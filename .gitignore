@@ -1,0 +1,16 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/settings.json
+*.swp
+
+# Secrets — never commit these
+*.env
+secrets.php
+
+# WordPress — don't commit the whole WP install, just the plugin
+wp-core/
+wp-includes/
+wp-admin/

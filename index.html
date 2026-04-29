@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Needham Market Scout Group – Booking System</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+
+  <!-- HEADER -->
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="logo">
+        <div class="logo-icon">⚜️</div>
+        <div>
+          <div class="logo-title">Needham Market Scout Group</div>
+          <div class="logo-sub">Venue &amp; Activity Booking</div>
+        </div>
+      </div>
+      <nav class="main-nav">
+        <button class="nav-btn active" data-page="home">Home</button>
+        <button class="nav-btn" data-page="calendar">Calendar</button>
+        <button class="nav-btn" data-page="book">Make a Booking</button>
+        <button class="nav-btn" data-page="admin">Admin</button>
+      </nav>
+    </div>
+  </header>
+
+  <!-- PAGES -->
+  <main id="app">
+
+    <!-- HOME PAGE -->
+    <section id="page-home" class="page active">
+      <div class="hero">
+        <div class="hero-content">
+          <h1>Welcome to our Booking System</h1>
+          <p>Book our Scout Hall, meeting rooms, and outdoor spaces for your event or activity. Quick, easy, and paperless.</p>
+          <div class="hero-actions">
+            <button class="btn btn-primary" data-page="book">Book Now</button>
+            <button class="btn btn-outline" data-page="calendar">View Calendar</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="container">
+        <h2 class="section-title">Our Spaces</h2>
+        <div class="spaces-grid">
+          <div class="space-card">
+            <div class="space-icon">🏛️</div>
+            <h3>Main Scout Hall</h3>
+            <p>Large hall suitable for meetings, events, and activities. Capacity up to 80 people.</p>
+            <div class="space-meta">
+              <span class="badge">£25/hr</span>
+              <span class="badge badge-green">Available</span>
+            </div>
+          </div>
+          <div class="space-card">
+            <div class="space-icon">🪑</div>
+            <h3>Meeting Room</h3>
+            <p>Smaller room ideal for committee meetings and training sessions. Capacity up to 20 people.</p>
+            <div class="space-meta">
+              <span class="badge">£12/hr</span>
+              <span class="badge badge-green">Available</span>
+            </div>
+          </div>
+          <div class="space-card">
+            <div class="space-icon">🌳</div>
+            <h3>Outdoor Area</h3>
+            <p>Outdoor space for activities, camping practice, and outdoor events. Full day hire available.</p>
+            <div class="space-meta">
+              <span class="badge">£40/day</span>
+              <span class="badge badge-green">Available</span>
+            </div>
+          </div>
+          <div class="space-card">
+            <div class="space-icon">🍳</div>
+            <h3>Kitchen Facilities</h3>
+            <p>Fully equipped kitchen available as an add-on to any hall booking.</p>
+            <div class="space-meta">
+              <span class="badge">£10/session</span>
+              <span class="badge badge-green">Available</span>
+            </div>
+          </div>
+        </div>
+
+        <h2 class="section-title" style="margin-top:3rem">How It Works</h2>
+        <div class="steps-grid">
+          <div class="step">
+            <div class="step-num">1</div>
+            <h4>Check Availability</h4>
+            <p>Browse the calendar to see what's free on your preferred date.</p>
+          </div>
+          <div class="step">
+            <div class="step-num">2</div>
+            <h4>Submit a Booking</h4>
+            <p>Fill in the booking form with your details and requirements.</p>
+          </div>
+          <div class="step">
+            <div class="step-num">3</div>
+            <h4>Receive Invoice</h4>
+            <p>We'll confirm your booking and send you an invoice to pay.</p>
+          </div>
+          <div class="step">
+            <div class="step-num">4</div>
+            <h4>Enjoy Your Event</h4>
+            <p>Turn up on the day and enjoy our facilities!</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CALENDAR PAGE -->
+    <section id="page-calendar" class="page">
+      <div class="container">
+        <h2 class="section-title">Booking Calendar</h2>
+        <p class="section-sub">Click any date to see bookings or start a new booking.</p>
+
+        <div class="calendar-layout">
+          <div class="calendar-main">
+            <div class="cal-header">
+              <button class="cal-nav" id="cal-prev">&#8249;</button>
+              <h3 id="cal-month-label">Month Year</h3>
+              <button class="cal-nav" id="cal-next">&#8250;</button>
+            </div>
+            <div class="cal-grid">
+              <div class="cal-day-name">Mon</div>
+              <div class="cal-day-name">Tue</div>
+              <div class="cal-day-name">Wed</div>
+              <div class="cal-day-name">Thu</div>
+              <div class="cal-day-name">Fri</div>
+              <div class="cal-day-name">Sat</div>
+              <div class="cal-day-name">Sun</div>
+            </div>
+            <div id="cal-days" class="cal-grid cal-days-grid"></div>
+          </div>
+
+          <div class="calendar-sidebar">
+            <div id="cal-selected-info">
+              <h4>Select a date</h4>
+              <p>Click a date on the calendar to view bookings for that day.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="legend">
+          <span class="legend-item"><span class="dot dot-free"></span> Available</span>
+          <span class="legend-item"><span class="dot dot-partial"></span> Partially Booked</span>
+          <span class="legend-item"><span class="dot dot-full"></span> Fully Booked</span>
+          <span class="legend-item"><span class="dot dot-today"></span> Today</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- BOOKING FORM PAGE -->
+    <section id="page-book" class="page">
+      <div class="container container-narrow">
+        <h2 class="section-title">Make a Booking</h2>
+        <p class="section-sub">Complete the form below. You'll receive a confirmation and invoice by email.</p>
+
+        <form id="booking-form" class="booking-form" novalidate>
+          <div class="form-section">
+            <h3>Your Details</h3>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="f-name">Full Name *</label>
+                <input type="text" id="f-name" placeholder="Jane Smith" required />
+              </div>
+              <div class="form-group">
+                <label for="f-org">Organisation / Group</label>
+                <input type="text" id="f-org" placeholder="e.g. 1st Needham Market Scouts" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="f-email">Email Address *</label>
+                <input type="email" id="f-email" placeholder="jane@example.com" required />
+              </div>
+              <div class="form-group">
+                <label for="f-phone">Phone Number *</label>
+                <input type="tel" id="f-phone" placeholder="07700 900000" required />
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="f-address">Billing Address *</label>
+              <textarea id="f-address" rows="3" placeholder="123 High Street, Needham Market, IP6 8AA" required></textarea>
+            </div>
+          </div>
+
+          <div class="form-section">
+            <h3>Booking Details</h3>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="f-space">Space Required *</label>
+                <select id="f-space" required>
+                  <option value="">-- Select a space --</option>
+                  <option value="Main Scout Hall">Main Scout Hall (£25/hr)</option>
+                  <option value="Meeting Room">Meeting Room (£12/hr)</option>
+                  <option value="Outdoor Area">Outdoor Area (£40/day)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="f-kitchen">Kitchen Add-on</label>
+                <select id="f-kitchen">
+                  <option value="no">No kitchen required</option>
+                  <option value="yes">Yes, include kitchen (£10/session)</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="f-date">Date *</label>
+                <input type="date" id="f-date" required />
+              </div>
+              <div class="form-group">
+                <label for="f-attendees">Expected Attendees *</label>
+                <input type="number" id="f-attendees" min="1" max="80" placeholder="e.g. 30" required />
+              </div>
+            </div>
+            <div class="form-row" id="time-row">
+              <div class="form-group">
+                <label for="f-start">Start Time *</label>
+                <input type="time" id="f-start" required />
+              </div>
+              <div class="form-group">
+                <label for="f-end">End Time *</label>
+                <input type="time" id="f-end" required />
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="f-purpose">Purpose of Booking *</label>
+              <input type="text" id="f-purpose" placeholder="e.g. Birthday party, committee meeting, training day" required />
+            </div>
+            <div class="form-group">
+              <label for="f-notes">Additional Notes</label>
+              <textarea id="f-notes" rows="3" placeholder="Any special requirements, setup needs, etc."></textarea>
+            </div>
+          </div>
+
+          <div class="form-section" id="cost-preview">
+            <h3>Cost Estimate</h3>
+            <div class="cost-table">
+              <div class="cost-row">
+                <span id="cost-space-label">Space hire</span>
+                <span id="cost-space-val">£0.00</span>
+              </div>
+              <div class="cost-row" id="cost-kitchen-row" style="display:none">
+                <span>Kitchen add-on</span>
+                <span>£10.00</span>
+              </div>
+              <div class="cost-row cost-total">
+                <span>Total</span>
+                <span id="cost-total-val">£0.00</span>
+              </div>
+            </div>
+            <p class="cost-note">* Final invoice will be issued upon confirmation by our booking team.</p>
+          </div>
+
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary btn-lg">Submit Booking Request</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <!-- ADMIN PAGE -->
+    <section id="page-admin" class="page">
+      <div class="container">
+        <div class="admin-header">
+          <h2 class="section-title">Admin Dashboard</h2>
+          <div class="admin-actions">
+            <input type="text" id="admin-search" placeholder="Search bookings…" class="search-input" />
+            <select id="admin-filter" class="filter-select">
+              <option value="all">All Statuses</option>
+              <option value="pending">Pending</option>
+              <option value="confirmed">Confirmed</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="stats-row" id="admin-stats"></div>
+
+        <div class="bookings-table-wrap">
+          <table class="bookings-table" id="bookings-table">
+            <thead>
+              <tr>
+                <th>Ref</th>
+                <th>Name</th>
+                <th>Space</th>
+                <th>Date</th>
+                <th>Time</th>
+                <th>Attendees</th>
+                <th>Amount</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="bookings-tbody"></tbody>
+          </table>
+          <div id="no-bookings" class="empty-state" style="display:none">
+            <div class="empty-icon">📋</div>
+            <p>No bookings found.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- BOOKING DETAIL MODAL -->
+  <div id="modal-overlay" class="modal-overlay" style="display:none">
+    <div class="modal" id="booking-modal">
+      <div class="modal-header">
+        <h3 id="modal-title">Booking Details</h3>
+        <button class="modal-close" id="modal-close">&times;</button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+      <div class="modal-footer" id="modal-footer"></div>
+    </div>
+  </div>
+
+  <!-- INVOICE MODAL -->
+  <div id="invoice-overlay" class="modal-overlay" style="display:none">
+    <div class="modal modal-wide" id="invoice-modal">
+      <div class="modal-header">
+        <h3>Invoice</h3>
+        <button class="modal-close" id="invoice-close">&times;</button>
+      </div>
+      <div class="modal-body" id="invoice-body"></div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" id="invoice-print">🖨️ Print / Save as PDF</button>
+        <button class="btn btn-primary" id="invoice-close-btn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SUCCESS TOAST -->
+  <div id="toast" class="toast" style="display:none"></div>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>Needham Market Scout Group &bull; Registered Charity &bull; <a href="mailto:bookings@needhammarketscouts.org.uk">bookings@needhammarketscouts.org.uk</a></p>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

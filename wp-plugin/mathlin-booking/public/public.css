@@ -1,0 +1,231 @@
+/* ===== NM Scouts Booking – Public Styles ===== */
+/* Matches needhamscouts.uk Scout Association theme (purple #7413DC) */
+
+.nms-wrap { max-width: 1100px; margin: 0 auto; }
+
+/* ── Section titles ── */
+.nms-section-title { color: #7413DC; font-size: 1.6rem; font-weight: 700; margin-bottom: 0.4rem; }
+.nms-section-sub   { color: #6b7280; margin-bottom: 1.5rem; }
+.nms-muted         { color: #6b7280; }
+
+/* ── Alerts ── */
+.nms-alert {
+    padding: 1rem 1.25rem;
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+    font-weight: 600;
+}
+.nms-alert-success { background: #d1fae5; color: #065f46; border-left: 4px solid #2ecc71; }
+.nms-alert-error   { background: #fee2e2; color: #991b1b; border-left: 4px solid #e74c3c; }
+
+/* ── Buttons ── */
+.nms-btn {
+    display: inline-block;
+    padding: 0.6rem 1.4rem;
+    border-radius: 6px;
+    border: 2px solid transparent;
+    font-weight: 700;
+    font-size: 0.9rem;
+    cursor: pointer;
+    text-decoration: none;
+    transition: all 0.2s;
+    line-height: 1.4;
+}
+.nms-btn-primary { background: #7413DC; color: #fff; border-color: #7413DC; }
+.nms-btn-primary:hover { background: #5c0fb3; border-color: #5c0fb3; color: #fff; }
+.nms-btn-sm  { padding: 0.4rem 0.9rem; font-size: 0.8rem; }
+.nms-btn-lg  { padding: 0.875rem 2rem; font-size: 1rem; }
+
+/* ── Calendar ── */
+.nms-calendar-wrap { margin-bottom: 2.5rem; }
+
+.nms-calendar-layout {
+    display: grid;
+    grid-template-columns: 1fr 280px;
+    gap: 1.5rem;
+    align-items: start;
+}
+
+.nms-calendar-main {
+    background: #fff;
+    border-radius: 12px;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    overflow: hidden;
+}
+
+.nms-cal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem 1.5rem;
+    background: #7413DC;
+    color: #fff;
+}
+.nms-cal-header h3 { margin: 0; font-size: 1.1rem; color: #fff; }
+
+.nms-cal-nav {
+    background: rgba(255,255,255,0.15);
+    border: none;
+    color: #fff;
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    font-size: 1.4rem;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.2s;
+    line-height: 1;
+}
+.nms-cal-nav:hover { background: rgba(255,255,255,0.3); }
+
+.nms-cal-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+}
+
+.nms-cal-day-names > div {
+    text-align: center;
+    padding: 0.6rem 0;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #6b7280;
+    background: #fafafa;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.nms-cal-days { padding: 0.5rem; gap: 3px; }
+
+.nms-cal-day {
+    aspect-ratio: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    position: relative;
+    cursor: pointer;
+    transition: all 0.15s;
+    min-height: 44px;
+}
+.nms-cal-day:hover:not(.nms-other-month):not(.nms-past) { background: #f0e8ff; }
+.nms-other-month { color: #d1d5db; cursor: default; }
+.nms-past        { color: #d1d5db; cursor: default; }
+.nms-beyond-limit { color: #d1d5db; cursor: not-allowed; background: #fafafa; }
+.nms-beyond-limit:hover { background: #fafafa !important; }
+.nms-today       { background: #7413DC; color: #fff; font-weight: 700; }
+.nms-today:hover { background: #5c0fb3; }
+.nms-selected    { outline: 2px solid #f5a623; outline-offset: 1px; }
+
+.nms-has-bookings::after {
+    content: '';
+    position: absolute;
+    bottom: 4px;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #f5a623;
+}
+.nms-fully-booked::after { background: #e74c3c; }
+.nms-today.nms-has-bookings::after { background: #f5a623; }
+
+.nms-calendar-sidebar {
+    background: #fff;
+    border-radius: 12px;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    padding: 1.25rem;
+}
+.nms-calendar-sidebar h4 { color: #7413DC; font-weight: 700; margin-bottom: 0.75rem; }
+
+.nms-day-booking {
+    background: #f5f0ff;
+    border-left: 3px solid #7413DC;
+    border-radius: 6px;
+    padding: 0.6rem 0.75rem;
+    margin-bottom: 0.6rem;
+    font-size: 0.85rem;
+}
+.nms-day-booking-space { font-weight: 700; color: #7413DC; }
+.nms-day-booking-time  { color: #6b7280; font-size: 0.8rem; }
+
+.nms-legend {
+    display: flex;
+    gap: 1.25rem;
+    flex-wrap: wrap;
+    margin-top: 0.75rem;
+    font-size: 0.8rem;
+    color: #6b7280;
+}
+.nms-legend-item { display: flex; align-items: center; gap: 0.4rem; }
+.nms-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.nms-dot-free    { background: #2ecc71; }
+.nms-dot-partial { background: #f5a623; }
+.nms-dot-full    { background: #e74c3c; }
+.nms-dot-today   { background: #7413DC; }
+
+/* ── Booking form ── */
+.nms-form-wrap { margin-top: 2rem; }
+
+.nms-form { display: flex; flex-direction: column; gap: 1.5rem; }
+
+.nms-form-section {
+    background: #fff;
+    border-radius: 12px;
+    padding: 1.5rem;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+}
+.nms-form-section h3 {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #7413DC;
+    margin: 0 0 1.25rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 2px solid #e5e7eb;
+}
+
+.nms-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+
+.nms-form-group { display: flex; flex-direction: column; gap: 0.35rem; }
+.nms-form-group label { font-size: 0.875rem; font-weight: 600; color: #1a1a2e; }
+.nms-req { color: #e74c3c; }
+
+.nms-form-group input,
+.nms-form-group select,
+.nms-form-group textarea {
+    padding: 0.6rem 0.875rem;
+    border: 1.5px solid #e5e7eb;
+    border-radius: 7px;
+    font-size: 0.9rem;
+    font-family: inherit;
+    color: #1a1a2e;
+    background: #fff;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    outline: none;
+    width: 100%;
+    box-sizing: border-box;
+}
+.nms-form-group input:focus,
+.nms-form-group select:focus,
+.nms-form-group textarea:focus {
+    border-color: #7413DC;
+    box-shadow: 0 0 0 3px rgba(116,19,220,0.1);
+}
+.nms-field-error { border-color: #e74c3c !important; }
+
+/* Cost table */
+.nms-cost-table { display: flex; flex-direction: column; gap: 0.4rem; }
+.nms-cost-row { display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid #e5e7eb; font-size: 0.9rem; }
+.nms-cost-total { font-weight: 700; font-size: 1rem; color: #7413DC; border-bottom: none; border-top: 2px solid #7413DC; padding-top: 0.75rem; }
+.nms-cost-note { font-size: 0.8rem; color: #6b7280; margin-top: 0.75rem; }
+.nms-field-hint { font-size: 0.8rem; color: #6b7280; margin: 0.25rem 0 0; }
+
+.nms-form-actions { display: flex; justify-content: center; padding: 0.5rem 0; }
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+    .nms-calendar-layout { grid-template-columns: 1fr; }
+    .nms-form-row        { grid-template-columns: 1fr; }
+}

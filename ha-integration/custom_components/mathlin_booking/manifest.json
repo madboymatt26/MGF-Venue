@@ -1,0 +1,13 @@
+{
+  "domain": "mathlin_booking",
+  "name": "Mathlin Booking System",
+  "version": "1.0.0",
+  "documentation": "https://needhamscouts.uk",
+  "issue_tracker": "https://needhamscouts.uk",
+  "dependencies": [],
+  "codeowners": ["@needhamscouts"],
+  "requirements": [],
+  "iot_class": "cloud_polling",
+  "config_flow": true,
+  "integration_type": "service"
+}

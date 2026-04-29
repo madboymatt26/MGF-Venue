@@ -1,0 +1,41 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Mathlin Booking System",
+        "description": "Enter the URL of your Scout Group website. The booking plugin must be installed and active.",
+        "data": {
+          "website_url": "Website URL"
+        },
+        "data_description": {
+          "website_url": "e.g. https://needhamscouts.uk"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect":   "Could not connect to the website. Check the URL and try again.",
+      "plugin_not_found": "Connected to the website but the booking plugin API was not found. Make sure the Mathlin Booking plugin is installed and active.",
+      "invalid_url":      "That doesn't look like a valid URL.",
+      "unknown":          "An unexpected error occurred."
+    },
+    "abort": {
+      "already_configured": "This website is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Booking Automation Timing",
+        "description": "Configure how many minutes before and after each booking the automation events fire.",
+        "data": {
+          "pre_event_minutes":  "Minutes before booking start",
+          "post_event_minutes": "Minutes after booking end"
+        },
+        "data_description": {
+          "pre_event_minutes":  "Fire the 'booking_start' event this many minutes before the booking begins. Use this to pre-heat the hall, turn on lights, etc. (0 = fire exactly at start time)",
+          "post_event_minutes": "Fire the 'booking_end' event this many minutes after the booking finishes. Use this to turn off heating, lights, etc. (0 = fire exactly at end time)"
+        }
+      }
+    }
+  }
+}
