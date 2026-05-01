@@ -108,6 +108,9 @@
                         <?php if ( $b->status === 'confirmed' ) : ?>
                             <button class="button button-small nms-btn-paid" data-ref="<?php echo esc_attr( $b->ref ); ?>">Mark Paid</button>
                         <?php endif; ?>
+                        <?php if ( $b->status === 'paid' ) : ?>
+                            <button class="button button-small nms-btn-unpaid" data-ref="<?php echo esc_attr( $b->ref ); ?>">Undo Paid</button>
+                        <?php endif; ?>
                         <?php if ( $b->status !== 'cancelled' && $b->status !== 'archived' && $b->status !== 'paid' ) : ?>
                             <button class="button button-small nms-btn-cancel" data-ref="<?php echo esc_attr( $b->ref ); ?>">Cancel</button>
                         <?php endif; ?>

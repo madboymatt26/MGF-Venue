@@ -49,6 +49,11 @@
                         💰 Mark as Paid
                     </button>
                 <?php endif; ?>
+                <?php if ( $booking->status === 'paid' ) : ?>
+                    <button class="button nms-btn-unpaid" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">
+                        ↩ Undo Paid
+                    </button>
+                <?php endif; ?>
                 <?php if ( $booking->status !== 'cancelled' && $booking->status !== 'archived' && $booking->status !== 'paid' ) : ?>
                     <button class="button nms-btn-cancel" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">
                         ✗ Cancel Booking

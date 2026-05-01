@@ -38,6 +38,15 @@ jQuery(function ($) {
         nmsUpdateStatus(ref, 'paid', $btn, redirect || true);
     });
 
+    // ── Undo paid (back to confirmed) ──────────────────────────────────────────
+    $(document).on('click', '.nms-btn-unpaid', function () {
+        var $btn     = $(this);
+        var ref      = $btn.data('ref');
+        var redirect = $btn.data('redirect');
+        if (!confirm('Undo paid status for ' + ref + '? It will be set back to Confirmed.')) return;
+        nmsUpdateStatus(ref, 'confirmed', $btn, redirect || true);
+    });
+
     // ── Archive single booking ─────────────────────────────────────────────────
     $(document).on('click', '.nms-btn-archive', function () {
         var $btn     = $(this);
