@@ -115,6 +115,10 @@
 .nms-past        { color: #d1d5db; cursor: default; }
 .nms-beyond-limit { color: #d1d5db; cursor: not-allowed; background: #fafafa; }
 .nms-beyond-limit:hover { background: #fafafa !important; }
+.nms-blocked { background: #fee2e2 !important; color: #991b1b; cursor: not-allowed; position: relative; }
+.nms-blocked:hover { background: #fee2e2 !important; }
+.nms-blocked .nms-cal-day-num { color: #991b1b; }
+.nms-blocked-label { display: block; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; color: #dc3232; margin-top: 2px; letter-spacing: 0.02em; }
 .nms-today       { background: #7413DC; color: #fff; font-weight: 700; }
 .nms-today:hover { background: #5c0fb3; }
 .nms-selected    { outline: 2px solid #f5a623; outline-offset: 1px; }

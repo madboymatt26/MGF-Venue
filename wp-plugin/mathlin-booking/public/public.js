@@ -56,12 +56,30 @@ jQuery(function ($) {
             var tooSoon = thisDate >= today && thisDate < minDate;
             if (tooSoon) classes.push('nms-beyond-limit');
 
+            // Check if date is blocked (all spaces)
+            var isBlocked = false;
+            if (NMS.blocked_dates && NMS.blocked_dates[dateStr]) {
+                var blocks = NMS.blocked_dates[dateStr];
+                for (var bi = 0; bi < blocks.length; bi++) {
+                    if (blocks[bi] === '__all__') { isBlocked = true; break; }
+                }
+            }
+            if (isBlocked) classes.push('nms-blocked');
+
             var $cell = $('<div>')
                 .addClass(classes.join(' '))
-                .text(d)
                 .attr('data-date', dateStr);
 
-            if (thisDate >= minDate) {
+            // Day number
+            var $num = $('<span class="nms-cal-day-num">').text(d);
+            $cell.append($num);
+
+            // Show blocked label
+            if (isBlocked) {
+                $cell.append('<span class="nms-blocked-label">Unavailable</span>');
+            }
+
+            if (thisDate >= minDate && !isBlocked) {
                 $cell.on('click', function () {
                     var ds = $(this).data('date');
                     $('.nms-cal-day').removeClass('nms-selected');
@@ -78,6 +96,12 @@ jQuery(function ($) {
         var label    = formatDate(dateStr);
         $sidebar.html('<h4>' + label + '</h4><p class="nms-muted">Loading…</p>');
 
+        // Check for blocked spaces on this date
+        var blockedSpaces = [];
+        if (NMS.blocked_dates && NMS.blocked_dates[dateStr]) {
+            blockedSpaces = NMS.blocked_dates[dateStr];
+        }
+
         $.post(NMS.ajax_url, {
             action: 'mbs_get_day',
             nonce:  NMS.nonce,
@@ -86,6 +110,16 @@ jQuery(function ($) {
             if (!res.success) return;
             var bookings = res.data;
             var html = '<h4>' + label + '</h4>';
+
+            // Show blocked notice
+            if (blockedSpaces.length > 0) {
+                var allBlocked = blockedSpaces.indexOf('__all__') !== -1;
+                if (allBlocked) {
+                    html += '<div class="nms-alert nms-alert-error" style="margin-bottom:1rem;padding:0.75rem 1rem;font-size:0.85rem;">🚫 <strong>Unavailable</strong> — All spaces are blocked on this date.</div>';
+                } else {
+                    html += '<div class="nms-alert nms-alert-error" style="margin-bottom:1rem;padding:0.75rem 1rem;font-size:0.85rem;">🚫 <strong>Partially unavailable</strong> — ' + escHtml(blockedSpaces.join(', ')) + ' blocked on this date.</div>';
+                }
+            }
 
             if (bookings.length === 0) {
                 html += '<p class="nms-muted" style="margin-bottom:1rem">No bookings on this day.</p>';
