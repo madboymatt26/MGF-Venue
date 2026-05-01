@@ -12,7 +12,7 @@ class MBS_Database {
         $sql = "CREATE TABLE IF NOT EXISTS {$table} (
             id              BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
             ref             VARCHAR(20)  NOT NULL UNIQUE,
-            status          ENUM('pending','confirmed','cancelled') NOT NULL DEFAULT 'pending',
+            status          VARCHAR(20)  NOT NULL DEFAULT 'pending',
             name            VARCHAR(100) NOT NULL,
             organisation    VARCHAR(100) DEFAULT '',
             email           VARCHAR(150) NOT NULL,
@@ -40,7 +40,28 @@ class MBS_Database {
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
         dbDelta( $sql );
 
+        // Migrate ENUM to VARCHAR if needed (for existing installs)
+        self::maybe_migrate_status_column();
+
         update_option( 'mbs_db_version', MBS_VERSION );
+    }
+
+    /**
+     * Migrate the status column from ENUM to VARCHAR if it's still an ENUM.
+     * This allows new statuses (paid, archived) to be stored.
+     */
+    private static function maybe_migrate_status_column() {
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_TABLE;
+
+        // Check if the column is still ENUM
+        $col_info = $wpdb->get_row( "SHOW COLUMNS FROM {$table} WHERE Field = 'status'" );
+        if ( $col_info && strpos( strtolower( $col_info->Type ), 'enum' ) !== false ) {
+            $wpdb->query( "ALTER TABLE {$table} MODIFY COLUMN status VARCHAR(20) NOT NULL DEFAULT 'pending'" );
+        }
+
+        // Fix any bookings with empty status (from failed ENUM writes)
+        $wpdb->query( "UPDATE {$table} SET status = 'pending' WHERE status = '' OR status IS NULL" );
     }
 
     public static function on_deactivate() {
