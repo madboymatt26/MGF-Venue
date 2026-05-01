@@ -135,6 +135,55 @@ rest:
             ({{ state_attr('sensor.scout_hall_first_booking_today', 'attendees') }} people)</pre>
         </div>
 
+        <!-- GitHub Auto-Update Settings -->
+        <div class="nms-card">
+            <div class="nms-card-header">
+                <h2>🔄 Plugin Auto-Update (GitHub)</h2>
+            </div>
+            <p>This plugin can update itself from GitHub releases. When you push a new version and create a <strong>GitHub Release</strong>, WordPress will detect it and offer a one-click update in <strong>Dashboard → Updates</strong>.</p>
+
+            <table class="form-table">
+                <tr>
+                    <th><label for="github_token">GitHub Personal Access Token</label></th>
+                    <td>
+                        <input type="password" id="github_token" name="github_token"
+                               value="<?php echo esc_attr( get_option( 'mbs_github_token', '' ) ); ?>"
+                               class="regular-text"
+                               placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                               autocomplete="off">
+                        <p class="description">
+                            Required because the repository is <strong>private</strong>.<br>
+                            Create a token at <a href="https://github.com/settings/tokens" target="_blank">github.com/settings/tokens</a> with <code>repo</code> scope.<br>
+                            The token is stored in the WordPress database and only used to check for releases and download updates.
+                        </p>
+                    </td>
+                </tr>
+                <tr>
+                    <th>Repository</th>
+                    <td><code>madboymatt26/mathlin-booking</code></td>
+                </tr>
+                <tr>
+                    <th>Installed Version</th>
+                    <td><code><?php echo esc_html( MBS_VERSION ); ?></code></td>
+                </tr>
+            </table>
+
+            <h4 style="margin-top:1.5rem">How to release an update</h4>
+            <ol>
+                <li>Update the version number in <code>mathlin-booking.php</code> (both the header and <code>MBS_VERSION</code>)</li>
+                <li>Push your changes to the <code>main</code> branch on GitHub</li>
+                <li>Go to <a href="https://github.com/madboymatt26/mathlin-booking/releases/new" target="_blank">GitHub → Releases → Create new release</a></li>
+                <li>Set the tag to the version number (e.g. <code>1.0.1</code> or <code>v1.0.1</code>)</li>
+                <li>Publish the release</li>
+                <li>WordPress will detect the update within 12 hours, or check manually at <strong>Dashboard → Updates</strong></li>
+            </ol>
+
+            <div class="nms-settings-actions">
+                <button id="nms-check-update" class="button">Check for Updates Now</button>
+                <span id="nms-update-msg" class="nms-settings-msg"></span>
+            </div>
+        </div>
+
         <!-- General Settings -->
         <div class="nms-card">
             <div class="nms-card-header"><h2>⚙️ Booking Rules</h2></div>

@@ -11,6 +11,7 @@ class MBS_Admin {
         add_action( 'wp_ajax_mbs_get_invoice',    array( $this, 'ajax_get_invoice' ) );
         add_action( 'wp_ajax_mbs_save_settings',  array( $this, 'ajax_save_settings' ) );
         add_action( 'wp_ajax_mbs_test_ha',        array( $this, 'ajax_test_ha' ) );
+        add_action( 'wp_ajax_mbs_check_update',   array( $this, 'ajax_check_update' ) );
     }
 
     // ── Menu ───────────────────────────────────────────────────────────────────
@@ -143,12 +144,18 @@ class MBS_Admin {
 
         $webhook      = esc_url_raw( $_POST['ha_webhook_url'] ?? '' );
         $notice_days  = absint( $_POST['min_notice_days'] ?? 1 );
+        $github_token = sanitize_text_field( $_POST['github_token'] ?? '' );
 
         // Clamp to a sensible range: 0 = same day allowed, 30 = max notice required
         $notice_days = max( 0, min( 30, $notice_days ) );
 
         update_option( 'mbs_ha_webhook_url',  $webhook );
         update_option( 'mbs_min_notice_days', $notice_days );
+
+        // Only update the token if a value was provided (don't blank it if the field wasn't sent)
+        if ( ! empty( $github_token ) ) {
+            update_option( 'mbs_github_token', $github_token );
+        }
 
         wp_send_json_success( array( 'saved' => true, 'min_notice_days' => $notice_days ) );
     }
@@ -181,5 +188,32 @@ class MBS_Admin {
 
         $code = wp_remote_retrieve_response_code( $response );
         wp_send_json_success( array( 'http_code' => $code ) );
+    }
+
+    public function ajax_check_update() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
+
+        // Clear the update transient so WordPress re-checks immediately
+        delete_site_transient( 'update_plugins' );
+        wp_update_plugins();
+
+        $update_plugins = get_site_transient( 'update_plugins' );
+        $plugin_basename = plugin_basename( MBS_PLUGIN_DIR . 'mathlin-booking.php' );
+
+        if ( isset( $update_plugins->response[ $plugin_basename ] ) ) {
+            $update = $update_plugins->response[ $plugin_basename ];
+            wp_send_json_success( array(
+                'update_available' => true,
+                'new_version'      => $update->new_version,
+                'current_version'  => MBS_VERSION,
+            ) );
+        } else {
+            wp_send_json_success( array(
+                'update_available' => false,
+                'current_version'  => MBS_VERSION,
+                'message'          => 'You are running the latest version.',
+            ) );
+        }
     }
 }

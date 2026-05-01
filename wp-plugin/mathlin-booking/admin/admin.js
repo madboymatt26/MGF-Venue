@@ -46,7 +46,8 @@ jQuery(function ($) {
             action:          'mbs_save_settings',
             nonce:           MBS_Admin.nonce,
             ha_webhook_url:  $('#ha_webhook_url').val(),
-            min_notice_days: $('#min_notice_days').val()
+            min_notice_days: $('#min_notice_days').val(),
+            github_token:    $('#github_token').val()
         }, function (res) {
             $btn.prop('disabled', false).text('Save Settings');
             if (res.success) {
@@ -75,6 +76,33 @@ jQuery(function ($) {
                 $msg.text('✗ ' + (res.data || 'Failed')).removeClass('success').addClass('error');
             }
             setTimeout(function () { $msg.text(''); }, 4000);
+        });
+    });
+
+    // ── Check for plugin updates ───────────────────────────────────────────────
+    $('#nms-check-update').on('click', function () {
+        var $btn = $(this);
+        var $msg = $('#nms-update-msg');
+        $btn.prop('disabled', true).text('Checking…');
+
+        $.post(MBS_Admin.ajax_url, {
+            action: 'mbs_check_update',
+            nonce:  MBS_Admin.nonce
+        }, function (res) {
+            $btn.prop('disabled', false).text('Check for Updates Now');
+            if (res.success) {
+                if (res.data.update_available) {
+                    $msg.text('Update available: v' + res.data.new_version + ' (current: v' + res.data.current_version + '). Go to Dashboard → Updates to install.')
+                        .removeClass('error').addClass('success');
+                } else {
+                    $msg.text('✓ You are running the latest version (v' + res.data.current_version + ')')
+                        .removeClass('error').addClass('success');
+                }
+            } else {
+                $msg.text('✗ Could not check for updates. Is the GitHub token valid?')
+                    .removeClass('success').addClass('error');
+            }
+            setTimeout(function () { $msg.text(''); }, 6000);
         });
     });
 
