@@ -225,8 +225,9 @@ class MBS_Updater {
      * Fix the extracted directory name after unzipping.
      *
      * GitHub's auto-generated zipball extracts to something like
-     * "madboymatt26-mathlin-booking-abc1234/" — we need to rename it
-     * to "mathlin-booking/" so WordPress recognises it as the same plugin.
+     * "/tmp/upgrades/madboymatt26-mathlin-booking-abc1234/" — we need to
+     * extract just the plugin subdirectory and rename it to "mathlin-booking/"
+     * so WordPress recognises it as the same plugin.
      */
     public function fix_source_dir( $source, $remote_source, $upgrader, $hook_extra ) {
         // Only act on our plugin
@@ -239,28 +240,31 @@ class MBS_Updater {
         $corrected_source = trailingslashit( $remote_source ) . $this->slug . '/';
 
         // If the source already has the right name, nothing to do
-        if ( $source === $corrected_source ) {
+        if ( trailingslashit( $source ) === $corrected_source ) {
             return $source;
         }
 
-        // Check if the zip contains the plugin in a subdirectory (repo_subdir)
-        // GitHub source zips contain the full repo, so the plugin is at
-        // <extracted-dir>/wp-plugin/mathlin-booking/
-        $extracted_dirs = $wp_filesystem->dirlist( $source );
-        if ( $extracted_dirs ) {
-            $first_dir = key( $extracted_dirs );
-            $subdir_path = trailingslashit( $source ) . $first_dir . '/' . $this->repo_subdir . '/';
+        // The plugin lives in a subdirectory of the repo.
+        // $source is the extracted repo root (e.g. /tmp/.../madboymatt26-mathlin-booking-abc1234/)
+        // We need to find wp-plugin/mathlin-booking/ inside it.
+        $subdir_path = trailingslashit( $source ) . $this->repo_subdir . '/';
 
-            if ( $wp_filesystem->is_dir( $subdir_path ) ) {
-                // The plugin is nested inside the repo — move it up
-                $wp_filesystem->move( $subdir_path, $corrected_source );
-                // Clean up the extracted repo directory
-                $wp_filesystem->delete( $source, true );
-                return $corrected_source;
-            }
+        if ( $wp_filesystem->is_dir( $subdir_path ) ) {
+            // Move the plugin subdirectory to the correct location
+            $wp_filesystem->move( $subdir_path, $corrected_source );
+            // Clean up the extracted repo directory
+            $wp_filesystem->delete( trailingslashit( $source ), true );
+            return $corrected_source;
         }
 
-        // Otherwise just rename the top-level directory
+        // If the plugin file exists directly in $source (shouldn't happen with our repo structure,
+        // but handle it as a fallback)
+        if ( $wp_filesystem->exists( trailingslashit( $source ) . 'mathlin-booking.php' ) ) {
+            $wp_filesystem->move( $source, $corrected_source );
+            return $corrected_source;
+        }
+
+        // Last resort: just rename the directory
         $wp_filesystem->move( $source, $corrected_source );
         return $corrected_source;
     }
