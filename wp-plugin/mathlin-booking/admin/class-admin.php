@@ -42,6 +42,14 @@ class MBS_Admin {
             'mathlin-settings',
             array( $this, 'render_settings' )
         );
+        add_submenu_page(
+            'mathlin-booking',
+            'Archived',
+            'Archived',
+            'manage_options',
+            'mathlin-archived',
+            array( $this, 'render_archived' )
+        );
     }
 
     // ── Assets ─────────────────────────────────────────────────────────────────
@@ -101,6 +109,12 @@ class MBS_Admin {
         include MBS_PLUGIN_DIR . 'admin/views/settings.php';
     }
 
+    public function render_archived() {
+        $search   = isset( $_GET['s'] ) ? sanitize_text_field( $_GET['s'] ) : '';
+        $bookings = MBS_Bookings::get_all( array( 'status' => 'archived', 'search' => $search, 'exclude_archived' => false, 'orderby' => 'booking_date', 'order' => 'DESC' ) );
+        include MBS_PLUGIN_DIR . 'admin/views/archived.php';
+    }
+
     // ── AJAX handlers ──────────────────────────────────────────────────────────
     public function ajax_update_status() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
@@ -120,6 +134,11 @@ class MBS_Admin {
         if ( $status === 'cancelled' ) {
             $booking = MBS_Bookings::get( $ref );
             if ( $booking ) MBS_Email::notify_cancelled( $booking, $reason );
+        }
+
+        if ( $status === 'paid' ) {
+            $booking = MBS_Bookings::get( $ref );
+            if ( $booking ) MBS_Email::notify_paid( $booking );
         }
 
         wp_send_json_success( array( 'ref' => $ref, 'status' => $status ) );
@@ -155,6 +174,12 @@ class MBS_Admin {
         $admin_email  = sanitize_email( $_POST['admin_email'] ?? '' );
         $kitchen_price = floatval( $_POST['kitchen_price'] ?? 10 );
 
+        $bank_sort_code     = sanitize_text_field( $_POST['bank_sort_code'] ?? '' );
+        $bank_account_number = sanitize_text_field( $_POST['bank_account_number'] ?? '' );
+        $bank_account_name  = sanitize_text_field( $_POST['bank_account_name'] ?? '' );
+        $payment_terms_days = absint( $_POST['payment_terms_days'] ?? 14 );
+        $payment_terms_days = max( 1, min( 90, $payment_terms_days ) );
+
         // Clamp to a sensible range: 0 = same day allowed, 30 = max notice required
         $notice_days = max( 0, min( 30, $notice_days ) );
 
@@ -174,6 +199,11 @@ class MBS_Admin {
         if ( ! empty( $github_token ) ) {
             update_option( 'mbs_github_token', $github_token );
         }
+
+        if ( ! empty( $bank_sort_code ) ) update_option( 'mbs_bank_sort_code', $bank_sort_code );
+        if ( ! empty( $bank_account_number ) ) update_option( 'mbs_bank_account_number', $bank_account_number );
+        if ( ! empty( $bank_account_name ) ) update_option( 'mbs_bank_account_name', $bank_account_name );
+        update_option( 'mbs_payment_terms_days', $payment_terms_days );
 
         // Save spaces if provided
         if ( isset( $_POST['spaces'] ) && is_array( $_POST['spaces'] ) ) {

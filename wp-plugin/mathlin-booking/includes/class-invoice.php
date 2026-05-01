@@ -25,7 +25,8 @@ class MBS_Invoice {
 
         $space_subtotal = $booking->amount - ( $booking->kitchen ? $kitchen_price : 0 );
         $issue_date     = date( 'j F Y', strtotime( $booking->created_at ) );
-        $due_date       = date( 'j F Y', strtotime( $booking->created_at . ' +14 days' ) );
+        $bank           = MBS_Bookings::get_bank_details();
+        $due_date       = date( 'j F Y', strtotime( $booking->created_at . ' +' . $bank['payment_days'] . ' days' ) );
         $booking_date   = date( 'l j F Y', strtotime( $booking->booking_date ) );
         $time_str       = $is_day_rate ? 'Full day' : ( $booking->start_time . ' – ' . $booking->end_time );
 
@@ -94,9 +95,9 @@ class MBS_Invoice {
 
             <div class="nms-inv-notes">
                 <h5>Payment Details</h5>
-                <p>Please make payment within 14 days quoting reference <strong><?php echo esc_html( $booking->invoice_number ); ?></strong>.<br>
-                Bank Transfer: Sort Code <strong>12-34-56</strong> &bull; Account No. <strong>12345678</strong><br>
-                Cheques payable to: <em>Needham Market Scout Group</em></p>
+                <p>Please make payment within <?php echo esc_html( $bank['payment_days'] ); ?> days quoting reference <strong><?php echo esc_html( $booking->invoice_number ); ?></strong>.<br>
+                Bank Transfer: Sort Code <strong><?php echo esc_html( $bank['sort_code'] ); ?></strong> &bull; Account No. <strong><?php echo esc_html( $bank['account_number'] ); ?></strong><br>
+                Cheques payable to: <em><?php echo esc_html( $bank['account_name'] ); ?></em></p>
             </div>
         </div>
         <?php
@@ -126,7 +127,8 @@ class MBS_Invoice {
 
         $space_subtotal = $booking->amount - ( $booking->kitchen ? $kitchen_price : 0 );
         $issue_date     = date( 'j F Y', strtotime( $booking->created_at ) );
-        $due_date       = date( 'j F Y', strtotime( $booking->created_at . ' +14 days' ) );
+        $bank           = MBS_Bookings::get_bank_details();
+        $due_date       = date( 'j F Y', strtotime( $booking->created_at . ' +' . $bank['payment_days'] . ' days' ) );
         $booking_date   = date( 'l j F Y', strtotime( $booking->booking_date ) );
         $time_str       = $is_day_rate ? 'Full day' : ( $booking->start_time . ' – ' . $booking->end_time );
         $admin_email    = MBS_Bookings::get_admin_email();
@@ -226,9 +228,9 @@ class MBS_Invoice {
 
     <div class="notes">
         <h5>Payment Details</h5>
-        <p>Please make payment within 14 days quoting reference <strong><?php echo esc_html( $booking->invoice_number ); ?></strong>.<br>
-        Bank Transfer: Sort Code <strong>12-34-56</strong> &bull; Account No. <strong>12345678</strong><br>
-        Cheques payable to: <em>Needham Market Scout Group</em></p>
+        <p>Please make payment within <?php echo esc_html( $bank['payment_days'] ); ?> days quoting reference <strong><?php echo esc_html( $booking->invoice_number ); ?></strong>.<br>
+        Bank Transfer: Sort Code <strong><?php echo esc_html( $bank['sort_code'] ); ?></strong> &bull; Account No. <strong><?php echo esc_html( $bank['account_number'] ); ?></strong><br>
+        Cheques payable to: <em><?php echo esc_html( $bank['account_name'] ); ?></em></p>
     </div>
 </body>
 </html>

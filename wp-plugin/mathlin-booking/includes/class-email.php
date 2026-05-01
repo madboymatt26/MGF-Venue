@@ -46,7 +46,8 @@ class MBS_Email {
         $body   .= '<p>Great news — your booking has been confirmed. Please find the details and invoice attached.</p>';
         $body   .= self::booking_table_obj( $booking );
         $body   .= '<p><strong>Invoice Number:</strong> ' . esc_html( $booking->invoice_number ) . '</p>';
-        $body   .= '<p>Payment is due within 14 days. Please transfer to:<br>Sort Code: <strong>12-34-56</strong> | Account: <strong>12345678</strong> | Ref: <strong>' . esc_html( $booking->invoice_number ) . '</strong></p>';
+        $bank = MBS_Bookings::get_bank_details();
+        $body   .= '<p>Payment is due within ' . $bank['payment_days'] . ' days. Please transfer to:<br>Sort Code: <strong>' . esc_html( $bank['sort_code'] ) . '</strong> | Account: <strong>' . esc_html( $bank['account_number'] ) . '</strong> | Ref: <strong>' . esc_html( $booking->invoice_number ) . '</strong></p>';
         $body   .= '<p>If you have any questions, please contact us at <a href="mailto:' . esc_attr( $admin_email ) . '">' . esc_html( $admin_email ) . '</a>.</p>';
         $body   .= self::footer();
 
@@ -72,6 +73,20 @@ class MBS_Email {
         $body   .= '<p>We apologise for any inconvenience. If you\'d like to rebook for a different date or have any questions, please don\'t hesitate to contact us.</p>';
         $body   .= self::booking_table_obj( $booking );
         $body   .= '<p>Contact us at <a href="mailto:' . esc_attr( $admin_email ) . '">' . esc_html( $admin_email ) . '</a> or call 01449 797577.</p>';
+        $body   .= self::footer();
+        self::send( $booking->email, $subject, $body );
+    }
+
+    public static function notify_paid( $booking ) {
+        $admin_email = self::admin_email();
+        $subject = 'Payment Received – ' . $booking->ref;
+        $body    = self::header();
+        $body   .= '<h2 style="color:#46b450;">Payment Received – Thank You!</h2>';
+        $body   .= '<p>Hi ' . esc_html( $booking->name ) . ',</p>';
+        $body   .= '<p>We\'ve received your payment for the following booking. Thank you!</p>';
+        $body   .= self::booking_table_obj( $booking );
+        $body   .= '<p>Your booking is fully confirmed and paid. We look forward to seeing you!</p>';
+        $body   .= '<p>If you have any questions, please contact us at <a href="mailto:' . esc_attr( $admin_email ) . '">' . esc_html( $admin_email ) . '</a>.</p>';
         $body   .= self::footer();
         self::send( $booking->email, $subject, $body );
     }

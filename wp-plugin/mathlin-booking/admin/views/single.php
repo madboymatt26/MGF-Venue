@@ -44,7 +44,12 @@
                         ✓ Confirm Booking
                     </button>
                 <?php endif; ?>
-                <?php if ( $booking->status !== 'cancelled' && $booking->status !== 'archived' ) : ?>
+                <?php if ( $booking->status === 'confirmed' ) : ?>
+                    <button class="button button-primary nms-btn-paid" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">
+                        💰 Mark as Paid
+                    </button>
+                <?php endif; ?>
+                <?php if ( $booking->status !== 'cancelled' && $booking->status !== 'archived' && $booking->status !== 'paid' ) : ?>
                     <button class="button nms-btn-cancel" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">
                         ✗ Cancel Booking
                     </button>
@@ -52,6 +57,11 @@
                 <?php if ( $booking->status === 'cancelled' ) : ?>
                     <button class="button nms-btn-reopen" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">
                         ↩ Reopen Booking
+                    </button>
+                <?php endif; ?>
+                <?php if ( in_array( $booking->status, array( 'confirmed', 'paid', 'cancelled' ) ) ) : ?>
+                    <button class="button nms-btn-archive" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">
+                        📦 Archive
                     </button>
                 <?php endif; ?>
                 <a href="?page=mathlin-booking&action=invoice&ref=<?php echo esc_attr( $booking->ref ); ?>" class="button">

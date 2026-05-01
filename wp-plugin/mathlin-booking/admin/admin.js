@@ -29,6 +29,24 @@ jQuery(function ($) {
         nmsUpdateStatus(ref, 'pending', $btn, redirect);
     });
 
+    // ── Mark as paid ───────────────────────────────────────────────────────────
+    $(document).on('click', '.nms-btn-paid', function () {
+        var $btn     = $(this);
+        var ref      = $btn.data('ref');
+        var redirect = $btn.data('redirect');
+        if (!confirm('Mark booking ' + ref + ' as paid? A payment confirmation email will be sent to the booker.')) return;
+        nmsUpdateStatus(ref, 'paid', $btn, redirect);
+    });
+
+    // ── Archive single booking ─────────────────────────────────────────────────
+    $(document).on('click', '.nms-btn-archive', function () {
+        var $btn     = $(this);
+        var ref      = $btn.data('ref');
+        var redirect = $btn.data('redirect');
+        if (!confirm('Archive booking ' + ref + '?')) return;
+        nmsUpdateStatus(ref, 'archived', $btn, redirect);
+    });
+
     // ── Archive past bookings ──────────────────────────────────────────────────
     $('#nms-archive-past').on('click', function () {
         if (!confirm('Archive all past bookings (confirmed and cancelled)?\n\nThis moves them out of the main list. You can still view them by filtering for "Archived" status.')) return;
@@ -91,6 +109,10 @@ jQuery(function ($) {
             github_token:    $('#github_token').val(),
             admin_email:     $('#admin_email').val(),
             kitchen_price:   $('#kitchen_price').val(),
+            bank_sort_code:     $('#bank_sort_code').val(),
+            bank_account_number: $('#bank_account_number').val(),
+            bank_account_name:  $('#bank_account_name').val(),
+            payment_terms_days: $('#payment_terms_days').val(),
             spaces:          spaces
         }, function (res) {
             $btn.prop('disabled', false).text('💾 Save All Settings');

@@ -17,6 +17,10 @@
             <div class="nms-stat-val"><?php echo esc_html( $stats['confirmed'] ); ?></div>
             <div class="nms-stat-label">Confirmed</div>
         </div>
+        <div class="nms-stat-card nms-stat-paid">
+            <div class="nms-stat-val"><?php echo esc_html( $stats['paid'] ); ?></div>
+            <div class="nms-stat-label">Paid</div>
+        </div>
         <div class="nms-stat-card nms-stat-revenue">
             <div class="nms-stat-val">&pound;<?php echo number_format( $stats['revenue_fy'], 2 ); ?></div>
             <div class="nms-stat-label">Revenue FY <?php echo esc_html( $stats['fy_label'] ); ?></div>
@@ -32,6 +36,7 @@
                 <option value="">All Statuses</option>
                 <option value="pending"   <?php selected( $status, 'pending' ); ?>>Pending</option>
                 <option value="confirmed" <?php selected( $status, 'confirmed' ); ?>>Confirmed</option>
+                <option value="paid" <?php selected( $status, 'paid' ); ?>>Paid</option>
                 <option value="cancelled" <?php selected( $status, 'cancelled' ); ?>>Cancelled</option>
                 <option value="archived"  <?php selected( $status, 'archived' ); ?>>Archived</option>
             </select>
@@ -101,11 +106,17 @@
                         <?php if ( $b->status === 'pending' ) : ?>
                             <button class="button button-small button-primary nms-btn-confirm" data-ref="<?php echo esc_attr( $b->ref ); ?>">Confirm</button>
                         <?php endif; ?>
-                        <?php if ( $b->status !== 'cancelled' && $b->status !== 'archived' ) : ?>
+                        <?php if ( $b->status === 'confirmed' ) : ?>
+                            <button class="button button-small nms-btn-paid" data-ref="<?php echo esc_attr( $b->ref ); ?>">Mark Paid</button>
+                        <?php endif; ?>
+                        <?php if ( $b->status !== 'cancelled' && $b->status !== 'archived' && $b->status !== 'paid' ) : ?>
                             <button class="button button-small nms-btn-cancel" data-ref="<?php echo esc_attr( $b->ref ); ?>">Cancel</button>
                         <?php endif; ?>
                         <?php if ( $b->status === 'cancelled' ) : ?>
                             <button class="button button-small nms-btn-reopen" data-ref="<?php echo esc_attr( $b->ref ); ?>">Reopen</button>
+                        <?php endif; ?>
+                        <?php if ( in_array( $b->status, array( 'confirmed', 'paid', 'cancelled' ) ) ) : ?>
+                            <button class="button button-small nms-btn-archive" data-ref="<?php echo esc_attr( $b->ref ); ?>">Archive</button>
                         <?php endif; ?>
                     </div>
                 </td>

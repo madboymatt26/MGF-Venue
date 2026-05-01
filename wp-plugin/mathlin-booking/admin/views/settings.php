@@ -84,6 +84,32 @@
             <p><strong>Note:</strong> When a booking is confirmed, the invoice is automatically attached to the confirmation email sent to the booker.</p>
         </div>
 
+        <!-- Payment & Invoice Settings -->
+        <div class="nms-card">
+            <div class="nms-card-header">
+                <h2>💳 Payment &amp; Invoice Settings</h2>
+            </div>
+            <p>Configure the bank details and payment terms shown on invoices and confirmation emails.</p>
+            <table class="form-table">
+                <tr>
+                    <th><label for="bank_sort_code">Sort Code</label></th>
+                    <td><input type="text" id="bank_sort_code" value="<?php echo esc_attr( get_option( 'mbs_bank_sort_code', '12-34-56' ) ); ?>" class="regular-text" placeholder="12-34-56"></td>
+                </tr>
+                <tr>
+                    <th><label for="bank_account_number">Account Number</label></th>
+                    <td><input type="text" id="bank_account_number" value="<?php echo esc_attr( get_option( 'mbs_bank_account_number', '12345678' ) ); ?>" class="regular-text" placeholder="12345678"></td>
+                </tr>
+                <tr>
+                    <th><label for="bank_account_name">Account Name</label></th>
+                    <td><input type="text" id="bank_account_name" value="<?php echo esc_attr( get_option( 'mbs_bank_account_name', 'Needham Market Scout Group' ) ); ?>" class="regular-text" placeholder="Needham Market Scout Group"></td>
+                </tr>
+                <tr>
+                    <th><label for="payment_terms_days">Payment Terms</label></th>
+                    <td><input type="number" id="payment_terms_days" value="<?php echo esc_attr( get_option( 'mbs_payment_terms_days', 14 ) ); ?>" min="1" max="90" style="width:80px"> days</td>
+                </tr>
+            </table>
+        </div>
+
         <!-- Home Assistant Settings -->
         <div class="nms-card">
             <div class="nms-card-header">

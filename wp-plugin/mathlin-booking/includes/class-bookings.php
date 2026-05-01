@@ -32,6 +32,15 @@ class MBS_Bookings {
         return get_option( 'mbs_admin_email', 'bookings@needhamscouts.uk' );
     }
 
+    public static function get_bank_details() {
+        return array(
+            'sort_code'      => get_option( 'mbs_bank_sort_code', '12-34-56' ),
+            'account_number' => get_option( 'mbs_bank_account_number', '12345678' ),
+            'account_name'   => get_option( 'mbs_bank_account_name', 'Needham Market Scout Group' ),
+            'payment_days'   => (int) get_option( 'mbs_payment_terms_days', 14 ),
+        );
+    }
+
     public static function calculate_cost( $space, $start_time, $end_time, $kitchen = false ) {
         $spaces = self::get_spaces();
         if ( ! isset( $spaces[ $space ] ) ) return 0;
@@ -196,7 +205,7 @@ class MBS_Bookings {
     public static function update_status( $ref, $status ) {
         global $wpdb;
         $table   = $wpdb->prefix . MBS_TABLE;
-        $allowed = array( 'pending', 'confirmed', 'cancelled', 'archived' );
+        $allowed = array( 'pending', 'confirmed', 'cancelled', 'archived', 'paid' );
         if ( ! in_array( $status, $allowed ) ) return false;
 
         $result = $wpdb->update(
@@ -270,8 +279,9 @@ class MBS_Bookings {
             'confirmed'  => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status='confirmed'" ),
             'cancelled'  => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status='cancelled'" ),
             'archived'   => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status='archived'" ),
+            'paid'       => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status='paid'" ),
             'revenue_fy' => (float) $wpdb->get_var( $wpdb->prepare(
-                "SELECT COALESCE(SUM(amount), 0) FROM {$table} WHERE status='confirmed' AND booking_date BETWEEN %s AND %s",
+                "SELECT COALESCE(SUM(amount), 0) FROM {$table} WHERE status IN ('confirmed', 'paid') AND booking_date BETWEEN %s AND %s",
                 $fy_start, $fy_end
             ) ),
             'fy_label'   => $fy_label,
