@@ -37,9 +37,9 @@ jQuery(function ($) {
     });
 
     // ── Save settings ──────────────────────────────────────────────────────────
-    $(document).on('click', '.nms-save-settings', function () {
+    $('#nms-save-all').on('click', function () {
         var $btn = $(this);
-        var $msg = $('.nms-settings-msg');
+        var $msg = $('#nms-save-msg');
         $btn.prop('disabled', true).text('Saving…');
 
         // Collect spaces data
@@ -64,13 +64,16 @@ jQuery(function ($) {
             kitchen_price:   $('#kitchen_price').val(),
             spaces:          spaces
         }, function (res) {
-            $('.nms-save-settings').prop('disabled', false).text('Save All Settings');
+            $btn.prop('disabled', false).text('💾 Save All Settings');
             if (res.success) {
-                $msg.text('✓ Settings saved').removeClass('error').addClass('success');
+                $msg.text('✓ All settings saved successfully').css('color', '#46b450').show();
             } else {
-                $msg.text('✗ Error saving').removeClass('success').addClass('error');
+                $msg.text('✗ Error saving settings').css('color', '#dc3232').show();
             }
-            setTimeout(function () { $msg.text(''); }, 3000);
+            setTimeout(function () { $msg.text('').hide(); }, 4000);
+        }).fail(function () {
+            $btn.prop('disabled', false).text('💾 Save All Settings');
+            $msg.text('✗ Network error – please try again').css('color', '#dc3232').show();
         });
     });
 
@@ -97,7 +100,7 @@ jQuery(function ($) {
     // ── Test HA webhook ────────────────────────────────────────────────────────
     $('#nms-test-ha').on('click', function () {
         var $btn = $(this);
-        var $msg = $btn.siblings('.nms-settings-msg');
+        var $msg = $('#nms-ha-msg');
         $btn.prop('disabled', true).text('Sending…');
 
         $.post(MBS_Admin.ajax_url, {

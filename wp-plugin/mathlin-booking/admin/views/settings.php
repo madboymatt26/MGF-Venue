@@ -2,6 +2,8 @@
 <div class="wrap mbs-admin">
     <h1>&#9884; Scout Bookings – Settings</h1>
 
+    <div id="nms-settings-global-msg" class="nms-settings-msg" style="margin-bottom:16px;font-size:14px;"></div>
+
     <div class="nms-settings-layout">
 
         <!-- Bookable Spaces / Resources -->
@@ -55,11 +57,6 @@
                     </td>
                 </tr>
             </table>
-
-            <div class="nms-settings-actions">
-                <button id="nms-save-settings" class="button button-primary">Save All Settings</button>
-                <span id="nms-settings-msg" class="nms-settings-msg"></span>
-            </div>
         </div>
 
         <!-- Email & Notifications -->
@@ -85,11 +82,6 @@
             </table>
 
             <p><strong>Note:</strong> When a booking is confirmed, the invoice is automatically attached to the confirmation email sent to the booker.</p>
-
-            <div class="nms-settings-actions">
-                <button id="nms-save-settings" class="button button-primary">Save All Settings</button>
-                <span id="nms-settings-msg" class="nms-settings-msg"></span>
-            </div>
         </div>
 
         <!-- Home Assistant Settings -->
@@ -116,9 +108,8 @@
             </table>
 
             <div class="nms-settings-actions">
-                <button class="button button-primary nms-save-settings">Save All Settings</button>
                 <button id="nms-test-ha" class="button">Send Test Webhook</button>
-                <span class="nms-settings-msg"></span>
+                <span id="nms-ha-msg" class="nms-settings-msg"></span>
             </div>
         </div>
 
@@ -194,7 +185,7 @@ rest:
                 <tr>
                     <th><label for="github_token">GitHub Personal Access Token</label></th>
                     <td>
-                        <input type="password" id="github_token" name="github_token"
+                        <input type="text" id="github_token" name="github_token"
                                value="<?php echo esc_attr( get_option( 'mbs_github_token', '' ) ); ?>"
                                class="regular-text"
                                placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
@@ -221,7 +212,7 @@ rest:
             </div>
         </div>
 
-        <!-- General Settings -->
+        <!-- Booking Rules -->
         <div class="nms-card">
             <div class="nms-card-header"><h2>⚙️ Booking Rules</h2></div>
             <p>Control how far in advance people can book.</p>
@@ -249,10 +240,12 @@ rest:
                     <td><?php echo esc_html( MBS_VERSION ); ?></td>
                 </tr>
             </table>
-            <div class="nms-settings-actions">
-                <button id="nms-save-settings" class="button button-primary">Save All Settings</button>
-                <span id="nms-settings-msg" class="nms-settings-msg"></span>
-            </div>
+        </div>
+
+        <!-- Single Save Button -->
+        <div class="nms-card" style="text-align:center;padding:24px;">
+            <button id="nms-save-all" class="button button-primary button-hero">💾 Save All Settings</button>
+            <span id="nms-save-msg" class="nms-settings-msg" style="display:block;margin-top:12px;"></span>
         </div>
 
     </div>
