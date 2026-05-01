@@ -38,7 +38,6 @@
                 <option value="confirmed" <?php selected( $status, 'confirmed' ); ?>>Confirmed</option>
                 <option value="paid" <?php selected( $status, 'paid' ); ?>>Paid</option>
                 <option value="cancelled" <?php selected( $status, 'cancelled' ); ?>>Cancelled</option>
-                <option value="archived"  <?php selected( $status, 'archived' ); ?>>Archived</option>
             </select>
             <button type="submit" class="button">Filter</button>
             <?php if ( $status || $search ) : ?>

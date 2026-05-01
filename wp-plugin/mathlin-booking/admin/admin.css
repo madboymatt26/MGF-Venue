@@ -56,6 +56,8 @@
 .nms-status-pending   { background: #fff3cd; color: #856404; }
 .nms-status-confirmed { background: #d1fae5; color: #065f46; }
 .nms-status-cancelled { background: #fee2e2; color: #991b1b; }
+.nms-status-paid      { background: #dbeafe; color: #1e40af; }
+.nms-status-archived  { background: #f3f4f6; color: #6b7280; }
 
 /* Cards */
 .nms-card {
