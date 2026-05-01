@@ -44,9 +44,14 @@
                         ✓ Confirm Booking
                     </button>
                 <?php endif; ?>
-                <?php if ( $booking->status !== 'cancelled' ) : ?>
+                <?php if ( $booking->status !== 'cancelled' && $booking->status !== 'archived' ) : ?>
                     <button class="button nms-btn-cancel" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">
                         ✗ Cancel Booking
+                    </button>
+                <?php endif; ?>
+                <?php if ( $booking->status === 'cancelled' ) : ?>
+                    <button class="button nms-btn-reopen" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">
+                        ↩ Reopen Booking
                     </button>
                 <?php endif; ?>
                 <a href="?page=mathlin-booking&action=invoice&ref=<?php echo esc_attr( $booking->ref ); ?>" class="button">

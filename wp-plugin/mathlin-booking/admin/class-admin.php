@@ -12,6 +12,7 @@ class MBS_Admin {
         add_action( 'wp_ajax_mbs_save_settings',  array( $this, 'ajax_save_settings' ) );
         add_action( 'wp_ajax_mbs_test_ha',        array( $this, 'ajax_test_ha' ) );
         add_action( 'wp_ajax_mbs_check_update',   array( $this, 'ajax_check_update' ) );
+        add_action( 'wp_ajax_mbs_archive_past',   array( $this, 'ajax_archive_past' ) );
     }
 
     // ── Menu ───────────────────────────────────────────────────────────────────
@@ -107,12 +108,18 @@ class MBS_Admin {
 
         $ref    = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
         $status = sanitize_text_field( $_POST['status'] ?? '' );
+        $reason = sanitize_textarea_field( $_POST['reason'] ?? '' );
 
         $result = MBS_Bookings::update_status( $ref, $status );
 
         if ( $status === 'confirmed' ) {
             $booking = MBS_Bookings::get( $ref );
             if ( $booking ) MBS_Email::notify_confirmed( $booking );
+        }
+
+        if ( $status === 'cancelled' ) {
+            $booking = MBS_Bookings::get( $ref );
+            if ( $booking ) MBS_Email::notify_cancelled( $booking, $reason );
         }
 
         wp_send_json_success( array( 'ref' => $ref, 'status' => $status ) );
@@ -248,5 +255,13 @@ class MBS_Admin {
                 'message'          => 'You are running the latest version.',
             ) );
         }
+    }
+
+    public function ajax_archive_past() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
+
+        $count = MBS_Bookings::archive_past_bookings();
+        wp_send_json_success( array( 'archived' => $count ) );
     }
 }

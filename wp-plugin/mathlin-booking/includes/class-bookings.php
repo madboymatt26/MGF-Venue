@@ -4,23 +4,14 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 class MBS_Bookings {
 
     // ── Spaces / Resources ─────────────────────────────────────────────────────
-    /**
-     * Get configurable spaces from the database.
-     * Falls back to defaults if nothing is saved yet.
-     */
     public static function get_spaces() {
         $spaces = get_option( 'mbs_spaces', array() );
-
         if ( empty( $spaces ) ) {
             $spaces = self::get_default_spaces();
         }
-
         return $spaces;
     }
 
-    /**
-     * Default spaces used on first install or if option is empty.
-     */
     public static function get_default_spaces() {
         return array(
             'Main Scout Hall' => array( 'rate' => 25, 'unit' => 'hr',  'capacity' => 80 ),
@@ -29,23 +20,14 @@ class MBS_Bookings {
         );
     }
 
-    /**
-     * Save spaces to the database.
-     */
     public static function save_spaces( $spaces ) {
         return update_option( 'mbs_spaces', $spaces );
     }
 
-    /**
-     * Get the kitchen add-on price.
-     */
     public static function get_kitchen_price() {
         return (float) get_option( 'mbs_kitchen_price', 10 );
     }
 
-    /**
-     * Get the admin email address.
-     */
     public static function get_admin_email() {
         return get_option( 'mbs_admin_email', 'bookings@needhamscouts.uk' );
     }
@@ -144,6 +126,7 @@ class MBS_Bookings {
             'order'     => 'ASC',
             'limit'     => 200,
             'offset'    => 0,
+            'exclude_archived' => true,
         );
         $args = wp_parse_args( $args, $defaults );
 
@@ -153,6 +136,8 @@ class MBS_Bookings {
         if ( $args['status'] ) {
             $where[]  = 'status = %s';
             $values[] = $args['status'];
+        } elseif ( $args['exclude_archived'] ) {
+            $where[] = "status != 'archived'";
         }
         if ( $args['date_from'] ) {
             $where[]  = 'booking_date >= %s';
@@ -185,7 +170,7 @@ class MBS_Bookings {
         global $wpdb;
         $table = $wpdb->prefix . MBS_TABLE;
         return $wpdb->get_results( $wpdb->prepare(
-            "SELECT * FROM {$table} WHERE booking_date = %s AND status != 'cancelled' ORDER BY start_time ASC",
+            "SELECT * FROM {$table} WHERE booking_date = %s AND status NOT IN ('cancelled', 'archived') ORDER BY start_time ASC",
             $date
         ) );
     }
@@ -197,7 +182,7 @@ class MBS_Bookings {
         $to      = date( 'Y-m-t', strtotime( $from ) );
         $results = $wpdb->get_results( $wpdb->prepare(
             "SELECT booking_date, COUNT(*) as count FROM {$table}
-             WHERE booking_date BETWEEN %s AND %s AND status != 'cancelled'
+             WHERE booking_date BETWEEN %s AND %s AND status NOT IN ('cancelled', 'archived')
              GROUP BY booking_date",
             $from, $to
         ) );
@@ -211,7 +196,7 @@ class MBS_Bookings {
     public static function update_status( $ref, $status ) {
         global $wpdb;
         $table   = $wpdb->prefix . MBS_TABLE;
-        $allowed = array( 'pending', 'confirmed', 'cancelled' );
+        $allowed = array( 'pending', 'confirmed', 'cancelled', 'archived' );
         if ( ! in_array( $status, $allowed ) ) return false;
 
         $result = $wpdb->update(
@@ -243,15 +228,53 @@ class MBS_Bookings {
         return $wpdb->delete( $table, array( 'ref' => $ref ), array( '%s' ) );
     }
 
+    /**
+     * Archive all past bookings (booking_date before today) that are confirmed or cancelled.
+     * Returns the number of bookings archived.
+     */
+    public static function archive_past_bookings() {
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_TABLE;
+        $today = date( 'Y-m-d' );
+        return $wpdb->query( $wpdb->prepare(
+            "UPDATE {$table} SET status = 'archived' WHERE booking_date < %s AND status IN ('confirmed', 'cancelled')",
+            $today
+        ) );
+    }
+
+    /**
+     * Get stats with financial year support (April to March).
+     */
     public static function get_stats() {
         global $wpdb;
         $table = $wpdb->prefix . MBS_TABLE;
+
+        // Calculate current financial year (April to March)
+        $now   = new DateTime();
+        $month = (int) $now->format( 'n' );
+        $year  = (int) $now->format( 'Y' );
+
+        if ( $month >= 4 ) {
+            $fy_start = $year . '-04-01';
+            $fy_end   = ( $year + 1 ) . '-03-31';
+            $fy_label = $year . '/' . ( $year + 1 );
+        } else {
+            $fy_start = ( $year - 1 ) . '-04-01';
+            $fy_end   = $year . '-03-31';
+            $fy_label = ( $year - 1 ) . '/' . $year;
+        }
+
         return array(
-            'total'     => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table}" ),
-            'pending'   => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status='pending'" ),
-            'confirmed' => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status='confirmed'" ),
-            'cancelled' => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status='cancelled'" ),
-            'revenue'   => (float) $wpdb->get_var( "SELECT SUM(amount) FROM {$table} WHERE status='confirmed'" ),
+            'total'      => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status != 'archived'" ),
+            'pending'    => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status='pending'" ),
+            'confirmed'  => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status='confirmed'" ),
+            'cancelled'  => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status='cancelled'" ),
+            'archived'   => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status='archived'" ),
+            'revenue_fy' => (float) $wpdb->get_var( $wpdb->prepare(
+                "SELECT COALESCE(SUM(amount), 0) FROM {$table} WHERE status='confirmed' AND booking_date BETWEEN %s AND %s",
+                $fy_start, $fy_end
+            ) ),
+            'fy_label'   => $fy_label,
         );
     }
 }

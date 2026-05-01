@@ -15,8 +15,37 @@ jQuery(function ($) {
         var $btn     = $(this);
         var ref      = $btn.data('ref');
         var redirect = $btn.data('redirect');
-        if (!confirm('Cancel booking ' + ref + '?')) return;
-        nmsUpdateStatus(ref, 'cancelled', $btn, redirect);
+        var reason   = prompt('Cancel booking ' + ref + '?\n\nOptionally enter a reason (this will be sent to the booker):');
+        if (reason === null) return; // User clicked Cancel on the prompt
+        nmsUpdateStatus(ref, 'cancelled', $btn, redirect, reason);
+    });
+
+    // ── Reopen cancelled booking ───────────────────────────────────────────────
+    $(document).on('click', '.nms-btn-reopen', function () {
+        var $btn     = $(this);
+        var ref      = $btn.data('ref');
+        var redirect = $btn.data('redirect');
+        if (!confirm('Reopen booking ' + ref + '? It will be set back to Pending status.')) return;
+        nmsUpdateStatus(ref, 'pending', $btn, redirect);
+    });
+
+    // ── Archive past bookings ──────────────────────────────────────────────────
+    $('#nms-archive-past').on('click', function () {
+        if (!confirm('Archive all past bookings (confirmed and cancelled)?\n\nThis moves them out of the main list. You can still view them by filtering for "Archived" status.')) return;
+        var $btn = $(this);
+        $btn.prop('disabled', true).text('Archiving…');
+
+        $.post(MBS_Admin.ajax_url, {
+            action: 'mbs_archive_past',
+            nonce:  MBS_Admin.nonce
+        }, function (res) {
+            $btn.prop('disabled', false).text('📦 Archive Past Bookings');
+            if (res.success) {
+                var count = res.data.archived;
+                alert(count + ' booking' + (count !== 1 ? 's' : '') + ' archived.');
+                window.location.reload();
+            }
+        });
     });
 
     // ── Delete booking ─────────────────────────────────────────────────────────
@@ -145,15 +174,18 @@ jQuery(function ($) {
     });
 
     // ── Helper: update status via AJAX ─────────────────────────────────────────
-    function nmsUpdateStatus(ref, status, $btn, redirect) {
+    function nmsUpdateStatus(ref, status, $btn, redirect, reason) {
         $btn.prop('disabled', true);
 
-        $.post(MBS_Admin.ajax_url, {
+        var data = {
             action: 'mbs_update_status',
             nonce:  MBS_Admin.nonce,
             ref:    ref,
             status: status
-        }, function (res) {
+        };
+        if (reason) data.reason = reason;
+
+        $.post(MBS_Admin.ajax_url, data, function (res) {
             if (res.success) {
                 if (redirect) {
                     window.location.reload();

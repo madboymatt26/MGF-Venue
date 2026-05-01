@@ -57,6 +57,26 @@ class MBS_Email {
     }
 
     /**
+     * Send a cancellation/denial notification to the booker.
+     */
+    public static function notify_cancelled( $booking, $reason = '' ) {
+        $admin_email = self::admin_email();
+        $subject = 'Booking Cancelled – ' . $booking->ref;
+        $body    = self::header();
+        $body   .= '<h2 style="color:#dc3232;">Booking Cancelled</h2>';
+        $body   .= '<p>Hi ' . esc_html( $booking->name ) . ',</p>';
+        $body   .= '<p>We\'re sorry, but your booking for <strong>' . esc_html( $booking->space ) . '</strong> on <strong>' . date( 'l j F Y', strtotime( $booking->booking_date ) ) . '</strong> has been cancelled.</p>';
+        if ( ! empty( $reason ) ) {
+            $body .= '<p><strong>Reason:</strong> ' . esc_html( $reason ) . '</p>';
+        }
+        $body   .= '<p>We apologise for any inconvenience. If you\'d like to rebook for a different date or have any questions, please don\'t hesitate to contact us.</p>';
+        $body   .= self::booking_table_obj( $booking );
+        $body   .= '<p>Contact us at <a href="mailto:' . esc_attr( $admin_email ) . '">' . esc_html( $admin_email ) . '</a> or call 01449 797577.</p>';
+        $body   .= self::footer();
+        self::send( $booking->email, $subject, $body );
+    }
+
+    /**
      * Generate an invoice HTML file and return the path for email attachment.
      */
     private static function generate_invoice_attachment( $booking ) {
