@@ -7,7 +7,7 @@ jQuery(function ($) {
         var ref      = $btn.data('ref');
         var redirect = $btn.data('redirect');
         if (!confirm('Confirm booking ' + ref + '? A confirmation email will be sent to the booker.')) return;
-        nmsUpdateStatus(ref, 'confirmed', $btn, redirect);
+        nmsUpdateStatus(ref, 'confirmed', $btn, redirect || true);
     });
 
     // ── Cancel booking ─────────────────────────────────────────────────────────
@@ -26,7 +26,7 @@ jQuery(function ($) {
         var ref      = $btn.data('ref');
         var redirect = $btn.data('redirect');
         if (!confirm('Reopen booking ' + ref + '? It will be set back to Pending status.')) return;
-        nmsUpdateStatus(ref, 'pending', $btn, redirect);
+        nmsUpdateStatus(ref, 'pending', $btn, redirect || true);
     });
 
     // ── Mark as paid ───────────────────────────────────────────────────────────
