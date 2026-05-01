@@ -36,6 +36,14 @@ class MBS_Admin {
         );
         add_submenu_page(
             'mathlin-booking',
+            'Calendar',
+            'Calendar',
+            'manage_options',
+            'mathlin-calendar',
+            array( $this, 'render_calendar' )
+        );
+        add_submenu_page(
+            'mathlin-booking',
             'Settings',
             'Settings',
             'manage_options',
@@ -103,6 +111,10 @@ class MBS_Admin {
             return;
         }
         include MBS_PLUGIN_DIR . 'admin/views/invoice.php';
+    }
+
+    public function render_calendar() {
+        include MBS_PLUGIN_DIR . 'admin/views/calendar.php';
     }
 
     public function render_settings() {
