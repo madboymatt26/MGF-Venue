@@ -116,9 +116,9 @@
             </table>
 
             <div class="nms-settings-actions">
-                <button id="nms-save-settings" class="button button-primary">Save Settings</button>
+                <button class="button button-primary nms-save-settings">Save All Settings</button>
                 <button id="nms-test-ha" class="button">Send Test Webhook</button>
-                <span id="nms-settings-msg" class="nms-settings-msg"></span>
+                <span class="nms-settings-msg"></span>
             </div>
         </div>
 

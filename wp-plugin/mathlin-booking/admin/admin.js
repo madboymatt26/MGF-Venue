@@ -37,9 +37,9 @@ jQuery(function ($) {
     });
 
     // ── Save settings ──────────────────────────────────────────────────────────
-    $('#nms-save-settings').on('click', function () {
+    $(document).on('click', '.nms-save-settings', function () {
         var $btn = $(this);
-        var $msg = $('#nms-settings-msg');
+        var $msg = $('.nms-settings-msg');
         $btn.prop('disabled', true).text('Saving…');
 
         // Collect spaces data
@@ -64,7 +64,7 @@ jQuery(function ($) {
             kitchen_price:   $('#kitchen_price').val(),
             spaces:          spaces
         }, function (res) {
-            $btn.prop('disabled', false).text('Save All Settings');
+            $('.nms-save-settings').prop('disabled', false).text('Save All Settings');
             if (res.success) {
                 $msg.text('✓ Settings saved').removeClass('error').addClass('success');
             } else {
@@ -97,7 +97,7 @@ jQuery(function ($) {
     // ── Test HA webhook ────────────────────────────────────────────────────────
     $('#nms-test-ha').on('click', function () {
         var $btn = $(this);
-        var $msg = $('#nms-settings-msg');
+        var $msg = $btn.siblings('.nms-settings-msg');
         $btn.prop('disabled', true).text('Sending…');
 
         $.post(MBS_Admin.ajax_url, {
