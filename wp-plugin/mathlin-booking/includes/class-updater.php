@@ -46,6 +46,7 @@ class MBS_Updater {
         add_filter( 'pre_set_site_transient_update_plugins', array( $this, 'check_update' ) );
         add_filter( 'plugins_api',                           array( $this, 'plugin_info' ), 20, 3 );
         add_filter( 'upgrader_source_selection',             array( $this, 'fix_source_dir' ), 10, 4 );
+        add_filter( 'http_request_args',                     array( $this, 'add_auth_header' ), 10, 2 );
     }
 
     /**
@@ -111,31 +112,20 @@ class MBS_Updater {
     /**
      * Build the download URL for the release zip.
      * Prefers an attached zip asset; falls back to the auto-generated zipball.
+     * Auth is handled via the http_request_args filter (add_auth_header).
      */
     private function get_download_url( $release ) {
         // Check for an attached .zip asset first
         if ( ! empty( $release['assets'] ) ) {
             foreach ( $release['assets'] as $asset ) {
                 if ( substr( $asset['name'], -4 ) === '.zip' ) {
-                    $url = $asset['url']; // API URL, needs Accept header
-                    $token = $this->get_token();
-                    if ( ! empty( $token ) ) {
-                        // Use the browser_download_url with token as query param
-                        // for private repos this is more reliable
-                        return add_query_arg( 'access_token', $token, $asset['browser_download_url'] );
-                    }
                     return $asset['browser_download_url'];
                 }
             }
         }
 
         // Fallback: GitHub auto-generated source zipball
-        $url = $release['zipball_url'];
-        $token = $this->get_token();
-        if ( ! empty( $token ) ) {
-            return add_query_arg( 'access_token', $token, $url );
-        }
-        return $url;
+        return $release['zipball_url'];
     }
 
     /**
@@ -155,13 +145,6 @@ class MBS_Updater {
 
         if ( version_compare( $remote_version, $this->current_version, '>' ) ) {
             $download_url = $this->get_download_url( $release );
-
-            // For private repos, we need to add auth headers to the download
-            $token = $this->get_token();
-            if ( ! empty( $token ) ) {
-                // Use the zipball URL with token-based auth via a filter
-                add_filter( 'http_request_args', array( $this, 'add_auth_header' ), 10, 2 );
-            }
 
             $transient->response[ $this->plugin_basename ] = (object) array(
                 'slug'        => $this->slug,
@@ -233,7 +216,6 @@ class MBS_Updater {
         $token = $this->get_token();
         if ( ! empty( $token ) ) {
             $args['headers']['Authorization'] = 'token ' . $token;
-            $args['headers']['Accept']        = 'application/octet-stream';
         }
 
         return $args;
