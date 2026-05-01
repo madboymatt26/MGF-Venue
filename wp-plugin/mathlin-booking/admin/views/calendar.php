@@ -34,6 +34,9 @@ foreach ( $bookings as $b ) {
     $by_date[ $b->booking_date ][] = $b;
 }
 
+// Get blocked dates for this month
+$blocked_dates = MBS_Blocked_Dates::get_for_month( $year, $month );
+
 // Calendar grid info
 $first_dow = (int) date( 'N', strtotime( $first_day ) ); // 1=Mon, 7=Sun
 $days_in_month = (int) date( 't', strtotime( $first_day ) );
@@ -42,6 +45,7 @@ $today = date( 'Y-m-d' );
 // Selected day
 $selected_date = isset( $_GET['cal_date'] ) ? sanitize_text_field( $_GET['cal_date'] ) : '';
 $selected_bookings = $selected_date && isset( $by_date[ $selected_date ] ) ? $by_date[ $selected_date ] : array();
+$selected_blocks   = $selected_date && isset( $blocked_dates[ $selected_date ] ) ? $blocked_dates[ $selected_date ] : array();
 ?>
 <div class="wrap mbs-admin">
     <h1 class="wp-heading-inline">&#9884; Scout Bookings – Calendar</h1>
@@ -77,6 +81,7 @@ $selected_bookings = $selected_date && isset( $by_date[ $selected_date ] ) ? $by
                     while ( $day <= $days_in_month ) {
                         $date_str = sprintf( '%04d-%02d-%02d', $year, $month, $day );
                         $has_bookings = isset( $by_date[ $date_str ] );
+                        $is_blocked = isset( $blocked_dates[ $date_str ] );
                         $count = $has_bookings ? count( $by_date[ $date_str ] ) : 0;
                         $is_today = ( $date_str === $today );
                         $is_selected = ( $date_str === $selected_date );
@@ -84,6 +89,7 @@ $selected_bookings = $selected_date && isset( $by_date[ $selected_date ] ) ? $by
                         $classes = 'nms-cal-day';
                         if ( $is_today ) $classes .= ' nms-cal-today';
                         if ( $has_bookings ) $classes .= ' nms-cal-has-bookings';
+                        if ( $is_blocked ) $classes .= ' nms-cal-blocked';
                         if ( $is_selected ) $classes .= ' nms-cal-selected';
 
                         $url = add_query_arg( array( 'page' => 'mathlin-calendar', 'cal_year' => $year, 'cal_month' => $month, 'cal_date' => $date_str ) );
@@ -93,6 +99,9 @@ $selected_bookings = $selected_date && isset( $by_date[ $selected_date ] ) ? $by
                         echo '<span class="nms-cal-day-num">' . $day . '</span>';
                         if ( $count > 0 ) {
                             echo '<span class="nms-cal-badge">' . $count . '</span>';
+                        }
+                        if ( $is_blocked ) {
+                            echo '<span class="nms-cal-blocked-badge">🚫</span>';
                         }
                         echo '</a>';
                         echo '</td>';
@@ -116,6 +125,14 @@ $selected_bookings = $selected_date && isset( $by_date[ $selected_date ] ) ? $by
         <div class="nms-calendar-sidebar">
             <?php if ( $selected_date ) : ?>
                 <h3><?php echo esc_html( date( 'l j F Y', strtotime( $selected_date ) ) ); ?></h3>
+                <?php if ( ! empty( $selected_blocks ) ) : ?>
+                    <div class="nms-cal-blocked-notice">
+                        <strong>🚫 Blocked</strong>
+                        <?php foreach ( $selected_blocks as $block ) : ?>
+                            <div><?php echo esc_html( $block['space'] ); ?><?php if ( $block['reason'] ) echo ' — ' . esc_html( $block['reason'] ); ?></div>
+                        <?php endforeach; ?>
+                    </div>
+                <?php endif; ?>
                 <?php if ( empty( $selected_bookings ) ) : ?>
                     <p class="nms-muted">No bookings on this day.</p>
                 <?php else : ?>

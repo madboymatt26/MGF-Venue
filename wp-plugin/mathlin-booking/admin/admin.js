@@ -92,6 +92,56 @@ jQuery(function ($) {
         });
     });
 
+    // ── Blocked dates ──────────────────────────────────────────────────────────
+    $('#nms-add-block').on('click', function () {
+        var $btn  = $(this);
+        var $msg  = $('#nms-block-msg');
+        var from  = $('#nms-block-from').val();
+        var to    = $('#nms-block-to').val();
+        var space = $('#nms-block-space').val();
+        var reason = $('#nms-block-reason').val();
+
+        if (!from || !to) {
+            $msg.text('Please select both From and To dates.').css('color', '#dc3232');
+            return;
+        }
+
+        $btn.prop('disabled', true).text('Blocking…');
+
+        $.post(MBS_Admin.ajax_url, {
+            action:    'mbs_add_blocked',
+            nonce:     MBS_Admin.nonce,
+            date_from: from,
+            date_to:   to,
+            space:     space,
+            reason:    reason
+        }, function (res) {
+            $btn.prop('disabled', false).text('Block Dates');
+            if (res.success) {
+                $msg.text('✓ Dates blocked').css('color', '#46b450');
+                setTimeout(function () { window.location.reload(); }, 800);
+            } else {
+                $msg.text('✗ ' + (res.data || 'Error')).css('color', '#dc3232');
+            }
+        });
+    });
+
+    $(document).on('click', '.nms-delete-block', function () {
+        var $btn = $(this);
+        var id   = $btn.data('id');
+        if (!confirm('Remove this blocked date entry?')) return;
+
+        $.post(MBS_Admin.ajax_url, {
+            action: 'mbs_delete_blocked',
+            nonce:  MBS_Admin.nonce,
+            id:     id
+        }, function (res) {
+            if (res.success) {
+                $('#nms-block-row-' + id).fadeOut(300, function () { $(this).remove(); });
+            }
+        });
+    });
+
     // ── Save settings ──────────────────────────────────────────────────────────
     $('#nms-save-all').on('click', function () {
         var $btn = $(this);

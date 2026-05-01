@@ -32,6 +32,7 @@ class MBS_Public {
                 'kitchen_price'   => MBS_Bookings::get_kitchen_price(),
                 'min_notice_days' => $notice_days,
                 'min_date'        => date( 'Y-m-d', strtotime( "+{$notice_days} days" ) ),
+                'blocked_dates'   => self::get_blocked_dates_for_frontend(),
             ) );
         }
     }
@@ -92,6 +93,13 @@ class MBS_Public {
             wp_send_json_error( array( 'message' => 'Invalid space selected.' ) );
         }
 
+        // Check if date/space is blocked
+        $blocked = MBS_Blocked_Dates::is_blocked( $date, $space );
+        if ( $blocked ) {
+            $reason_msg = $blocked->reason ? ' Reason: ' . $blocked->reason : '';
+            wp_send_json_error( array( 'message' => 'Sorry, this date is unavailable for booking.' . $reason_msg ) );
+        }
+
         // Validate times for hourly spaces
         if ( $spaces[ $space ]['unit'] === 'hr' ) {
             $start = sanitize_text_field( $_POST['start_time'] ?? '' );
@@ -144,5 +152,32 @@ class MBS_Public {
             );
         }, $bookings );
         wp_send_json_success( $safe );
+    }
+
+    /**
+     * Get blocked dates for the next 6 months for the frontend calendar.
+     * Returns a flat array of blocked date strings for "all spaces" blocks.
+     */
+    private static function get_blocked_dates_for_frontend() {
+        $from = date( 'Y-m-d' );
+        $to   = date( 'Y-m-d', strtotime( '+6 months' ) );
+
+        $entries = MBS_Blocked_Dates::get_for_range( $from, $to );
+        $blocked = array();
+
+        foreach ( $entries as $entry ) {
+            $start = max( strtotime( $from ), strtotime( $entry->date_from ) );
+            $end   = min( strtotime( $to ), strtotime( $entry->date_to ) );
+
+            for ( $d = $start; $d <= $end; $d += 86400 ) {
+                $date_str = date( 'Y-m-d', $d );
+                if ( ! isset( $blocked[ $date_str ] ) ) {
+                    $blocked[ $date_str ] = array();
+                }
+                $blocked[ $date_str ][] = $entry->space ?: '__all__';
+            }
+        }
+
+        return $blocked;
     }
 }

@@ -40,6 +40,20 @@ class MBS_Database {
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
         dbDelta( $sql );
 
+        // Blocked dates table
+        $blocked_table = $wpdb->prefix . 'mathlin_blocked_dates';
+        $sql2 = "CREATE TABLE IF NOT EXISTS {$blocked_table} (
+            id          BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            date_from   DATE         NOT NULL,
+            date_to     DATE         NOT NULL,
+            space       VARCHAR(60)  DEFAULT '',
+            reason      VARCHAR(255) DEFAULT '',
+            created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            KEY idx_dates (date_from, date_to)
+        ) {$charset};";
+        dbDelta( $sql2 );
+
         // Migrate ENUM to VARCHAR if needed (for existing installs)
         self::maybe_migrate_status_column();
 

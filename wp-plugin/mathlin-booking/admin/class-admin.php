@@ -13,6 +13,8 @@ class MBS_Admin {
         add_action( 'wp_ajax_mbs_test_ha',        array( $this, 'ajax_test_ha' ) );
         add_action( 'wp_ajax_mbs_check_update',   array( $this, 'ajax_check_update' ) );
         add_action( 'wp_ajax_mbs_archive_past',   array( $this, 'ajax_archive_past' ) );
+        add_action( 'wp_ajax_mbs_add_blocked',    array( $this, 'ajax_add_blocked' ) );
+        add_action( 'wp_ajax_mbs_delete_blocked', array( $this, 'ajax_delete_blocked' ) );
     }
 
     // ── Menu ───────────────────────────────────────────────────────────────────
@@ -57,6 +59,14 @@ class MBS_Admin {
             'manage_options',
             'mathlin-archived',
             array( $this, 'render_archived' )
+        );
+        add_submenu_page(
+            'mathlin-booking',
+            'Blocked Dates',
+            'Blocked Dates',
+            'manage_options',
+            'mathlin-blocked',
+            array( $this, 'render_blocked' )
         );
     }
 
@@ -305,5 +315,42 @@ class MBS_Admin {
 
         $count = MBS_Bookings::archive_past_bookings();
         wp_send_json_success( array( 'archived' => $count ) );
+    }
+
+    public function render_blocked() {
+        $blocked = MBS_Blocked_Dates::get_all();
+        $spaces  = MBS_Bookings::get_spaces();
+        include MBS_PLUGIN_DIR . 'admin/views/blocked.php';
+    }
+
+    public function ajax_add_blocked() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
+
+        $date_from = sanitize_text_field( $_POST['date_from'] ?? '' );
+        $date_to   = sanitize_text_field( $_POST['date_to'] ?? '' );
+        $space     = sanitize_text_field( $_POST['space'] ?? '' );
+        $reason    = sanitize_text_field( $_POST['reason'] ?? '' );
+
+        if ( ! $date_from || ! $date_to ) {
+            wp_send_json_error( 'Please provide both start and end dates.' );
+        }
+        if ( strtotime( $date_to ) < strtotime( $date_from ) ) {
+            wp_send_json_error( 'End date must be on or after start date.' );
+        }
+
+        MBS_Blocked_Dates::add( $date_from, $date_to, $space, $reason );
+        wp_send_json_success( array( 'message' => 'Dates blocked successfully.' ) );
+    }
+
+    public function ajax_delete_blocked() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
+
+        $id = absint( $_POST['id'] ?? 0 );
+        if ( ! $id ) wp_send_json_error( 'Invalid ID.' );
+
+        MBS_Blocked_Dates::delete( $id );
+        wp_send_json_success( array( 'deleted' => $id ) );
     }
 }

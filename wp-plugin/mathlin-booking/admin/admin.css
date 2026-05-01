@@ -285,3 +285,27 @@
         grid-template-columns: 1fr;
     }
 }
+
+/* Blocked dates */
+.nms-cal-blocked .nms-cal-day-link {
+    background: #fee2e2 !important;
+    border-left: 3px solid #dc3232 !important;
+}
+.nms-cal-blocked-badge {
+    display: block;
+    font-size: 11px;
+    margin-top: 2px;
+}
+.nms-cal-blocked-notice {
+    background: #fee2e2;
+    border: 1px solid #fca5a5;
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    font-size: 13px;
+    color: #991b1b;
+}
+.nms-cal-blocked-notice strong {
+    display: block;
+    margin-bottom: 4px;
+}

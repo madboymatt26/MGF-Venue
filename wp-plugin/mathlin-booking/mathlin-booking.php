@@ -3,7 +3,7 @@
  * Plugin Name: Mathlin Booking System
  * Plugin URI:  https://needhamscouts.uk
  * Description: Venue booking system for Needham Market Scout Group with Home Assistant integration.
- * Version:     1.5.0
+ * Version:     1.6.0
  * Author:      Needham Market Scout Group
  * License:     GPL-2.0+
  * Text Domain: mathlin-booking
@@ -11,7 +11,7 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'MBS_VERSION',    '1.5.0' );
+define( 'MBS_VERSION',    '1.6.0' );
 define( 'MBS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MBS_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'MBS_TABLE',      'mathlin_bookings' );
@@ -23,6 +23,7 @@ require_once MBS_PLUGIN_DIR . 'includes/class-email.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-invoice.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-rest-api.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-homeassistant.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-blocked-dates.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-updater.php';
 require_once MBS_PLUGIN_DIR . 'admin/class-admin.php';
 require_once MBS_PLUGIN_DIR . 'public/class-public.php';
