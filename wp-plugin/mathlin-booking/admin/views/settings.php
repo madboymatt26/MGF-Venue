@@ -70,7 +70,20 @@
                                class="regular-text"
                                placeholder="bookings@needhamscouts.uk">
                         <p class="description">
-                            New booking notifications are sent here. This is also used as the "From" address and the reply-to address shown to bookers.
+                            Primary email for booking notifications and the "From" address on outgoing emails.
+                        </p>
+                    </td>
+                </tr>
+                <tr>
+                    <th><label for="additional_emails">Additional notification emails</label></th>
+                    <td>
+                        <input type="text" id="additional_emails" name="additional_emails"
+                               value="<?php echo esc_attr( get_option( 'mbs_additional_emails', '' ) ); ?>"
+                               class="regular-text"
+                               placeholder="manager@example.com, treasurer@example.com">
+                        <p class="description">
+                            Comma-separated list of extra email addresses to receive new booking notifications.<br>
+                            These people will get the same alert as the primary email above.
                         </p>
                     </td>
                 </tr>
@@ -296,6 +309,20 @@ rest:
                             <strong>0</strong> = disabled (manual archive only) &bull;
                             <strong>7</strong> = archive 1 week after the event.
                             Runs daily at 2am via WP-Cron.
+                        </p>
+                    </td>
+                </tr>
+                <tr>
+                    <th><label for="auto_chase_enabled">Auto-chase overdue payments</label></th>
+                    <td>
+                        <select id="auto_chase_enabled" name="auto_chase_enabled">
+                            <option value="1" <?php selected( get_option( 'mbs_auto_chase_enabled', 1 ), 1 ); ?>>Enabled</option>
+                            <option value="0" <?php selected( get_option( 'mbs_auto_chase_enabled', 1 ), 0 ); ?>>Disabled</option>
+                        </select>
+                        <p class="description">
+                            Automatically send payment reminder emails when invoices are overdue.<br>
+                            Sends up to 3 reminders with increasing urgency, spaced 3 days apart.<br>
+                            Runs daily at 9am. You can also manually chase from the booking detail page.
                         </p>
                     </td>
                 </tr>

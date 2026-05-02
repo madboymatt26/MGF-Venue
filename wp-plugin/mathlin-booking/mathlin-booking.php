@@ -3,7 +3,7 @@
  * Plugin Name: Mathlin Booking System
  * Plugin URI:  https://needhamscouts.uk
  * Description: Venue booking system for Needham Market Scout Group with Home Assistant integration.
- * Version:     1.12.0
+ * Version:     1.13.0
  * Author:      Needham Market Scout Group
  * License:     GPL-2.0+
  * Text Domain: mathlin-booking
@@ -11,7 +11,7 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'MBS_VERSION',    '1.12.0' );
+define( 'MBS_VERSION',    '1.13.0' );
 define( 'MBS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MBS_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'MBS_TABLE',      'mathlin_bookings' );
@@ -32,6 +32,7 @@ require_once MBS_PLUGIN_DIR . 'includes/class-dashboard-widget.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-audit-log.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-woo-payment.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-auto-archive.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-payment-chaser.php';
 require_once MBS_PLUGIN_DIR . 'admin/class-admin.php';
 require_once MBS_PLUGIN_DIR . 'public/class-public.php';
 
@@ -40,6 +41,7 @@ register_activation_hook( __FILE__, array( 'MBS_Database', 'create_tables' ) );
 register_deactivation_hook( __FILE__, array( 'MBS_Database', 'on_deactivate' ) );
 register_deactivation_hook( __FILE__, array( 'MBS_Reminders', 'deactivate' ) );
 register_deactivation_hook( __FILE__, array( 'MBS_Auto_Archive', 'deactivate' ) );
+register_deactivation_hook( __FILE__, array( 'MBS_Payment_Chaser', 'deactivate' ) );
 
 // ── Boot ───────────────────────────────────────────────────────────────────────
 add_action( 'plugins_loaded', 'mbs_init' );
@@ -58,7 +60,8 @@ function mbs_init() {
     $csv_export   = new MBS_CSV_Export();
     $dashboard    = new MBS_Dashboard_Widget();
     $woo_payment  = new MBS_Woo_Payment();
-    $auto_archive = new MBS_Auto_Archive();
+    $auto_archive   = new MBS_Auto_Archive();
+    $payment_chaser = new MBS_Payment_Chaser();
 
     $admin->init();
     $public->init();
@@ -69,4 +72,5 @@ function mbs_init() {
     $dashboard->init();
     $woo_payment->init();
     $auto_archive->init();
+    $payment_chaser->init();
 }

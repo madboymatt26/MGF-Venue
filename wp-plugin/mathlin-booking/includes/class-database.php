@@ -32,6 +32,8 @@ class MBS_Database {
             invoice_number  VARCHAR(30)  DEFAULT '',
             ha_notified     TINYINT(1)   NOT NULL DEFAULT 0,
             reminder_sent   TINYINT(1)   NOT NULL DEFAULT 0,
+            chase_count     SMALLINT     NOT NULL DEFAULT 0,
+            last_chased     DATETIME     DEFAULT NULL,
             series_id       VARCHAR(20)  DEFAULT NULL,
             admin_notes     TEXT         DEFAULT '',
             created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -128,6 +130,13 @@ class MBS_Database {
         $col = $wpdb->get_results( "SHOW COLUMNS FROM {$table} LIKE 'reminder_sent'" );
         if ( empty( $col ) ) {
             $wpdb->query( "ALTER TABLE {$table} ADD COLUMN reminder_sent TINYINT(1) NOT NULL DEFAULT 0 AFTER ha_notified" );
+        }
+
+        // Add payment chase columns if missing
+        $col = $wpdb->get_results( "SHOW COLUMNS FROM {$table} LIKE 'chase_count'" );
+        if ( empty( $col ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN chase_count SMALLINT NOT NULL DEFAULT 0 AFTER reminder_sent" );
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN last_chased DATETIME DEFAULT NULL AFTER chase_count" );
         }
     }
 

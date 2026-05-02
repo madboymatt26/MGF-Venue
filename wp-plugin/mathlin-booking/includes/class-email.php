@@ -4,14 +4,34 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 class MBS_Email {
 
     /**
-     * Get the admin email address (configurable in settings).
+     * Get the admin email address(es).
+     * Returns the primary email. For multiple recipients, use get_notification_emails().
      */
     private static function admin_email() {
         return MBS_Bookings::get_admin_email();
     }
 
+    /**
+     * Get all notification email addresses (comma-separated in settings).
+     */
+    private static function notification_emails() {
+        $primary    = MBS_Bookings::get_admin_email();
+        $additional = get_option( 'mbs_additional_emails', '' );
+
+        $emails = array( $primary );
+        if ( ! empty( $additional ) ) {
+            $extras = array_map( 'trim', explode( ',', $additional ) );
+            foreach ( $extras as $email ) {
+                if ( is_email( $email ) && $email !== $primary ) {
+                    $emails[] = $email;
+                }
+            }
+        }
+        return $emails;
+    }
+
     public static function notify_admin( $booking ) {
-        $admin_email = self::admin_email();
+        $emails  = self::notification_emails();
         $subject = '[New Booking] ' . $booking['ref'] . ' – ' . $booking['name'];
         $body    = self::header();
         $body   .= '<h2 style="color:#7413DC;">New Booking Request</h2>';
@@ -19,7 +39,9 @@ class MBS_Email {
         $body   .= self::booking_table( $booking );
         $body   .= '<p style="margin-top:24px;"><a href="' . admin_url( 'admin.php?page=mathlin-booking&action=view&ref=' . $booking['ref'] ) . '" style="background:#7413DC;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;">View &amp; Manage Booking</a></p>';
         $body   .= self::footer();
-        self::send( $admin_email, $subject, $body );
+        foreach ( $emails as $email ) {
+            self::send( $email, $subject, $body );
+        }
     }
 
     public static function notify_booker( $booking ) {

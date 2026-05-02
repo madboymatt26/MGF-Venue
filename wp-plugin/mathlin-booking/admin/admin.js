@@ -191,8 +191,10 @@ jQuery(function ($) {
             payment_terms_days: $('#payment_terms_days').val(),
             reminder_hours:  $('#reminder_hours').val(),
             terms_page_id:      $('#terms_page_id').val(),
-            auto_archive_days:  $('#auto_archive_days').val(),
-            spaces:             spaces
+            auto_archive_days:   $('#auto_archive_days').val(),
+            auto_chase_enabled:  $('#auto_chase_enabled').val(),
+            additional_emails:   $('#additional_emails').val(),
+            spaces:              spaces
         }, function (res) {
             $btn.prop('disabled', false).text('💾 Save All Settings');
             if (res.success) {
@@ -271,6 +273,28 @@ jQuery(function ($) {
                     .removeClass('success').addClass('error');
             }
             setTimeout(function () { $msg.text(''); }, 6000);
+        });
+    });
+
+    // ── Chase payment ──────────────────────────────────────────────────────────
+    $(document).on('click', '.nms-btn-chase', function () {
+        var $btn = $(this);
+        var ref  = $btn.data('ref');
+        if (!confirm('Send a payment reminder email to the booker for ' + ref + '?')) return;
+        $btn.prop('disabled', true).text('Sending…');
+
+        $.post(MBS_Admin.ajax_url, {
+            action: 'mbs_chase_payment',
+            nonce:  MBS_Admin.nonce,
+            ref:    ref
+        }, function (res) {
+            $btn.prop('disabled', false).text('📧 Chase Payment');
+            if (res.success) {
+                alert('Payment reminder sent (chase #' + res.data.chase_count + ').');
+                window.location.reload();
+            } else {
+                alert('Error: ' + (res.data || 'Unknown error'));
+            }
         });
     });
 

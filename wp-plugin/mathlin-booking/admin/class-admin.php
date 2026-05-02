@@ -18,6 +18,7 @@ class MBS_Admin {
         add_action( 'wp_ajax_mbs_clear_expired_blocks', array( $this, 'ajax_clear_expired_blocks' ) );
         add_action( 'wp_ajax_mbs_update_series_status', array( $this, 'ajax_update_series_status' ) );
         add_action( 'wp_ajax_mbs_save_admin_notes', array( $this, 'ajax_save_admin_notes' ) );
+        add_action( 'wp_ajax_mbs_chase_payment',  array( $this, 'ajax_chase_payment' ) );
     }
 
     // ── Menu ───────────────────────────────────────────────────────────────────
@@ -228,6 +229,14 @@ class MBS_Admin {
         $auto_archive_days = absint( $_POST['auto_archive_days'] ?? 7 );
         update_option( 'mbs_auto_archive_days', $auto_archive_days );
 
+        // Additional notification emails
+        $additional_emails = sanitize_text_field( $_POST['additional_emails'] ?? '' );
+        update_option( 'mbs_additional_emails', $additional_emails );
+
+        // Auto-chase
+        $auto_chase = absint( $_POST['auto_chase_enabled'] ?? 1 );
+        update_option( 'mbs_auto_chase_enabled', $auto_chase );
+
         // Save admin email if provided
         if ( ! empty( $admin_email ) ) {
             update_option( 'mbs_admin_email', $admin_email );
@@ -411,5 +420,19 @@ class MBS_Admin {
 
         MBS_Bookings::update_admin_notes( $ref, $notes );
         wp_send_json_success( array( 'ref' => $ref ) );
+    }
+
+    public function ajax_chase_payment() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
+
+        $ref     = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
+        $booking = MBS_Bookings::get( $ref );
+
+        if ( ! $booking ) wp_send_json_error( 'Booking not found.' );
+        if ( $booking->status !== 'confirmed' ) wp_send_json_error( 'Can only chase payment for confirmed bookings.' );
+
+        MBS_Payment_Chaser::send_chase( $booking, true );
+        wp_send_json_success( array( 'ref' => $ref, 'chase_count' => ( $booking->chase_count ?? 0 ) + 1 ) );
     }
 }

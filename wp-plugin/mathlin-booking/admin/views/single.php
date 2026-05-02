@@ -65,6 +65,17 @@
                     <button class="button button-primary nms-btn-paid" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">
                         💰 Mark as Paid
                     </button>
+                    <button class="button nms-btn-chase" data-ref="<?php echo esc_attr( $booking->ref ); ?>">
+                        📧 Chase Payment
+                    </button>
+                    <?php if ( $booking->chase_count > 0 ) : ?>
+                        <small class="nms-muted" style="display:block;margin-top:4px;">
+                            <?php echo esc_html( $booking->chase_count ); ?> chase email(s) sent
+                            <?php if ( $booking->last_chased ) : ?>
+                                — last: <?php echo esc_html( date( 'j M H:i', strtotime( $booking->last_chased ) ) ); ?>
+                            <?php endif; ?>
+                        </small>
+                    <?php endif; ?>
                 <?php endif; ?>
                 <?php if ( $booking->status === 'paid' ) : ?>
                     <button class="button nms-btn-unpaid" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">
