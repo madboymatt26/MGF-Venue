@@ -49,6 +49,18 @@ class MBS_Email {
         $bank = MBS_Bookings::get_bank_details();
         $body   .= '<p>Payment is due within ' . $bank['payment_days'] . ' days. Please transfer to:<br>Sort Code: <strong>' . esc_html( $bank['sort_code'] ) . '</strong> | Account: <strong>' . esc_html( $bank['account_number'] ) . '</strong> | Ref: <strong>' . esc_html( $booking->invoice_number ) . '</strong></p>';
         $body   .= '<p>If you have any questions, please contact us at <a href="mailto:' . esc_attr( $admin_email ) . '">' . esc_html( $admin_email ) . '</a>.</p>';
+
+        // Add Pay Now button if WooCommerce is available
+        if ( MBS_Woo_Payment::is_available() ) {
+            $pay_url = MBS_Woo_Payment::generate_payment_url( $booking );
+            if ( $pay_url ) {
+                $body .= '<p style="margin-top:16px;text-align:center;">';
+                $body .= '<a href="' . esc_url( $pay_url ) . '" style="background:#2ecc71;color:#fff;padding:14px 32px;border-radius:6px;text-decoration:none;font-weight:bold;font-size:16px;">💳 Pay Now Online</a>';
+                $body .= '</p>';
+                $body .= '<p style="text-align:center;font-size:13px;color:#666;">Or pay by bank transfer using the details above.</p>';
+            }
+        }
+
         $body   .= self::ical_button( $booking );
         $body   .= self::footer();
 

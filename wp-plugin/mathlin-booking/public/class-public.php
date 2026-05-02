@@ -6,6 +6,7 @@ class MBS_Public {
     public function init() {
         add_shortcode( 'mathlin_booking', array( $this, 'shortcode_booking' ) );
         add_shortcode( 'mathlin_calendar', array( $this, 'shortcode_calendar' ) );
+        add_shortcode( 'mathlin_status', array( $this, 'shortcode_status' ) );
         add_action( 'wp_enqueue_scripts', array( $this, 'enqueue_assets' ) );
         add_action( 'wp_ajax_nopriv_mbs_submit_booking', array( $this, 'ajax_submit' ) );
         add_action( 'wp_ajax_mbs_submit_booking',        array( $this, 'ajax_submit' ) );
@@ -13,6 +14,8 @@ class MBS_Public {
         add_action( 'wp_ajax_mbs_get_calendar',          array( $this, 'ajax_calendar' ) );
         add_action( 'wp_ajax_nopriv_mbs_get_day',        array( $this, 'ajax_get_day' ) );
         add_action( 'wp_ajax_mbs_get_day',               array( $this, 'ajax_get_day' ) );
+        add_action( 'wp_ajax_nopriv_mbs_lookup_booking', array( $this, 'ajax_lookup_booking' ) );
+        add_action( 'wp_ajax_mbs_lookup_booking',        array( $this, 'ajax_lookup_booking' ) );
     }
 
     public function enqueue_assets() {
@@ -20,7 +23,8 @@ class MBS_Public {
         // Only load on pages that use our shortcodes
         if ( is_a( $post, 'WP_Post' ) && (
             has_shortcode( $post->post_content, 'mathlin_booking' ) ||
-            has_shortcode( $post->post_content, 'mathlin_calendar' )
+            has_shortcode( $post->post_content, 'mathlin_calendar' ) ||
+            has_shortcode( $post->post_content, 'mathlin_status' )
         ) ) {
             wp_enqueue_style(  'mbs-public', MBS_PLUGIN_URL . 'public/public.css', array(), MBS_VERSION );
             wp_enqueue_script( 'mbs-public', MBS_PLUGIN_URL . 'public/public.js',  array( 'jquery' ), MBS_VERSION, true );
@@ -48,6 +52,13 @@ class MBS_Public {
     public function shortcode_calendar( $atts ) {
         ob_start();
         include MBS_PLUGIN_DIR . 'public/views/calendar.php';
+        return ob_get_clean();
+    }
+
+    // ── Shortcode: booking status lookup ───────────────────────────────────────
+    public function shortcode_status( $atts ) {
+        ob_start();
+        include MBS_PLUGIN_DIR . 'public/views/booking-status.php';
         return ob_get_clean();
     }
 
@@ -222,6 +233,46 @@ class MBS_Public {
             );
         }, $bookings );
         wp_send_json_success( $safe );
+    }
+
+    // ── AJAX: lookup booking by reference ──────────────────────────────────────
+    public function ajax_lookup_booking() {
+        check_ajax_referer( 'mbs_public_nonce', 'nonce' );
+        $ref = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
+
+        if ( ! $ref ) {
+            wp_send_json_error( array( 'message' => 'Please enter a booking reference.' ) );
+        }
+
+        $booking = MBS_Bookings::get( $ref );
+        if ( ! $booking ) {
+            wp_send_json_error( array( 'message' => 'No booking found with reference ' . $ref . '. Please check and try again.' ) );
+        }
+
+        $spaces   = MBS_Bookings::get_spaces();
+        $is_daily = ! empty( $booking->all_day );
+        $time_str = $is_daily ? 'All day' : ( $booking->start_time . ' – ' . $booking->end_time );
+
+        $data = array(
+            'ref'             => $booking->ref,
+            'status'          => $booking->status,
+            'space'           => $booking->space,
+            'date_formatted'  => date( 'l j F Y', strtotime( $booking->booking_date ) ),
+            'time'            => $time_str,
+            'attendees'       => $booking->attendees,
+            'purpose'         => $booking->purpose,
+            'amount'          => number_format( $booking->amount, 2 ),
+            'invoice_number'  => $booking->invoice_number,
+            'ical_url'        => rest_url( 'mathlin/v1/bookings/' . $booking->ref . '/ical' ),
+            'payment_url'     => '',
+        );
+
+        // Add payment URL if WooCommerce is available and booking is confirmed (not yet paid)
+        if ( $booking->status === 'confirmed' && MBS_Woo_Payment::is_available() ) {
+            $data['payment_url'] = MBS_Woo_Payment::generate_payment_url( $booking );
+        }
+
+        wp_send_json_success( $data );
     }
 
     /**

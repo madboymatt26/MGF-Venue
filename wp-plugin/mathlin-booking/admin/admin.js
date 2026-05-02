@@ -190,8 +190,9 @@ jQuery(function ($) {
             bank_account_name:  $('#bank_account_name').val(),
             payment_terms_days: $('#payment_terms_days').val(),
             reminder_hours:  $('#reminder_hours').val(),
-            terms_page_id:   $('#terms_page_id').val(),
-            spaces:          spaces
+            terms_page_id:      $('#terms_page_id').val(),
+            auto_archive_days:  $('#auto_archive_days').val(),
+            spaces:             spaces
         }, function (res) {
             $btn.prop('disabled', false).text('💾 Save All Settings');
             if (res.success) {

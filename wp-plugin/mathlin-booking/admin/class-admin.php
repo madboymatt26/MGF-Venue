@@ -224,6 +224,10 @@ class MBS_Admin {
         $terms_page_id = absint( $_POST['terms_page_id'] ?? 0 );
         update_option( 'mbs_terms_page_id', $terms_page_id );
 
+        // Auto-archive days
+        $auto_archive_days = absint( $_POST['auto_archive_days'] ?? 7 );
+        update_option( 'mbs_auto_archive_days', $auto_archive_days );
+
         // Save admin email if provided
         if ( ! empty( $admin_email ) ) {
             update_option( 'mbs_admin_email', $admin_email );

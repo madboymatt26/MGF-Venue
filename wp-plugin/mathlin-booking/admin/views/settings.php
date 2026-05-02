@@ -286,6 +286,20 @@ rest:
                     </td>
                 </tr>
                 <tr>
+                    <th><label for="auto_archive_days">Auto-archive after</label></th>
+                    <td>
+                        <input type="number" id="auto_archive_days" name="auto_archive_days"
+                               value="<?php echo esc_attr( get_option( 'mbs_auto_archive_days', 7 ) ); ?>"
+                               min="0" max="365" style="width:80px"> days
+                        <p class="description">
+                            Automatically archive bookings this many days after they've passed.<br>
+                            <strong>0</strong> = disabled (manual archive only) &bull;
+                            <strong>7</strong> = archive 1 week after the event.
+                            Runs daily at 2am via WP-Cron.
+                        </p>
+                    </td>
+                </tr>
+                <tr>
                     <th>iCal Feed URL</th>
                     <td>
                         <code><?php echo esc_html( rest_url( 'mathlin/v1/bookings/ical' ) ); ?></code>
