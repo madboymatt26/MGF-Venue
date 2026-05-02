@@ -26,14 +26,35 @@ class MBS_Modification {
      */
     public static function get_modification_url( $booking ) {
         $token = $booking->modification_token;
-        if ( empty( $token ) ) return '';
 
-        // Use the site URL with a query parameter — works on any page with the shortcode
+        // Generate token if missing (for bookings created before v2.0.0)
+        if ( empty( $token ) ) {
+            $token = wp_generate_password( 32, false );
+            global $wpdb;
+            $wpdb->update(
+                $wpdb->prefix . MBS_TABLE,
+                array( 'modification_token' => $token ),
+                array( 'ref' => $booking->ref )
+            );
+        }
+
+        // Find a page with the [mathlin_status] shortcode to use as the base URL
+        $base_url = home_url();
+        $pages = get_posts( array(
+            'post_type'  => 'page',
+            'post_status' => 'publish',
+            's'          => 'mathlin_status',
+            'numberposts' => 1,
+        ) );
+        if ( ! empty( $pages ) ) {
+            $base_url = get_permalink( $pages[0]->ID );
+        }
+
         return add_query_arg( array(
             'mbs_modify' => '1',
             'ref'        => $booking->ref,
             'token'      => $token,
-        ), home_url() );
+        ), $base_url );
     }
 
     /**

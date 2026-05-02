@@ -60,12 +60,6 @@ class MBS_Public {
 
     // ── Shortcode: booking status lookup ───────────────────────────────────────
     public function shortcode_status( $atts ) {
-        // Check if this is a modification request redirect
-        if ( isset( $_GET['mbs_modify'] ) && $_GET['mbs_modify'] === '1' ) {
-            ob_start();
-            include MBS_PLUGIN_DIR . 'public/views/modification-form.php';
-            return ob_get_clean();
-        }
         ob_start();
         include MBS_PLUGIN_DIR . 'public/views/booking-status.php';
         return ob_get_clean();
@@ -291,6 +285,11 @@ class MBS_Public {
         // Add payment URL if WooCommerce is available and booking is confirmed (not yet paid)
         if ( $booking->status === 'confirmed' && MBS_Woo_Payment::is_available() ) {
             $data['payment_url'] = MBS_Woo_Payment::generate_payment_url( $booking );
+        }
+
+        // Add modification URL
+        if ( ! in_array( $booking->status, array( 'cancelled', 'archived' ) ) ) {
+            $data['modify_url'] = MBS_Modification::get_modification_url( $booking );
         }
 
         wp_send_json_success( $data );

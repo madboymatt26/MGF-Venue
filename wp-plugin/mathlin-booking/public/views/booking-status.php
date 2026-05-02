@@ -1,5 +1,13 @@
 <?php if ( ! defined( 'ABSPATH' ) ) exit; ?>
 
+<?php
+// If this is a modification request, show the modification form instead
+if ( isset( $_GET['mbs_modify'] ) && $_GET['mbs_modify'] === '1' ) {
+    include __DIR__ . '/modification-form.php';
+    return;
+}
+?>
+
 <div class="nms-wrap" id="nms-status-wrap">
     <h2 class="nms-section-title">Check Your Booking</h2>
     <p class="nms-section-sub">Enter your booking reference to see the current status and details.</p>
@@ -78,6 +86,12 @@ jQuery(function($) {
                 if (b.ical_url) {
                     html += '<div style="margin-top:0.75rem;text-align:center;">';
                     html += '<a href="' + b.ical_url + '" class="nms-btn nms-btn-sm" style="background:#f5f0ff;color:#7413DC;border-color:#e0d0f0;">📅 Add to Calendar</a>';
+                    html += '</div>';
+                }
+
+                if (b.modify_url && b.status !== 'cancelled' && b.status !== 'archived') {
+                    html += '<div style="margin-top:0.75rem;text-align:center;">';
+                    html += '<a href="' + b.modify_url + '" style="color:#7413DC;font-size:0.85rem;">Need to change something? Request a modification</a>';
                     html += '</div>';
                 }
 
