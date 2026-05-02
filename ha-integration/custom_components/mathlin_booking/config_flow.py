@@ -17,8 +17,10 @@ from .const import (
     CONF_WEBSITE_URL,
     CONF_PRE_EVENT_MINUTES,
     CONF_POST_EVENT_MINUTES,
+    CONF_GAP_MINUTES,
     DEFAULT_PRE_EVENT_MINUTES,
     DEFAULT_POST_EVENT_MINUTES,
+    DEFAULT_GAP_MINUTES,
     API_PATH_TODAY,
 )
 
@@ -85,6 +87,7 @@ class MathlinConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         options={
                             CONF_PRE_EVENT_MINUTES:  DEFAULT_PRE_EVENT_MINUTES,
                             CONF_POST_EVENT_MINUTES: DEFAULT_POST_EVENT_MINUTES,
+                            CONF_GAP_MINUTES:        DEFAULT_GAP_MINUTES,
                         },
                     )
 
@@ -133,6 +136,10 @@ class MathlinOptionsFlow(config_entries.OptionsFlow):
                     CONF_POST_EVENT_MINUTES,
                     default=current.get(CONF_POST_EVENT_MINUTES, DEFAULT_POST_EVENT_MINUTES),
                 ): vol.All(vol.Coerce(int), vol.Range(min=0, max=480)),
+                vol.Required(
+                    CONF_GAP_MINUTES,
+                    default=current.get(CONF_GAP_MINUTES, DEFAULT_GAP_MINUTES),
+                ): vol.All(vol.Coerce(int), vol.Range(min=0, max=240)),
             }),
             description_placeholders={
                 "pre_hint":  "Minutes before booking start to fire the 'booking_start' event (0–480)",

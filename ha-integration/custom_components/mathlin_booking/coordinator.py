@@ -19,8 +19,10 @@ from .const import (
     CONF_WEBSITE_URL,
     CONF_PRE_EVENT_MINUTES,
     CONF_POST_EVENT_MINUTES,
+    CONF_GAP_MINUTES,
     DEFAULT_PRE_EVENT_MINUTES,
     DEFAULT_POST_EVENT_MINUTES,
+    DEFAULT_GAP_MINUTES,
     API_PATH_TODAY,
     EVENT_BOOKING_START,
     EVENT_BOOKING_END,
@@ -111,23 +113,27 @@ class MathlinCoordinator(DataUpdateCoordinator):
         For each booking today, schedule:
           - A 'booking_start' event N minutes before start_time
           - A 'booking_end'   event M minutes after end_time
+            (UNLESS another booking on the same space starts within the gap window)
         """
         if not self.data:
             return
 
         pre_mins  = self.entry.options.get(CONF_PRE_EVENT_MINUTES,  DEFAULT_PRE_EVENT_MINUTES)
         post_mins = self.entry.options.get(CONF_POST_EVENT_MINUTES, DEFAULT_POST_EVENT_MINUTES)
+        gap_mins  = self.entry.options.get(CONF_GAP_MINUTES,        DEFAULT_GAP_MINUTES)
         now       = dt_util.now()
         today     = now.date()
 
+        # Parse all bookings into structured data for gap analysis
+        parsed = []
         for booking in self.data:
             ref       = booking.get("ref", "unknown")
+            space     = booking.get("space", "")
             all_day   = booking.get("all_day", False)
             start_str = booking.get("start_time")
             end_str   = booking.get("end_time")
 
             if all_day:
-                # Outdoor / all-day booking — fire start at 08:00, end at 20:00
                 start_dt = dt_util.as_local(datetime.combine(today, time(8, 0)))
                 end_dt   = dt_util.as_local(datetime.combine(today, time(20, 0)))
             elif start_str and end_str:
@@ -142,25 +148,52 @@ class MathlinCoordinator(DataUpdateCoordinator):
             else:
                 continue
 
+            parsed.append({
+                "booking": booking,
+                "ref": ref,
+                "space": space,
+                "start_dt": start_dt,
+                "end_dt": end_dt,
+            })
+
+        # Sort by start time
+        parsed.sort(key=lambda x: x["start_dt"])
+
+        for i, p in enumerate(parsed):
+            ref      = p["ref"]
+            space    = p["space"]
+            start_dt = p["start_dt"]
+            end_dt   = p["end_dt"]
+            booking  = p["booking"]
+
             fire_start = start_dt - timedelta(minutes=pre_mins)
             fire_end   = end_dt   + timedelta(minutes=post_mins)
 
-            # Only schedule if the fire time is still in the future
+            # Schedule start event
             if fire_start > now:
                 self._schedule_event(fire_start, EVENT_BOOKING_START, booking, ref)
-                _LOGGER.debug(
-                    "Booking %s: start event scheduled for %s", ref, fire_start
-                )
-            else:
-                _LOGGER.debug(
-                    "Booking %s: start event time %s already passed, skipping", ref, fire_start
-                )
+                _LOGGER.debug("Booking %s: start event at %s", ref, fire_start)
 
-            if fire_end > now:
+            # Smart gap detection: check if another booking on the SAME space
+            # starts within gap_mins of this booking's end
+            skip_end = False
+            if gap_mins > 0:
+                for j in range(i + 1, len(parsed)):
+                    next_p = parsed[j]
+                    if next_p["space"] == space:
+                        gap = (next_p["start_dt"] - end_dt).total_seconds() / 60
+                        if gap <= gap_mins:
+                            skip_end = True
+                            _LOGGER.info(
+                                "Booking %s: skipping end event — next booking %s "
+                                "on same space starts in %.0f min (gap threshold: %d min)",
+                                ref, next_p["ref"], gap, gap_mins,
+                            )
+                        break  # Only check the next booking on same space
+
+            if not skip_end and fire_end > now:
                 self._schedule_event(fire_end, EVENT_BOOKING_END, booking, ref)
-                _LOGGER.debug(
-                    "Booking %s: end event scheduled for %s", ref, fire_end
-                )
+                _LOGGER.debug("Booking %s: end event at %s", ref, fire_end)
 
     def _schedule_event(
         self,

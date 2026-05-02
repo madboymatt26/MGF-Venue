@@ -118,6 +118,10 @@ class MBS_Bookings {
         if ( $result === false ) {
             return new WP_Error( 'db_error', 'Could not save booking.' );
         }
+
+        // Audit log
+        MBS_Audit_Log::log( $ref, 'created', 'Booking created by ' . sanitize_text_field( $data['name'] ) . ' for ' . sanitize_text_field( $data['space'] ) . ' on ' . sanitize_text_field( $data['booking_date'] ), 0 );
+
         return array_merge( $insert, array( 'id' => $wpdb->insert_id ) );
     }
 
@@ -226,6 +230,11 @@ class MBS_Bookings {
             array( '%s' ), array( '%s' )
         );
 
+        if ( $result !== false ) {
+            // Audit log
+            MBS_Audit_Log::log( $ref, $status === 'pending' ? 'reopened' : $status, 'Status changed to ' . $status );
+        }
+
         if ( $result !== false && $status === 'confirmed' ) {
             $booking = self::get( $ref );
             if ( $booking ) {
@@ -245,6 +254,7 @@ class MBS_Bookings {
     public static function delete( $ref ) {
         global $wpdb;
         $table = $wpdb->prefix . MBS_TABLE;
+        MBS_Audit_Log::log( $ref, 'deleted', 'Booking permanently deleted' );
         return $wpdb->delete( $table, array( 'ref' => $ref ), array( '%s' ) );
     }
 
@@ -453,6 +463,10 @@ class MBS_Bookings {
             array( '%s' ), array( '%s' )
         );
 
+        if ( $result !== false ) {
+            MBS_Audit_Log::log( $series_id, 'series_' . $status, 'Entire series status changed to ' . $status );
+        }
+
         // Trigger HA notifications for each booking in the series
         if ( $result !== false && in_array( $status, array( 'confirmed', 'cancelled' ) ) ) {
             $bookings = self::get_series( $series_id );
@@ -477,6 +491,7 @@ class MBS_Bookings {
     public static function update_admin_notes( $ref, $notes ) {
         global $wpdb;
         $table = $wpdb->prefix . MBS_TABLE;
+        MBS_Audit_Log::log( $ref, 'notes_updated', 'Admin notes updated' );
         return $wpdb->update(
             $table,
             array( 'admin_notes' => sanitize_textarea_field( $notes ) ),

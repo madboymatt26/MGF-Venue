@@ -1,7 +1,7 @@
 {
   "domain": "mathlin_booking",
   "name": "Mathlin Booking System",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "documentation": "https://needhamscouts.uk",
   "issue_tracker": "https://needhamscouts.uk",
   "dependencies": [],

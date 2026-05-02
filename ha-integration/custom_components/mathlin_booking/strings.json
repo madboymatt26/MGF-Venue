@@ -29,11 +29,13 @@
         "description": "Configure how many minutes before and after each booking the automation events fire.",
         "data": {
           "pre_event_minutes":  "Minutes before booking start",
-          "post_event_minutes": "Minutes after booking end"
+          "post_event_minutes": "Minutes after booking end",
+          "gap_minutes":        "Gap threshold (minutes)"
         },
         "data_description": {
           "pre_event_minutes":  "Fire the 'booking_start' event this many minutes before the booking begins. Use this to pre-heat the hall, turn on lights, etc. (0 = fire exactly at start time)",
-          "post_event_minutes": "Fire the 'booking_end' event this many minutes after the booking finishes. Use this to turn off heating, lights, etc. (0 = fire exactly at end time)"
+          "post_event_minutes": "Fire the 'booking_end' event this many minutes after the booking finishes. Use this to turn off heating, lights, etc. (0 = fire exactly at end time)",
+          "gap_minutes":        "If another booking on the same space starts within this many minutes, skip the shutdown event to keep heating/lights on between bookings. (0 = always fire end events)"
         }
       }
     }

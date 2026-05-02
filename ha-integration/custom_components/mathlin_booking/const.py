@@ -1,7 +1,7 @@
 """Constants for the Mathlin Booking integration."""
 
 DOMAIN = "mathlin_booking"
-PLATFORMS = ["sensor"]
+PLATFORMS = ["sensor", "binary_sensor"]
 
 # Config entry keys
 CONF_WEBSITE_URL = "website_url"
@@ -9,10 +9,12 @@ CONF_WEBSITE_URL = "website_url"
 # Options keys (configurable after setup)
 CONF_PRE_EVENT_MINUTES  = "pre_event_minutes"   # fire start event N mins before booking
 CONF_POST_EVENT_MINUTES = "post_event_minutes"  # fire end event N mins after booking ends
+CONF_GAP_MINUTES        = "gap_minutes"         # skip shutdown if next booking within N mins
 
 # Defaults
 DEFAULT_PRE_EVENT_MINUTES  = 60   # 1 hour before
 DEFAULT_POST_EVENT_MINUTES = 15   # 15 minutes after end
+DEFAULT_GAP_MINUTES        = 30   # 30 min gap = skip shutdown
 
 # REST API path (appended to the website URL)
 API_PATH_TODAY    = "/wp-json/mathlin/v1/bookings/today"

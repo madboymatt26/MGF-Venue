@@ -107,4 +107,28 @@
             </div>
         </div>
     </div>
+
+    <!-- Audit Log -->
+    <?php $audit_entries = MBS_Audit_Log::get_for_booking( $booking->ref ); ?>
+    <?php if ( ! empty( $audit_entries ) ) : ?>
+    <div class="nms-card" style="margin-top:0;">
+        <div class="nms-card-header"><h2>📋 Audit Log</h2></div>
+        <div style="padding:1rem 1.5rem;max-height:300px;overflow-y:auto;">
+            <?php foreach ( $audit_entries as $entry ) : ?>
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:6px 0;border-bottom:1px solid var(--border);font-size:0.8rem;">
+                <div>
+                    <strong><?php echo MBS_Audit_Log::action_label( $entry->action ); ?></strong>
+                    <?php if ( $entry->details ) : ?>
+                        <br><span style="color:var(--text-muted);"><?php echo esc_html( $entry->details ); ?></span>
+                    <?php endif; ?>
+                </div>
+                <div style="text-align:right;white-space:nowrap;color:var(--text-muted);font-size:0.75rem;">
+                    <?php echo esc_html( $entry->user_name ); ?><br>
+                    <?php echo esc_html( date( 'j M Y H:i', strtotime( $entry->created_at ) ) ); ?>
+                </div>
+            </div>
+            <?php endforeach; ?>
+        </div>
+    </div>
+    <?php endif; ?>
 </div>

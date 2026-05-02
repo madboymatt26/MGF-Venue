@@ -62,6 +62,24 @@ class MBS_Database {
         // Run migrations for existing installs
         self::maybe_run_migrations();
 
+        // Audit log table
+        $audit_table = $wpdb->prefix . 'mathlin_audit_log';
+        $sql3 = "CREATE TABLE IF NOT EXISTS {$audit_table} (
+            id          BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            ref         VARCHAR(20)  NOT NULL,
+            action      VARCHAR(30)  NOT NULL,
+            details     TEXT         DEFAULT '',
+            user_id     BIGINT(20)   NOT NULL DEFAULT 0,
+            user_name   VARCHAR(100) DEFAULT '',
+            ip_address  VARCHAR(45)  DEFAULT '',
+            created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            KEY idx_ref    (ref),
+            KEY idx_action (action),
+            KEY idx_date   (created_at)
+        ) {$charset};";
+        dbDelta( $sql3 );
+
         update_option( 'mbs_db_version', MBS_VERSION );
     }
 
