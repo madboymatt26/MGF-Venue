@@ -119,6 +119,23 @@
                     <label for="nms-notes">Additional Notes</label>
                     <textarea id="nms-notes" name="notes" rows="3" placeholder="Any special requirements, setup needs, etc."></textarea>
                 </div>
+
+                <!-- Recurring booking option -->
+                <div class="nms-form-row">
+                    <div class="nms-form-group">
+                        <label for="nms-recurring">Repeat Weekly?</label>
+                        <select id="nms-recurring" name="recurring">
+                            <option value="0">No — single booking</option>
+                            <option value="1">Yes — repeat weekly</option>
+                        </select>
+                    </div>
+                    <div class="nms-form-group" id="nms-repeat-until-group" style="display:none">
+                        <label for="nms-repeat-until">Repeat Until <span class="nms-req">*</span></label>
+                        <input type="date" id="nms-repeat-until" name="repeat_until"
+                               min="<?php echo esc_attr( date( 'Y-m-d', strtotime( '+7 days' ) ) ); ?>">
+                        <p class="nms-field-hint">Booking will repeat every week until this date (max 52 weeks). Dates with conflicts will be skipped.</p>
+                    </div>
+                </div>
             </div>
 
             <!-- Cost preview -->

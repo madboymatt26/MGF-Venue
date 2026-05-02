@@ -31,6 +31,8 @@ class MBS_Database {
             amount          DECIMAL(8,2) NOT NULL DEFAULT 0.00,
             invoice_number  VARCHAR(30)  DEFAULT '',
             ha_notified     TINYINT(1)   NOT NULL DEFAULT 0,
+            series_id       VARCHAR(20)  DEFAULT NULL,
+            admin_notes     TEXT         DEFAULT '',
             created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             PRIMARY KEY (id),
@@ -88,6 +90,19 @@ class MBS_Database {
         $col = $wpdb->get_results( "SHOW COLUMNS FROM {$table} LIKE 'all_day'" );
         if ( empty( $col ) ) {
             $wpdb->query( "ALTER TABLE {$table} ADD COLUMN all_day TINYINT(1) NOT NULL DEFAULT 0 AFTER booking_date_end" );
+        }
+
+        // Add recurring columns if missing
+        $col = $wpdb->get_results( "SHOW COLUMNS FROM {$table} LIKE 'series_id'" );
+        if ( empty( $col ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN series_id VARCHAR(20) DEFAULT NULL AFTER ha_notified" );
+            $wpdb->query( "ALTER TABLE {$table} ADD KEY idx_series (series_id)" );
+        }
+
+        // Add admin_notes column if missing
+        $col = $wpdb->get_results( "SHOW COLUMNS FROM {$table} LIKE 'admin_notes'" );
+        if ( empty( $col ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN admin_notes TEXT DEFAULT '' AFTER notes" );
         }
     }
 

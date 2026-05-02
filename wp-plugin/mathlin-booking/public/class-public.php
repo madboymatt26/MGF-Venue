@@ -126,6 +126,56 @@ class MBS_Public {
             $check_date += 86400;
         }
 
+        // Check for booking conflicts
+        $check_end = $date_end ?: $date;
+        $check_date = strtotime( $date );
+        $check_end_ts = strtotime( $check_end );
+        while ( $check_date <= $check_end_ts ) {
+            $check_str = date( 'Y-m-d', $check_date );
+            $conflicts = MBS_Bookings::check_conflicts(
+                $space,
+                $check_str,
+                $all_day ? null : sanitize_text_field( $_POST['start_time'] ?? '' ),
+                $all_day ? null : sanitize_text_field( $_POST['end_time'] ?? '' ),
+                $all_day
+            );
+            if ( ! empty( $conflicts ) ) {
+                wp_send_json_error( array( 'message' => MBS_Bookings::format_conflict_message( $conflicts ) ) );
+            }
+            $check_date += 86400;
+        }
+
+        // Handle recurring bookings
+        $repeat_until = sanitize_text_field( $_POST['repeat_until'] ?? '' );
+        if ( $repeat_until ) {
+            $result = MBS_Bookings::create_recurring( $_POST, $repeat_until );
+
+            if ( is_wp_error( $result ) ) {
+                wp_send_json_error( array( 'message' => $result->get_error_message() ) );
+            }
+
+            // Send emails for the first booking in the series
+            $first_booking_data = $_POST;
+            $first_booking_data['ref'] = $result['refs'][0];
+            MBS_Email::notify_admin( array_merge( $first_booking_data, array(
+                'ref' => $result['refs'][0],
+                'amount' => MBS_Bookings::calculate_cost( $space, $_POST['start_time'] ?? '', $_POST['end_time'] ?? '', ! empty( $_POST['kitchen'] ), $all_day ),
+            ) ) );
+
+            $msg = 'Recurring booking submitted! ' . $result['created'] . ' booking(s) created (reference series: ' . $result['series_id'] . ').';
+            if ( ! empty( $result['skipped'] ) ) {
+                $msg .= ' ' . count( $result['skipped'] ) . ' date(s) were skipped due to conflicts or blocked dates.';
+            }
+
+            wp_send_json_success( array(
+                'ref'       => $result['series_id'],
+                'message'   => $msg,
+                'recurring' => true,
+                'created'   => $result['created'],
+                'skipped'   => count( $result['skipped'] ),
+            ) );
+        }
+
         $result = MBS_Bookings::create( $_POST );
 
         if ( is_wp_error( $result ) ) {

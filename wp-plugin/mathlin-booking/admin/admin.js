@@ -271,6 +271,55 @@ jQuery(function ($) {
         });
     });
 
+    // ── Series status update ───────────────────────────────────────────────────
+    $(document).on('click', '.nms-btn-series-status', function () {
+        var $btn     = $(this);
+        var seriesId = $btn.data('series');
+        var status   = $btn.data('status');
+        var label    = status.charAt(0).toUpperCase() + status.slice(1);
+
+        if (!confirm(label + ' ALL bookings in series ' + seriesId + '?')) return;
+        $btn.prop('disabled', true);
+
+        $.post(MBS_Admin.ajax_url, {
+            action:    'mbs_update_series_status',
+            nonce:     MBS_Admin.nonce,
+            series_id: seriesId,
+            status:    status
+        }, function (res) {
+            $btn.prop('disabled', false);
+            if (res.success) {
+                alert(res.data.count + ' booking(s) ' + status + '.');
+                window.location.reload();
+            } else {
+                alert('Error: ' + (res.data || 'Unknown error'));
+            }
+        });
+    });
+
+    // ── Save admin notes ───────────────────────────────────────────────────────
+    $(document).on('click', '#nms-save-notes', function () {
+        var $btn = $(this);
+        var $msg = $('#nms-notes-msg');
+        var ref  = $btn.data('ref');
+        $btn.prop('disabled', true).text('Saving…');
+
+        $.post(MBS_Admin.ajax_url, {
+            action:      'mbs_save_admin_notes',
+            nonce:       MBS_Admin.nonce,
+            ref:         ref,
+            admin_notes: $('#nms-admin-notes').val()
+        }, function (res) {
+            $btn.prop('disabled', false).text('Save Notes');
+            if (res.success) {
+                $msg.text('✓ Saved').css('color', '#46b450');
+            } else {
+                $msg.text('✗ Error').css('color', '#dc3232');
+            }
+            setTimeout(function () { $msg.text(''); }, 3000);
+        });
+    });
+
     // ── Helper: update status via AJAX ─────────────────────────────────────────
     function nmsUpdateStatus(ref, status, $btn, redirect, reason) {
         $btn.prop('disabled', true);

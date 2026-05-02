@@ -248,6 +248,243 @@ class MBS_Bookings {
         return $wpdb->delete( $table, array( 'ref' => $ref ), array( '%s' ) );
     }
 
+    // ── Conflict Detection ─────────────────────────────────────────────────────
+
+    /**
+     * Check if a proposed booking conflicts with existing bookings.
+     *
+     * @param string $space      Space name
+     * @param string $date       Booking date (Y-m-d)
+     * @param string $start_time Start time (H:i or H:i:s), null for all-day
+     * @param string $end_time   End time, null for all-day
+     * @param bool   $all_day    Whether this is an all-day booking
+     * @param string $exclude_ref  Ref to exclude (for editing existing bookings)
+     * @return array  Array of conflicting booking objects (empty = no conflicts)
+     */
+    public static function check_conflicts( $space, $date, $start_time = null, $end_time = null, $all_day = false, $exclude_ref = '' ) {
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_TABLE;
+
+        // Also check multi-day bookings that span this date
+        $where = "space = %s AND status NOT IN ('cancelled', 'archived')
+                  AND (
+                      booking_date = %s
+                      OR (booking_date_end IS NOT NULL AND booking_date <= %s AND booking_date_end >= %s)
+                  )";
+        $values = array( $space, $date, $date, $date );
+
+        if ( $exclude_ref ) {
+            $where .= " AND ref != %s";
+            $values[] = $exclude_ref;
+        }
+
+        $existing = $wpdb->get_results( $wpdb->prepare(
+            "SELECT * FROM {$table} WHERE {$where} ORDER BY start_time ASC",
+            $values
+        ) );
+
+        if ( empty( $existing ) ) return array();
+
+        // If the new booking is all-day, it conflicts with everything on that date
+        if ( $all_day ) return $existing;
+
+        $conflicts = array();
+        foreach ( $existing as $b ) {
+            // Existing all-day booking conflicts with any timed booking
+            if ( $b->all_day ) {
+                $conflicts[] = $b;
+                continue;
+            }
+
+            // Check time overlap: new_start < existing_end AND new_end > existing_start
+            if ( $start_time && $end_time && $b->start_time && $b->end_time ) {
+                $new_start = strtotime( $start_time );
+                $new_end   = strtotime( $end_time );
+                $ex_start  = strtotime( $b->start_time );
+                $ex_end    = strtotime( $b->end_time );
+
+                if ( $new_start < $ex_end && $new_end > $ex_start ) {
+                    $conflicts[] = $b;
+                }
+            }
+        }
+
+        return $conflicts;
+    }
+
+    /**
+     * Format conflict information into a human-readable message.
+     */
+    public static function format_conflict_message( $conflicts ) {
+        if ( empty( $conflicts ) ) return '';
+
+        $msgs = array();
+        foreach ( $conflicts as $b ) {
+            $time = $b->all_day ? 'all day' : ( $b->start_time . '–' . $b->end_time );
+            $msgs[] = $b->space . ' on ' . date( 'j M', strtotime( $b->booking_date ) ) . ' (' . $time . ') – ' . $b->name;
+        }
+
+        return 'This booking conflicts with: ' . implode( '; ', $msgs ) . '. Please choose a different time or space.';
+    }
+
+    // ── Recurring Bookings ─────────────────────────────────────────────────────
+
+    /**
+     * Generate a unique series ID for recurring bookings.
+     */
+    public static function generate_series_id() {
+        return 'SER-' . strtoupper( substr( base_convert( uniqid(), 16, 36 ), -6 ) );
+    }
+
+    /**
+     * Create a recurring booking series (weekly repeat).
+     *
+     * @param array  $data       Base booking data
+     * @param string $repeat_until  End date for recurrence (Y-m-d)
+     * @return array  Array of created booking refs, or WP_Error
+     */
+    public static function create_recurring( $data, $repeat_until ) {
+        $series_id  = self::generate_series_id();
+        $start_date = sanitize_text_field( $data['booking_date'] );
+        $end_date   = sanitize_text_field( $repeat_until );
+        $refs       = array();
+        $conflicts  = array();
+
+        $current = strtotime( $start_date );
+        $end     = strtotime( $end_date );
+
+        if ( $current > $end ) {
+            return new WP_Error( 'invalid_range', 'Repeat-until date must be after the booking date.' );
+        }
+
+        // Limit to 52 weeks max to prevent abuse
+        $max_occurrences = 52;
+        $count = 0;
+
+        while ( $current <= $end && $count < $max_occurrences ) {
+            $date_str = date( 'Y-m-d', $current );
+
+            // Check for conflicts on each date
+            $all_day = ! empty( $data['all_day'] );
+            $date_conflicts = self::check_conflicts(
+                sanitize_text_field( $data['space'] ),
+                $date_str,
+                $all_day ? null : sanitize_text_field( $data['start_time'] ?? '' ),
+                $all_day ? null : sanitize_text_field( $data['end_time'] ?? '' ),
+                $all_day
+            );
+
+            // Check blocked dates
+            $blocked = MBS_Blocked_Dates::is_blocked( $date_str, sanitize_text_field( $data['space'] ) );
+
+            if ( ! empty( $date_conflicts ) || $blocked ) {
+                $conflicts[] = $date_str;
+                $current += 7 * 86400; // Skip this week
+                $count++;
+                continue;
+            }
+
+            // Create the individual booking
+            $booking_data = $data;
+            $booking_data['booking_date'] = $date_str;
+            $booking_data['booking_date_end'] = $date_str;
+
+            $result = self::create( $booking_data );
+
+            if ( is_wp_error( $result ) ) {
+                $current += 7 * 86400;
+                $count++;
+                continue;
+            }
+
+            // Link to series
+            global $wpdb;
+            $table = $wpdb->prefix . MBS_TABLE;
+            $wpdb->update(
+                $table,
+                array( 'series_id' => $series_id ),
+                array( 'ref' => $result['ref'] ),
+                array( '%s' ), array( '%s' )
+            );
+
+            $refs[] = $result['ref'];
+            $current += 7 * 86400; // Next week
+            $count++;
+        }
+
+        if ( empty( $refs ) ) {
+            return new WP_Error( 'no_bookings', 'Could not create any bookings. All dates had conflicts or were blocked.' );
+        }
+
+        return array(
+            'series_id'  => $series_id,
+            'refs'       => $refs,
+            'created'    => count( $refs ),
+            'skipped'    => $conflicts,
+            'total_weeks' => $count,
+        );
+    }
+
+    /**
+     * Get all bookings in a series.
+     */
+    public static function get_series( $series_id ) {
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_TABLE;
+        return $wpdb->get_results( $wpdb->prepare(
+            "SELECT * FROM {$table} WHERE series_id = %s ORDER BY booking_date ASC",
+            $series_id
+        ) );
+    }
+
+    /**
+     * Update status for all bookings in a series.
+     */
+    public static function update_series_status( $series_id, $status ) {
+        global $wpdb;
+        $table   = $wpdb->prefix . MBS_TABLE;
+        $allowed = array( 'pending', 'confirmed', 'cancelled', 'archived', 'paid' );
+        if ( ! in_array( $status, $allowed ) ) return false;
+
+        $result = $wpdb->update(
+            $table,
+            array( 'status' => $status ),
+            array( 'series_id' => $series_id ),
+            array( '%s' ), array( '%s' )
+        );
+
+        // Trigger HA notifications for each booking in the series
+        if ( $result !== false && in_array( $status, array( 'confirmed', 'cancelled' ) ) ) {
+            $bookings = self::get_series( $series_id );
+            foreach ( $bookings as $booking ) {
+                if ( $status === 'confirmed' ) {
+                    MBS_HomeAssistant::notify( $booking );
+                    $wpdb->update( $table, array( 'ha_notified' => 1 ), array( 'ref' => $booking->ref ) );
+                } elseif ( $status === 'cancelled' ) {
+                    MBS_HomeAssistant::notify_cancelled( $booking );
+                }
+            }
+        }
+
+        return $result;
+    }
+
+    // ── Admin Notes ────────────────────────────────────────────────────────────
+
+    /**
+     * Update admin notes for a booking.
+     */
+    public static function update_admin_notes( $ref, $notes ) {
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_TABLE;
+        return $wpdb->update(
+            $table,
+            array( 'admin_notes' => sanitize_textarea_field( $notes ) ),
+            array( 'ref' => $ref ),
+            array( '%s' ), array( '%s' )
+        );
+    }
+
     /**
      * Archive all past bookings (booking_date before today) that are confirmed or cancelled.
      * Returns the number of bookings archived.

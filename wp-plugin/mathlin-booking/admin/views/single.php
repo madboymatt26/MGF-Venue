@@ -32,6 +32,23 @@
                 <div class="nms-detail-item nms-detail-full"><label>Billing Address</label><span><?php echo nl2br( esc_html( $booking->address ) ); ?></span></div>
                 <div class="nms-detail-item"><label>Submitted</label><span><?php echo esc_html( date( 'j F Y H:i', strtotime( $booking->created_at ) ) ); ?></span></div>
                 <div class="nms-detail-item"><label>HA Notified</label><span><?php echo $booking->ha_notified ? '✅ Yes' : '—'; ?></span></div>
+                <?php if ( ! empty( $booking->series_id ) ) : ?>
+                <div class="nms-detail-item"><label>Series</label><span>
+                    <?php echo esc_html( $booking->series_id ); ?>
+                    <?php
+                    $series = MBS_Bookings::get_series( $booking->series_id );
+                    echo ' (' . count( $series ) . ' bookings in series)';
+                    ?>
+                </span></div>
+                <?php endif; ?>
+            </div>
+
+            <!-- Admin Notes -->
+            <div style="padding:0 1.5rem 1.5rem;">
+                <label style="display:block;font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:4px;">Admin Notes (private)</label>
+                <textarea id="nms-admin-notes" rows="3" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:0.875rem;" placeholder="Internal notes — not visible to the booker"><?php echo esc_textarea( $booking->admin_notes ?? '' ); ?></textarea>
+                <button class="button button-small" id="nms-save-notes" data-ref="<?php echo esc_attr( $booking->ref ); ?>" style="margin-top:6px;">Save Notes</button>
+                <span id="nms-notes-msg" class="nms-settings-msg" style="margin-left:8px;"></span>
             </div>
         </div>
 
@@ -75,6 +92,18 @@
                 <button class="button nms-btn-delete" data-ref="<?php echo esc_attr( $booking->ref ); ?>">
                     🗑 Delete Booking
                 </button>
+                <?php if ( ! empty( $booking->series_id ) ) : ?>
+                <hr style="margin:0.5rem 0;border:none;border-top:1px solid var(--border);">
+                <p style="font-size:0.8rem;color:var(--text-muted);margin:0 0 0.5rem;">Series Actions (affects all <?php echo count( MBS_Bookings::get_series( $booking->series_id ) ); ?> bookings):</p>
+                <?php if ( $booking->status === 'pending' ) : ?>
+                    <button class="button button-primary nms-btn-series-status" data-series="<?php echo esc_attr( $booking->series_id ); ?>" data-status="confirmed">
+                        ✓ Confirm Entire Series
+                    </button>
+                <?php endif; ?>
+                <button class="button nms-btn-series-status" data-series="<?php echo esc_attr( $booking->series_id ); ?>" data-status="cancelled">
+                    ✗ Cancel Entire Series
+                </button>
+                <?php endif; ?>
             </div>
         </div>
     </div>

@@ -239,6 +239,15 @@ jQuery(function ($) {
 
     $('#nms-space, #nms-start, #nms-end, #nms-kitchen, #nms-allday, #nms-date, #nms-date-end').on('change', updateCost);
 
+    // ── Recurring booking toggle ───────────────────────────────────────────────
+    $('#nms-recurring').on('change', function () {
+        var isRecurring = $(this).val() === '1';
+        $('#nms-repeat-until-group').toggle(isRecurring);
+        if (!isRecurring) {
+            $('#nms-repeat-until').val('');
+        }
+    });
+
     // When switching to full day, also hide the error message if it was about time fields
     $('#nms-allday').on('change', function () {
         if ($(this).val() === '1') {

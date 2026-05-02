@@ -16,6 +16,8 @@ class MBS_Admin {
         add_action( 'wp_ajax_mbs_add_blocked',    array( $this, 'ajax_add_blocked' ) );
         add_action( 'wp_ajax_mbs_delete_blocked', array( $this, 'ajax_delete_blocked' ) );
         add_action( 'wp_ajax_mbs_clear_expired_blocks', array( $this, 'ajax_clear_expired_blocks' ) );
+        add_action( 'wp_ajax_mbs_update_series_status', array( $this, 'ajax_update_series_status' ) );
+        add_action( 'wp_ajax_mbs_save_admin_notes', array( $this, 'ajax_save_admin_notes' ) );
     }
 
     // ── Menu ───────────────────────────────────────────────────────────────────
@@ -361,5 +363,40 @@ class MBS_Admin {
 
         $count = MBS_Blocked_Dates::clear_expired();
         wp_send_json_success( array( 'cleared' => $count ) );
+    }
+
+    public function ajax_update_series_status() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
+
+        $series_id = sanitize_text_field( $_POST['series_id'] ?? '' );
+        $status    = sanitize_text_field( $_POST['status'] ?? '' );
+
+        if ( ! $series_id ) wp_send_json_error( 'No series ID provided.' );
+
+        $result = MBS_Bookings::update_series_status( $series_id, $status );
+
+        if ( $status === 'confirmed' ) {
+            $bookings = MBS_Bookings::get_series( $series_id );
+            foreach ( $bookings as $booking ) {
+                if ( $booking->status === 'confirmed' ) {
+                    MBS_Email::notify_confirmed( $booking );
+                }
+            }
+        }
+
+        $count = count( MBS_Bookings::get_series( $series_id ) );
+        wp_send_json_success( array( 'series_id' => $series_id, 'status' => $status, 'count' => $count ) );
+    }
+
+    public function ajax_save_admin_notes() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
+
+        $ref   = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
+        $notes = sanitize_textarea_field( $_POST['admin_notes'] ?? '' );
+
+        MBS_Bookings::update_admin_notes( $ref, $notes );
+        wp_send_json_success( array( 'ref' => $ref ) );
     }
 }
