@@ -347,6 +347,54 @@ jQuery(function ($) {
         });
     });
 
+    // ── Save email settings ────────────────────────────────────────────────────
+    $('#mbs-save-email-settings').on('click', function () {
+        var $btn = $(this);
+        var $msg = $('#mbs-email-save-msg');
+        $btn.prop('disabled', true).text('Saving…');
+
+        // Collect templates
+        var templates = {};
+        $('.mbs-tpl-subject').each(function () {
+            var type = $(this).data('type');
+            templates[type] = {
+                subject: $(this).val(),
+                body:    $('.mbs-tpl-body[data-type="' + type + '"]').val()
+            };
+        });
+
+        $.post(MBS_Admin.ajax_url, {
+            action:              'mbs_save_email_settings',
+            nonce:               MBS_Admin.nonce,
+            org_name:            $('#org_name').val(),
+            org_address:         $('#org_address').val(),
+            org_phone:           $('#org_phone').val(),
+            org_charity_number:  $('#org_charity_number').val(),
+            max_chase_emails:    $('#max_chase_emails').val(),
+            chase_interval_days: $('#chase_interval_days').val(),
+            cron_time_reminders: $('#cron_time_reminders').val(),
+            cron_time_chase:     $('#cron_time_chase').val(),
+            cron_time_archive:   $('#cron_time_archive').val(),
+            templates:           templates
+        }, function (res) {
+            $btn.prop('disabled', false).text('💾 Save Email Settings');
+            if (res.success) {
+                $msg.text('✓ Email settings saved').css('color', '#46b450').show();
+            } else {
+                $msg.text('✗ Error saving').css('color', '#dc3232').show();
+            }
+            setTimeout(function () { $msg.text('').hide(); }, 4000);
+        });
+    });
+
+    // ── Reset email template to default ────────────────────────────────────────
+    $(document).on('click', '.mbs-tpl-reset', function () {
+        var type = $(this).data('type');
+        if (!confirm('Reset this email template to its default?')) return;
+        $('.mbs-tpl-subject[data-type="' + type + '"]').val($(this).data('default-subject'));
+        $('.mbs-tpl-body[data-type="' + type + '"]').val($(this).data('default-body'));
+    });
+
     // ── Helper: update status via AJAX ─────────────────────────────────────────
     function nmsUpdateStatus(ref, status, $btn, redirect, reason) {
         $btn.prop('disabled', true);

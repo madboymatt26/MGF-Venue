@@ -45,32 +45,27 @@ class MBS_Email {
     }
 
     public static function notify_booker( $booking ) {
-        $admin_email = self::admin_email();
-        $subject = 'Booking Request Received – ' . $booking['ref'];
-        $body    = self::header();
-        $body   .= '<h2 style="color:#7413DC;">Thank you for your booking request!</h2>';
-        $body   .= '<p>Hi ' . esc_html( $booking['name'] ) . ',</p>';
-        $body   .= '<p>We\'ve received your booking request for <strong>' . esc_html( $booking['space'] ) . '</strong> on <strong>' . date( 'l j F Y', strtotime( $booking['booking_date'] ) ) . '</strong>.</p>';
-        $body   .= '<p>Your booking reference is: <strong>' . esc_html( $booking['ref'] ) . '</strong></p>';
-        $body   .= '<p>We\'ll be in touch shortly to confirm your booking and send an invoice.</p>';
-        $body   .= self::booking_table( $booking );
-        $body   .= '<p>If you have any questions, please contact us at <a href="mailto:' . esc_attr( $admin_email ) . '">' . esc_html( $admin_email ) . '</a> or call 01449 797577.</p>';
-        $body   .= self::footer();
+        $tpl     = MBS_Email_Templates::get_template( 'booking_received' );
+        $subject = MBS_Email_Templates::replace_placeholders( $tpl['subject'], $booking );
+        $body_text = MBS_Email_Templates::replace_placeholders( $tpl['body'], $booking );
+
+        $body  = self::header();
+        $body .= '<h2 style="color:#7413DC;">Thank you for your booking request!</h2>';
+        $body .= nl2br( esc_html( $body_text ) );
+        $body .= self::booking_table( $booking );
+        $body .= self::footer();
         self::send( $booking['email'], $subject, $body );
     }
 
     public static function notify_confirmed( $booking ) {
-        $admin_email = self::admin_email();
-        $subject = 'Booking Confirmed – ' . $booking->ref;
-        $body    = self::header();
-        $body   .= '<h2 style="color:#7413DC;">Your Booking is Confirmed!</h2>';
-        $body   .= '<p>Hi ' . esc_html( $booking->name ) . ',</p>';
-        $body   .= '<p>Great news — your booking has been confirmed. Please find the details and invoice attached.</p>';
-        $body   .= self::booking_table_obj( $booking );
-        $body   .= '<p><strong>Invoice Number:</strong> ' . esc_html( $booking->invoice_number ) . '</p>';
-        $bank = MBS_Bookings::get_bank_details();
-        $body   .= '<p>Payment is due within ' . $bank['payment_days'] . ' days. Please transfer to:<br>Sort Code: <strong>' . esc_html( $bank['sort_code'] ) . '</strong> | Account: <strong>' . esc_html( $bank['account_number'] ) . '</strong> | Ref: <strong>' . esc_html( $booking->invoice_number ) . '</strong></p>';
-        $body   .= '<p>If you have any questions, please contact us at <a href="mailto:' . esc_attr( $admin_email ) . '">' . esc_html( $admin_email ) . '</a>.</p>';
+        $tpl       = MBS_Email_Templates::get_template( 'booking_confirmed' );
+        $subject   = MBS_Email_Templates::replace_placeholders( $tpl['subject'], $booking );
+        $body_text = MBS_Email_Templates::replace_placeholders( $tpl['body'], $booking );
+
+        $body  = self::header();
+        $body .= '<h2 style="color:#7413DC;">Your Booking is Confirmed!</h2>';
+        $body .= nl2br( esc_html( $body_text ) );
+        $body .= self::booking_table_obj( $booking );
 
         // Add Pay Now button if WooCommerce is available
         if ( MBS_Woo_Payment::is_available() ) {
@@ -83,12 +78,10 @@ class MBS_Email {
             }
         }
 
-        $body   .= self::ical_button( $booking );
-        $body   .= self::footer();
+        $body .= self::ical_button( $booking );
+        $body .= self::footer();
 
-        // Generate invoice HTML file as attachment
         $attachments = self::generate_invoice_attachment( $booking );
-
         self::send( $booking->email, $subject, $body, $attachments );
     }
 
@@ -96,34 +89,30 @@ class MBS_Email {
      * Send a cancellation/denial notification to the booker.
      */
     public static function notify_cancelled( $booking, $reason = '' ) {
-        $admin_email = self::admin_email();
-        $subject = 'Booking Cancelled – ' . $booking->ref;
-        $body    = self::header();
-        $body   .= '<h2 style="color:#dc3232;">Booking Cancelled</h2>';
-        $body   .= '<p>Hi ' . esc_html( $booking->name ) . ',</p>';
-        $body   .= '<p>We\'re sorry, but your booking for <strong>' . esc_html( $booking->space ) . '</strong> on <strong>' . date( 'l j F Y', strtotime( $booking->booking_date ) ) . '</strong> has been cancelled.</p>';
-        if ( ! empty( $reason ) ) {
-            $body .= '<p><strong>Reason:</strong> ' . esc_html( $reason ) . '</p>';
-        }
-        $body   .= '<p>We apologise for any inconvenience. If you\'d like to rebook for a different date or have any questions, please don\'t hesitate to contact us.</p>';
-        $body   .= self::booking_table_obj( $booking );
-        $body   .= '<p>Contact us at <a href="mailto:' . esc_attr( $admin_email ) . '">' . esc_html( $admin_email ) . '</a> or call 01449 797577.</p>';
-        $body   .= self::footer();
+        $tpl       = MBS_Email_Templates::get_template( 'booking_cancelled' );
+        $extra     = array( '{reason}' => $reason ? 'Reason: ' . $reason : '' );
+        $subject   = MBS_Email_Templates::replace_placeholders( $tpl['subject'], $booking, $extra );
+        $body_text = MBS_Email_Templates::replace_placeholders( $tpl['body'], $booking, $extra );
+
+        $body  = self::header();
+        $body .= '<h2 style="color:#dc3232;">Booking Cancelled</h2>';
+        $body .= nl2br( esc_html( $body_text ) );
+        $body .= self::booking_table_obj( $booking );
+        $body .= self::footer();
         self::send( $booking->email, $subject, $body );
     }
 
     public static function notify_paid( $booking ) {
-        $admin_email = self::admin_email();
-        $subject = 'Payment Received – ' . $booking->ref;
-        $body    = self::header();
-        $body   .= '<h2 style="color:#46b450;">Payment Received – Thank You!</h2>';
-        $body   .= '<p>Hi ' . esc_html( $booking->name ) . ',</p>';
-        $body   .= '<p>We\'ve received your payment for the following booking. Thank you!</p>';
-        $body   .= self::booking_table_obj( $booking );
-        $body   .= '<p>Your booking is fully confirmed and paid. We look forward to seeing you!</p>';
-        $body   .= self::ical_button( $booking );
-        $body   .= '<p>If you have any questions, please contact us at <a href="mailto:' . esc_attr( $admin_email ) . '">' . esc_html( $admin_email ) . '</a>.</p>';
-        $body   .= self::footer();
+        $tpl       = MBS_Email_Templates::get_template( 'payment_received' );
+        $subject   = MBS_Email_Templates::replace_placeholders( $tpl['subject'], $booking );
+        $body_text = MBS_Email_Templates::replace_placeholders( $tpl['body'], $booking );
+
+        $body  = self::header();
+        $body .= '<h2 style="color:#46b450;">Payment Received – Thank You!</h2>';
+        $body .= nl2br( esc_html( $body_text ) );
+        $body .= self::booking_table_obj( $booking );
+        $body .= self::ical_button( $booking );
+        $body .= self::footer();
         self::send( $booking->email, $subject, $body );
     }
 
@@ -131,18 +120,16 @@ class MBS_Email {
      * Send a reminder email before a booking.
      */
     public static function notify_reminder( $booking ) {
-        $admin_email = self::admin_email();
-        $subject = 'Reminder: Your booking is coming up – ' . $booking->ref;
-        $body    = self::header();
-        $body   .= '<h2 style="color:#7413DC;">Booking Reminder</h2>';
-        $body   .= '<p>Hi ' . esc_html( $booking->name ) . ',</p>';
-        $body   .= '<p>Just a friendly reminder that your booking is coming up soon:</p>';
-        $body   .= self::booking_table_obj( $booking );
-        $body   .= self::ical_button( $booking );
-        $body   .= '<p><strong>Location:</strong> Needham Market Scout Hall, Crown St, Needham Market, IP6 8RY</p>';
-        $body   .= '<p>If you need to make any changes or cancel, please contact us at <a href="mailto:' . esc_attr( $admin_email ) . '">' . esc_html( $admin_email ) . '</a> or call 01449 797577.</p>';
-        $body   .= '<p>We look forward to seeing you!</p>';
-        $body   .= self::footer();
+        $tpl       = MBS_Email_Templates::get_template( 'booking_reminder' );
+        $subject   = MBS_Email_Templates::replace_placeholders( $tpl['subject'], $booking );
+        $body_text = MBS_Email_Templates::replace_placeholders( $tpl['body'], $booking );
+
+        $body  = self::header();
+        $body .= '<h2 style="color:#7413DC;">Booking Reminder</h2>';
+        $body .= nl2br( esc_html( $body_text ) );
+        $body .= self::booking_table_obj( $booking );
+        $body .= self::ical_button( $booking );
+        $body .= self::footer();
         self::send( $booking->email, $subject, $body );
     }
 
@@ -210,26 +197,29 @@ class MBS_Email {
     }
 
     private static function header() {
+        $org = MBS_Email_Templates::get_org_settings();
         return '<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;color:#1a1a2e;max-width:600px;margin:0 auto;">
         <div style="background:#7413DC;padding:24px 32px;border-radius:8px 8px 0 0;">
-            <h1 style="color:#fff;margin:0;font-size:20px;">&#9884; Needham Market Scout Group</h1>
+            <h1 style="color:#fff;margin:0;font-size:20px;">&#9884; ' . esc_html( $org['name'] ) . '</h1>
             <p style="color:rgba(255,255,255,0.8);margin:4px 0 0;">Booking System</p>
         </div>
         <div style="background:#fff;padding:32px;border:1px solid #e0d0f0;border-top:none;border-radius:0 0 8px 8px;">';
     }
 
     private static function footer() {
+        $org = MBS_Email_Templates::get_org_settings();
         return '</div><div style="text-align:center;padding:16px;color:#999;font-size:12px;">
-            Needham Market Scout Group &bull; Crown St, Needham Market, IP6 8RY &bull; 01449 797577<br>
-            Registered Charity No. 1038177
+            ' . esc_html( $org['name'] ) . ' &bull; ' . esc_html( $org['address'] ) . ' &bull; ' . esc_html( $org['phone'] ) . '<br>
+            Registered Charity No. ' . esc_html( $org['charity_number'] ) . '
         </div></body></html>';
     }
 
     private static function send( $to, $subject, $html_body, $attachments = array() ) {
         $admin_email = self::admin_email();
+        $org = MBS_Email_Templates::get_org_settings();
         $headers = array(
             'Content-Type: text/html; charset=UTF-8',
-            'From: Needham Market Scouts <' . $admin_email . '>',
+            'From: ' . $org['name'] . ' <' . $admin_email . '>',
         );
         wp_mail( $to, $subject, $html_body, $headers, $attachments );
     }

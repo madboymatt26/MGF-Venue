@@ -19,6 +19,7 @@ class MBS_Admin {
         add_action( 'wp_ajax_mbs_update_series_status', array( $this, 'ajax_update_series_status' ) );
         add_action( 'wp_ajax_mbs_save_admin_notes', array( $this, 'ajax_save_admin_notes' ) );
         add_action( 'wp_ajax_mbs_chase_payment',  array( $this, 'ajax_chase_payment' ) );
+        add_action( 'wp_ajax_mbs_save_email_settings', array( $this, 'ajax_save_email_settings' ) );
     }
 
     // ── Menu ───────────────────────────────────────────────────────────────────
@@ -71,6 +72,14 @@ class MBS_Admin {
             'manage_options',
             'mathlin-blocked',
             array( $this, 'render_blocked' )
+        );
+        add_submenu_page(
+            'mathlin-booking',
+            'Email Templates',
+            'Email Templates',
+            'manage_options',
+            'mathlin-emails',
+            array( $this, 'render_email_templates' )
         );
     }
 
@@ -348,6 +357,10 @@ class MBS_Admin {
         include MBS_PLUGIN_DIR . 'admin/views/blocked.php';
     }
 
+    public function render_email_templates() {
+        include MBS_PLUGIN_DIR . 'admin/views/email-templates.php';
+    }
+
     public function ajax_add_blocked() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
         if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
@@ -434,5 +447,40 @@ class MBS_Admin {
 
         MBS_Payment_Chaser::send_chase( $booking, true );
         wp_send_json_success( array( 'ref' => $ref, 'chase_count' => ( $booking->chase_count ?? 0 ) + 1 ) );
+    }
+
+    public function ajax_save_email_settings() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
+
+        // Save organisation details
+        MBS_Email_Templates::save_org_settings( array(
+            'org_name'           => $_POST['org_name'] ?? '',
+            'org_address'        => $_POST['org_address'] ?? '',
+            'org_phone'          => $_POST['org_phone'] ?? '',
+            'org_charity_number' => $_POST['org_charity_number'] ?? '',
+        ) );
+
+        // Save chase/cron settings
+        MBS_Email_Templates::save_chase_settings( array(
+            'max_chase_emails'    => $_POST['max_chase_emails'] ?? 3,
+            'chase_interval_days' => $_POST['chase_interval_days'] ?? 3,
+            'cron_time_reminders' => $_POST['cron_time_reminders'] ?? '07:00',
+            'cron_time_chase'     => $_POST['cron_time_chase'] ?? '09:00',
+            'cron_time_archive'   => $_POST['cron_time_archive'] ?? '02:00',
+        ) );
+
+        // Save email templates
+        if ( isset( $_POST['templates'] ) && is_array( $_POST['templates'] ) ) {
+            foreach ( $_POST['templates'] as $type => $tpl ) {
+                MBS_Email_Templates::save_template(
+                    sanitize_text_field( $type ),
+                    $tpl['subject'] ?? '',
+                    $tpl['body'] ?? ''
+                );
+            }
+        }
+
+        wp_send_json_success( array( 'saved' => true ) );
     }
 }
