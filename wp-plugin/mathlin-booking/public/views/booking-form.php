@@ -167,17 +167,23 @@
                         </select>
                         <p class="nms-field-hint">Public events display the event name and your contact details on the calendar.</p>
                     </div>
+                    <?php
+                    // Only show Scout Use option to Scout Volunteers
+                    $is_volunteer = false;
+                    if ( is_user_logged_in() ) {
+                        $is_volunteer = (bool) get_user_meta( get_current_user_id(), 'mbs_scout_volunteer', true );
+                    }
+                    if ( $is_volunteer ) :
+                    ?>
                     <div class="nms-form-group">
                         <label for="nms-scout-use">Booking Type</label>
                         <select id="nms-scout-use" name="scout_use">
                             <option value="0">External hire (charged)</option>
-                            <option value="1" <?php
-                                // Auto-select for Scout Volunteers
-                                if ( is_user_logged_in() && get_user_meta( get_current_user_id(), 'mbs_scout_volunteer', true ) ) echo 'selected';
-                            ?>>Scout use (no charge)</option>
+                            <option value="1" selected>Scout use (no charge)</option>
                         </select>
                         <p class="nms-field-hint">Scout section meetings, training, and group activities are free of charge.</p>
                     </div>
+                    <?php endif; ?>
                 </div>
             </div>
 
