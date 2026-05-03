@@ -277,6 +277,50 @@ jQuery(function ($) {
         });
     });
 
+    // ── Approve/reject modification requests ────────────────────────────────────
+    $(document).on('click', '.nms-approve-request', function () {
+        var $btn = $(this);
+        var id   = $btn.data('id');
+        if (!confirm('Approve this request? Changes will be applied automatically and the booker will be notified.')) return;
+        $btn.prop('disabled', true).text('Approving…');
+
+        $.post(MBS_Admin.ajax_url, {
+            action: 'mbs_approve_request',
+            nonce:  MBS_Admin.nonce,
+            id:     id
+        }, function (res) {
+            if (res.success) {
+                window.location.reload();
+            } else {
+                alert('Error: ' + (res.data || 'Unknown error'));
+                $btn.prop('disabled', false).text('✓ Approve');
+            }
+        });
+    });
+
+    $(document).on('click', '.nms-reject-request', function () {
+        var $btn   = $(this);
+        var id     = $btn.data('id');
+        var type   = $btn.data('type');
+        var reason = prompt('Reject this ' + (type === 'cancel' ? 'cancellation' : 'modification') + ' request?\n\nOptionally enter a reason (this will be sent to the booker):');
+        if (reason === null) return;
+        $btn.prop('disabled', true).text('Rejecting…');
+
+        $.post(MBS_Admin.ajax_url, {
+            action: 'mbs_reject_request',
+            nonce:  MBS_Admin.nonce,
+            id:     id,
+            reason: reason
+        }, function (res) {
+            if (res.success) {
+                window.location.reload();
+            } else {
+                alert('Error: ' + (res.data || 'Unknown error'));
+                $btn.prop('disabled', false).text('✗ Reject');
+            }
+        });
+    });
+
     // ── Toggle series expansion ────────────────────────────────────────────────
     $(document).on('click', '.nms-toggle-series', function () {
         var $btn   = $(this);

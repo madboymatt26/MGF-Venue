@@ -105,6 +105,25 @@ class MBS_Database {
         ) {$charset};";
         dbDelta( $sql4 );
 
+        // Modification requests table
+        $mod_table = $wpdb->prefix . 'mathlin_mod_requests';
+        $sql5 = "CREATE TABLE IF NOT EXISTS {$mod_table} (
+            id              BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            booking_ref     VARCHAR(20)  NOT NULL,
+            request_type    VARCHAR(20)  NOT NULL DEFAULT 'modify',
+            status          VARCHAR(20)  NOT NULL DEFAULT 'pending',
+            requested_data  TEXT         DEFAULT '',
+            notes           TEXT         DEFAULT '',
+            admin_response  TEXT         DEFAULT '',
+            resolved_at     DATETIME     DEFAULT NULL,
+            resolved_by     BIGINT(20)   DEFAULT NULL,
+            created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            KEY idx_ref    (booking_ref),
+            KEY idx_status (status)
+        ) {$charset};";
+        dbDelta( $sql5 );
+
         update_option( 'mbs_db_version', MBS_VERSION );
     }
 

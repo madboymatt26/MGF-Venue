@@ -22,6 +22,8 @@ class MBS_Admin {
         add_action( 'wp_ajax_mbs_save_email_settings', array( $this, 'ajax_save_email_settings' ) );
         add_action( 'wp_ajax_mbs_save_custom_fields', array( $this, 'ajax_save_custom_fields' ) );
         add_action( 'wp_ajax_mbs_edit_booking',      array( $this, 'ajax_edit_booking' ) );
+        add_action( 'wp_ajax_mbs_approve_request',  array( $this, 'ajax_approve_request' ) );
+        add_action( 'wp_ajax_mbs_reject_request',   array( $this, 'ajax_reject_request' ) );
     }
 
     // ── Menu ───────────────────────────────────────────────────────────────────
@@ -98,6 +100,19 @@ class MBS_Admin {
             'manage_options',
             'mathlin-custom-fields',
             array( $this, 'render_custom_fields' )
+        );
+        $pending_count = MBS_Modification::get_pending_count();
+        $requests_label = 'Requests';
+        if ( $pending_count > 0 ) {
+            $requests_label .= ' <span class="awaiting-mod count-' . $pending_count . '"><span class="pending-count">' . $pending_count . '</span></span>';
+        }
+        add_submenu_page(
+            'mathlin-booking',
+            'Change Requests',
+            $requests_label,
+            'manage_options',
+            'mathlin-requests',
+            array( $this, 'render_requests' )
         );
     }
 
@@ -404,6 +419,10 @@ class MBS_Admin {
         include MBS_PLUGIN_DIR . 'admin/views/custom-fields.php';
     }
 
+    public function render_requests() {
+        include MBS_PLUGIN_DIR . 'admin/views/requests.php';
+    }
+
     public function ajax_add_blocked() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
         if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
@@ -694,4 +713,38 @@ class MBS_Admin {
         );
         MBS_Email_Queue::send( $booking->email, $subject, $body, $headers );
     }
+
+    public function ajax_approve_request() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
+
+        $id = absint( $_POST['id'] ?? 0 );
+        if ( ! $id ) wp_send_json_error( 'Invalid request ID.' );
+
+        $result = MBS_Modification::approve( $id );
+        if ( $result ) {
+            wp_send_json_success( array( 'approved' => true ) );
+        } else {
+            wp_send_json_error( 'Could not approve this request.' );
+        }
+    }
+
+    public function ajax_reject_request() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
+
+        $id     = absint( $_POST['id'] ?? 0 );
+        $reason = sanitize_textarea_field( $_POST['reason'] ?? '' );
+        if ( ! $id ) wp_send_json_error( 'Invalid request ID.' );
+
+        $result = MBS_Modification::reject( $id, $reason );
+        if ( $result ) {
+            wp_send_json_success( array( 'rejected' => true ) );
+        } else {
+            wp_send_json_error( 'Could not reject this request.' );
+        }
+    }
 }
+
+// Note: approve/reject methods are added outside the class closing brace above
+// because the class structure is complex. These are standalone functions registered via add_action.
