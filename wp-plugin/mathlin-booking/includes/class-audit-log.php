@@ -84,6 +84,7 @@ class MBS_Audit_Log {
             'deleted'           => '🗑️ Deleted',
             'reopened'          => '↩️ Reopened',
             'notes_updated'     => '📝 Admin Notes Updated',
+            'edited'            => '✏️ Booking Edited',
             'series_confirmed'  => '✅ Series Confirmed',
             'series_cancelled'  => '❌ Series Cancelled',
             'reminder_sent'     => '📧 Reminder Sent',

@@ -21,6 +21,7 @@ class MBS_Admin {
         add_action( 'wp_ajax_mbs_chase_payment',  array( $this, 'ajax_chase_payment' ) );
         add_action( 'wp_ajax_mbs_save_email_settings', array( $this, 'ajax_save_email_settings' ) );
         add_action( 'wp_ajax_mbs_save_custom_fields', array( $this, 'ajax_save_custom_fields' ) );
+        add_action( 'wp_ajax_mbs_edit_booking',      array( $this, 'ajax_edit_booking' ) );
     }
 
     // ── Menu ───────────────────────────────────────────────────────────────────
@@ -535,5 +536,137 @@ class MBS_Admin {
 
         MBS_Custom_Fields::save_fields( $fields );
         wp_send_json_success( array( 'saved' => true, 'count' => count( $fields ) ) );
+    }
+
+    public function ajax_edit_booking() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
+
+        $ref = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
+        $booking = MBS_Bookings::get( $ref );
+        if ( ! $booking ) wp_send_json_error( 'Booking not found.' );
+
+        $old_amount = (float) $booking->amount;
+
+        // Recalculate cost
+        $scout_use = ! empty( $_POST['scout_use'] );
+        $all_day   = ! empty( $_POST['all_day'] );
+        $new_amount = MBS_Bookings::calculate_cost(
+            sanitize_text_field( $_POST['space'] ),
+            sanitize_text_field( $_POST['start_time'] ?? '' ),
+            sanitize_text_field( $_POST['end_time'] ?? '' ),
+            ! empty( $_POST['kitchen'] ),
+            $all_day,
+            1,
+            $scout_use
+        );
+
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_TABLE;
+
+        $update = array(
+            'name'         => sanitize_text_field( $_POST['name'] ),
+            'organisation' => sanitize_text_field( $_POST['organisation'] ?? '' ),
+            'email'        => sanitize_email( $_POST['email'] ),
+            'phone'        => sanitize_text_field( $_POST['phone'] ),
+            'space'        => sanitize_text_field( $_POST['space'] ),
+            'booking_date' => sanitize_text_field( $_POST['booking_date'] ),
+            'start_time'   => ! empty( $_POST['start_time'] ) ? sanitize_text_field( $_POST['start_time'] ) : null,
+            'end_time'     => ! empty( $_POST['end_time'] )   ? sanitize_text_field( $_POST['end_time'] )   : null,
+            'attendees'    => absint( $_POST['attendees'] ),
+            'all_day'      => $all_day ? 1 : 0,
+            'kitchen'      => ! empty( $_POST['kitchen'] ) ? 1 : 0,
+            'scout_use'    => $scout_use ? 1 : 0,
+            'purpose'      => sanitize_text_field( $_POST['purpose'] ),
+            'notes'        => sanitize_textarea_field( $_POST['notes'] ?? '' ),
+            'address'      => sanitize_textarea_field( $_POST['address'] ?? '' ),
+            'amount'       => $new_amount,
+        );
+
+        $wpdb->update( $table, $update, array( 'ref' => $ref ) );
+
+        // Build change summary for audit log
+        $changes = array();
+        if ( $booking->space !== $update['space'] ) $changes[] = 'space: ' . $booking->space . ' → ' . $update['space'];
+        if ( $booking->booking_date !== $update['booking_date'] ) $changes[] = 'date: ' . $booking->booking_date . ' → ' . $update['booking_date'];
+        if ( $booking->start_time !== $update['start_time'] ) $changes[] = 'start: ' . $booking->start_time . ' → ' . $update['start_time'];
+        if ( $booking->end_time !== $update['end_time'] ) $changes[] = 'end: ' . $booking->end_time . ' → ' . $update['end_time'];
+        if ( abs( $old_amount - $new_amount ) > 0.01 ) $changes[] = 'amount: £' . number_format( $old_amount, 2 ) . ' → £' . number_format( $new_amount, 2 );
+
+        $change_summary = ! empty( $changes ) ? implode( ', ', $changes ) : 'Details updated (no price change)';
+        MBS_Audit_Log::log( $ref, 'edited', 'Booking edited by admin. ' . $change_summary );
+
+        // Notify booker if requested
+        if ( ! empty( $_POST['notify'] ) ) {
+            $updated_booking = MBS_Bookings::get( $ref );
+            self::send_edit_notification( $updated_booking, $old_amount, $new_amount );
+        }
+
+        wp_send_json_success( array( 'ref' => $ref, 'new_amount' => $new_amount ) );
+    }
+
+    /**
+     * Send notification email when a booking is edited by admin.
+     */
+    private static function send_edit_notification( $booking, $old_amount, $new_amount ) {
+        $org         = MBS_Email_Templates::get_org_settings();
+        $admin_email = MBS_Bookings::get_admin_email();
+        $is_daily    = ! empty( $booking->all_day );
+        $time_str    = $is_daily ? 'All day' : ( $booking->start_time . ' – ' . $booking->end_time );
+
+        $subject = 'Booking Updated – ' . $booking->ref;
+
+        $body  = '<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;color:#1a1a2e;max-width:600px;margin:0 auto;">';
+        $body .= '<div style="background:#7413DC;padding:24px 32px;border-radius:8px 8px 0 0;">';
+        $body .= '<h1 style="color:#fff;margin:0;font-size:20px;">&#9884; ' . esc_html( $org['name'] ) . '</h1>';
+        $body .= '<p style="color:rgba(255,255,255,0.8);margin:4px 0 0;">Booking Update</p>';
+        $body .= '</div>';
+        $body .= '<div style="background:#fff;padding:32px;border:1px solid #e0d0f0;border-top:none;border-radius:0 0 8px 8px;">';
+        $body .= '<h2 style="color:#7413DC;">Your Booking Has Been Updated</h2>';
+        $body .= '<p>Hi ' . esc_html( $booking->name ) . ',</p>';
+        $body .= '<p>Your booking has been updated. Here are the current details:</p>';
+
+        $body .= '<table style="width:100%;border-collapse:collapse;margin:16px 0;">';
+        $body .= '<tr><td style="padding:8px 12px;background:#f5f0ff;font-weight:600;width:35%;border-bottom:1px solid #e0d0f0;">Reference</td><td style="padding:8px 12px;border-bottom:1px solid #e0d0f0;">' . esc_html( $booking->ref ) . '</td></tr>';
+        $body .= '<tr><td style="padding:8px 12px;background:#f5f0ff;font-weight:600;border-bottom:1px solid #e0d0f0;">Space</td><td style="padding:8px 12px;border-bottom:1px solid #e0d0f0;">' . esc_html( $booking->space ) . '</td></tr>';
+        $body .= '<tr><td style="padding:8px 12px;background:#f5f0ff;font-weight:600;border-bottom:1px solid #e0d0f0;">Date</td><td style="padding:8px 12px;border-bottom:1px solid #e0d0f0;">' . esc_html( date( 'l j F Y', strtotime( $booking->booking_date ) ) ) . '</td></tr>';
+        $body .= '<tr><td style="padding:8px 12px;background:#f5f0ff;font-weight:600;border-bottom:1px solid #e0d0f0;">Time</td><td style="padding:8px 12px;border-bottom:1px solid #e0d0f0;">' . esc_html( $time_str ) . '</td></tr>';
+        $body .= '<tr><td style="padding:8px 12px;background:#f5f0ff;font-weight:600;border-bottom:1px solid #e0d0f0;">Amount</td><td style="padding:8px 12px;border-bottom:1px solid #e0d0f0;font-weight:bold;">&pound;' . number_format( $new_amount, 2 ) . '</td></tr>';
+        $body .= '</table>';
+
+        // Price change notice
+        $diff = $new_amount - $old_amount;
+        if ( abs( $diff ) > 0.01 ) {
+            if ( $diff > 0 ) {
+                $body .= '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:6px;padding:12px 16px;margin:16px 0;">';
+                $body .= '<strong style="color:#991b1b;">Additional amount due: &pound;' . number_format( $diff, 2 ) . '</strong>';
+                $body .= '<p style="margin:4px 0 0;font-size:0.85rem;color:#991b1b;">Please arrange payment for the additional amount.</p>';
+                $body .= '</div>';
+
+                // Add Pay Now button if WooCommerce available
+                if ( MBS_Woo_Payment::is_available() && $booking->status === 'confirmed' ) {
+                    $pay_url = MBS_Woo_Payment::generate_payment_url( $booking );
+                    if ( $pay_url ) {
+                        $body .= '<p style="text-align:center;margin:16px 0;"><a href="' . esc_url( $pay_url ) . '" style="background:#2ecc71;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;">💳 Pay Now</a></p>';
+                    }
+                }
+            } else {
+                $body .= '<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:6px;padding:12px 16px;margin:16px 0;">';
+                $body .= '<strong style="color:#065f46;">Credit of &pound;' . number_format( abs( $diff ), 2 ) . '</strong>';
+                $body .= '<p style="margin:4px 0 0;font-size:0.85rem;color:#065f46;">We\'ll arrange a refund or credit this against your next booking.</p>';
+                $body .= '</div>';
+            }
+        }
+
+        $body .= '<p>If you have any questions, contact us at <a href="mailto:' . esc_attr( $admin_email ) . '">' . esc_html( $admin_email ) . '</a>.</p>';
+        $body .= '</div>';
+        $body .= '<div style="text-align:center;padding:16px;color:#999;font-size:12px;">' . esc_html( $org['name'] ) . ' &bull; ' . esc_html( $org['address'] ) . '</div>';
+        $body .= '</body></html>';
+
+        $headers = array(
+            'Content-Type: text/html; charset=UTF-8',
+            'From: ' . $org['name'] . ' <' . $admin_email . '>',
+        );
+        MBS_Email_Queue::send( $booking->email, $subject, $body, $headers );
     }
 }
