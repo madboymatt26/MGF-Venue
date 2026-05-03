@@ -117,6 +117,54 @@ class MBS_Email {
     }
 
     /**
+     * Send a summary email for a recurring booking series.
+     */
+    public static function notify_recurring_summary( $series_id, $refs, $skipped, $name, $email, $space, $time_str ) {
+        $admin_email = self::admin_email();
+        $org         = MBS_Email_Templates::get_org_settings();
+
+        $subject = 'Recurring Booking Submitted – ' . $series_id;
+
+        $body  = self::header();
+        $body .= '<h2 style="color:#7413DC;">Recurring Booking Submitted</h2>';
+        $body .= '<p>Hi ' . esc_html( $name ) . ',</p>';
+        $body .= '<p>Your recurring booking request has been submitted. Here is a summary:</p>';
+
+        $body .= '<table style="width:100%;border-collapse:collapse;margin:16px 0;">';
+        $body .= '<tr><td style="padding:8px 12px;background:#f5f0ff;font-weight:600;width:35%;border-bottom:1px solid #e0d0f0;">Series Reference</td><td style="padding:8px 12px;border-bottom:1px solid #e0d0f0;">' . esc_html( $series_id ) . '</td></tr>';
+        $body .= '<tr><td style="padding:8px 12px;background:#f5f0ff;font-weight:600;border-bottom:1px solid #e0d0f0;">Space</td><td style="padding:8px 12px;border-bottom:1px solid #e0d0f0;">' . esc_html( $space ) . '</td></tr>';
+        $body .= '<tr><td style="padding:8px 12px;background:#f5f0ff;font-weight:600;border-bottom:1px solid #e0d0f0;">Time</td><td style="padding:8px 12px;border-bottom:1px solid #e0d0f0;">' . esc_html( $time_str ) . '</td></tr>';
+        $body .= '<tr><td style="padding:8px 12px;background:#f5f0ff;font-weight:600;border-bottom:1px solid #e0d0f0;">Bookings Created</td><td style="padding:8px 12px;border-bottom:1px solid #e0d0f0;"><strong>' . count( $refs ) . '</strong></td></tr>';
+        $body .= '</table>';
+
+        $body .= '<h3 style="color:#7413DC;margin-top:24px;">Booked Dates</h3>';
+        $body .= '<ul style="margin:8px 0;padding-left:20px;">';
+        foreach ( $refs as $ref ) {
+            $booking = MBS_Bookings::get( $ref );
+            if ( $booking ) {
+                $body .= '<li style="margin-bottom:4px;">' . esc_html( date( 'l j F Y', strtotime( $booking->booking_date ) ) ) . ' &mdash; <code>' . esc_html( $ref ) . '</code></li>';
+            }
+        }
+        $body .= '</ul>';
+
+        if ( ! empty( $skipped ) ) {
+            $body .= '<h3 style="color:#f39c12;margin-top:16px;">Skipped Dates</h3>';
+            $body .= '<p style="font-size:0.85rem;color:#6b7280;">These dates were skipped due to conflicts or blocked dates:</p>';
+            $body .= '<ul style="margin:8px 0;padding-left:20px;color:#856404;">';
+            foreach ( $skipped as $skip_date ) {
+                $body .= '<li style="margin-bottom:4px;">' . esc_html( date( 'l j F Y', strtotime( $skip_date ) ) ) . '</li>';
+            }
+            $body .= '</ul>';
+        }
+
+        $body .= '<p style="margin-top:16px;">Each booking is pending confirmation. We will review and confirm them shortly.</p>';
+        $body .= '<p>If you have any questions, contact us at <a href="mailto:' . esc_attr( $admin_email ) . '">' . esc_html( $admin_email ) . '</a> or call ' . esc_html( $org['phone'] ) . '.</p>';
+        $body .= self::footer();
+
+        self::send( $email, $subject, $body );
+    }
+
+    /**
      * Send a reminder email before a booking.
      */
     public static function notify_reminder( $booking ) {

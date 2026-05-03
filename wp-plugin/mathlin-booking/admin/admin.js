@@ -277,6 +277,22 @@ jQuery(function ($) {
         });
     });
 
+    // ── Toggle series expansion ────────────────────────────────────────────────
+    $(document).on('click', '.nms-toggle-series', function () {
+        var $btn   = $(this);
+        var series = $btn.data('series');
+        var $rows  = $('.nms-series-' + series);
+        var visible = $rows.first().is(':visible');
+
+        if (visible) {
+            $rows.hide();
+            $btn.text('▶ Expand');
+        } else {
+            $rows.show();
+            $btn.text('▼ Collapse');
+        }
+    });
+
     // ── Chase payment ──────────────────────────────────────────────────────────
     $(document).on('click', '.nms-btn-chase', function () {
         var $btn = $(this);

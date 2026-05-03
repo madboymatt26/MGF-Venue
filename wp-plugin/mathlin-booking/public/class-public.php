@@ -199,13 +199,24 @@ class MBS_Public {
                 wp_send_json_error( array( 'message' => $result->get_error_message() ) );
             }
 
-            // Send emails for the first booking in the series
+            // Send admin notification
             $first_booking_data = $_POST;
             $first_booking_data['ref'] = $result['refs'][0];
             MBS_Email::notify_admin( array_merge( $first_booking_data, array(
                 'ref' => $result['refs'][0],
                 'amount' => MBS_Bookings::calculate_cost( $space, $_POST['start_time'] ?? '', $_POST['end_time'] ?? '', ! empty( $_POST['kitchen'] ), $all_day ),
             ) ) );
+
+            // Send recurring summary email to booker
+            MBS_Email::notify_recurring_summary(
+                $result['series_id'],
+                $result['refs'],
+                $result['skipped'],
+                sanitize_text_field( $_POST['name'] ),
+                sanitize_email( $_POST['email'] ),
+                $space,
+                $all_day ? 'All day' : ( sanitize_text_field( $_POST['start_time'] ?? '' ) . ' – ' . sanitize_text_field( $_POST['end_time'] ?? '' ) )
+            );
 
             $msg = 'Recurring booking submitted! ' . $result['created'] . ' booking(s) created (reference series: ' . $result['series_id'] . ').';
             if ( ! empty( $result['skipped'] ) ) {

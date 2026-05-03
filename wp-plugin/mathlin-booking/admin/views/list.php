@@ -85,9 +85,77 @@
         <?php
         // PERF-001: Get spaces once outside the loop
         $spaces = MBS_Bookings::get_spaces();
+
+        // Group bookings by series_id for collapsed display
+        $series_shown = array();
+        $grouped = array();
+        foreach ( $bookings as $b ) {
+            if ( ! empty( $b->series_id ) ) {
+                $grouped[ $b->series_id ][] = $b;
+            }
+        }
+
         foreach ( $bookings as $b ) :
             $is_daily = ! empty( $b->all_day );
+
+            // If this booking is part of a series, only show the first one as a summary row
+            if ( ! empty( $b->series_id ) ) {
+                if ( isset( $series_shown[ $b->series_id ] ) ) continue; // Skip — already shown
+                $series_shown[ $b->series_id ] = true;
+                $series_bookings = $grouped[ $b->series_id ];
+                $series_count    = count( $series_bookings );
+                $series_total    = array_sum( array_column( $series_bookings, 'amount' ) );
+                $first_date      = $series_bookings[0]->booking_date;
+                $last_date       = end( $series_bookings )->booking_date;
         ?>
+            <!-- Series summary row -->
+            <tr id="nms-row-<?php echo esc_attr( $b->ref ); ?>" class="nms-series-row" style="background:#f9f7ff;">
+                <td>
+                    <strong><?php echo esc_html( $b->series_id ); ?></strong>
+                    <br><small class="nms-muted"><?php echo $series_count; ?> bookings</small>
+                </td>
+                <td>
+                    <?php echo esc_html( $b->name ); ?>
+                    <?php if ( $b->organisation ) : ?><br><small class="nms-muted"><?php echo esc_html( $b->organisation ); ?></small><?php endif; ?>
+                </td>
+                <td><?php echo esc_html( $b->space ); ?></td>
+                <td>
+                    <?php echo esc_html( date( 'j M', strtotime( $first_date ) ) ); ?> – <?php echo esc_html( date( 'j M Y', strtotime( $last_date ) ) ); ?>
+                    <br><small class="nms-muted">Weekly × <?php echo $series_count; ?></small>
+                </td>
+                <td><?php echo $is_daily ? 'All day' : esc_html( $b->start_time . ' – ' . $b->end_time ); ?></td>
+                <td><?php echo esc_html( $b->attendees ); ?></td>
+                <td><strong>&pound;<?php echo number_format( $series_total, 2 ); ?></strong></td>
+                <td>
+                    <span class="nms-status nms-status-<?php echo esc_attr( $b->status ); ?>"><?php echo esc_html( ucfirst( $b->status ) ); ?></span>
+                </td>
+                <td>
+                    <div class="nms-action-btns">
+                        <button class="button button-small nms-toggle-series" data-series="<?php echo esc_attr( $b->series_id ); ?>">▶ Expand</button>
+                        <a href="?page=mathlin-booking&action=view&ref=<?php echo esc_attr( $b->ref ); ?>" class="button button-small">View</a>
+                        <?php if ( $b->status === 'pending' ) : ?>
+                            <button class="button button-small button-primary nms-btn-series-status" data-series="<?php echo esc_attr( $b->series_id ); ?>" data-status="confirmed">Confirm All</button>
+                        <?php endif; ?>
+                        <button class="button button-small nms-btn-series-status" data-series="<?php echo esc_attr( $b->series_id ); ?>" data-status="cancelled">Cancel All</button>
+                    </div>
+                </td>
+            </tr>
+            <!-- Individual series bookings (hidden by default) -->
+            <?php foreach ( $series_bookings as $sb ) : ?>
+            <tr class="nms-series-child nms-series-<?php echo esc_attr( $b->series_id ); ?>" style="display:none;background:#fdfcff;">
+                <td style="padding-left:24px;"><small><?php echo esc_html( $sb->ref ); ?></small></td>
+                <td></td>
+                <td></td>
+                <td><?php echo esc_html( date( 'D j M Y', strtotime( $sb->booking_date ) ) ); ?></td>
+                <td><?php echo ! empty( $sb->all_day ) ? 'All day' : esc_html( $sb->start_time . ' – ' . $sb->end_time ); ?></td>
+                <td></td>
+                <td>&pound;<?php echo number_format( $sb->amount, 2 ); ?></td>
+                <td><span class="nms-status nms-status-<?php echo esc_attr( $sb->status ); ?>"><?php echo esc_html( ucfirst( $sb->status ) ); ?></span></td>
+                <td><a href="?page=mathlin-booking&action=view&ref=<?php echo esc_attr( $sb->ref ); ?>" class="button button-small">View</a></td>
+            </tr>
+            <?php endforeach; ?>
+        <?php else : ?>
+            <!-- Regular (non-series) booking row -->
             <tr id="nms-row-<?php echo esc_attr( $b->ref ); ?>">
                 <td><strong><?php echo esc_html( $b->ref ); ?></strong></td>
                 <td>
@@ -131,6 +199,7 @@
                     </div>
                 </td>
             </tr>
+        <?php endif; // end series vs regular ?>
         <?php endforeach; ?>
         </tbody>
     </table>
