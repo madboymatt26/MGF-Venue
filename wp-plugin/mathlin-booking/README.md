@@ -1,205 +1,170 @@
-# Mathlin Booking System – WordPress Plugin
+# Mathlin Booking System
 
-Venue booking system for **Needham Market Scout Group** with Home Assistant integration.
+A comprehensive WordPress venue booking plugin built for Needham Market Scout Group, with Home Assistant integration.
+
+**Current Version:** 2.6.1+  
+**Requires WordPress:** 5.0+  
+**Requires PHP:** 7.4+  
+**Tested with WordPress:** 6.7  
+**License:** GPL-2.0+
+
+---
+
+## Features
+
+### Public Booking System
+- Interactive availability calendar with blocked date indicators
+- Booking form with real-time cost calculation
+- Multi-day and full-day booking support
+- Recurring weekly bookings (up to 52 weeks)
+- Conflict detection prevents double bookings
+- Configurable minimum notice period
+- Custom form fields (admin-configurable)
+- Terms & Conditions checkbox
+- Public/private event visibility toggle
+- Scout Use (free) bookings for volunteers
+
+### Customer Accounts (Hirer Portal)
+- Self-service registration and login (`[mathlin_portal]`)
+- Dashboard showing all bookings, invoices, payment status
+- Pre-filled booking form for returning hirers
+- Quick account creation after first booking
+- Booking status lookup (`[mathlin_status]`)
+- Modification and cancellation requests
+
+### Admin Dashboard
+- Bookings list with search, filter, and CSV export
+- Editable booking details with live cost recalculation
+- Custom price override for ad-hoc arrangements
+- Calendar view with day-by-day breakdown
+- Recurring bookings grouped as collapsible series
+- Booking analytics with Chart.js visualisations
+- Occupancy/utilisation reports per space
+- Audit log tracking all actions with user and timestamp
+- Dashboard widget on wp-admin home
+
+### Financial
+- Configurable spaces and pricing (hourly + daily rates)
+- Kitchen add-on pricing
+- WooCommerce payment integration (Stripe, PayPal, etc.)
+- Invoice generation with PDF email attachment
+- Automatic payment chasing (3 escalating levels)
+- Accounting export (Xero, Sage, QuickBooks CSV)
+- Bank transfer details on invoices
+- Financial year revenue tracking (April–March)
+
+### Email System
+- 14 editable email templates with placeholder tags
+- Configurable organisation name, address, logo
+- Email queue with automatic retry on failure
+- Booking reminders (configurable hours before)
+- Multi-admin notifications
+- Recurring booking summary emails
+
+### Modification & Cancellation Requests
+- Bookers can request changes via secure link
+- Proper approval queue with pending count badge
+- Admin approve/reject with one click
+- Auto-applies changes on approval (with conflict check)
+- Rejection emails with optional reason
+
+### Integrations
+- Home Assistant: webhook on confirmation + REST API polling
+- WooCommerce: Pay Now button in emails, auto-status update
+- iCal: downloadable .ics files + subscribable calendar feed
+- GitHub: auto-update from private repository releases
 
 ---
 
 ## Installation
 
-1. Upload the `mathlin-booking` folder to `/wp-content/plugins/` via SFTP
-2. Log in to WordPress admin → **Plugins → Installed Plugins**
-3. Activate **Mathlin Booking System**
-4. The plugin automatically creates the `wp_mathlin_bookings` table in MariaDB
+1. Upload `mathlin-booking/` to `/wp-content/plugins/`
+2. Activate in wp-admin → Plugins
+3. Database tables are created automatically
 
----
+## Shortcodes
 
-## Usage
+| Shortcode | Description |
+|---|---|
+| `[mathlin_booking]` | Full calendar + booking form |
+| `[mathlin_calendar]` | Calendar only (no form) |
+| `[mathlin_status]` | Booking status lookup + modification form |
+| `[mathlin_portal]` | Hirer login/register + dashboard |
 
-### Add the booking system to a page
+## REST API
 
-In the WordPress page editor, add this shortcode:
-
-```
-[mathlin_booking]
-```
-
-This embeds the full calendar + booking form on any page.
-
-To show the calendar only (no form):
-```
-[mathlin_calendar]
-```
-
-### Admin dashboard
-
-Go to **wp-admin → Scout Bookings** to:
-- View all bookings
-- Confirm or cancel bookings
-- Generate and print invoices
-- Search and filter bookings
-
----
-
-## Home Assistant Integration
-
-### 1. Outbound webhook (WordPress → HA)
-
-When a booking is **confirmed**, WordPress POSTs JSON to your HA webhook.
-
-**Setup:**
-1. In HA: Settings → Automations → New Automation → Trigger: Webhook
-2. Copy the webhook URL (e.g. `http://homeassistant.local:8123/api/webhook/mathlin_booking`)
-3. In WordPress: Scout Bookings → Settings → paste the URL → Save
-4. Click **Send Test Webhook** to verify
-
-**Payload sent on confirmation:**
-```json
-{
-  "event":        "booking_confirmed",
-  "ref":          "NMS-ABC123",
-  "space":        "Main Scout Hall",
-  "booking_date": "2026-05-10",
-  "start_time":   "18:00:00",
-  "end_time":     "21:00:00",
-  "attendees":    45,
-  "purpose":      "Beaver Colony meeting",
-  "kitchen":      false,
-  "amount":       75.00
-}
-```
-
-**Payload sent on cancellation:**
-```json
-{
-  "event":        "booking_cancelled",
-  "ref":          "NMS-ABC123",
-  "space":        "Main Scout Hall",
-  "booking_date": "2026-05-10",
-  "start_time":   "18:00:00",
-  "end_time":     "21:00:00"
-}
-```
-
----
-
-### 2. REST API (HA polls WordPress)
-
-Add to `configuration.yaml`:
-
-```yaml
-rest:
-  - resource: https://needhamscouts.uk/wp-json/mathlin/v1/bookings/upcoming
-    scan_interval: 300
-    sensor:
-      - name: "Scout Hall Next Booking"
-        value_template: >
-          {% if value_json | length > 0 %}
-            {{ value_json[0].booking_date }} {{ value_json[0].start_time }}
-          {% else %}
-            No upcoming bookings
-          {% endif %}
-        json_attributes_path: "$[0]"
-        json_attributes:
-          - ref
-          - space
-          - booking_date
-          - start_time
-          - end_time
-          - attendees
-          - purpose
-          - kitchen
-
-      - name: "Scout Hall Booking Count"
-        value_template: "{{ value_json | length }}"
-
-  - resource: https://needhamscouts.uk/wp-json/mathlin/v1/bookings/today
-    scan_interval: 3600
-    sensor:
-      - name: "Scout Hall Today Bookings"
-        value_template: "{{ value_json | length }}"
-```
-
----
-
-### 3. Example HA automation
-
-```yaml
-automation:
-  - alias: "Scout Hall – Pre-heat before booking"
-    trigger:
-      - platform: webhook
-        webhook_id: mathlin_booking
-    condition:
-      - condition: template
-        value_template: "{{ trigger.json.event == 'booking_confirmed' }}"
-    action:
-      - service: climate.set_temperature
-        target:
-          entity_id: climate.scout_hall
-        data:
-          temperature: 19
-      - service: notify.mobile_app_your_phone
-        data:
-          title: "Scout Hall Booking Confirmed"
-          message: >
-            {{ trigger.json.space }} on {{ trigger.json.booking_date }}
-            at {{ trigger.json.start_time }} ({{ trigger.json.attendees }} people)
-```
-
----
-
-## REST API Endpoints
+Base: `/wp-json/mathlin/v1/`
 
 | Endpoint | Auth | Description |
 |---|---|---|
-| `GET /wp-json/mathlin/v1/bookings/upcoming` | None | Confirmed bookings, next 30 days |
-| `GET /wp-json/mathlin/v1/bookings/today` | None | Today's confirmed bookings |
-| `GET /wp-json/mathlin/v1/bookings/calendar?year=2026&month=5` | None | Booked dates in a month |
-| `GET /wp-json/mathlin/v1/bookings/date/2026-05-10` | None | Bookings on a specific date |
-| `GET /wp-json/mathlin/v1/bookings` | WP Admin | All bookings |
-| `GET /wp-json/mathlin/v1/bookings/{ref}` | WP Admin | Single booking |
-| `POST /wp-json/mathlin/v1/bookings/{ref}/status` | WP Admin | Update status |
+| `GET /bookings/today` | None | Today's confirmed bookings |
+| `GET /bookings/upcoming` | None | Next 30 days |
+| `GET /bookings/calendar?year=&month=` | None | Booked dates |
+| `GET /bookings/{ref}/ical` | None | iCal download |
+| `GET /bookings/ical` | None | iCal feed |
+| `GET /bookings` | Admin | All bookings |
+| `POST /bookings/{ref}/status` | Admin | Update status |
 
 ---
 
-## Pricing (edit in `includes/class-bookings.php`)
+## Changelog
 
-| Space | Rate | Unit |
-|---|---|---|
-| Main Scout Hall | £25 | per hour |
-| Meeting Room | £12 | per hour |
-| Outdoor Area | £40 | per day |
-| Kitchen add-on | £10 | per session |
+### v2.6.1 (Latest)
+- **Fix:** Overnight booking (22:00–02:00) spanning 2 calendar dates no longer double-counts days
+- Rule: if overnight AND date span = 2, treat as 1 continuous block
 
----
+### v2.6.0
+- **Fix:** Midnight-spanning bookings (22:00–01:00) now calculate hours correctly
+- **Fix:** Multi-day hourly bookings now multiply hours × days
+- **Fix:** Modification approval checks for conflicts before applying
+- **Fix:** Blocked date warning on date picker input
+- **Fix:** Calendar loading state during navigation
+- **Enhancement:** Recurring email includes total series cost
+- **Enhancement:** Scout use toggle noted in audit log
 
-## File Structure
+### v2.5.2
+- All 14 email types now use editable templates
 
-```
-mathlin-booking/
-├── mathlin-booking.php       Main plugin file
-├── uninstall.php               Cleanup on deletion
-├── includes/
-│   ├── class-database.php      Table creation
-│   ├── class-bookings.php      CRUD + pricing logic
-│   ├── class-email.php         Email notifications
-│   ├── class-invoice.php       Invoice HTML generation
-│   ├── class-rest-api.php      REST API endpoints
-│   └── class-homeassistant.php HA webhook + data formatting
-├── admin/
-│   ├── class-admin.php         Admin menu + AJAX handlers
-│   ├── admin.css               Admin styles
-│   ├── admin.js                Admin JavaScript
-│   └── views/
-│       ├── list.php            Bookings list page
-│       ├── single.php          Single booking detail
-│       ├── invoice.php         Invoice print page
-│       └── settings.php        Settings + HA config
-└── public/
-    ├── class-public.php        Shortcodes + public AJAX
-    ├── public.css              Frontend styles (Scout purple)
-    ├── public.js               Calendar + form JS
-    └── views/
-        ├── booking-form.php    Full form shortcode output
-        └── calendar.php        Calendar shortcode output
-```
+### v2.5.1
+- Configurable logo upload for all emails
+
+### v2.5.0
+- Proper approval queue for modification/cancellation requests
+- Pending count badge on admin menu
+
+### v2.4.x
+- Editable booking details with live cost recalculation
+- Series grouping in admin list (collapsible)
+- Recurring booking summary email
+- Fatal error fix in admin list (PHP syntax)
+
+### v2.3.0
+- Admin can edit all booking fields
+- Live cost preview with price change warnings
+- Notification email on edit with price difference
+
+### v2.2.x
+- Scout Use (free) bookings for volunteers
+- Recurring booking cost preview
+- Payment links work cross-device (token-based)
+
+### v2.1.x
+- Hirer portal with login/register
+- Public/private event visibility
+- Occupancy reports + accounting export
+- Quick account creation after booking
+- Login prompt on booking form
+
+### v2.0.x
+- Email queue with retry
+- Custom form fields
+- Booking modification requests
+- Analytics dashboard with charts
+
+### v1.x
+- Core booking system, calendar, invoicing
+- Home Assistant integration
+- Conflict detection, recurring bookings
+- Payment chasing, CSV export, dashboard widget
+- WooCommerce payments, auto-archive
+- Configurable email templates

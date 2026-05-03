@@ -589,6 +589,13 @@ class MBS_Admin {
             $scout_use
         );
 
+        // QA-007: Custom price override
+        $calculated_amount = $new_amount;
+        $is_custom_price   = ! empty( $_POST['custom_price'] );
+        if ( $is_custom_price ) {
+            $new_amount = max( 0, round( floatval( $_POST['custom_amount'] ?? 0 ), 2 ) );
+        }
+
         global $wpdb;
         $table = $wpdb->prefix . MBS_TABLE;
 
@@ -644,6 +651,7 @@ class MBS_Admin {
         // QA-006: Note when admin enables/disables scout use
         if ( $scout_use && ! $booking->scout_use ) $changes[] = 'scout use: enabled by admin';
         if ( ! $scout_use && $booking->scout_use ) $changes[] = 'scout use: disabled by admin';
+        if ( $is_custom_price ) $changes[] = 'CUSTOM PRICE: calculated £' . number_format( $calculated_amount, 2 ) . ' overridden to £' . number_format( $new_amount, 2 );
 
         $change_summary = ! empty( $changes ) ? implode( ', ', $changes ) : 'Details updated (no price change)';
         MBS_Audit_Log::log( $ref, 'edited', 'Booking edited by admin. ' . $change_summary );

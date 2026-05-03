@@ -101,11 +101,25 @@ $kitchen_price = MBS_Bookings::get_kitchen_price();
                         <span>Original amount:</span>
                         <span>&pound;<?php echo number_format( $booking->amount, 2 ); ?></span>
                     </div>
-                    <div style="display:flex;justify-content:space-between;font-size:0.9rem;margin-top:4px;">
-                        <span>New amount:</span>
+                    <div id="nms-edit-calc-row" style="display:flex;justify-content:space-between;font-size:0.9rem;margin-top:4px;">
+                        <span>Calculated amount:</span>
                         <strong id="nms-edit-new-amount">&pound;<?php echo number_format( $booking->amount, 2 ); ?></strong>
                     </div>
                     <div id="nms-edit-cost-diff" style="display:none;margin-top:8px;padding:8px 12px;border-radius:6px;font-size:0.85rem;font-weight:600;"></div>
+
+                    <!-- Custom price override -->
+                    <div style="margin-top:12px;padding-top:12px;border-top:1px solid #e0d0f0;">
+                        <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem;cursor:pointer;">
+                            <input type="checkbox" id="nms-edit-custom-price"> <strong>Override price manually</strong>
+                        </label>
+                        <div id="nms-custom-price-row" style="display:none;margin-top:8px;">
+                            <div style="display:flex;align-items:center;gap:8px;">
+                                <span style="font-size:1.1rem;font-weight:600;">&pound;</span>
+                                <input type="number" id="nms-edit-custom-amount" step="0.01" min="0" value="<?php echo number_format( $booking->amount, 2, '.', '' ); ?>" style="width:120px;padding:6px 10px;border:1.5px solid #7413DC;border-radius:6px;font-size:1rem;font-weight:700;">
+                            </div>
+                            <p style="font-size:0.75rem;color:#6b7280;margin:4px 0 0;">Enter the exact amount to charge. This overrides the calculated rate.</p>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Payment warning -->
@@ -220,6 +234,32 @@ jQuery(function($) {
         $('#nms-toggle-edit').show();
     });
 
+    // Custom price override toggle
+    $('#nms-edit-custom-price').on('change', function() {
+        var isCustom = $(this).is(':checked');
+        $('#nms-custom-price-row').toggle(isCustom);
+        $('#nms-edit-calc-row').css('opacity', isCustom ? 0.4 : 1);
+        updateCostDiff();
+    });
+    $('#nms-edit-custom-amount').on('input', updateCostDiff);
+
+    function updateCostDiff() {
+        var isCustom = $('#nms-edit-custom-price').is(':checked');
+        var finalAmount = isCustom ? parseFloat($('#nms-edit-custom-amount').val()) || 0 : parseFloat($('#nms-edit-new-amount').text().replace('£', '')) || 0;
+        var diff = finalAmount - originalAmount;
+        var $diffEl = $('#nms-edit-cost-diff');
+        if (Math.abs(diff) > 0.01) {
+            $diffEl.show();
+            if (diff > 0) {
+                $diffEl.css({ background: '#fee2e2', color: '#991b1b' }).text('⬆ Price increased by £' + diff.toFixed(2));
+            } else {
+                $diffEl.css({ background: '#d1fae5', color: '#065f46' }).text('⬇ Price decreased by £' + Math.abs(diff).toFixed(2));
+            }
+        } else {
+            $diffEl.hide();
+        }
+    }
+
     // Live cost recalculation
     $('#nms-edit-space, #nms-edit-start, #nms-edit-end, #nms-edit-kitchen, #nms-edit-allday, #nms-edit-scout, #nms-edit-date, #nms-edit-date-end').on('change', recalcEditCost);
 
@@ -271,19 +311,7 @@ jQuery(function($) {
         }
 
         $('#nms-edit-new-amount').text('£' + cost.toFixed(2));
-
-        var diff = cost - originalAmount;
-        var $diffEl = $('#nms-edit-cost-diff');
-        if (Math.abs(diff) > 0.01) {
-            $diffEl.show();
-            if (diff > 0) {
-                $diffEl.css({ background: '#fee2e2', color: '#991b1b' }).text('⬆ Price increased by £' + diff.toFixed(2) + ' — supplementary invoice may be needed');
-            } else {
-                $diffEl.css({ background: '#d1fae5', color: '#065f46' }).text('⬇ Price decreased by £' + Math.abs(diff).toFixed(2) + ' — credit/refund may be needed');
-            }
-        } else {
-            $diffEl.hide();
-        }
+        updateCostDiff();
     }
 
     // Save edits
@@ -312,7 +340,9 @@ jQuery(function($) {
             purpose:      $('#nms-edit-purpose').val(),
             notes:        $('#nms-edit-notes').val(),
             address:      $('#nms-edit-address').val(),
-            notify:       $('#nms-edit-notify').is(':checked') ? 1 : 0
+            notify:       $('#nms-edit-notify').is(':checked') ? 1 : 0,
+            custom_price: $('#nms-edit-custom-price').is(':checked') ? 1 : 0,
+            custom_amount: $('#nms-edit-custom-amount').val()
         }, function(res) {
             $btn.prop('disabled', false).text('💾 Save Changes');
             if (res.success) {
