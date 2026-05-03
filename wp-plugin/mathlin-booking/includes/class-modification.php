@@ -86,18 +86,47 @@ class MBS_Modification {
         }
 
         $requested_changes = sanitize_textarea_field( $_POST['changes'] ?? '' );
-        $new_date          = sanitize_text_field( $_POST['new_date'] ?? '' );
-        $new_start         = sanitize_text_field( $_POST['new_start_time'] ?? '' );
-        $new_end           = sanitize_text_field( $_POST['new_end_time'] ?? '' );
+        $mod_action        = sanitize_text_field( $_POST['mod_action'] ?? 'modify' );
 
-        if ( empty( $requested_changes ) && empty( $new_date ) ) {
-            wp_send_json_error( array( 'message' => 'Please describe what you would like to change.' ) );
+        // Handle cancellation request
+        if ( $mod_action === 'cancel' ) {
+            $cancel_reason = sanitize_textarea_field( $_POST['cancel_reason'] ?? '' );
+            $summary = "CANCELLATION REQUEST by {$booking->name} ({$booking->email})";
+            if ( $cancel_reason ) $summary .= "\nReason: {$cancel_reason}";
+
+            $existing_notes = $booking->admin_notes ?? '';
+            $timestamp      = current_time( 'j M Y H:i' );
+            $new_notes      = trim( $existing_notes . "\n\n--- Cancellation Request ({$timestamp}) ---\n{$summary}" );
+            MBS_Bookings::update_admin_notes( $ref, $new_notes );
+
+            MBS_Audit_Log::log( $ref, 'cancellation_requested', 'Booker requested cancellation' . ( $cancel_reason ? ': ' . substr( $cancel_reason, 0, 100 ) : '' ), 0 );
+            self::notify_admin_of_request( $booking, $summary );
+
+            wp_send_json_success( array(
+                'message' => 'Your cancellation request has been submitted. We\'ll review it and get back to you shortly.',
+            ) );
         }
+
+        // Handle modification request
+        $new_date     = sanitize_text_field( $_POST['new_date'] ?? '' );
+        $new_date_end = sanitize_text_field( $_POST['new_date_end'] ?? '' );
+        $new_start    = sanitize_text_field( $_POST['new_start_time'] ?? '' );
+        $new_end      = sanitize_text_field( $_POST['new_end_time'] ?? '' );
+        $new_space    = sanitize_text_field( $_POST['new_space'] ?? '' );
+        $new_type     = sanitize_text_field( $_POST['new_booking_type'] ?? '' );
+        $new_kitchen  = sanitize_text_field( $_POST['new_kitchen'] ?? '' );
+        $new_attendees = sanitize_text_field( $_POST['new_attendees'] ?? '' );
 
         // Build a summary of requested changes
         $summary = "Modification requested by {$booking->name} ({$booking->email}):\n\n";
-        if ( $new_date ) $summary .= "New date: {$new_date}\n";
-        if ( $new_start && $new_end ) $summary .= "New time: {$new_start} – {$new_end}\n";
+        if ( $new_space && $new_space !== $booking->space ) $summary .= "Space: {$booking->space} → {$new_space}\n";
+        if ( $new_date && $new_date !== $booking->booking_date ) $summary .= "Date: {$booking->booking_date} → {$new_date}\n";
+        if ( $new_date_end ) $summary .= "End date: {$new_date_end}\n";
+        if ( $new_type ) $summary .= "Booking type: {$new_type}\n";
+        if ( $new_start && $new_end ) $summary .= "Time: {$new_start} – {$new_end}\n";
+        if ( $new_kitchen !== '' ) $summary .= "Kitchen: " . ( $new_kitchen ? 'Yes' : 'No' ) . "\n";
+        if ( $new_attendees ) $summary .= "Attendees: {$new_attendees}\n";
+        if ( $requested_changes ) $summary .= "Notes: {$requested_changes}\n";
         if ( $requested_changes ) $summary .= "Details: {$requested_changes}\n";
 
         // Add to admin notes
