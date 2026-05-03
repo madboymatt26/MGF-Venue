@@ -10,6 +10,16 @@
         <h2 class="nms-section-title">Make a Booking</h2>
         <p class="nms-section-sub">Complete the form below. You'll receive a confirmation email and invoice once your booking is approved.</p>
 
+        <?php if ( ! is_user_logged_in() ) :
+            $portal_pages = get_posts( array( 'post_type' => 'page', 'post_status' => 'publish', 's' => 'mathlin_portal', 'numberposts' => 1 ) );
+            $portal_url = ! empty( $portal_pages ) ? get_permalink( $portal_pages[0]->ID ) : '';
+            if ( $portal_url ) :
+        ?>
+        <div style="background:#f5f0ff;border:1px solid #e0d0f0;border-radius:8px;padding:12px 16px;margin-bottom:1.5rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+            <span style="font-size:0.9rem;color:#1a1a2e;">🔑 Have an account? <a href="<?php echo esc_url( $portal_url ); ?>" style="color:#7413DC;font-weight:600;">Log in</a> to pre-fill your details and track your bookings.</span>
+        </div>
+        <?php endif; endif; ?>
+
         <div id="nms-success-msg" class="nms-alert nms-alert-success" style="display:none"></div>
         <div id="nms-error-msg"   class="nms-alert nms-alert-error"   style="display:none"></div>
 
