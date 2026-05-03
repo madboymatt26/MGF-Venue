@@ -56,7 +56,6 @@ class MBS_Hirer_Portal {
             $admin_role->add_cap( 'mbs_manage_bookings' );
         }
     }
-    }
 
     /**
      * Remove the role on plugin deactivation.

@@ -2,7 +2,7 @@
 
 A comprehensive WordPress venue booking plugin built for Needham Market Scout Group, with Home Assistant integration.
 
-**Current Version:** 2.9.1  
+**Current Version:** 2.9.2  
 **Requires WordPress:** 5.0+  
 **Requires PHP:** 7.4+  
 **Tested with WordPress:** 6.7  
@@ -111,7 +111,10 @@ Base: `/wp-json/mathlin/v1/`
 
 ## Changelog
 
-### v2.9.1 (Latest)
+### v2.9.2 (Latest)
+- **Fix:** Fatal syntax error in `class-hirer-portal.php` — extra closing brace prematurely ended the class
+
+### v2.9.1
 - **Fix:** Critical error caused by PHP reserved keyword `NAMESPACE` used as class constant
 - Renamed to `API_NAMESPACE` in REST API class for PHP 8.x compatibility
 
