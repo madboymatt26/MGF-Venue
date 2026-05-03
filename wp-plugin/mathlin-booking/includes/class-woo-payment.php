@@ -77,12 +77,24 @@ class MBS_Woo_Payment {
         $product_id = self::get_payment_product_id();
         if ( ! $product_id ) return '';
 
-        // Build a URL that adds the product to cart with booking metadata
+        // Use the modification_token as a session-independent secret
+        // This allows payment links to work from any device/browser
+        $token = $booking->modification_token;
+        if ( empty( $token ) ) {
+            // Generate one if missing (pre-v2.0 bookings)
+            $token = wp_generate_password( 32, false );
+            global $wpdb;
+            $wpdb->update(
+                $wpdb->prefix . MBS_TABLE,
+                array( 'modification_token' => $token ),
+                array( 'ref' => $booking->ref )
+            );
+        }
+
         $url = add_query_arg( array(
             'mbs_pay'  => '1',
             'ref'      => $booking->ref,
-            'amount'   => $booking->amount,
-            'nonce'    => wp_create_nonce( 'mbs_pay_' . $booking->ref ),
+            'token'    => $token,
         ), wc_get_checkout_url() );
 
         return $url;
@@ -96,19 +108,28 @@ class MBS_Woo_Payment {
         if ( ! isset( $_GET['mbs_pay'] ) || $_GET['mbs_pay'] !== '1' ) return;
         if ( ! self::is_available() ) return;
 
-        $ref    = sanitize_text_field( $_GET['ref'] ?? '' );
-        $amount = floatval( $_GET['amount'] ?? 0 );
-        $nonce  = sanitize_text_field( $_GET['nonce'] ?? '' );
+        $ref   = sanitize_text_field( $_GET['ref'] ?? '' );
+        $token = sanitize_text_field( $_GET['token'] ?? '' );
 
-        if ( ! $ref || ! $amount || ! wp_verify_nonce( $nonce, 'mbs_pay_' . $ref ) ) {
+        if ( ! $ref || ! $token ) {
             wp_die( 'Invalid payment link. Please contact us for assistance.' );
         }
 
-        // Verify booking exists and is payable
+        // Verify booking exists and token matches
         $booking = MBS_Bookings::get( $ref );
-        if ( ! $booking || ! in_array( $booking->status, array( 'confirmed' ) ) ) {
+        if ( ! $booking ) {
+            wp_die( 'Booking not found. Please contact us for assistance.' );
+        }
+
+        if ( empty( $booking->modification_token ) || ! hash_equals( $booking->modification_token, $token ) ) {
+            wp_die( 'Invalid payment link. Please contact us for assistance.' );
+        }
+
+        if ( ! in_array( $booking->status, array( 'confirmed' ) ) ) {
             wp_die( 'This booking is not available for payment. It may have already been paid or cancelled.' );
         }
+
+        $amount = floatval( $booking->amount );
 
         // Clear cart and add our product
         WC()->cart->empty_cart();
