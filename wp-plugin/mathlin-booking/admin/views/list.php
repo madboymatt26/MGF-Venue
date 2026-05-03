@@ -82,9 +82,11 @@
             </tr>
         </thead>
         <tbody>
-        <?php foreach ( $bookings as $b ) :
-            $spaces   = MBS_Bookings::get_spaces();
-            $is_daily = isset( $spaces[ $b->space ] ) && $spaces[ $b->space ]['unit'] === 'day';
+        <?php
+        // PERF-001: Get spaces once outside the loop
+        $spaces = MBS_Bookings::get_spaces();
+        foreach ( $bookings as $b ) :
+            $is_daily = ! empty( $b->all_day );
         ?>
             <tr id="nms-row-<?php echo esc_attr( $b->ref ); ?>">
                 <td><strong><?php echo esc_html( $b->ref ); ?></strong></td>

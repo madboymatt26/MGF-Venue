@@ -274,15 +274,18 @@ class MBS_Public {
     // ── AJAX: lookup booking by reference ──────────────────────────────────────
     public function ajax_lookup_booking() {
         check_ajax_referer( 'mbs_public_nonce', 'nonce' );
-        $ref = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
+        $ref   = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
+        $email = sanitize_email( $_POST['email'] ?? '' );
 
-        if ( ! $ref ) {
-            wp_send_json_error( array( 'message' => 'Please enter a booking reference.' ) );
+        if ( ! $ref || ! $email ) {
+            wp_send_json_error( array( 'message' => 'Please enter your booking reference and email address.' ) );
         }
 
         $booking = MBS_Bookings::get( $ref );
-        if ( ! $booking ) {
-            wp_send_json_error( array( 'message' => 'No booking found with reference ' . $ref . '. Please check and try again.' ) );
+
+        // SEC-002: Verify email matches to prevent reference enumeration
+        if ( ! $booking || strtolower( $booking->email ) !== strtolower( $email ) ) {
+            wp_send_json_error( array( 'message' => 'No booking found with that reference and email combination. Please check and try again.' ) );
         }
 
         $spaces   = MBS_Bookings::get_spaces();
@@ -329,8 +332,10 @@ class MBS_Public {
      * Returns a flat array of blocked date strings for "all spaces" blocks.
      */
     private static function get_blocked_dates_for_frontend() {
-        $from = date( 'Y-m-d' );
-        $to   = date( 'Y-m-d', strtotime( '+6 months' ) );
+        // PERF-003: Only load 2 months of blocked dates (current + next)
+        // Additional months loaded via AJAX when user navigates calendar
+        $from = date( 'Y-m-01' );
+        $to   = date( 'Y-m-t', strtotime( '+1 month' ) );
 
         $entries = MBS_Blocked_Dates::get_for_range( $from, $to );
         $blocked = array();

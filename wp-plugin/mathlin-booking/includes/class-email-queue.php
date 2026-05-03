@@ -122,6 +122,9 @@ class MBS_Email_Queue {
         if ( $sent > 0 || $failed > 0 ) {
             error_log( "[Mathlin Booking] Email queue: {$sent} sent, {$failed} failed/retrying." );
         }
+
+        // UX-006: Clean up old entries
+        self::cleanup();
     }
 
     /**

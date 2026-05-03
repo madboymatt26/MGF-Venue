@@ -95,6 +95,15 @@ class MBS_Hirer_Portal {
     public function ajax_register() {
         check_ajax_referer( 'mbs_public_nonce', 'nonce' );
 
+        // SEC-005: Rate limit registrations by IP
+        $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+        $rate_key = 'mbs_reg_' . md5( $ip );
+        $attempts = (int) get_transient( $rate_key );
+        if ( $attempts >= 5 ) {
+            wp_send_json_error( array( 'message' => 'Too many registration attempts. Please try again in an hour.' ) );
+        }
+        set_transient( $rate_key, $attempts + 1, 3600 );
+
         $name  = sanitize_text_field( $_POST['name'] ?? '' );
         $email = sanitize_email( $_POST['email'] ?? '' );
         $phone = sanitize_text_field( $_POST['phone'] ?? '' );

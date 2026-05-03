@@ -564,6 +564,26 @@ class MBS_Admin {
         global $wpdb;
         $table = $wpdb->prefix . MBS_TABLE;
 
+        // SEC-006: Check for conflicts when admin edits date/time/space
+        $new_space = sanitize_text_field( $_POST['space'] );
+        $new_date  = sanitize_text_field( $_POST['booking_date'] );
+        $new_start = sanitize_text_field( $_POST['start_time'] ?? '' );
+        $new_end   = sanitize_text_field( $_POST['end_time'] ?? '' );
+        $new_allday = ! empty( $_POST['all_day'] );
+
+        if ( $new_space !== $booking->space || $new_date !== $booking->booking_date ||
+             $new_start !== $booking->start_time || $new_end !== $booking->end_time ) {
+            $conflicts = MBS_Bookings::check_conflicts(
+                $new_space, $new_date,
+                $new_allday ? null : $new_start,
+                $new_allday ? null : $new_end,
+                $new_allday, $ref
+            );
+            if ( ! empty( $conflicts ) ) {
+                wp_send_json_error( 'This change conflicts with an existing booking: ' . MBS_Bookings::format_conflict_message( $conflicts ) );
+            }
+        }
+
         $update = array(
             'name'         => sanitize_text_field( $_POST['name'] ),
             'organisation' => sanitize_text_field( $_POST['organisation'] ?? '' ),

@@ -344,6 +344,19 @@ jQuery(function ($) {
 
         $btn.prop('disabled', true).text('Submitting…');
 
+        // UX-004: Confirm before submitting recurring bookings
+        if ($('#nms-recurring').val() === '1' && $('#nms-repeat-until').val()) {
+            var dateFrom = $('#nms-date').val();
+            var repeatUntil = $('#nms-repeat-until').val();
+            if (dateFrom && repeatUntil) {
+                var weeks = Math.max(1, Math.floor((new Date(repeatUntil + 'T00:00:00') - new Date(dateFrom + 'T00:00:00')) / (7 * 86400000)) + 1);
+                if (!confirm('You are about to create up to ' + weeks + ' weekly bookings. Dates with conflicts will be skipped.\n\nContinue?')) {
+                    $btn.prop('disabled', false).text('Submit Booking Request');
+                    return;
+                }
+            }
+        }
+
         var data = $form.serializeArray();
         data.push({ name: 'action', value: 'mbs_submit_booking' });
 

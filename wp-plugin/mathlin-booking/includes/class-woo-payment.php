@@ -74,6 +74,9 @@ class MBS_Woo_Payment {
     public static function generate_payment_url( $booking ) {
         if ( ! self::is_available() ) return '';
 
+        // UX-002: Don't generate payment URLs for £0 bookings (scout use etc)
+        if ( (float) $booking->amount <= 0 ) return '';
+
         $product_id = self::get_payment_product_id();
         if ( ! $product_id ) return '';
 
@@ -168,14 +171,18 @@ class MBS_Woo_Payment {
     }
 
     /**
-     * Set the correct price for the cart item.
+     * Set the correct price for the cart item — always from database to prevent tampering.
      */
     public static function set_cart_item_price( $cart ) {
         if ( is_admin() && ! defined( 'DOING_AJAX' ) ) return;
 
         foreach ( $cart->get_cart() as $cart_item ) {
-            if ( isset( $cart_item['mbs_booking_amount'] ) ) {
-                $cart_item['data']->set_price( $cart_item['mbs_booking_amount'] );
+            if ( isset( $cart_item['mbs_booking_ref'] ) ) {
+                // SEC-004: Always read price from database, not cart session
+                $booking = MBS_Bookings::get( $cart_item['mbs_booking_ref'] );
+                if ( $booking ) {
+                    $cart_item['data']->set_price( $booking->amount );
+                }
             }
         }
     }

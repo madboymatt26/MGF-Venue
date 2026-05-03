@@ -82,10 +82,17 @@ class MBS_Bookings {
 
         $ref     = self::generate_ref();
         $all_day = ! empty( $data['all_day'] );
-        $scout_use = ! empty( $data['scout_use'] );
         $date_from = sanitize_text_field( $data['booking_date'] );
         $date_to   = sanitize_text_field( $data['booking_date_end'] ?? $data['booking_date'] );
         $num_days  = max( 1, (int) round( ( strtotime( $date_to ) - strtotime( $date_from ) ) / 86400 ) + 1 );
+
+        // SEC-003: Validate scout_use server-side — only allow if email is in volunteer list
+        $scout_use = false;
+        if ( ! empty( $data['scout_use'] ) ) {
+            $vol_emails = array_filter( array_map( 'trim', explode( "\n", get_option( 'mbs_scout_volunteer_emails', '' ) ) ) );
+            $submitter_email = sanitize_email( $data['email'] ?? '' );
+            $scout_use = in_array( strtolower( $submitter_email ), array_map( 'strtolower', $vol_emails ) );
+        }
 
         $cost = self::calculate_cost(
             sanitize_text_field( $data['space'] ),
@@ -139,10 +146,29 @@ class MBS_Bookings {
             $insert['user_id'] = get_current_user_id();
         }
 
+        // SEC-001: Use transaction to prevent race condition double bookings
+        $wpdb->query( 'START TRANSACTION' );
+
+        // Re-check conflicts inside the transaction
+        $space_val = sanitize_text_field( $data['space'] );
+        $tx_conflicts = self::check_conflicts(
+            $space_val, $date_from,
+            $all_day ? null : ( $data['start_time'] ?? '' ),
+            $all_day ? null : ( $data['end_time'] ?? '' ),
+            $all_day
+        );
+        if ( ! empty( $tx_conflicts ) ) {
+            $wpdb->query( 'ROLLBACK' );
+            return new WP_Error( 'conflict', self::format_conflict_message( $tx_conflicts ) );
+        }
+
         $result = $wpdb->insert( $table, $insert );
         if ( $result === false ) {
+            $wpdb->query( 'ROLLBACK' );
             return new WP_Error( 'db_error', 'Could not save booking.' );
         }
+
+        $wpdb->query( 'COMMIT' );
 
         // Audit log
         MBS_Audit_Log::log( $ref, 'created', 'Booking created by ' . sanitize_text_field( $data['name'] ) . ' for ' . sanitize_text_field( $data['space'] ) . ' on ' . sanitize_text_field( $data['booking_date'] ), 0 );
@@ -228,15 +254,29 @@ class MBS_Bookings {
         $table   = $wpdb->prefix . MBS_TABLE;
         $from    = sprintf( '%04d-%02d-01', $year, $month );
         $to      = date( 'Y-m-t', strtotime( $from ) );
+
+        // UX-005: Include multi-day bookings that span into this month
         $results = $wpdb->get_results( $wpdb->prepare(
-            "SELECT booking_date, COUNT(*) as count FROM {$table}
-             WHERE booking_date BETWEEN %s AND %s AND status NOT IN ('cancelled', 'archived')
-             GROUP BY booking_date",
-            $from, $to
+            "SELECT booking_date, booking_date_end, COUNT(*) as count FROM {$table}
+             WHERE (
+                 (booking_date BETWEEN %s AND %s)
+                 OR (booking_date_end IS NOT NULL AND booking_date <= %s AND booking_date_end >= %s)
+             )
+             AND status NOT IN ('cancelled', 'archived')
+             GROUP BY booking_date, booking_date_end",
+            $from, $to, $to, $from
         ) );
+
         $map = array();
         foreach ( $results as $row ) {
-            $map[ $row->booking_date ] = (int) $row->count;
+            // Expand multi-day bookings into individual dates
+            $start = max( strtotime( $from ), strtotime( $row->booking_date ) );
+            $end   = $row->booking_date_end ? min( strtotime( $to ), strtotime( $row->booking_date_end ) ) : $start;
+
+            for ( $d = $start; $d <= $end; $d += 86400 ) {
+                $date_str = date( 'Y-m-d', $d );
+                $map[ $date_str ] = ( $map[ $date_str ] ?? 0 ) + (int) $row->count;
+            }
         }
         return $map;
     }

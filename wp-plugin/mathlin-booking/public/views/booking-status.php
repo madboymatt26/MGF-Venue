@@ -15,17 +15,19 @@ if ( isset( $_GET['mbs_modify'] ) && $_GET['mbs_modify'] === '1' ) {
     <div class="nms-form-section" style="max-width:500px;">
         <form id="nms-status-form" class="nms-form" style="gap:1rem;">
             <?php wp_nonce_field( 'mbs_public_nonce', 'nonce' ); ?>
-            <div class="nms-form-row" style="grid-template-columns:1fr auto;">
-                <div class="nms-form-group">
-                    <label for="nms-status-ref">Booking Reference</label>
-                    <input type="text" id="nms-status-ref" name="ref" placeholder="e.g. MBS-ABC123" required
-                           style="text-transform:uppercase;" pattern="[A-Za-z0-9\-]+">
-                </div>
-                <div class="nms-form-group" style="justify-content:flex-end;">
-                    <button type="submit" class="nms-btn nms-btn-primary" id="nms-status-btn" style="margin-top:1.5rem;">
-                        Look Up
-                    </button>
-                </div>
+            <div class="nms-form-group">
+                <label for="nms-status-ref">Booking Reference</label>
+                <input type="text" id="nms-status-ref" name="ref" placeholder="e.g. MBS-ABC123" required
+                       style="text-transform:uppercase;" pattern="[A-Za-z0-9\-]+">
+            </div>
+            <div class="nms-form-group">
+                <label for="nms-status-email">Email Address</label>
+                <input type="email" id="nms-status-email" name="email" placeholder="The email used when booking" required>
+            </div>
+            <div class="nms-form-group">
+                <button type="submit" class="nms-btn nms-btn-primary" id="nms-status-btn" style="width:100%;">
+                    Look Up Booking
+                </button>
             </div>
         </form>
     </div>
@@ -38,10 +40,11 @@ jQuery(function($) {
     $('#nms-status-form').on('submit', function(e) {
         e.preventDefault();
         var ref  = $('#nms-status-ref').val().trim().toUpperCase();
+        var email = $('#nms-status-email').val().trim();
         var $btn = $('#nms-status-btn');
         var $res = $('#nms-status-result');
 
-        if (!ref) return;
+        if (!ref || !email) return;
 
         $btn.prop('disabled', true).text('Looking up…');
         $res.hide();
@@ -49,7 +52,8 @@ jQuery(function($) {
         $.post(NMS.ajax_url, {
             action: 'mbs_lookup_booking',
             nonce:  NMS.nonce,
-            ref:    ref
+            ref:    ref,
+            email:  email
         }, function(res) {
             $btn.prop('disabled', false).text('Look Up');
             if (res.success) {
