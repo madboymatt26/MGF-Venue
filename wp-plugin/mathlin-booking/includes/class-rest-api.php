@@ -19,7 +19,7 @@ if ( ! defined( 'ABSPATH' ) ) exit;
  */
 class MBS_Rest_API {
 
-    const NAMESPACE = 'mathlin/v1';
+    const API_NAMESPACE = 'mathlin/v1';
 
     public function init() {
         add_action( 'rest_api_init', array( $this, 'register_routes' ) );
@@ -27,7 +27,7 @@ class MBS_Rest_API {
 
     public function register_routes() {
 
-        register_rest_route( self::NAMESPACE, '/bookings/upcoming', array(
+        register_rest_route( self::API_NAMESPACE, '/bookings/upcoming', array(
             'methods'             => 'GET',
             'callback'            => array( $this, 'get_upcoming' ),
             'permission_callback' => '__return_true',
@@ -36,13 +36,13 @@ class MBS_Rest_API {
             ),
         ) );
 
-        register_rest_route( self::NAMESPACE, '/bookings/today', array(
+        register_rest_route( self::API_NAMESPACE, '/bookings/today', array(
             'methods'             => 'GET',
             'callback'            => array( $this, 'get_today' ),
             'permission_callback' => '__return_true',
         ) );
 
-        register_rest_route( self::NAMESPACE, '/bookings/calendar', array(
+        register_rest_route( self::API_NAMESPACE, '/bookings/calendar', array(
             'methods'             => 'GET',
             'callback'            => array( $this, 'get_calendar' ),
             'permission_callback' => '__return_true',
@@ -52,39 +52,39 @@ class MBS_Rest_API {
             ),
         ) );
 
-        register_rest_route( self::NAMESPACE, '/bookings/date/(?P<date>\d{4}-\d{2}-\d{2})', array(
+        register_rest_route( self::API_NAMESPACE, '/bookings/date/(?P<date>\d{4}-\d{2}-\d{2})', array(
             'methods'             => 'GET',
             'callback'            => array( $this, 'get_by_date' ),
             'permission_callback' => '__return_true',
         ) );
 
         // ── Public: iCal download for a single booking ──────────────────────────
-        register_rest_route( self::NAMESPACE, '/bookings/(?P<ref>[A-Z0-9\-]+)/ical', array(
+        register_rest_route( self::API_NAMESPACE, '/bookings/(?P<ref>[A-Z0-9\-]+)/ical', array(
             'methods'             => 'GET',
             'callback'            => array( $this, 'get_ical' ),
             'permission_callback' => '__return_true',
         ) );
 
         // ── Public: iCal feed for all upcoming bookings ───────────────────────
-        register_rest_route( self::NAMESPACE, '/bookings/ical', array(
+        register_rest_route( self::API_NAMESPACE, '/bookings/ical', array(
             'methods'             => 'GET',
             'callback'            => array( $this, 'get_ical_feed' ),
             'permission_callback' => '__return_true',
         ) );
 
-        register_rest_route( self::NAMESPACE, '/bookings', array(
+        register_rest_route( self::API_NAMESPACE, '/bookings', array(
             'methods'             => 'GET',
             'callback'            => array( $this, 'get_all' ),
             'permission_callback' => array( $this, 'admin_permission' ),
         ) );
 
-        register_rest_route( self::NAMESPACE, '/bookings/(?P<ref>[A-Z0-9\-]+)', array(
+        register_rest_route( self::API_NAMESPACE, '/bookings/(?P<ref>[A-Z0-9\-]+)', array(
             'methods'             => 'GET',
             'callback'            => array( $this, 'get_single' ),
             'permission_callback' => array( $this, 'admin_permission' ),
         ) );
 
-        register_rest_route( self::NAMESPACE, '/bookings/(?P<ref>[A-Z0-9\-]+)/status', array(
+        register_rest_route( self::API_NAMESPACE, '/bookings/(?P<ref>[A-Z0-9\-]+)/status', array(
             'methods'             => 'POST',
             'callback'            => array( $this, 'update_status' ),
             'permission_callback' => array( $this, 'admin_permission' ),
