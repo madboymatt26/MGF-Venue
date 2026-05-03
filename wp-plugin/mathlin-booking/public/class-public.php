@@ -233,6 +233,7 @@ class MBS_Public {
         wp_send_json_success( array(
             'ref'     => $result['ref'],
             'message' => 'Your booking request has been submitted! Reference: ' . $result['ref'],
+            'account_exists' => email_exists( sanitize_email( $_POST['email'] ) ) ? true : false,
         ) );
     }
 

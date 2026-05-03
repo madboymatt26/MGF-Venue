@@ -321,15 +321,28 @@ jQuery(function ($) {
 
                 // Show account creation prompt if not logged in
                 if (!NMS.is_logged_in) {
-                    msg += '<div id="nms-create-account-prompt" style="margin-top:16px;padding:16px;background:#f5f0ff;border-radius:8px;border:1px solid #e0d0f0;">' +
-                        '<p style="margin:0 0 8px;font-weight:700;color:#7413DC;">📋 Want to track your bookings?</p>' +
-                        '<p style="margin:0 0 12px;font-size:0.85rem;color:#6b7280;">Create an account to view all your bookings, invoices, and make future bookings faster. Your details are already saved — just set a password.</p>' +
-                        '<div style="display:flex;gap:8px;align-items:center;">' +
-                        '<input type="password" id="nms-quick-password" placeholder="Choose a password (min 8 chars)" style="flex:1;padding:8px 12px;border:1.5px solid #e5e7eb;border-radius:6px;font-size:0.9rem;">' +
-                        '<button type="button" id="nms-quick-register" class="nms-btn nms-btn-primary nms-btn-sm">Create Account</button>' +
-                        '</div>' +
-                        '<p id="nms-quick-reg-msg" style="margin:8px 0 0;font-size:0.8rem;"></p>' +
-                        '</div>';
+                    // Check if an account already exists for this email
+                    var bookerEmail = (NMS._lastBookingData && NMS._lastBookingData.email) || '';
+
+                    msg += '<div id="nms-create-account-prompt" style="margin-top:16px;padding:16px;background:#f5f0ff;border-radius:8px;border:1px solid #e0d0f0;">';
+
+                    if (bookerEmail && res.data.account_exists) {
+                        // Account exists — show login prompt
+                        msg += '<p style="margin:0 0 8px;font-weight:700;color:#7413DC;">📋 Track your bookings</p>' +
+                            '<p style="margin:0 0 12px;font-size:0.85rem;color:#6b7280;">You already have an account. Log in to view all your bookings, invoices, and make future bookings faster.</p>' +
+                            '<a href="' + (NMS.portal_url || '#') + '" class="nms-btn nms-btn-primary nms-btn-sm">Log In to My Bookings</a>';
+                    } else {
+                        // No account — show create prompt
+                        msg += '<p style="margin:0 0 8px;font-weight:700;color:#7413DC;">📋 Want to track your bookings?</p>' +
+                            '<p style="margin:0 0 12px;font-size:0.85rem;color:#6b7280;">Create an account to view all your bookings, invoices, and make future bookings faster. Your details are already saved — just set a password.</p>' +
+                            '<div style="display:flex;gap:8px;align-items:center;">' +
+                            '<input type="password" id="nms-quick-password" placeholder="Choose a password (min 8 chars)" style="flex:1;padding:8px 12px;border:1.5px solid #e5e7eb;border-radius:6px;font-size:0.9rem;">' +
+                            '<button type="button" id="nms-quick-register" class="nms-btn nms-btn-primary nms-btn-sm">Create Account</button>' +
+                            '</div>' +
+                            '<p id="nms-quick-reg-msg" style="margin:8px 0 0;font-size:0.8rem;"></p>';
+                    }
+
+                    msg += '</div>';
                 }
 
                 $ok.html(msg).show();
