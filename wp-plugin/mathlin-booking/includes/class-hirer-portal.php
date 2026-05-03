@@ -16,8 +16,10 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 class MBS_Hirer_Portal {
 
     const ROLE = 'mbs_hirer';
+    const MANAGER_ROLE = 'mbs_booking_manager';
 
     public function init() {
+        add_action( 'init', array( $this, 'register_roles' ) );
         add_action( 'init', array( $this, 'register_role' ) );
         add_shortcode( 'mathlin_portal', array( $this, 'shortcode_portal' ) );
         add_action( 'wp_ajax_mbs_hirer_register',    array( $this, 'ajax_register' ) );
@@ -30,14 +32,30 @@ class MBS_Hirer_Portal {
     }
 
     /**
-     * Register the hirer role on plugin init.
+     * Register roles on plugin init.
      */
-    public function register_role() {
+    public function register_roles() {
+        // Hirer role — public users who book the hall
         if ( ! get_role( self::ROLE ) ) {
             add_role( self::ROLE, 'Venue Hirer', array(
                 'read' => true,
             ) );
         }
+
+        // Booking Manager role — volunteers who manage bookings but aren't full admins
+        if ( ! get_role( self::MANAGER_ROLE ) ) {
+            add_role( self::MANAGER_ROLE, 'Booking Manager', array(
+                'read'                 => true,
+                'mbs_manage_bookings'  => true,
+            ) );
+        }
+
+        // Ensure admins also have the booking capability
+        $admin_role = get_role( 'administrator' );
+        if ( $admin_role && ! $admin_role->has_cap( 'mbs_manage_bookings' ) ) {
+            $admin_role->add_cap( 'mbs_manage_bookings' );
+        }
+    }
     }
 
     /**
@@ -45,6 +63,9 @@ class MBS_Hirer_Portal {
      */
     public static function deactivate() {
         remove_role( self::ROLE );
+        remove_role( self::MANAGER_ROLE );
+        $admin_role = get_role( 'administrator' );
+        if ( $admin_role ) $admin_role->remove_cap( 'mbs_manage_bookings' );
     }
 
     /**

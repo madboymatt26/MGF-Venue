@@ -175,7 +175,9 @@ $kitchen_price = MBS_Bookings::get_kitchen_price();
                     <button class="button nms-btn-archive" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">📦 Archive</button>
                 <?php endif; ?>
                 <a href="?page=mathlin-booking&action=invoice&ref=<?php echo esc_attr( $booking->ref ); ?>" class="button">🧾 View Invoice</a>
+                <?php if ( current_user_can( 'manage_options' ) ) : ?>
                 <button class="button nms-btn-delete" data-ref="<?php echo esc_attr( $booking->ref ); ?>">🗑 Delete Booking</button>
+                <?php endif; ?>
                 <?php if ( ! empty( $booking->series_id ) ) : ?>
                 <hr style="margin:0.5rem 0;border:none;border-top:1px solid var(--border);">
                 <p style="font-size:0.8rem;color:var(--text-muted);margin:0 0 0.5rem;">Series (<?php echo count( MBS_Bookings::get_series( $booking->series_id ) ); ?> bookings):</p>

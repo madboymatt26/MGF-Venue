@@ -12,7 +12,7 @@ class MBS_Dashboard_Widget {
     }
 
     public function register_widget() {
-        if ( ! current_user_can( 'manage_options' ) ) return;
+        if ( ! current_user_can( 'manage_options' ) && ! current_user_can( 'mbs_manage_bookings' ) ) return;
 
         wp_add_dashboard_widget(
             'mbs_dashboard_widget',
@@ -63,6 +63,28 @@ class MBS_Dashboard_Widget {
             .mbs-dw-links { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
             .mbs-dw-links a { font-size: 12px; }
         </style>
+
+        <!-- Alerts -->
+        <?php
+        $email_stats    = MBS_Email_Queue::get_stats();
+        $pending_reqs   = MBS_Modification::get_pending_count();
+        if ( $email_stats['failed'] > 0 ) : ?>
+        <div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:0.85rem;color:#991b1b;">
+            ⚠️ <strong><?php echo $email_stats['failed']; ?> email(s) failed to send</strong> after 3 retries.
+            <a href="<?php echo admin_url( 'admin.php?page=mathlin-analytics' ); ?>" style="color:#991b1b;">View details →</a>
+        </div>
+        <?php endif; ?>
+        <?php if ( $email_stats['pending'] > 0 ) : ?>
+        <div style="background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:0.85rem;color:#856404;">
+            📧 <?php echo $email_stats['pending']; ?> email(s) queued for retry.
+        </div>
+        <?php endif; ?>
+        <?php if ( $pending_reqs > 0 ) : ?>
+        <div style="background:#f5f0ff;border:1px solid #e0d0f0;border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:0.85rem;color:#7413DC;">
+            📝 <strong><?php echo $pending_reqs; ?> change request(s)</strong> awaiting review.
+            <a href="<?php echo admin_url( 'admin.php?page=mathlin-requests' ); ?>" style="color:#7413DC;">Review →</a>
+        </div>
+        <?php endif; ?>
 
         <!-- Quick stats -->
         <div class="mbs-dw-stats">

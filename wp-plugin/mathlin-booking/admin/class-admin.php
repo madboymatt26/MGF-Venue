@@ -29,95 +29,55 @@ class MBS_Admin {
 
     // ── Menu ───────────────────────────────────────────────────────────────────
     public function add_menu() {
+        // Booking management pages — accessible to Booking Managers + Admins
+        $booking_cap = 'mbs_manage_bookings';
+        // Settings/config pages — admin only
+        $admin_cap   = 'manage_options';
+
         add_menu_page(
             'Scout Bookings',
             'Scout Bookings',
-            'manage_options',
+            $booking_cap,
             'mathlin-booking',
             array( $this, 'render_dashboard' ),
             'dashicons-calendar-alt',
             30
         );
-        add_submenu_page(
-            'mathlin-booking',
-            'All Bookings',
-            'All Bookings',
-            'manage_options',
-            'mathlin-booking',
-            array( $this, 'render_dashboard' )
-        );
-        add_submenu_page(
-            'mathlin-booking',
-            'Calendar',
-            'Calendar',
-            'manage_options',
-            'mathlin-calendar',
-            array( $this, 'render_calendar' )
-        );
-        add_submenu_page(
-            'mathlin-booking',
-            'Settings',
-            'Settings',
-            'manage_options',
-            'mathlin-settings',
-            array( $this, 'render_settings' )
-        );
-        add_submenu_page(
-            'mathlin-booking',
-            'Archived',
-            'Archived',
-            'manage_options',
-            'mathlin-archived',
-            array( $this, 'render_archived' )
-        );
-        add_submenu_page(
-            'mathlin-booking',
-            'Blocked Dates',
-            'Blocked Dates',
-            'manage_options',
-            'mathlin-blocked',
-            array( $this, 'render_blocked' )
-        );
-        add_submenu_page(
-            'mathlin-booking',
-            'Email Templates',
-            'Email Templates',
-            'manage_options',
-            'mathlin-emails',
-            array( $this, 'render_email_templates' )
-        );
-        add_submenu_page(
-            'mathlin-booking',
-            'Analytics',
-            'Analytics',
-            'manage_options',
-            'mathlin-analytics',
-            array( $this, 'render_analytics' )
-        );
-        add_submenu_page(
-            'mathlin-booking',
-            'Custom Fields',
-            'Custom Fields',
-            'manage_options',
-            'mathlin-custom-fields',
-            array( $this, 'render_custom_fields' )
-        );
+        add_submenu_page( 'mathlin-booking', 'All Bookings', 'All Bookings', $booking_cap, 'mathlin-booking', array( $this, 'render_dashboard' ) );
+        add_submenu_page( 'mathlin-booking', 'Calendar', 'Calendar', $booking_cap, 'mathlin-calendar', array( $this, 'render_calendar' ) );
+        add_submenu_page( 'mathlin-booking', 'Archived', 'Archived', $booking_cap, 'mathlin-archived', array( $this, 'render_archived' ) );
+        add_submenu_page( 'mathlin-booking', 'Blocked Dates', 'Blocked Dates', $booking_cap, 'mathlin-blocked', array( $this, 'render_blocked' ) );
+        // Settings pages — admin only
+        add_submenu_page( 'mathlin-booking', 'Settings', 'Settings', $admin_cap, 'mathlin-settings', array( $this, 'render_settings' ) );
+        add_submenu_page( 'mathlin-booking', 'Email Templates', 'Email Templates', $admin_cap, 'mathlin-emails', array( $this, 'render_email_templates' ) );
+        add_submenu_page( 'mathlin-booking', 'Custom Fields', 'Custom Fields', $admin_cap, 'mathlin-custom-fields', array( $this, 'render_custom_fields' ) );
+
+        // Booking management pages — accessible to Booking Managers
+        add_submenu_page( 'mathlin-booking', 'Analytics', 'Analytics', $booking_cap, 'mathlin-analytics', array( $this, 'render_analytics' ) );
+
         $pending_count = MBS_Modification::get_pending_count();
         $requests_label = 'Requests';
         if ( $pending_count > 0 ) {
             $requests_label .= ' <span class="awaiting-mod count-' . $pending_count . '"><span class="pending-count">' . $pending_count . '</span></span>';
         }
-        add_submenu_page(
-            'mathlin-booking',
-            'Change Requests',
-            $requests_label,
-            'manage_options',
-            'mathlin-requests',
-            array( $this, 'render_requests' )
-        );
+        add_submenu_page( 'mathlin-booking', 'Change Requests', $requests_label, $booking_cap, 'mathlin-requests', array( $this, 'render_requests' ) );
     }
 
     // ── Assets ─────────────────────────────────────────────────────────────────
+    /**
+     * Check if current user can manage bookings (admin or booking manager).
+     */
+    private static function can_manage_bookings() {
+        return self::can_manage_bookings() || current_user_can( 'mbs_manage_bookings' );
+    }
+
+    /**
+     * Check if current user can delete bookings (admin only).
+     */
+    private static function can_delete_bookings() {
+        return current_user_can( 'manage_options' );
+    }
+
     public function enqueue_assets( $hook ) {
         if ( strpos( $hook, 'mathlin' ) === false ) return;
         wp_enqueue_style(  'mbs-admin', MBS_PLUGIN_URL . 'admin/admin.css', array(), MBS_VERSION );
@@ -191,7 +151,7 @@ class MBS_Admin {
     // ── AJAX handlers ──────────────────────────────────────────────────────────
     public function ajax_update_status() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
+        if ( ! self::can_manage_bookings() ) wp_die( 'Forbidden', 403 );
 
         $ref    = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
         $status = sanitize_text_field( $_POST['status'] ?? '' );
@@ -219,7 +179,8 @@ class MBS_Admin {
 
     public function ajax_delete_booking() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
+        // Hard delete restricted to administrators only
+        if ( ! self::can_delete_bookings() ) wp_die( 'Only administrators can permanently delete bookings.', 403 );
 
         $ref    = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
         $result = MBS_Bookings::delete( $ref );
@@ -228,7 +189,7 @@ class MBS_Admin {
 
     public function ajax_get_invoice() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
+        if ( ! self::can_manage_bookings() ) wp_die( 'Forbidden', 403 );
 
         $ref     = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
         $booking = MBS_Bookings::get( $ref );
@@ -400,7 +361,7 @@ class MBS_Admin {
 
     public function ajax_archive_past() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
+        if ( ! self::can_manage_bookings() ) wp_die( 'Forbidden', 403 );
 
         $count = MBS_Bookings::archive_past_bookings();
         wp_send_json_success( array( 'archived' => $count ) );
@@ -430,7 +391,7 @@ class MBS_Admin {
 
     public function ajax_add_blocked() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
+        if ( ! self::can_manage_bookings() ) wp_die( 'Forbidden', 403 );
 
         $date_from = sanitize_text_field( $_POST['date_from'] ?? '' );
         $date_to   = sanitize_text_field( $_POST['date_to'] ?? '' );
@@ -450,7 +411,7 @@ class MBS_Admin {
 
     public function ajax_delete_blocked() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
+        if ( ! self::can_manage_bookings() ) wp_die( 'Forbidden', 403 );
 
         $id = absint( $_POST['id'] ?? 0 );
         if ( ! $id ) wp_send_json_error( 'Invalid ID.' );
@@ -461,7 +422,7 @@ class MBS_Admin {
 
     public function ajax_clear_expired_blocks() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
+        if ( ! self::can_manage_bookings() ) wp_die( 'Forbidden', 403 );
 
         $count = MBS_Blocked_Dates::clear_expired();
         wp_send_json_success( array( 'cleared' => $count ) );
@@ -493,7 +454,7 @@ class MBS_Admin {
 
     public function ajax_save_admin_notes() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
+        if ( ! self::can_manage_bookings() ) wp_die( 'Forbidden', 403 );
 
         $ref   = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
         $notes = sanitize_textarea_field( $_POST['admin_notes'] ?? '' );
@@ -504,7 +465,7 @@ class MBS_Admin {
 
     public function ajax_chase_payment() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
+        if ( ! self::can_manage_bookings() ) wp_die( 'Forbidden', 403 );
 
         $ref     = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
         $booking = MBS_Bookings::get( $ref );
@@ -565,7 +526,7 @@ class MBS_Admin {
 
     public function ajax_edit_booking() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
+        if ( ! self::can_manage_bookings() ) wp_die( 'Forbidden', 403 );
 
         $ref = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
         $booking = MBS_Bookings::get( $ref );
@@ -733,7 +694,7 @@ class MBS_Admin {
 
     public function ajax_approve_request() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
+        if ( ! self::can_manage_bookings() ) wp_die( 'Forbidden', 403 );
 
         $id = absint( $_POST['id'] ?? 0 );
         if ( ! $id ) wp_send_json_error( 'Invalid request ID.' );
@@ -748,7 +709,7 @@ class MBS_Admin {
 
     public function ajax_reject_request() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
+        if ( ! self::can_manage_bookings() ) wp_die( 'Forbidden', 403 );
 
         $id     = absint( $_POST['id'] ?? 0 );
         $reason = sanitize_textarea_field( $_POST['reason'] ?? '' );
@@ -764,7 +725,7 @@ class MBS_Admin {
 
     public function ajax_bulk_action() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
+        if ( ! self::can_manage_bookings() ) wp_die( 'Forbidden', 403 );
 
         $action = sanitize_text_field( $_POST['bulk_action'] ?? '' );
         $refs   = $_POST['refs'] ?? array();
