@@ -15,11 +15,20 @@ class MBS_Woo_Payment {
     const PRODUCT_SLUG = 'mbs-booking-payment';
 
     public function init() {
-        // Only load if WooCommerce is active
+        // Register hooks on 'init' to guarantee WooCommerce is loaded
+        // (plugins_loaded order is not guaranteed between plugins)
+        add_action( 'init', array( $this, 'register_woo_hooks' ) );
+    }
+
+    /**
+     * Register WooCommerce hooks — called on 'init' when WooCommerce is guaranteed loaded.
+     */
+    public function register_woo_hooks() {
         if ( ! class_exists( 'WooCommerce' ) ) return;
 
         add_action( 'woocommerce_order_status_completed',  array( $this, 'on_order_completed' ) );
         add_action( 'woocommerce_order_status_processing', array( $this, 'on_order_completed' ) );
+        add_action( 'woocommerce_payment_complete',        array( $this, 'on_order_completed' ) );
         add_action( 'woocommerce_thankyou',                array( $this, 'thankyou_message' ) );
 
         // REST endpoint for generating payment links
@@ -205,11 +214,17 @@ class MBS_Woo_Payment {
     }
 
     /**
-     * When a WooCommerce order is completed/processing, update the booking to "paid".
+     * When a WooCommerce order is completed/processing/paid, update the booking to "paid".
+     * Guarded against duplicate processing via order meta flag.
      */
     public function on_order_completed( $order_id ) {
         $order = wc_get_order( $order_id );
         if ( ! $order ) return;
+
+        // Guard: skip if we've already processed this order
+        if ( $order->get_meta( '_mbs_payment_processed' ) === 'yes' ) return;
+
+        $processed_any = false;
 
         foreach ( $order->get_items() as $item ) {
             $ref = $item->get_meta( '_mbs_booking_ref' );
@@ -218,13 +233,18 @@ class MBS_Woo_Payment {
             $booking = MBS_Bookings::get( $ref );
             if ( ! $booking ) continue;
 
-            // Only update if currently confirmed (not already paid)
+            // Only update if currently confirmed (not already paid/cancelled)
             if ( $booking->status === 'confirmed' ) {
                 MBS_Bookings::update_status( $ref, 'paid' );
-                MBS_Audit_Log::log( $ref, 'paid', 'Payment received via WooCommerce (Order #' . $order_id . ')', 0 );
+                MBS_Audit_Log::log( $ref, 'paid', 'Payment received via WooCommerce Order #' . $order_id . '. Status updated to Paid.', 0 );
                 MBS_Email::notify_paid( $booking );
 
-                // Store order ID on the booking for reference
+                // Add WooCommerce order note for admin visibility
+                $order->add_order_note(
+                    sprintf( 'Mathlin Booking %s automatically marked as Paid.', $ref )
+                );
+
+                // Store order ID on the booking for cross-reference
                 global $wpdb;
                 $table = $wpdb->prefix . MBS_TABLE;
                 $wpdb->update(
@@ -232,7 +252,18 @@ class MBS_Woo_Payment {
                     array( 'admin_notes' => trim( $booking->admin_notes . "\nPayment: WooCommerce Order #" . $order_id ) ),
                     array( 'ref' => $ref )
                 );
+
+                // Save booking ref as order-level meta for easier lookup
+                $order->update_meta_data( '_mbs_booking_ref', $ref );
+
+                $processed_any = true;
             }
+        }
+
+        // Mark order as processed to prevent duplicate runs
+        if ( $processed_any ) {
+            $order->update_meta_data( '_mbs_payment_processed', 'yes' );
+            $order->save();
         }
     }
 
