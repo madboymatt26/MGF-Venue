@@ -34,16 +34,29 @@ class MBS_Admin {
         // Settings/config pages — admin only
         $admin_cap   = 'manage_options';
 
+        // Pending booking count for notification badges
+        $pending_bookings = MBS_Bookings::get_pending_count();
+        $bookings_label = 'All Bookings';
+        if ( $pending_bookings > 0 ) {
+            $bookings_label .= ' <span class="awaiting-mod count-' . $pending_bookings . '"><span class="pending-count">' . $pending_bookings . '</span></span>';
+        }
+
+        // Parent menu — show pending bookings count in the top-level menu item
+        $menu_label = 'Scout Bookings';
+        if ( $pending_bookings > 0 ) {
+            $menu_label .= ' <span class="update-plugins count-' . $pending_bookings . '"><span class="plugin-count">' . $pending_bookings . '</span></span>';
+        }
+
         add_menu_page(
             'Scout Bookings',
-            'Scout Bookings',
+            $menu_label,
             $booking_cap,
             'mathlin-booking',
             array( $this, 'render_dashboard' ),
             'dashicons-calendar-alt',
             30
         );
-        add_submenu_page( 'mathlin-booking', 'All Bookings', 'All Bookings', $booking_cap, 'mathlin-booking', array( $this, 'render_dashboard' ) );
+        add_submenu_page( 'mathlin-booking', 'All Bookings', $bookings_label, $booking_cap, 'mathlin-booking', array( $this, 'render_dashboard' ) );
         add_submenu_page( 'mathlin-booking', 'Calendar', 'Calendar', $booking_cap, 'mathlin-calendar', array( $this, 'render_calendar' ) );
         add_submenu_page( 'mathlin-booking', 'Archived', 'Archived', $booking_cap, 'mathlin-archived', array( $this, 'render_archived' ) );
         add_submenu_page( 'mathlin-booking', 'Blocked Dates', 'Blocked Dates', $booking_cap, 'mathlin-blocked', array( $this, 'render_blocked' ) );

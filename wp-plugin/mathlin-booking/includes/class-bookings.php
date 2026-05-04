@@ -588,6 +588,15 @@ class MBS_Bookings {
     }
 
     /**
+     * Count bookings with 'pending' status.
+     */
+    public static function get_pending_count() {
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_TABLE;
+        return (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status = 'pending'" );
+    }
+
+    /**
      * Get stats with financial year support (April to March).
      */
     public static function get_stats() {
