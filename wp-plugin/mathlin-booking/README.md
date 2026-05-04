@@ -2,7 +2,7 @@
 
 A comprehensive WordPress venue booking plugin built for Needham Market Scout Group, with Home Assistant integration.
 
-**Current Version:** 2.10.0  
+**Current Version:** 2.10.1  
 **Requires WordPress:** 5.0+  
 **Requires PHP:** 7.4+  
 **Tested with WordPress:** 6.7  
@@ -111,7 +111,11 @@ Base: `/wp-json/mathlin/v1/`
 
 ## Changelog
 
-### v2.10.0 (Latest)
+### v2.10.1 (Latest)
+- **Fix:** Calendar dots now refresh after a booking is submitted
+- **Fix:** Calendar auto-refreshes when sidebar shows bookings not reflected in dots (stale data detection)
+
+### v2.10.0
 - **Critical Fix:** `can_manage_bookings()` had infinite recursion (called itself instead of `current_user_can`), causing all admin AJAX handlers to crash silently
 - **Fix:** All `wp_die()` calls in AJAX handlers replaced with `wp_send_json_error()` for proper JSON responses
 - **Fix:** Mobile password input on account creation prompt now renders correctly (was collapsing to tiny square)

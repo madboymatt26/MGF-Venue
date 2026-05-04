@@ -149,6 +149,11 @@ jQuery(function ($) {
 
             html += '<button class="nms-btn nms-btn-primary nms-btn-sm nms-prefill-date" data-date="' + dateStr + '">+ Book this date</button>';
             $sidebar.html(html);
+
+            // If sidebar shows bookings but calendar dot is missing, refresh calendar
+            if (bookings.length > 0 && !calData[dateStr]) {
+                loadCalendar(calYear, calMonth);
+            }
         });
     }
 
@@ -422,6 +427,8 @@ jQuery(function ($) {
                 $ok.html(msg).show();
                 $form[0].reset();
                 updateCost();
+                // Refresh calendar dots to show the new booking
+                loadCalendar(calYear, calMonth);
                 $('html, body').animate({ scrollTop: $ok.offset().top - 80 }, 400);
             } else {
                 $err.text(res.data.message || 'An error occurred. Please try again.').show();
