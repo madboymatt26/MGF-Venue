@@ -330,8 +330,11 @@ jQuery(function ($) {
                 $msg.text('✓ ' + d.processed + ' processed, ' + d.skipped + ' skipped').css('color', '#46b450');
                 setTimeout(function() { location.reload(); }, 1500);
             } else {
-                $msg.text('✗ ' + (res.data || 'Error')).css('color', '#dc3232');
+                $msg.text('✗ ' + (res.data && res.data.message ? res.data.message : 'Error')).css('color', '#dc3232');
             }
+        }).fail(function () {
+            $btn.prop('disabled', false).text('Apply');
+            $msg.text('✗ Network error — please try again.').css('color', '#dc3232');
         });
     });
 
@@ -350,9 +353,12 @@ jQuery(function ($) {
             if (res.success) {
                 window.location.reload();
             } else {
-                alert('Error: ' + (res.data || 'Unknown error'));
+                alert('Error: ' + (res.data && res.data.message ? res.data.message : 'Unknown error'));
                 $btn.prop('disabled', false).text('✓ Approve');
             }
+        }).fail(function () {
+            alert('Network error — please try again.');
+            $btn.prop('disabled', false).text('✓ Approve');
         });
     });
 
@@ -373,9 +379,12 @@ jQuery(function ($) {
             if (res.success) {
                 window.location.reload();
             } else {
-                alert('Error: ' + (res.data || 'Unknown error'));
+                alert('Error: ' + (res.data && res.data.message ? res.data.message : 'Unknown error'));
                 $btn.prop('disabled', false).text('✗ Reject');
             }
+        }).fail(function () {
+            alert('Network error — please try again.');
+            $btn.prop('disabled', false).text('✗ Reject');
         });
     });
 
@@ -412,8 +421,11 @@ jQuery(function ($) {
                 alert('Payment reminder sent (chase #' + res.data.chase_count + ').');
                 window.location.reload();
             } else {
-                alert('Error: ' + (res.data || 'Unknown error'));
+                alert('Error: ' + (res.data && res.data.message ? res.data.message : 'Unknown error'));
             }
+        }).fail(function () {
+            $btn.prop('disabled', false).text('📧 Chase Payment');
+            alert('Network error — please try again.');
         });
     });
 
@@ -528,6 +540,7 @@ jQuery(function ($) {
 
     // ── Helper: update status via AJAX ─────────────────────────────────────────
     function nmsUpdateStatus(ref, status, $btn, redirect, reason) {
+        var origText = $btn.text();
         $btn.prop('disabled', true);
 
         var data = {
@@ -557,9 +570,12 @@ jQuery(function ($) {
                     $btn.prop('disabled', false);
                 }
             } else {
-                alert('Error updating booking status.');
-                $btn.prop('disabled', false);
+                alert('Error: ' + (res.data && res.data.message ? res.data.message : 'Could not update booking status.'));
+                $btn.prop('disabled', false).text(origText);
             }
+        }).fail(function () {
+            alert('Network error — please try again.');
+            $btn.prop('disabled', false).text(origText);
         });
     }
 });

@@ -81,7 +81,7 @@ class MBS_Admin {
      * Check if current user can manage bookings (admin or booking manager).
      */
     private static function can_manage_bookings() {
-        return self::can_manage_bookings() || current_user_can( 'mbs_manage_bookings' );
+        return current_user_can( 'manage_options' ) || current_user_can( 'mbs_manage_bookings' );
     }
 
     /**
@@ -164,7 +164,7 @@ class MBS_Admin {
     // ── AJAX handlers ──────────────────────────────────────────────────────────
     public function ajax_update_status() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! self::can_manage_bookings() ) wp_die( 'Forbidden', 403 );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
 
         $ref    = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
         $status = sanitize_text_field( $_POST['status'] ?? '' );
@@ -193,7 +193,7 @@ class MBS_Admin {
     public function ajax_delete_booking() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
         // Hard delete restricted to administrators only
-        if ( ! self::can_delete_bookings() ) wp_die( 'Only administrators can permanently delete bookings.', 403 );
+        if ( ! self::can_delete_bookings() ) wp_send_json_error( 'Only administrators can permanently delete bookings.', 403 );
 
         $ref    = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
         $result = MBS_Bookings::delete( $ref );
@@ -202,7 +202,7 @@ class MBS_Admin {
 
     public function ajax_get_invoice() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! self::can_manage_bookings() ) wp_die( 'Forbidden', 403 );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
 
         $ref     = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
         $booking = MBS_Bookings::get( $ref );
@@ -213,7 +213,7 @@ class MBS_Admin {
 
     public function ajax_save_settings() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
+        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
 
         $webhook      = esc_url_raw( $_POST['ha_webhook_url'] ?? '' );
         $notice_days  = absint( $_POST['min_notice_days'] ?? 1 );
@@ -317,7 +317,7 @@ class MBS_Admin {
 
     public function ajax_test_ha() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
+        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
 
         $webhook_url = get_option( 'mbs_ha_webhook_url', '' );
         if ( empty( $webhook_url ) ) {
@@ -347,7 +347,7 @@ class MBS_Admin {
 
     public function ajax_check_update() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
+        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
 
         // Clear the update transient so WordPress re-checks immediately
         delete_site_transient( 'update_plugins' );
@@ -374,7 +374,7 @@ class MBS_Admin {
 
     public function ajax_archive_past() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! self::can_manage_bookings() ) wp_die( 'Forbidden', 403 );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
 
         $count = MBS_Bookings::archive_past_bookings();
         wp_send_json_success( array( 'archived' => $count ) );
@@ -404,7 +404,7 @@ class MBS_Admin {
 
     public function ajax_add_blocked() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! self::can_manage_bookings() ) wp_die( 'Forbidden', 403 );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
 
         $date_from = sanitize_text_field( $_POST['date_from'] ?? '' );
         $date_to   = sanitize_text_field( $_POST['date_to'] ?? '' );
@@ -424,7 +424,7 @@ class MBS_Admin {
 
     public function ajax_delete_blocked() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! self::can_manage_bookings() ) wp_die( 'Forbidden', 403 );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
 
         $id = absint( $_POST['id'] ?? 0 );
         if ( ! $id ) wp_send_json_error( 'Invalid ID.' );
@@ -435,7 +435,7 @@ class MBS_Admin {
 
     public function ajax_clear_expired_blocks() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! self::can_manage_bookings() ) wp_die( 'Forbidden', 403 );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
 
         $count = MBS_Blocked_Dates::clear_expired();
         wp_send_json_success( array( 'cleared' => $count ) );
@@ -443,7 +443,7 @@ class MBS_Admin {
 
     public function ajax_update_series_status() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
+        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
 
         $series_id = sanitize_text_field( $_POST['series_id'] ?? '' );
         $status    = sanitize_text_field( $_POST['status'] ?? '' );
@@ -467,7 +467,7 @@ class MBS_Admin {
 
     public function ajax_save_admin_notes() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! self::can_manage_bookings() ) wp_die( 'Forbidden', 403 );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
 
         $ref   = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
         $notes = sanitize_textarea_field( $_POST['admin_notes'] ?? '' );
@@ -478,7 +478,7 @@ class MBS_Admin {
 
     public function ajax_chase_payment() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! self::can_manage_bookings() ) wp_die( 'Forbidden', 403 );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
 
         $ref     = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
         $booking = MBS_Bookings::get( $ref );
@@ -492,7 +492,7 @@ class MBS_Admin {
 
     public function ajax_save_email_settings() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
+        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
 
         // Save organisation details
         MBS_Email_Templates::save_org_settings( array(
@@ -528,7 +528,7 @@ class MBS_Admin {
 
     public function ajax_save_custom_fields() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Forbidden', 403 );
+        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
 
         $fields = $_POST['fields'] ?? array();
         if ( ! is_array( $fields ) ) $fields = array();
@@ -539,7 +539,7 @@ class MBS_Admin {
 
     public function ajax_edit_booking() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! self::can_manage_bookings() ) wp_die( 'Forbidden', 403 );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
 
         $ref = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
         $booking = MBS_Bookings::get( $ref );
@@ -664,7 +664,7 @@ class MBS_Admin {
         $body .= '<table style="width:100%;border-collapse:collapse;margin:16px 0;">';
         $body .= '<tr><td style="padding:8px 12px;background:#f5f0ff;font-weight:600;width:35%;border-bottom:1px solid #e0d0f0;">Reference</td><td style="padding:8px 12px;border-bottom:1px solid #e0d0f0;">' . esc_html( $booking->ref ) . '</td></tr>';
         $body .= '<tr><td style="padding:8px 12px;background:#f5f0ff;font-weight:600;border-bottom:1px solid #e0d0f0;">Space</td><td style="padding:8px 12px;border-bottom:1px solid #e0d0f0;">' . esc_html( $booking->space ) . '</td></tr>';
-        $body .= '<tr><td style="padding:8px 12px;background:#f5f0ff;font-weight:600;border-bottom:1px solid #e0d0f0;">Date</td><td style="padding:8px 12px;border-bottom:1px solid #e0d0f0;">' . esc_html( date( 'l j F Y', strtotime( $booking->booking_date ) ) ) . '</td></tr>';
+        $body .= '<tr><td style="padding:8px 12px;background:#f5f0ff;font-weight:600;border-bottom:1px solid #e0d0f0;">Date</td><td style="padding:8px 12px;border-bottom:1px solid #e0d0f0;">' . esc_html( wp_date( 'l j F Y', strtotime( $booking->booking_date ) ) ) . '</td></tr>';
         $body .= '<tr><td style="padding:8px 12px;background:#f5f0ff;font-weight:600;border-bottom:1px solid #e0d0f0;">Time</td><td style="padding:8px 12px;border-bottom:1px solid #e0d0f0;">' . esc_html( $time_str ) . '</td></tr>';
         $body .= '<tr><td style="padding:8px 12px;background:#f5f0ff;font-weight:600;border-bottom:1px solid #e0d0f0;">Amount</td><td style="padding:8px 12px;border-bottom:1px solid #e0d0f0;font-weight:bold;">&pound;' . number_format( $new_amount, 2 ) . '</td></tr>';
         $body .= '</table>';
@@ -707,7 +707,7 @@ class MBS_Admin {
 
     public function ajax_approve_request() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! self::can_manage_bookings() ) wp_die( 'Forbidden', 403 );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
 
         $id = absint( $_POST['id'] ?? 0 );
         if ( ! $id ) wp_send_json_error( 'Invalid request ID.' );
@@ -722,7 +722,7 @@ class MBS_Admin {
 
     public function ajax_reject_request() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! self::can_manage_bookings() ) wp_die( 'Forbidden', 403 );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
 
         $id     = absint( $_POST['id'] ?? 0 );
         $reason = sanitize_textarea_field( $_POST['reason'] ?? '' );
@@ -738,7 +738,7 @@ class MBS_Admin {
 
     public function ajax_bulk_action() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! self::can_manage_bookings() ) wp_die( 'Forbidden', 403 );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
 
         $action = sanitize_text_field( $_POST['bulk_action'] ?? '' );
         $refs   = $_POST['refs'] ?? array();
