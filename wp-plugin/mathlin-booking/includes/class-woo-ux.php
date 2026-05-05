@@ -138,7 +138,7 @@ class MBS_Woo_UX {
      * Modify the WooCommerce My Account menu items.
      */
     public function modify_account_menu( $items ) {
-        if ( ! $this->current_user_is_hirer() ) return $items;
+        if ( ! $this->current_user_is_hirer() && ! $this->current_user_is_manager() ) return $items;
 
         // Insert "My Hall Bookings" after Dashboard
         $new_items = array();
@@ -149,10 +149,12 @@ class MBS_Woo_UX {
             }
         }
 
-        // Remove irrelevant tabs for hirers
-        $remove = array( 'downloads', 'edit-address' );
-        foreach ( $remove as $key ) {
-            unset( $new_items[ $key ] );
+        // Remove irrelevant tabs for hirers (managers may still want addresses for their own orders)
+        if ( $this->current_user_is_hirer() && ! $this->current_user_is_manager() ) {
+            $remove = array( 'downloads', 'edit-address' );
+            foreach ( $remove as $key ) {
+                unset( $new_items[ $key ] );
+            }
         }
 
         return $new_items;
@@ -194,6 +196,11 @@ class MBS_Woo_UX {
         if ( ! is_user_logged_in() ) return false;
         $user = wp_get_current_user();
         return $this->user_is_hirer( $user );
+    }
+
+    private function current_user_is_manager() {
+        if ( ! is_user_logged_in() ) return false;
+        return current_user_can( 'mbs_manage_bookings' );
     }
 
     private function get_portal_url() {
