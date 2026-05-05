@@ -165,6 +165,11 @@ jQuery(function ($) {
         var $msg = $('#nms-save-msg');
         $btn.prop('disabled', true).text('Saving…');
 
+        // Sync all TinyMCE editors back to their textareas before reading values
+        if (typeof tinyMCE !== 'undefined') {
+            tinyMCE.triggerSave();
+        }
+
         // Collect spaces data
         var spaces = [];
         $('#nms-spaces-tbody .nms-space-row').each(function () {
@@ -200,8 +205,8 @@ jQuery(function ($) {
             curfew_sunday:        $('#curfew_sunday').val(),
             payment_days_required: $('#payment_days_required').val(),
             booking_notice:       $('#booking_notice').val(),
-            facilities_text:      (typeof tinyMCE !== 'undefined' && tinyMCE.get('facilities_text')) ? tinyMCE.get('facilities_text').getContent() : $('#facilities_text').val(),
-            terms_text:           (typeof tinyMCE !== 'undefined' && tinyMCE.get('terms_text')) ? tinyMCE.get('terms_text').getContent() : $('#terms_text').val(),
+            facilities_text:      $('#facilities_text').val(),
+            terms_text:           $('#terms_text').val(),
             spaces:              spaces
         }, function (res) {
             $btn.prop('disabled', false).text('💾 Save All Settings');
