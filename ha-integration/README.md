@@ -41,6 +41,7 @@ After setup, click **Configure** on the integration card to adjust timing:
 |---|---|---|
 | Minutes before booking start | 60 | How early to fire the `mathlin_booking_start` event |
 | Minutes after booking end | 15 | How long after end to fire the `mathlin_booking_end` event |
+| Gap threshold (minutes) | 30 | Skip shutdown if next booking on same space starts within this window |
 
 For example, with defaults: a booking at 18:00–21:00 will fire `booking_start` at **17:00** and `booking_end` at **21:15**.
 
@@ -183,6 +184,69 @@ Midnight
 ```
 
 Timers are rescheduled every midnight with fresh data. If HA restarts during the day, the integration fetches current data immediately on startup and reschedules any timers that haven't fired yet.
+
+---
+
+## System Architecture — Data Flow
+
+```
+┌─────────────────────────────┐         ┌──────────────────────────────────────┐
+│     WordPress Plugin        │         │         Home Assistant                │
+│                             │         │                                      │
+│  PUSH (real-time):          │         │  custom_components/mathlin_booking/  │
+│  On confirm → POST webhook  │──PUSH──►│  • Webhook trigger automations       │
+│  On cancel  → POST webhook  │         │  • Instant notifications             │
+│                             │         │                                      │
+│  PULL (scheduled):          │         │  Coordinator (midnight poll):        │
+│  GET /bookings/today        │◄─POLL───│  • Fetches today's bookings          │
+│  GET /bookings/upcoming     │         │  • Schedules internal timers         │
+│                             │         │  • Fires events before/after         │
+│                             │         │                                      │
+│                             │         │  Creates:                            │
+│                             │         │  • binary_sensor.hall_occupied        │
+│                             │         │  • sensor.hall_bookings_today         │
+│                             │         │  • mathlin_booking_start event        │
+│                             │         │  • mathlin_booking_end event          │
+└─────────────────────────────┘         └──────────────────────────────────────┘
+```
+
+### Two Communication Channels
+
+1. **Webhook (push):** WordPress POSTs to HA immediately when a booking is confirmed or cancelled. The webhook URL is configured in Scout Bookings → Settings. Payload includes: event type, ref, space, date, times, attendees, purpose, kitchen flag, amount.
+
+2. **REST API (pull):** The custom component polls `/wp-json/mathlin/v1/bookings/today` at midnight. It then schedules internal timers for each booking — firing `mathlin_booking_start` N minutes before and `mathlin_booking_end` M minutes after. Smart gap detection skips the shutdown if another booking on the same space starts within the configured gap window.
+
+### Smart Gap Detection
+
+If another booking on the **same space** starts within `gap_minutes` (default: 30) of the current booking's end, the `mathlin_booking_end` event is **suppressed**. This prevents wasteful heat-up/cool-down cycles between back-to-back bookings.
+
+Example: Booking A ends at 18:00, Booking B starts at 18:15 (same space). The end event for A is skipped — heating stays on continuously.
+
+---
+
+## Binary Sensor: Occupancy
+
+The integration creates `binary_sensor.scout_hall_occupied`:
+- **ON** when the current time falls within any active booking's time window
+- **OFF** when no bookings are currently active
+- All-day bookings use 08:00–20:00 as the active window
+- Attributes show the currently active booking details (ref, space, times, attendees)
+
+This sensor is useful for:
+- Failsafe automations (turn off heating if sensor goes OFF but heating is still running)
+- Dashboard indicators
+- Presence-based lighting
+
+---
+
+## YAML Configuration Files
+
+Pre-built configuration and automation YAML files are provided in this directory:
+
+- `configuration.yaml` — Supplementary REST sensors and template sensors
+- `automations.yaml` — Pre-heat, shutdown, failsafe, and webhook automations
+
+These work alongside the custom component and can be included in your HA config.
 
 ---
 

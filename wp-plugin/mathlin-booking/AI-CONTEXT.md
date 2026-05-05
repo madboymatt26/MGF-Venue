@@ -1,4 +1,4 @@
-# AI-CONTEXT.md — Mathlin Booking System
+# AI-CONTEXT.md — Mathlin Booking System (v2.13.2)
 
 This document is designed for LLMs and AI agents to read before modifying this codebase. It maps the architecture, file relationships, and critical business logic rules.
 
@@ -55,7 +55,9 @@ mathlin-booking/
 │   ├── class-woo-payment.php        WooCommerce payment integration
 │   ├── class-accounting-export.php  Xero/Sage/QuickBooks CSV
 │   ├── class-ical.php               iCal file generation
-│   └── class-updater.php            GitHub release auto-updater
+│   ├── class-updater.php            GitHub release auto-updater
+│   ├── class-osm-integration.php    Online Scout Manager integration
+│   └── class-woo-ux.php             WooCommerce UX for hirers + managers
 │
 ├── admin/
 │   ├── class-admin.php              ★ Admin menu, AJAX handlers, edit booking
@@ -184,6 +186,29 @@ Admins can override scout_use when editing a booking (no email check — intenti
 
 ---
 
+## Security Patches (v2.12.0)
+
+| ID | Fix | File |
+|---|---|---|
+| SEC-001 | WooCommerce refund reverts paid→confirmed | class-woo-payment.php |
+| SEC-002 | GDPR right-to-erasure (WordPress Privacy Eraser) | class-bookings.php |
+| SEC-003 | Email queue force-fails stalled entries >7 days | class-email-queue.php |
+| SEC-004 | link_existing_bookings checks mbs_hirer role | class-hirer-portal.php |
+| SEC-005 | Payment for cancelled booking logs critical warning | class-woo-payment.php |
+| SEC-007 | idx_email index on bookings table | class-database.php |
+| SEC-009 | idx_chase composite index for payment chaser | class-database.php |
+| SEC-010 | Audit log uses REMOTE_ADDR only (no X-Forwarded-For) | class-audit-log.php |
+
+### GDPR Implementation
+- WordPress Privacy Eraser registered via `wp_privacy_personal_data_erasers`
+- WordPress Privacy Exporter registered via `wp_privacy_personal_data_exporters`
+- Erasure anonymises PII (name→"Anonymised", email→"erased-{id}@anonymised.invalid")
+- Financial data (amounts, dates, spaces) preserved for audit trail
+- Audit log IPs scrubbed, email queue entries deleted
+- Admin uses: Tools → Erase Personal Data
+
+---
+
 ## Email System
 
 14 template types stored in `wp_options` as `mbs_email_template_{type}`. Each has a subject and body with placeholder tags.
@@ -214,6 +239,58 @@ Separate codebase in `ha-integration/custom_components/mathlin_booking/`.
 - Fires `mathlin_booking_start` and `mathlin_booking_end` events
 - Smart gap detection: skips shutdown if next booking within N minutes
 - Binary occupancy sensor: ON during active bookings
+
+---
+
+## WooCommerce UX Integration (v2.13.x)
+
+File: `includes/class-woo-ux.php`
+
+### Login Redirect Logic
+- `mbs_hirer` role → Frontend Bookings Portal page
+- `mbs_manage_bookings` capability → `wp-admin/admin.php?page=mathlin-booking`
+- All other roles → Default WordPress/WooCommerce behaviour
+- Explicit `redirect_to` parameters are never overridden
+
+### WooCommerce Admin Access
+- `woocommerce_prevent_admin_access` filter returns `false` for `mbs_manage_bookings` cap
+- `woocommerce_disable_admin_bar` filter returns `false` for managers
+- Without this, WooCommerce blocks non-shop roles from wp-admin
+
+### My Account Menu
+- Adds "My Hall Bookings" tab for both hirers AND booking managers
+- Removes Downloads/Addresses tabs for pure hirers only
+- Endpoint: `hall-bookings` (registered via `add_rewrite_endpoint`)
+- Query var registered via `woocommerce_get_query_vars` filter
+- Auto-flushes rewrite rules on version change (no manual permalink save needed)
+
+---
+
+## Home Assistant Data Flow
+
+```
+┌─────────────────────────────┐         ┌──────────────────────────────────────┐
+│     WordPress Plugin        │         │         Home Assistant                │
+│                             │         │                                      │
+│  PUSH (real-time):          │         │  custom_components/mathlin_booking/  │
+│  On confirm → POST webhook  │──PUSH──►│  • Webhook trigger automations       │
+│  On cancel  → POST webhook  │         │  • Instant notifications             │
+│                             │         │                                      │
+│  PULL (scheduled):          │         │  Coordinator (midnight poll):        │
+│  GET /bookings/today        │◄─POLL───│  • Fetches today's bookings          │
+│  GET /bookings/upcoming     │         │  • Schedules internal timers         │
+│                             │         │  • Fires events before/after         │
+│                             │         │                                      │
+│                             │         │  Creates:                            │
+│                             │         │  • binary_sensor.hall_occupied        │
+│                             │         │  • sensor.hall_bookings_today         │
+│                             │         │  • mathlin_booking_start event        │
+│                             │         │  • mathlin_booking_end event          │
+└─────────────────────────────┘         └──────────────────────────────────────┘
+```
+
+### Smart Gap Detection
+If another booking on the SAME space starts within `gap_minutes` (default 30) of the current booking's end, the `mathlin_booking_end` event is suppressed. This prevents wasteful heat-up/cool-down cycles between back-to-back bookings.
 
 ---
 

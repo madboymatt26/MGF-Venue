@@ -2,7 +2,7 @@
 
 A comprehensive WordPress venue booking plugin built for Needham Market Scout Group, with Home Assistant integration.
 
-**Current Version:** 2.11.0  
+**Current Version:** 2.13.2  
 **Requires WordPress:** 5.0+  
 **Requires PHP:** 7.4+  
 **Tested with WordPress:** 6.7  
@@ -76,6 +76,14 @@ A comprehensive WordPress venue booking plugin built for Needham Market Scout Gr
 - iCal: downloadable .ics files + subscribable calendar feed
 - GitHub: auto-update from private repository releases
 
+### Security & Privacy
+- GDPR right-to-erasure (WordPress Privacy tools integration)
+- PII anonymisation preserving financial audit trail
+- WooCommerce refund detection and status revert
+- IP address logging without trusting proxy headers
+- Email queue auto-cleanup of stalled PII-containing entries
+- Role-based access control (hirer, booking manager, admin)
+
 ---
 
 ## Installation
@@ -111,7 +119,32 @@ Base: `/wp-json/mathlin/v1/`
 
 ## Changelog
 
-### v2.11.0 (Latest)
+### v2.13.2
+- Booking managers now see "My Hall Bookings" tab in WooCommerce My Account
+
+### v2.13.1
+- **Fix:** Booking managers no longer blocked from wp-admin by WooCommerce
+- **Fix:** Manager login redirects to admin bookings page (not frontend portal)
+- **Fix:** /my-account/hall-bookings/ 404 resolved — endpoint auto-registers on update
+- Auto-flush rewrite rules on version change (no manual permalink save needed)
+
+### v2.13.0
+- **New:** WooCommerce UX integration for hirers
+- Smart login redirect: hirers → portal, managers → admin, others → default
+- "My Hall Bookings" tab in WooCommerce My Account menu
+- Irrelevant tabs (Downloads, Addresses) removed for hirer role
+
+### v2.12.0 (Security & Performance Release)
+- **[SEC-001]** WooCommerce refund handler: paid status reverts to confirmed on refund
+- **[SEC-002]** GDPR right-to-erasure via WordPress Privacy tools
+- **[SEC-003]** Email queue stalled entries force-failed after 7 days
+- **[SEC-004]** Hirer portal link_existing_bookings restricted to mbs_hirer role
+- **[SEC-005]** Payment for cancelled booking: critical warning on WooCommerce order
+- **[SEC-007]** Database index on email column for hirer portal performance
+- **[SEC-009]** Composite index for payment chaser cron query
+- **[SEC-010]** Audit log IP spoofing prevention (REMOTE_ADDR only)
+
+### v2.11.0
 - **New:** OSM (Online Scout Manager) integration — push financial records when bookings are paid
 - Reuses GilbertWeb Connector OAuth tokens (no double-authentication)
 - Standalone OAuth mode available if GilbertWeb Connector not installed
