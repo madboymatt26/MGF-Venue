@@ -1,0 +1,85 @@
+# ============================================================================
+# Mathlin Booking System — Home Assistant Configuration
+# ============================================================================
+#
+# DATA FLOW:
+# ┌─────────────────────┐         ┌──────────────────────────────────┐
+# │  WordPress Plugin   │         │       Home Assistant             │
+# │                     │         │                                  │
+# │  REST API:          │◄─POLL───│  custom_components/              │
+# │  /bookings/today    │  (midnight + startup)  mathlin_booking/    │
+# │  /bookings/upcoming │         │                                  │
+# │                     │         │  Creates:                        │
+# │  Webhook (push):    │──PUSH──►│  • binary_sensor.hall_occupied   │
+# │  On confirm/cancel  │         │  • sensor.hall_bookings_today    │
+# │                     │         │  • mathlin_booking_start event   │
+# │                     │         │  • mathlin_booking_end event     │
+# └─────────────────────┘         └──────────────────────────────────┘
+#
+# SETUP:
+# 1. Copy custom_components/mathlin_booking/ to your HA config directory
+# 2. Restart Home Assistant
+# 3. Go to Settings → Devices & Services → Add Integration → "Mathlin Booking"
+# 4. Enter your website URL: https://needhamscouts.uk
+# 5. Configure timing options (pre-heat minutes, post-event minutes, gap threshold)
+#
+# The custom component handles everything automatically:
+# - Polls the REST API at midnight for today's bookings
+# - Schedules internal timers for each booking
+# - Fires events before/after each booking
+# - Provides a binary occupancy sensor
+#
+# The YAML below adds supplementary sensors and automations that work
+# alongside the custom component.
+# ============================================================================
+
+# ── Supplementary REST sensor (optional) ────────────────────────────────────
+# This provides a simple count sensor if you want it on a dashboard.
+# The custom component already provides richer data, but this is useful
+# for Lovelace cards that just need a number.
+
+rest:
+  - resource: "https://needhamscouts.uk/wp-json/mathlin/v1/bookings/today"
+    scan_interval: 3600  # Re-check hourly (custom component handles midnight refresh)
+    sensor:
+      - name: "Scout Hall Bookings Today (REST)"
+        unique_id: mbs_rest_bookings_today_count
+        value_template: "{{ value_json | length }}"
+        unit_of_measurement: "bookings"
+        icon: "mdi:calendar-check"
+
+  - resource: "https://needhamscouts.uk/wp-json/mathlin/v1/bookings/upcoming?days=7"
+    scan_interval: 21600  # Every 6 hours
+    sensor:
+      - name: "Scout Hall Bookings This Week"
+        unique_id: mbs_rest_bookings_week_count
+        value_template: "{{ value_json | length }}"
+        unit_of_measurement: "bookings"
+        icon: "mdi:calendar-week"
+
+# ── Template sensors (derived from the custom component) ────────────────────
+
+template:
+  - binary_sensor:
+      # This is provided by the custom component, but if you want a
+      # template-based alternative that considers the pre-heat window:
+      - name: "Scout Hall Should Be Heating"
+        unique_id: mbs_should_be_heating
+        icon: "mdi:radiator"
+        device_class: heat
+        state: >
+          {{ is_state('binary_sensor.scout_hall_occupied', 'on') or
+             (state_attr('sensor.scout_hall_next_booking', 'minutes_until_start') | int(999) <= 60) }}
+
+  - sensor:
+      - name: "Scout Hall Status"
+        unique_id: mbs_hall_status_text
+        icon: "mdi:home-city"
+        state: >
+          {% if is_state('binary_sensor.scout_hall_occupied', 'on') %}
+            In Use
+          {% elif state_attr('sensor.scout_hall_next_booking', 'minutes_until_start') | int(999) <= 60 %}
+            Pre-heating
+          {% else %}
+            Available
+          {% endif %}

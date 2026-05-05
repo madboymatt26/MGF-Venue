@@ -1,0 +1,229 @@
+# ============================================================================
+# Mathlin Booking System — Home Assistant Automations
+# ============================================================================
+#
+# These automations control the physical building infrastructure based on
+# booking data from the Mathlin custom component.
+#
+# ENTITIES REQUIRED:
+#   climate.scout_hall          — Main hall heating (thermostat/HVAC)
+#   climate.meeting_room        — Meeting room heating (if separate zone)
+#   light.scout_hall_main       — Main hall lighting
+#   light.scout_hall_entrance   — Entrance/corridor lighting
+#   switch.kitchen_extractor    — Kitchen extractor fan
+#   binary_sensor.scout_hall_occupied — From Mathlin custom component
+#
+# EVENTS USED:
+#   mathlin_booking_start — Fires 60 minutes before booking start (configurable)
+#   mathlin_booking_end   — Fires 15 minutes after booking end (configurable)
+#
+# ============================================================================
+
+# ── PRE-HEAT: Turn on heating 1 hour before booking ─────────────────────────
+
+- id: mbs_preheat_before_booking
+  alias: "Scout Hall – Pre-heat before booking"
+  description: >
+    Fires 1 hour before each booking starts (via the mathlin_booking_start event).
+    Sets the heating to a comfortable temperature based on the space booked.
+  trigger:
+    - platform: event
+      event_type: mathlin_booking_start
+  action:
+    - choose:
+        # Main Scout Hall — larger space, needs more heat
+        - conditions:
+            - condition: template
+              value_template: "{{ trigger.event.data.space == 'Main Scout Hall' }}"
+          sequence:
+            - service: climate.set_temperature
+              target:
+                entity_id: climate.scout_hall
+              data:
+                temperature: 19
+                hvac_mode: heat
+            - service: light.turn_on
+              target:
+                entity_id: light.scout_hall_entrance
+              data:
+                brightness_pct: 80
+
+        # Meeting Room — smaller, heats faster
+        - conditions:
+            - condition: template
+              value_template: "{{ trigger.event.data.space == 'Meeting Room' }}"
+          sequence:
+            - service: climate.set_temperature
+              target:
+                entity_id: climate.meeting_room
+              data:
+                temperature: 20
+                hvac_mode: heat
+            - service: light.turn_on
+              target:
+                entity_id: light.scout_hall_entrance
+              data:
+                brightness_pct: 80
+
+      # Default: heat the main hall for any other space
+      default:
+        - service: climate.set_temperature
+          target:
+            entity_id: climate.scout_hall
+          data:
+            temperature: 19
+            hvac_mode: heat
+
+    # Kitchen extractor if kitchen is booked
+    - condition: template
+      value_template: "{{ trigger.event.data.kitchen == true }}"
+    - service: switch.turn_on
+      target:
+        entity_id: switch.kitchen_extractor
+
+    # Notify the building manager
+    - service: notify.mobile_app_building_manager
+      data:
+        title: "🏛️ Scout Hall booking starting soon"
+        message: >
+          {{ trigger.event.data.space }} at {{ trigger.event.data.start_time }}
+          — {{ trigger.event.data.attendees }} people
+          ({{ trigger.event.data.purpose }})
+        data:
+          tag: "mbs-preheat-{{ trigger.event.data.ref }}"
+
+# ── SHUTDOWN: Turn off heating after booking ends ────────────────────────────
+
+- id: mbs_shutdown_after_booking
+  alias: "Scout Hall – Shutdown after booking"
+  description: >
+    Fires 15 minutes after each booking ends (via the mathlin_booking_end event).
+    The custom component's smart gap detection means this WON'T fire if another
+    booking on the same space starts within 30 minutes — avoiding wasteful
+    heat-up/cool-down cycles.
+  trigger:
+    - platform: event
+      event_type: mathlin_booking_end
+  action:
+    # Set heating to frost protection (don't turn off completely in winter)
+    - service: climate.set_temperature
+      target:
+        entity_id:
+          - climate.scout_hall
+          - climate.meeting_room
+      data:
+        temperature: 12
+        hvac_mode: heat
+
+    # Turn off lights
+    - service: light.turn_off
+      target:
+        entity_id:
+          - light.scout_hall_main
+          - light.scout_hall_entrance
+
+    # Turn off kitchen extractor
+    - service: switch.turn_off
+      target:
+        entity_id: switch.kitchen_extractor
+
+    # Notify
+    - service: notify.mobile_app_building_manager
+      data:
+        title: "🏛️ Scout Hall booking ended"
+        message: >
+          {{ trigger.event.data.space }} booking finished
+          (ref: {{ trigger.event.data.ref }}).
+          Heating set to frost protection.
+        data:
+          tag: "mbs-shutdown-{{ trigger.event.data.ref }}"
+
+# ── FAILSAFE: Turn off if occupancy sensor goes OFF unexpectedly ─────────────
+
+- id: mbs_failsafe_occupancy_off
+  alias: "Scout Hall – Failsafe shutdown on no occupancy"
+  description: >
+    If the binary occupancy sensor goes OFF (no active bookings) but heating
+    is still running above frost protection, shut it down. This catches edge
+    cases like cancelled bookings or system clock drift.
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.scout_hall_occupied
+      to: "off"
+      for:
+        minutes: 30  # Wait 30 min to avoid false triggers during gaps
+  condition:
+    # Only act if heating is above frost protection level
+    - condition: numeric_state
+      entity_id: climate.scout_hall
+      attribute: temperature
+      above: 14
+  action:
+    - service: climate.set_temperature
+      target:
+        entity_id:
+          - climate.scout_hall
+          - climate.meeting_room
+      data:
+        temperature: 12
+        hvac_mode: heat
+    - service: light.turn_off
+      target:
+        entity_id:
+          - light.scout_hall_main
+          - light.scout_hall_entrance
+
+# ── WEBHOOK: Instant notification when a booking is confirmed ────────────────
+
+- id: mbs_webhook_booking_confirmed
+  alias: "Scout Hall – Booking confirmed (webhook)"
+  description: >
+    Fires instantly when WordPress confirms a booking (push notification).
+    Useful for immediate awareness — the pre-heat automation handles the
+    actual heating schedule.
+  trigger:
+    - platform: webhook
+      webhook_id: mathlin_booking
+      allowed_methods:
+        - POST
+  condition:
+    - condition: template
+      value_template: "{{ trigger.json.event == 'booking_confirmed' }}"
+  action:
+    - service: notify.mobile_app_building_manager
+      data:
+        title: "✅ New booking confirmed"
+        message: >
+          {{ trigger.json.space }} on {{ trigger.json.booking_date }}
+          at {{ trigger.json.start_time }}
+          ({{ trigger.json.attendees }} people — {{ trigger.json.purpose }})
+
+# ── WEBHOOK: Booking cancelled — cancel pre-heat if scheduled ────────────────
+
+- id: mbs_webhook_booking_cancelled
+  alias: "Scout Hall – Booking cancelled (webhook)"
+  description: >
+    When a booking is cancelled, force a data refresh so the custom component
+    removes the cancelled booking's timers on the next midnight poll.
+    For same-day cancellations, we also check if heating should be turned off.
+  trigger:
+    - platform: webhook
+      webhook_id: mathlin_booking
+      allowed_methods:
+        - POST
+  condition:
+    - condition: template
+      value_template: "{{ trigger.json.event == 'booking_cancelled' }}"
+  action:
+    # Force the custom component to refresh its data
+    - service: homeassistant.update_entity
+      target:
+        entity_id: binary_sensor.scout_hall_occupied
+    # Notify
+    - service: notify.mobile_app_building_manager
+      data:
+        title: "❌ Booking cancelled"
+        message: >
+          {{ trigger.json.space }} on {{ trigger.json.booking_date }}
+          ({{ trigger.json.start_time }} – {{ trigger.json.end_time }})
+          has been cancelled.
