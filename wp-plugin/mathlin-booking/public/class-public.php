@@ -8,6 +8,7 @@ class MBS_Public {
         add_shortcode( 'mathlin_calendar', array( $this, 'shortcode_calendar' ) );
         add_shortcode( 'mathlin_status', array( $this, 'shortcode_status' ) );
         add_shortcode( 'mathlin_modify', array( $this, 'shortcode_modify' ) );
+        add_shortcode( 'mathlin_manage', array( $this, 'shortcode_manage' ) );
         add_action( 'wp_enqueue_scripts', array( $this, 'enqueue_assets' ) );
         add_action( 'wp_ajax_nopriv_mbs_submit_booking', array( $this, 'ajax_submit' ) );
         add_action( 'wp_ajax_mbs_submit_booking',        array( $this, 'ajax_submit' ) );
@@ -28,6 +29,7 @@ class MBS_Public {
             has_shortcode( $post->post_content, 'mathlin_status' ) ||
             has_shortcode( $post->post_content, 'mathlin_modify' ) ||
             has_shortcode( $post->post_content, 'mathlin_portal' ) ||
+            has_shortcode( $post->post_content, 'mathlin_manage' ) ||
             isset( $_GET['mbs_modify'] )
         ) ) {
             wp_enqueue_style(  'mbs-public', MBS_PLUGIN_URL . 'public/public.css', array(), MBS_VERSION );
@@ -78,6 +80,13 @@ class MBS_Public {
     public function shortcode_modify( $atts ) {
         ob_start();
         include MBS_PLUGIN_DIR . 'public/views/modification-form.php';
+        return ob_get_clean();
+    }
+
+    // ── Shortcode: unified manage page ─────────────────────────────────────────
+    public function shortcode_manage( $atts ) {
+        ob_start();
+        include MBS_PLUGIN_DIR . 'public/views/manage.php';
         return ob_get_clean();
     }
 
