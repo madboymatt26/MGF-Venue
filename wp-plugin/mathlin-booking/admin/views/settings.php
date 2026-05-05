@@ -254,7 +254,7 @@ rest:
                 <tr>
                     <th><label for="venue_capacity">Venue Capacity</label></th>
                     <td>
-                        <input type="number" id="venue_capacity" value="<?php echo esc_attr( get_option( 'mbs_venue_capacity', 80 ) ); ?>" min="1" style="width:80px"> people
+                        <input type="number" id="venue_capacity" value="<?php echo esc_attr( get_option( 'mbs_venue_capacity', 100 ) ); ?>" min="1" style="width:80px"> people
                         <p class="description">Maximum permitted number for the hall (seating capacity).</p>
                     </td>
                 </tr>
@@ -297,6 +297,31 @@ rest:
                         <p class="description" style="margin-top:8px;">
                             Supports placeholders: <code>{org_name}</code>, <code>{admin_email}</code>, <code>{venue_capacity}</code>, <code>{curfew_saturday}</code>, <code>{curfew_sunday}</code>, <code>{payment_days_required}</code>, <code>{org_address}</code>, <code>{org_phone}</code>
                         </p>
+                    </td>
+                </tr>
+                <tr>
+                    <th><label for="booking_notice">Booking Notice</label></th>
+                    <td>
+                        <textarea id="booking_notice" rows="3" class="large-text"><?php echo esc_textarea( get_option( 'mbs_booking_notice', '' ) ); ?></textarea>
+                        <p class="description">Displayed prominently on the booking form and venue info page. Use for important restrictions (e.g. "We do not hire for adult parties that include alcohol").</p>
+                    </td>
+                </tr>
+                <tr>
+                    <th><label for="facilities_text">Facilities</label></th>
+                    <td>
+                        <?php
+                        wp_editor(
+                            get_option( 'mbs_facilities_text', '' ),
+                            'facilities_text',
+                            array(
+                                'textarea_name' => 'facilities_text',
+                                'textarea_rows' => 8,
+                                'media_buttons' => true,
+                                'teeny'         => false,
+                            )
+                        );
+                        ?>
+                        <p class="description" style="margin-top:8px;">Describe your venue's facilities (parking, accessibility, rooms, equipment). Displayed on the <code>[mathlin_venue_info]</code> page. HTML and images supported.</p>
                     </td>
                 </tr>
             </table>

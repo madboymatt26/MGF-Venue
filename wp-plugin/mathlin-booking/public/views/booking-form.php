@@ -10,6 +10,24 @@
         <h2 class="nms-section-title">Make a Booking</h2>
         <p class="nms-section-sub">Complete the form below. You'll receive a confirmation email and invoice once your booking is approved.</p>
 
+        <?php
+        // Show booking notice if configured
+        $booking_notice = get_option( 'mbs_booking_notice', '' );
+        if ( $booking_notice ) : ?>
+        <div class="nms-venue-notice" style="margin-bottom:1.5rem;">
+            <strong>⚠️ Please Note:</strong> <?php echo wp_kses_post( $booking_notice ); ?>
+        </div>
+        <?php endif; ?>
+
+        <?php
+        // Link to venue info page if it exists
+        $venue_info_pages = get_posts( array( 'post_type' => 'page', 'post_status' => 'publish', 's' => 'mathlin_venue_info', 'numberposts' => 1 ) );
+        if ( ! empty( $venue_info_pages ) ) : ?>
+        <p style="margin-bottom:1.5rem;font-size:0.9rem;">
+            📋 <a href="<?php echo esc_url( get_permalink( $venue_info_pages[0]->ID ) ); ?>" target="_blank" style="color:#7413DC;">View venue information, facilities &amp; conditions of hire</a>
+        </p>
+        <?php endif; ?>
+
         <?php if ( ! is_user_logged_in() ) :
             $portal_pages = get_posts( array( 'post_type' => 'page', 'post_status' => 'publish', 's' => 'mathlin_portal', 'numberposts' => 1 ) );
             $portal_url = ! empty( $portal_pages ) ? get_permalink( $portal_pages[0]->ID ) : '';

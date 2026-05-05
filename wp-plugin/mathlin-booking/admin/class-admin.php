@@ -323,6 +323,12 @@ class MBS_Admin {
         if ( isset( $_POST['terms_text'] ) ) {
             update_option( 'mbs_terms_text', wp_kses_post( $_POST['terms_text'] ) );
         }
+        if ( isset( $_POST['booking_notice'] ) ) {
+            update_option( 'mbs_booking_notice', wp_kses_post( $_POST['booking_notice'] ) );
+        }
+        if ( isset( $_POST['facilities_text'] ) ) {
+            update_option( 'mbs_facilities_text', wp_kses_post( $_POST['facilities_text'] ) );
+        }
 
         wp_send_json_success( array( 'saved' => true, 'min_notice_days' => $notice_days ) );
     }

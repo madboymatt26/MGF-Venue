@@ -199,6 +199,8 @@ jQuery(function ($) {
             curfew_saturday:      $('#curfew_saturday').val(),
             curfew_sunday:        $('#curfew_sunday').val(),
             payment_days_required: $('#payment_days_required').val(),
+            booking_notice:       $('#booking_notice').val(),
+            facilities_text:      (typeof tinyMCE !== 'undefined' && tinyMCE.get('facilities_text')) ? tinyMCE.get('facilities_text').getContent() : $('#facilities_text').val(),
             terms_text:           (typeof tinyMCE !== 'undefined' && tinyMCE.get('terms_text')) ? tinyMCE.get('terms_text').getContent() : $('#terms_text').val(),
             spaces:              spaces
         }, function (res) {

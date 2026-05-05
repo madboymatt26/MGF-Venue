@@ -93,15 +93,29 @@ class MBS_Public {
         $org_address = $org['address'] ?? '';
         $org_phone   = $org['phone'] ?? '';
         $admin_email = MBS_Bookings::get_admin_email();
-        $capacity    = get_option( 'mbs_venue_capacity', 80 );
+        $capacity    = get_option( 'mbs_venue_capacity', 100 );
         $curfew_sat  = get_option( 'mbs_curfew_saturday', '11:00 PM' );
         $curfew_sun  = get_option( 'mbs_curfew_sunday', '10:00 PM' );
         $spaces      = MBS_Bookings::get_spaces();
         $kitchen_price = MBS_Bookings::get_kitchen_price();
+        $booking_notice = get_option( 'mbs_booking_notice', '' );
+        $facilities     = get_option( 'mbs_facilities_text', '' );
+
+        // Find the booking page URL
+        $booking_url = '';
+        $bp = get_posts( array( 'post_type' => 'page', 'post_status' => 'publish', 's' => 'mathlin_booking', 'numberposts' => 1 ) );
+        if ( ! empty( $bp ) ) $booking_url = get_permalink( $bp[0]->ID );
 
         ob_start();
         ?>
         <div class="nms-wrap nms-venue-info">
+
+            <?php if ( $booking_notice ) : ?>
+            <div class="nms-venue-notice">
+                <strong>⚠️ Please Note:</strong> <?php echo wp_kses_post( $booking_notice ); ?>
+            </div>
+            <?php endif; ?>
+
             <h3>Venue at a Glance</h3>
             <ul class="nms-venue-list">
                 <li><strong>📍 Location:</strong> <?php echo esc_html( $org_address ?: $org_name ); ?></li>
@@ -114,7 +128,20 @@ class MBS_Public {
                 <li><strong>📧 Bookings:</strong> <a href="mailto:<?php echo esc_attr( $admin_email ); ?>"><?php echo esc_html( $admin_email ); ?></a></li>
             </ul>
 
-            <h4>Available Spaces &amp; Pricing</h4>
+            <?php if ( $booking_url ) : ?>
+            <p style="margin:1.5rem 0;">
+                <a href="<?php echo esc_url( $booking_url ); ?>" class="nms-btn nms-btn-primary">📅 Make a Booking</a>
+            </p>
+            <?php endif; ?>
+
+            <?php if ( $facilities ) : ?>
+            <h3>Facilities</h3>
+            <div class="nms-venue-facilities">
+                <?php echo wp_kses_post( $facilities ); ?>
+            </div>
+            <?php endif; ?>
+
+            <h3>Available Spaces &amp; Pricing</h3>
             <table class="nms-venue-pricing-table">
                 <thead>
                     <tr><th>Space</th><th>Hourly Rate</th><th>Day Rate</th><th>Capacity</th></tr>
@@ -135,6 +162,12 @@ class MBS_Public {
                     </tr>
                 </tbody>
             </table>
+
+            <?php if ( $booking_url ) : ?>
+            <p style="margin-top:1.5rem;text-align:center;">
+                <a href="<?php echo esc_url( $booking_url ); ?>" class="nms-btn nms-btn-primary nms-btn-lg">📅 Book the Hall Now</a>
+            </p>
+            <?php endif; ?>
         </div>
         <?php
         return ob_get_clean();

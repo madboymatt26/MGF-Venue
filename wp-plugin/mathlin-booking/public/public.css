@@ -422,3 +422,21 @@
 .nms-terms-content { max-width: 800px; line-height: 1.8; }
 .nms-terms-content h3 { color: #7413DC; }
 .nms-terms-content p { margin-bottom: 1rem; }
+
+/* Venue notice */
+.nms-venue-notice {
+    background: #fef3c7;
+    border: 1px solid #f59e0b;
+    border-left: 4px solid #f59e0b;
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+    color: #92400e;
+}
+.nms-venue-facilities {
+    line-height: 1.8;
+}
+.nms-venue-facilities ul {
+    padding-left: 1.5rem;
+}
