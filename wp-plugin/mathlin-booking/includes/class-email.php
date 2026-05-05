@@ -79,6 +79,16 @@ class MBS_Email {
         }
 
         $body .= self::ical_button( $booking );
+
+        // Add T&C reminder with link
+        $terms_url = self::get_terms_url();
+        if ( $terms_url ) {
+            $body .= '<p style="margin-top:16px;padding:12px 16px;background:#f5f0ff;border-radius:6px;font-size:13px;color:#6b7280;">';
+            $body .= 'By confirming this booking, you agree to our <a href="' . esc_url( $terms_url ) . '" style="color:#7413DC;">Terms &amp; Conditions of Hire</a>. ';
+            $body .= 'Please ensure all members of your party are aware of the conditions.';
+            $body .= '</p>';
+        }
+
         $body .= self::footer();
 
         $attachments = self::generate_invoice_attachment( $booking );
@@ -281,6 +291,22 @@ class MBS_Email {
             ' . esc_html( $org['name'] ) . ' &bull; ' . esc_html( $org['address'] ) . ' &bull; ' . esc_html( $org['phone'] ) . '<br>
             Registered Charity No. ' . esc_html( $org['charity_number'] ) . '
         </div></body></html>';
+    }
+
+    /**
+     * Get the URL to the Terms & Conditions page.
+     */
+    private static function get_terms_url() {
+        $terms_page_id = (int) get_option( 'mbs_terms_page_id', 0 );
+        if ( $terms_page_id && get_post( $terms_page_id ) ) {
+            return get_permalink( $terms_page_id );
+        }
+        // Fallback: find a page with [mathlin_terms] shortcode
+        $pages = get_posts( array( 'post_type' => 'page', 'post_status' => 'publish', 's' => 'mathlin_terms', 'numberposts' => 1 ) );
+        if ( ! empty( $pages ) ) {
+            return get_permalink( $pages[0]->ID );
+        }
+        return '';
     }
 
     private static function send( $to, $subject, $html_body, $attachments = array() ) {

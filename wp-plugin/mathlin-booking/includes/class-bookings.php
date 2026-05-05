@@ -658,23 +658,52 @@ class MBS_Bookings {
 
 <p>Any enquiries concerning hiring should be made via email to {admin_email}.</p>
 
-<p>The Hirer shall be over the age of 21.</p>
-
-<p>All events must end by {curfew_saturday} on a Saturday or {curfew_sunday} on Sunday through Friday.</p>
-
-<p>Maximum permitted number for the hall is {venue_capacity} seating capacity.</p>
-
-<p>The Hirer shall indemnify {org_name} for the cost of repair of any accidental or wilful damage done to any part of the premises including the curtilage thereof or the contents of the building during the period of hiring.</p>
-
-<p>The selling of alcohol on the premises is forbidden (unless the hirer has obtained a Temporary Event Notice). {org_name} does not have a Premises Licence for the sale of alcohol.</p>
-
-<p>Full payment for the Hire must be made {payment_days_required} days before the event or the booking will be cancelled. Cancellation by the Hirer within {payment_days_required} days of the event will incur a charge of 50% of the total hire cost.</p>
-
-<p>The Hirer shall be responsible for obtaining any licences or permissions required in connection with the hiring.</p>
-
-<p>The Hirer shall ensure that the premises are left in a clean and tidy condition at the end of the hire period.</p>
-
-<p>{org_name} reserves the right to cancel any booking at any time. In such circumstances, a full refund of any hire charges paid will be made.</p>';
+<ol>
+<li>The Hirer shall be over the age of 21.</li>
+<li>All events must end by {curfew_saturday} on a Saturday or {curfew_sunday} on a Sunday.</li>
+<li>Maximum permitted number of the Main Hall is {venue_capacity} seating capacity.</li>
+<li>It is the responsibility of the Hirer to ensure &lsquo;Conditions of Hire&rsquo; for the centre are understood and adhered to by all persons using the hall during the period of hire. (The &lsquo;Conditions of Hire&rsquo; are permanently displayed in the foyer and a copy accompanies each booking form).</li>
+<li>The Hirer must provide sufficient numbers of responsible adult attendants or stewards for adequate supervision of the premises and users therein. Two stewards for up to 40 people and one for the additional 20 people.</li>
+<li>Any hirer who hires the hall regularly and whose activities involve children or young people must follow good practice and follow their own policy. Those in charge of children must be DBS (Disclosure &amp; Barring Service) checked.</li>
+<li>The Hirer will, during the period of hire, be responsible for the supervision, care and protection from damage of the premises, fabric and contents and for the behaviour of all persons using the premises whatever their capacity.</li>
+<li>The Hirer shall indemnify {org_name} for the cost of repair of any accidental or wilful damage to any part of the premises or contents which may occur during the period of hire. {org_name} reserve the right to take legal action to reclaim monies owing.</li>
+<li>To the extent permitted by the Unfair Contract Terms Act 1977 {org_name} shall not be liable for any injury to persons, loss or damage to property brought onto the premises or for any consequential loss.</li>
+<li>The Hirer shall report to the Booking Secretary any injury to persons or loss or damage of the property. In the case of destruction, damage or loss by theft or attempt thereat, the Hirer shall immediately notify {org_name} and provide information as required to the Booking Secretary.</li>
+<li>The Hirer will enter any damages into the &lsquo;Defect Book&rsquo; kept in the kitchen.</li>
+<li>A First Aid kit is located in the kitchen.</li>
+<li>The Hirer shall enter any injuries in the Accident Book located in the kitchen.</li>
+<li>The Hirer shall not sublet or use the premises in any unlawful way or bring anything on to the premises, which may endanger same.</li>
+<li>Any complaints concerning the premises must be made as soon as possible in writing to {org_name}.</li>
+<li>In the event of the premises being rendered unfit for the use it was hired for, {org_name} shall not be liable for any loss whatsoever.</li>
+<li>{org_name} reserves the right of free admission during the period of hire to observe compliance with the &lsquo;Conditions of Hire&rsquo;.</li>
+<li>{org_name} reserves the right to cancel bookings with 3 (three) months notice if the hall is required for scouting activities.</li>
+<li>The selling of alcohol on the premises is forbidden (unless the hirer has obtained a licence).</li>
+<li>{org_name} does not have a Public Entertainments Licence.</li>
+<li>{org_name} has a NO Smoking Policy throughout the premises and grounds.</li>
+<li>Car parking next to the premises is available:<br>
+a) Spaces are not guaranteed.<br>
+b) Park in orderly manner to allow maximum use of the area.<br>
+c) Do not block other users in.<br>
+d) Overnight parking is not permitted.<br>
+e) Users park at their own risk.<br>
+f) The car park is owned by the local council and not {org_name}.</li>
+<li>As the hall is in a residential area, music and noise must be kept down to a reasonable level so as not to disturb the residents. This also applies to the car park.</li>
+<li>FIRE<br>
+a) Fire exits are clearly marked.<br>
+b) Ensure escape routes are kept clear and free of obstruction.<br>
+c) Fire doors must be kept closed and not wedged open.<br>
+d) Extinguishers must not be taken from the wall to use as doorstops.<br>
+e) The Hirer must ensure they are familiar with locations of fire exits and extinguishers.<br>
+f) On detection of a fire, the Hirer must break a glass and assist evacuation of the building to the evacuation point (Car Park). Dial 999 to fire brigade.</li>
+<li>The Hirer shall be responsible for leaving the premises clean and tidy at the proper time and fit to be used by the next hirer or Scout Meeting. Toilets must be cleaned, floors swept/mopped, kitchen surfaces and sinks cleaned and bins emptied. (Floor cleaning equipment to be found in cleaning cupboard and brooms in cupboard under stairs). Crockery/cutlery &amp; cooking equipment must be washed/dried and stored away. All rubbish is to be bagged and taken away by the Hirer for disposal.</li>
+<li>Hirers using the kitchen must leave it in a clean and acceptable state (see item 25) and should comply with notices posted in the kitchen. An additional cleaning charge may be levied if the Hirer fails to do this and additional cleaning is deemed necessary.</li>
+<li>The Hirer will not have access to {org_name}&rsquo;s camp store, dry store, mezzanine store or office.</li>
+<li>The Hirer will not stick anything to the walls/doors or {org_name} notice boards.</li>
+<li>Telephone &ndash; the nearest public telephone is near the council offices on the high street, opposite the corner shop.</li>
+<li>The Hirer will wipe clean tables, which have been used and leave all tables &amp; chairs for the large hall tidily away in the chair/table store.</li>
+<li>Hirers will check all fire exits are secure, lights turned off, taps off, electrical equipment including the cooker are all switched off prior to exiting the building.</li>
+<li>The hiring prices are reviewed annually, and prices charged will be those in force at the time of the let, regardless of when the booking was made. Full payment for the Hire must be made {payment_days_required} days before the event or the booking will be cancelled. Short notice bookings, less than {payment_days_required} days before the event will require full payment at the time of booking. Cancellation by the Hirer within {payment_days_required} days of the event will incur a charge of 50% of the total hire cost.</li>
+</ol>';
     }
 
     /**

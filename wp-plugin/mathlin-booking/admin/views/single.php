@@ -188,6 +188,25 @@ $kitchen_price = MBS_Bookings::get_kitchen_price();
                 <?php endif; ?>
             </div>
         </div>
+
+        <!-- Terms & Conditions reference -->
+        <?php
+        $terms_page_id = (int) get_option( 'mbs_terms_page_id', 0 );
+        $terms_url = '';
+        if ( $terms_page_id && get_post( $terms_page_id ) ) {
+            $terms_url = get_permalink( $terms_page_id );
+        } else {
+            $tp = get_posts( array( 'post_type' => 'page', 'post_status' => 'publish', 's' => 'mathlin_terms', 'numberposts' => 1 ) );
+            if ( ! empty( $tp ) ) $terms_url = get_permalink( $tp[0]->ID );
+        }
+        if ( $terms_url ) : ?>
+        <div class="nms-card" style="margin-top:0;">
+            <div style="padding:12px 1.5rem;background:#f5f0ff;font-size:0.85rem;">
+                📋 <a href="<?php echo esc_url( $terms_url ); ?>" target="_blank" style="color:#7413DC;font-weight:600;">View Terms &amp; Conditions of Hire</a>
+                <span class="nms-muted"> — applies to this booking</span>
+            </div>
+        </div>
+        <?php endif; ?>
     </div>
 
     <!-- Audit Log -->
