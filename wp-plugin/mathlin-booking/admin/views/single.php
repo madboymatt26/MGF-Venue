@@ -220,6 +220,9 @@ $kitchen_price = MBS_Bookings::get_kitchen_price();
                 <?php if ( $booking->status === 'paid' ) : ?>
                     <button class="button nms-btn-unpaid" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">↩ Undo Paid</button>
                 <?php endif; ?>
+                <?php if ( $booking->status === 'deposit_paid' ) : ?>
+                    <button class="button nms-btn-undo-deposit" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">↩ Undo Deposit</button>
+                <?php endif; ?>
                 <?php if ( ! in_array( $booking->status, array( 'cancelled', 'archived', 'paid', 'deposit_paid' ) ) ) : ?>
                     <button class="button nms-btn-cancel" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">✗ Cancel Booking</button>
                 <?php endif; ?>

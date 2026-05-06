@@ -203,11 +203,19 @@
                             <?php if ( $b->status === 'pending' ) { ?>
                                 <button class="button button-small button-primary nms-btn-confirm" data-ref="<?php echo esc_attr( $b->ref ); ?>">Confirm</button>
                             <?php } ?>
+                            <?php
+                            $list_dep_settings = MBS_Bookings::get_deposit_settings();
+                            if ( $b->status === 'confirmed' && $list_dep_settings['enabled'] && ! MBS_Bookings::requires_full_payment( $b->booking_date ) ) { ?>
+                                <button class="button button-small nms-btn-deposit-paid" data-ref="<?php echo esc_attr( $b->ref ); ?>" style="background:#f59e0b;color:#fff;border-color:#d97706;">Deposit Paid</button>
+                            <?php } ?>
                             <?php if ( $b->status === 'confirmed' || $b->status === 'deposit_paid' ) { ?>
-                                <button class="button button-small nms-btn-paid" data-ref="<?php echo esc_attr( $b->ref ); ?>">Mark Paid</button>
+                                <button class="button button-small nms-btn-paid" data-ref="<?php echo esc_attr( $b->ref ); ?>">Fully Paid</button>
                             <?php } ?>
                             <?php if ( $b->status === 'paid' ) { ?>
                                 <button class="button button-small nms-btn-unpaid" data-ref="<?php echo esc_attr( $b->ref ); ?>">Undo Paid</button>
+                            <?php } ?>
+                            <?php if ( $b->status === 'deposit_paid' ) { ?>
+                                <button class="button button-small nms-btn-undo-deposit" data-ref="<?php echo esc_attr( $b->ref ); ?>">Undo Deposit</button>
                             <?php } ?>
                             <?php if ( $b->status !== 'cancelled' && $b->status !== 'archived' && $b->status !== 'paid' && $b->status !== 'deposit_paid' ) { ?>
                                 <button class="button button-small nms-btn-cancel" data-ref="<?php echo esc_attr( $b->ref ); ?>">Cancel</button>

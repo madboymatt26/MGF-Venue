@@ -47,6 +47,30 @@ jQuery(function ($) {
         nmsUpdateStatus(ref, 'confirmed', $btn, redirect || true);
     });
 
+    // ── Undo deposit (back to confirmed) ───────────────────────────────────────
+    $(document).on('click', '.nms-btn-undo-deposit', function () {
+        var $btn     = $(this);
+        var ref      = $btn.data('ref');
+        var redirect = $btn.data('redirect');
+        if (!confirm('Undo deposit paid status for ' + ref + '? It will be set back to Confirmed and the deposit record cleared.')) return;
+        $btn.prop('disabled', true);
+        $.post(MBS_Admin.ajax_url, {
+            action: 'mbs_undo_deposit',
+            nonce:  MBS_Admin.nonce,
+            ref:    ref
+        }, function (res) {
+            if (res.success) {
+                window.location.reload();
+            } else {
+                alert('Error: ' + (res.data || 'Could not update booking.'));
+                $btn.prop('disabled', false);
+            }
+        }).fail(function () {
+            alert('Network error — please try again.');
+            $btn.prop('disabled', false);
+        });
+    });
+
     // ── Mark balance paid (after modification increased cost) ───────────────────
     $(document).on('click', '.nms-btn-mark-balance-paid', function () {
         var $btn = $(this);

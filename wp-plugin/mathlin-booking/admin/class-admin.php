@@ -9,6 +9,7 @@ class MBS_Admin {
         add_action( 'wp_ajax_mbs_update_status',  array( $this, 'ajax_update_status' ) );
         add_action( 'wp_ajax_mbs_mark_refunded',  array( $this, 'ajax_mark_refunded' ) );
         add_action( 'wp_ajax_mbs_mark_deposit_paid', array( $this, 'ajax_mark_deposit_paid' ) );
+        add_action( 'wp_ajax_mbs_undo_deposit',  array( $this, 'ajax_undo_deposit' ) );
         add_action( 'wp_ajax_mbs_delete_booking', array( $this, 'ajax_delete_booking' ) );
         add_action( 'wp_ajax_mbs_get_invoice',    array( $this, 'ajax_get_invoice' ) );
         add_action( 'wp_ajax_mbs_save_settings',  array( $this, 'ajax_save_settings' ) );
@@ -245,6 +246,29 @@ class MBS_Admin {
         MBS_Audit_Log::log( $ref, 'deposit_paid', 'Admin marked deposit of £' . number_format( $deposit_amount, 2 ) . ' as received (bank transfer). Balance of £' . number_format( (float) $booking->amount - $deposit_amount, 2 ) . ' outstanding.' );
 
         wp_send_json_success( array( 'ref' => $ref, 'status' => 'deposit_paid', 'deposit' => $deposit_amount ) );
+    }
+
+    /**
+     * Undo deposit paid — revert to confirmed and clear deposit_paid amount.
+     */
+    public function ajax_undo_deposit() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
+
+        $ref = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
+        $booking = MBS_Bookings::get( $ref );
+        if ( ! $booking ) wp_send_json_error( 'Booking not found.' );
+        if ( $booking->status !== 'deposit_paid' ) wp_send_json_error( 'Booking is not in Deposit Paid status.' );
+
+        MBS_Bookings::update_status( $ref, 'confirmed' );
+
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_TABLE;
+        $wpdb->update( $table, array( 'deposit_paid' => 0 ), array( 'ref' => $ref ) );
+
+        MBS_Audit_Log::log( $ref, 'status_changed', 'Admin reverted Deposit Paid to Confirmed. Deposit record cleared.' );
+
+        wp_send_json_success( array( 'ref' => $ref, 'status' => 'confirmed' ) );
     }
 
     public function ajax_get_invoice() {
