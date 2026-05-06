@@ -23,27 +23,8 @@ $kitchen_price = MBS_Bookings::get_kitchen_price();
 
             <!-- View mode -->
             <?php
-            // Financial balance indicator — show if booking has been modified and payment status differs
-            $amount_paid = 0;
-            if ( MBS_Woo_Payment::is_available() ) {
-                // Look up completed WooCommerce orders for this booking
-                $woo_orders = wc_get_orders( array(
-                    'meta_key'   => '_mbs_booking_ref',
-                    'meta_value' => $booking->ref,
-                    'status'     => array( 'wc-completed', 'wc-processing' ),
-                    'limit'      => -1,
-                ) );
-                foreach ( $woo_orders as $woo_order ) {
-                    $amount_paid += (float) $woo_order->get_total();
-                    // Subtract any refunds
-                    $amount_paid -= (float) $woo_order->get_total_refunded();
-                }
-            }
-            // Also consider status-based payment: if status is 'paid' but no WooCommerce orders found,
-            // assume the full original amount was paid (e.g. bank transfer marked manually)
-            if ( $amount_paid <= 0 && $booking->status === 'paid' ) {
-                $amount_paid = (float) $booking->amount;
-            }
+            // Financial balance indicator — use amount_paid column directly
+            $amount_paid = (float) ( $booking->amount_paid ?? 0 );
 
             $balance = (float) $booking->amount - $amount_paid;
             if ( $amount_paid > 0 && abs( $balance ) > 0.01 ) :
@@ -53,7 +34,7 @@ $kitchen_price = MBS_Bookings::get_kitchen_price();
                             ⚠️ Balance Due: &pound;<?php echo number_format( $balance, 2 ); ?>
                             <span style="font-weight:normal;font-size:13px;margin-left:8px;">(Paid: &pound;<?php echo number_format( $amount_paid, 2 ); ?> / Total: &pound;<?php echo number_format( $booking->amount, 2 ); ?>)</span>
                         </span>
-                        <button class="button button-small nms-btn-mark-balance-paid" data-ref="<?php echo esc_attr( $booking->ref ); ?>" style="background:#2ecc71;color:#fff;border-color:#27ae60;">✓ Mark Balance Paid</button>
+                        <button class="button button-small nms-btn-mark-balance-paid" data-ref="<?php echo esc_attr( $booking->ref ); ?>" style="background:#2ecc71;color:#fff;border-color:#27ae60;">✓ Mark Fully Paid (&pound;<?php echo number_format( $balance, 2 ); ?>)</button>
                     </div>
                 <?php else : ?>
                     <div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:6px;padding:12px 16px;margin:0 1.5rem 1rem;color:#065f46;font-weight:bold;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">

@@ -172,14 +172,14 @@ class MBS_Modification {
                     $new_amount = MBS_Bookings::calculate_cost( $space, $start, $end, (bool) $kitchen, (bool) $all_day, $num_days, (bool) $booking->scout_use );
                     $update['amount'] = $new_amount;
 
-                    // Auto-confirm: determine correct status based on payment
-                    // If previously paid and new cost <= old cost, keep as paid
-                    // If new cost > what was paid, set to confirmed (payment outstanding)
-                    $old_amount = (float) $booking->amount;
-                    $was_paid   = ( $booking->status === 'paid' );
+                    // Auto-confirm: determine correct status based on amount_paid
+                    // Do NOT change amount_paid — it stays at what was actually received
+                    $amount_paid = (float) ( $booking->amount_paid ?? 0 );
 
-                    if ( $was_paid && (float) $new_amount <= $old_amount ) {
+                    if ( $amount_paid >= (float) $new_amount ) {
                         $update['status'] = 'paid';
+                    } elseif ( $amount_paid > 0 && $amount_paid < (float) $new_amount ) {
+                        $update['status'] = 'confirmed';
                     } else {
                         $update['status'] = 'confirmed';
                     }
@@ -187,10 +187,11 @@ class MBS_Modification {
                     $wpdb->update( $table, $update, array( 'ref' => $request->booking_ref ) );
 
                     MBS_Audit_Log::log( $request->booking_ref, 'status_changed',
-                        sprintf( 'Modification approved: status set to %s (was %s, cost %s → %s)',
+                        sprintf( 'Modification approved: status set to %s (was %s, cost %s → %s, amount_paid: £%s)',
                             $update['status'], $booking->status,
-                            '£' . number_format( $old_amount, 2 ),
-                            '£' . number_format( (float) $new_amount, 2 )
+                            '£' . number_format( (float) $booking->amount, 2 ),
+                            '£' . number_format( (float) $new_amount, 2 ),
+                            number_format( $amount_paid, 2 )
                         )
                     );
                 }

@@ -83,7 +83,7 @@ $spaces  = MBS_Bookings::get_spaces();
                             // Determine payment context for display
                             $deposit_settings = MBS_Bookings::get_deposit_settings();
                             $total_amount     = (float) $b->amount;
-                            $deposit_paid_amt = (float) ( $b->deposit_paid ?? 0 );
+                            $amount_paid_val  = (float) ( $b->amount_paid ?? 0 );
                             $deposit_amount   = MBS_Bookings::calculate_deposit( $total_amount );
                             $is_deposit_mode  = $deposit_settings['enabled'] && $total_amount > 0;
                         ?>
@@ -94,8 +94,8 @@ $spaces  = MBS_Bookings::get_spaces();
                             <td style="padding:10px 8px;"><?php echo esc_html( $time_str ); ?></td>
                             <td style="padding:10px 8px;">
                                 &pound;<?php echo number_format( $b->amount, 2 ); ?>
-                                <?php if ( $b->status === 'deposit_paid' && $deposit_paid_amt > 0 ) : ?>
-                                    <br><span style="font-size:0.65rem;color:#92400e;">Paid: &pound;<?php echo number_format( $deposit_paid_amt, 2 ); ?> | Due: &pound;<?php echo number_format( $total_amount - $deposit_paid_amt, 2 ); ?></span>
+                                <?php if ( $amount_paid_val > 0 && $amount_paid_val < $total_amount ) : ?>
+                                    <br><span style="font-size:0.65rem;color:#92400e;">Paid: &pound;<?php echo number_format( $amount_paid_val, 2 ); ?> | Due: &pound;<?php echo number_format( $total_amount - $amount_paid_val, 2 ); ?></span>
                                 <?php endif; ?>
                             </td>
                             <td style="padding:10px 8px;">
@@ -108,9 +108,10 @@ $spaces  = MBS_Bookings::get_spaces();
                                     <?php if ( in_array( $b->status, array( 'confirmed', 'deposit_paid' ) ) && MBS_Woo_Payment::is_available() ) :
                                         $pay_url = MBS_Woo_Payment::generate_payment_url( $b );
                                         if ( $pay_url ) :
-                                            // Determine button label
-                                            if ( $b->status === 'deposit_paid' ) {
-                                                $pay_label = 'Pay Balance (£' . number_format( $total_amount - $deposit_paid_amt, 2 ) . ')';
+                                            // Determine button label based on amount_paid
+                                            $balance_due = $total_amount - $amount_paid_val;
+                                            if ( $amount_paid_val > 0 ) {
+                                                $pay_label = 'Pay Balance (£' . number_format( $balance_due, 2 ) . ')';
                                             } elseif ( $is_deposit_mode && ! MBS_Bookings::requires_full_payment( $b->booking_date ) ) {
                                                 $pay_label = 'Pay Deposit (£' . number_format( $deposit_amount, 2 ) . ')';
                                             } else {

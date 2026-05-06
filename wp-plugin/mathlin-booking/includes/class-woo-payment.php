@@ -154,11 +154,11 @@ class MBS_Woo_Payment {
         // Determine payment amount based on deposit settings
         $deposit_settings = MBS_Bookings::get_deposit_settings();
         $total_amount     = floatval( $booking->amount );
-        $deposit_paid     = floatval( $booking->deposit_paid ?? 0 );
+        $amount_paid      = floatval( $booking->amount_paid ?? 0 );
 
-        if ( $booking->status === 'deposit_paid' ) {
-            // Paying the remaining balance
-            $amount = $total_amount - $deposit_paid;
+        if ( $amount_paid > 0 ) {
+            // Pay whatever is still owed
+            $amount = $total_amount - $amount_paid;
         } elseif ( $deposit_settings['enabled'] && ! MBS_Bookings::requires_full_payment( $booking->booking_date ) ) {
             // Pay deposit only
             $amount = MBS_Bookings::calculate_deposit( $total_amount );
@@ -183,7 +183,7 @@ class MBS_Woo_Payment {
         $cart_item_data = array(
             'mbs_booking_ref'    => $ref,
             'mbs_booking_amount' => $amount,
-            'mbs_payment_type'   => ( $booking->status === 'deposit_paid' ) ? 'balance' : ( ( $amount < $total_amount ) ? 'deposit' : 'full' ),
+            'mbs_payment_type'   => ( $amount_paid > 0 ) ? 'balance' : ( ( $amount < $total_amount ) ? 'deposit' : 'full' ),
         );
 
         WC()->cart->add_to_cart( $product_id, 1, 0, array(), $cart_item_data );
@@ -219,11 +219,11 @@ class MBS_Woo_Payment {
                 if ( $booking ) {
                     $deposit_settings = MBS_Bookings::get_deposit_settings();
                     $total_amount     = (float) $booking->amount;
-                    $deposit_paid     = (float) ( $booking->deposit_paid ?? 0 );
+                    $amount_paid      = (float) ( $booking->amount_paid ?? 0 );
 
-                    if ( $booking->status === 'deposit_paid' ) {
-                        // Balance payment
-                        $price = $total_amount - $deposit_paid;
+                    if ( $amount_paid > 0 ) {
+                        // Pay whatever is still owed
+                        $price = $total_amount - $amount_paid;
                     } elseif ( $deposit_settings['enabled'] && ! MBS_Bookings::requires_full_payment( $booking->booking_date ) ) {
                         // Deposit payment
                         $price = MBS_Bookings::calculate_deposit( $total_amount );
@@ -282,7 +282,7 @@ class MBS_Woo_Payment {
                     MBS_Bookings::update_status( $ref, 'deposit_paid' );
                     global $wpdb;
                     $table = $wpdb->prefix . MBS_TABLE;
-                    $wpdb->update( $table, array( 'deposit_paid' => $order_total ), array( 'ref' => $ref ) );
+                    $wpdb->update( $table, array( 'deposit_paid' => $order_total, 'amount_paid' => $order_total ), array( 'ref' => $ref ) );
                     MBS_Audit_Log::log( $ref, 'deposit_paid', 'Deposit of £' . number_format( $order_total, 2 ) . ' received via WooCommerce Order #' . $order_id . '.', 0 );
                     $order->add_order_note( sprintf( 'Mathlin Booking %s: Deposit of £%s received. Balance of £%s due before event.', $ref, number_format( $order_total, 2 ), number_format( $booking_total - $order_total, 2 ) ) );
 
@@ -294,12 +294,13 @@ class MBS_Woo_Payment {
                 } else {
                     // Full payment or balance payment
                     MBS_Bookings::update_status( $ref, 'paid' );
-                    if ( $booking->status === 'deposit_paid' ) {
-                        // Update deposit_paid to reflect total paid
-                        global $wpdb;
-                        $table = $wpdb->prefix . MBS_TABLE;
-                        $wpdb->update( $table, array( 'deposit_paid' => $deposit_already + $order_total ), array( 'ref' => $ref ) );
-                    }
+                    $amount_paid_so_far = (float) ( $booking->amount_paid ?? 0 );
+                    global $wpdb;
+                    $table = $wpdb->prefix . MBS_TABLE;
+                    $wpdb->update( $table, array(
+                        'deposit_paid' => $deposit_already + $order_total,
+                        'amount_paid'  => $amount_paid_so_far + $order_total,
+                    ), array( 'ref' => $ref ) );
                     MBS_Audit_Log::log( $ref, 'paid', 'Payment received via WooCommerce Order #' . $order_id . '. Status updated to Paid.', 0 );
                     MBS_Email::notify_paid( $booking );
                     $order->add_order_note( sprintf( 'Mathlin Booking %s automatically marked as Paid.', $ref ) );

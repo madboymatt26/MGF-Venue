@@ -112,6 +112,14 @@ class MBS_Invoice {
                 <div class="nms-inv-total-row"><span>Subtotal</span><span>&pound;<?php echo number_format( $booking->amount, 2 ); ?></span></div>
                 <div class="nms-inv-total-row"><span>VAT (0% – Charity exempt)</span><span>&pound;0.00</span></div>
                 <div class="nms-inv-total-row nms-inv-grand"><span>Total Due</span><span>&pound;<?php echo number_format( $booking->amount, 2 ); ?></span></div>
+                <?php
+                $inv_amount_paid = (float) ( $booking->amount_paid ?? 0 );
+                if ( $inv_amount_paid > 0 ) :
+                    $inv_balance_due = (float) $booking->amount - $inv_amount_paid;
+                ?>
+                <div class="nms-inv-total-row"><span>Amount Paid</span><span>&pound;<?php echo number_format( $inv_amount_paid, 2 ); ?></span></div>
+                <div class="nms-inv-total-row nms-inv-grand"><span>Balance Due</span><span>&pound;<?php echo number_format( max( 0, $inv_balance_due ), 2 ); ?></span></div>
+                <?php endif; ?>
             </div>
 
             <?php

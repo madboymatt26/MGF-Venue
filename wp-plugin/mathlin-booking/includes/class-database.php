@@ -229,6 +229,16 @@ class MBS_Database {
             $wpdb->query( "ALTER TABLE {$table} ADD COLUMN deposit_paid DECIMAL(8,2) NOT NULL DEFAULT 0.00 AFTER amount" );
         }
 
+        // v3.2.0: Add amount_paid column to track total payments received
+        $col = $wpdb->get_results( "SHOW COLUMNS FROM {$table} LIKE 'amount_paid'" );
+        if ( empty( $col ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN amount_paid DECIMAL(8,2) NOT NULL DEFAULT 0.00 AFTER deposit_paid" );
+            // Migrate existing data: if status is 'paid', amount_paid = amount
+            // If status is 'deposit_paid', amount_paid = deposit_paid
+            $wpdb->query( "UPDATE {$table} SET amount_paid = amount WHERE status = 'paid'" );
+            $wpdb->query( "UPDATE {$table} SET amount_paid = deposit_paid WHERE status = 'deposit_paid' AND deposit_paid > 0" );
+        }
+
         // v3.0.0: Add pricing_tier column to track which tier was applied
         $col = $wpdb->get_results( "SHOW COLUMNS FROM {$table} LIKE 'pricing_tier'" );
         if ( empty( $col ) ) {

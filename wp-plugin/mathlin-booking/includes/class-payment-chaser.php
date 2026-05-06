@@ -112,15 +112,15 @@ class MBS_Payment_Chaser {
         $deposit_settings  = MBS_Bookings::get_deposit_settings();
         $is_deposit_chase  = ( $booking->status === 'confirmed' && $deposit_settings['enabled'] && ! MBS_Bookings::requires_full_payment( $booking->booking_date ) );
         $total_amount      = (float) $booking->amount;
-        $deposit_paid_amt  = (float) ( $booking->deposit_paid ?? 0 );
+        $amount_paid_val   = (float) ( $booking->amount_paid ?? 0 );
         $deposit_amount    = MBS_Bookings::calculate_deposit( $total_amount );
 
-        if ( $is_balance_chase ) {
-            $amount_due = $total_amount - $deposit_paid_amt;
-        } elseif ( $is_deposit_chase ) {
+        // Use amount - amount_paid for the amount due in all chase scenarios
+        $amount_due = $total_amount - $amount_paid_val;
+
+        // If amount_paid is 0 and it's a deposit chase, chase the deposit amount only
+        if ( $amount_paid_val == 0 && $is_deposit_chase ) {
             $amount_due = $deposit_amount;
-        } else {
-            $amount_due = $total_amount;
         }
 
         // Determine which template and colour based on chase count

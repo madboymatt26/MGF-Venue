@@ -70,6 +70,7 @@ class MBS_Email {
         // Deposit-aware payment terms
         $deposit_settings = MBS_Bookings::get_deposit_settings();
         $total_amount     = (float) $booking->amount;
+        $amount_paid_val  = (float) ( $booking->amount_paid ?? 0 );
 
         if ( $deposit_settings['enabled'] && $total_amount > 0 ) {
             $requires_full  = MBS_Bookings::requires_full_payment( $booking->booking_date );
@@ -77,7 +78,16 @@ class MBS_Email {
             $balance_amount = $total_amount - $deposit_amount;
             $balance_days   = $deposit_settings['balance_days'];
 
-            if ( ! $requires_full ) {
+            if ( $amount_paid_val > 0 ) {
+                // Modification scenario: already paid something, show additional payment due
+                $additional_due = $total_amount - $amount_paid_val;
+                if ( $additional_due > 0 ) {
+                    $body .= '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:6px;padding:16px;margin:16px 0;">';
+                    $body .= '<strong style="color:#991b1b;">Additional payment of &pound;' . number_format( $additional_due, 2 ) . ' due</strong><br>';
+                    $body .= '<span style="font-size:13px;color:#6b7280;">Previously paid: &pound;' . number_format( $amount_paid_val, 2 ) . ' | New total: &pound;' . number_format( $total_amount, 2 ) . '</span>';
+                    $body .= '</div>';
+                }
+            } elseif ( ! $requires_full ) {
                 $body .= '<div style="background:#f5f0ff;border:1px solid #e0d0f0;border-radius:6px;padding:16px;margin:16px 0;">';
                 $body .= '<strong style="color:#7413DC;">Payment Schedule</strong><br><br>';
                 $body .= '&#9679; <strong>Deposit due now:</strong> &pound;' . number_format( $deposit_amount, 2 ) . ' (' . (int) $deposit_settings['percentage'] . '% of total)<br>';
@@ -105,9 +115,10 @@ class MBS_Email {
             $pay_url = MBS_Woo_Payment::generate_payment_url( $booking );
             if ( $pay_url ) {
                 // Label the button appropriately
-                $deposit_settings_check = MBS_Bookings::get_deposit_settings();
                 $btn_label = '💳 Pay Now Online';
-                if ( $deposit_settings_check['enabled'] && $total_amount > 0 && ! MBS_Bookings::requires_full_payment( $booking->booking_date ) ) {
+                if ( $amount_paid_val > 0 && ( $total_amount - $amount_paid_val ) > 0 ) {
+                    $btn_label = '💳 Pay Balance Now (&pound;' . number_format( $total_amount - $amount_paid_val, 2 ) . ')';
+                } elseif ( $deposit_settings['enabled'] && $total_amount > 0 && ! MBS_Bookings::requires_full_payment( $booking->booking_date ) ) {
                     $btn_label = '💳 Pay Deposit Now (&pound;' . number_format( MBS_Bookings::calculate_deposit( $total_amount ), 2 ) . ')';
                 }
 

@@ -188,7 +188,13 @@ class MBS_Admin {
 
         if ( $status === 'paid' ) {
             $booking = MBS_Bookings::get( $ref );
-            if ( $booking ) MBS_Email::notify_paid( $booking );
+            if ( $booking ) {
+                // Set amount_paid = amount when marking as fully paid
+                global $wpdb;
+                $table = $wpdb->prefix . MBS_TABLE;
+                $wpdb->update( $table, array( 'amount_paid' => $booking->amount ), array( 'ref' => $ref ) );
+                MBS_Email::notify_paid( $booking );
+            }
         }
 
         wp_send_json_success( array( 'ref' => $ref, 'status' => $status ) );
@@ -241,7 +247,7 @@ class MBS_Admin {
 
         global $wpdb;
         $table = $wpdb->prefix . MBS_TABLE;
-        $wpdb->update( $table, array( 'deposit_paid' => $deposit_amount ), array( 'ref' => $ref ) );
+        $wpdb->update( $table, array( 'deposit_paid' => $deposit_amount, 'amount_paid' => $deposit_amount ), array( 'ref' => $ref ) );
 
         // Send deposit received confirmation email to booker
         $updated_booking = MBS_Bookings::get( $ref );
