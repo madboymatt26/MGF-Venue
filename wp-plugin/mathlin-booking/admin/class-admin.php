@@ -8,6 +8,7 @@ class MBS_Admin {
         add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
         add_action( 'wp_ajax_mbs_update_status',  array( $this, 'ajax_update_status' ) );
         add_action( 'wp_ajax_mbs_mark_refunded',  array( $this, 'ajax_mark_refunded' ) );
+        add_action( 'wp_ajax_mbs_mark_deposit_paid', array( $this, 'ajax_mark_deposit_paid' ) );
         add_action( 'wp_ajax_mbs_delete_booking', array( $this, 'ajax_delete_booking' ) );
         add_action( 'wp_ajax_mbs_get_invoice',    array( $this, 'ajax_get_invoice' ) );
         add_action( 'wp_ajax_mbs_save_settings',  array( $this, 'ajax_save_settings' ) );
@@ -218,6 +219,32 @@ class MBS_Admin {
         MBS_Audit_Log::log( $ref, 'refund_processed', 'Admin marked refund/credit as processed. Status set to Paid.' );
 
         wp_send_json_success( array( 'ref' => $ref, 'status' => 'paid' ) );
+    }
+
+    /**
+     * Mark a booking's deposit as received (manual bank transfer).
+     * Sets status to deposit_paid and records the deposit amount.
+     */
+    public function ajax_mark_deposit_paid() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
+
+        $ref = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
+        $booking = MBS_Bookings::get( $ref );
+        if ( ! $booking ) wp_send_json_error( 'Booking not found.' );
+        if ( $booking->status !== 'confirmed' ) wp_send_json_error( 'Booking must be in Confirmed status to mark deposit paid.' );
+
+        $deposit_amount = MBS_Bookings::calculate_deposit( (float) $booking->amount );
+
+        MBS_Bookings::update_status( $ref, 'deposit_paid' );
+
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_TABLE;
+        $wpdb->update( $table, array( 'deposit_paid' => $deposit_amount ), array( 'ref' => $ref ) );
+
+        MBS_Audit_Log::log( $ref, 'deposit_paid', 'Admin marked deposit of £' . number_format( $deposit_amount, 2 ) . ' as received (bank transfer). Balance of £' . number_format( (float) $booking->amount - $deposit_amount, 2 ) . ' outstanding.' );
+
+        wp_send_json_success( array( 'ref' => $ref, 'status' => 'deposit_paid', 'deposit' => $deposit_amount ) );
     }
 
     public function ajax_get_invoice() {

@@ -200,7 +200,15 @@ $kitchen_price = MBS_Bookings::get_kitchen_price();
                     <button class="button button-primary nms-btn-confirm" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">✓ Confirm Booking</button>
                 <?php endif; ?>
                 <?php if ( $booking->status === 'confirmed' || $booking->status === 'deposit_paid' ) : ?>
-                    <button class="button button-primary nms-btn-paid" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">💰 Mark as Paid</button>
+                    <?php
+                    $dep_settings = MBS_Bookings::get_deposit_settings();
+                    $dep_amount   = MBS_Bookings::calculate_deposit( (float) $booking->amount );
+                    $bal_amount   = (float) $booking->amount - (float) ( $booking->deposit_paid ?? 0 );
+                    ?>
+                    <?php if ( $booking->status === 'confirmed' && $dep_settings['enabled'] && ! MBS_Bookings::requires_full_payment( $booking->booking_date ) ) : ?>
+                        <button class="button nms-btn-deposit-paid" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1" style="background:#f59e0b;color:#fff;border-color:#d97706;">💰 Mark Deposit Paid (£<?php echo number_format( $dep_amount, 2 ); ?>)</button>
+                    <?php endif; ?>
+                    <button class="button button-primary nms-btn-paid" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">💰 Mark Fully Paid (£<?php echo number_format( $bal_amount, 2 ); ?>)</button>
                     <button class="button nms-btn-chase" data-ref="<?php echo esc_attr( $booking->ref ); ?>">📧 Chase Payment</button>
                     <?php if ( $booking->chase_count > 0 ) : ?>
                         <small class="nms-muted" style="display:block;margin-top:4px;"><?php echo esc_html( $booking->chase_count ); ?> chase(s) sent<?php if ( $booking->last_chased ) echo ' — last: ' . esc_html( date( 'j M H:i', strtotime( $booking->last_chased ) ) ); ?></small>

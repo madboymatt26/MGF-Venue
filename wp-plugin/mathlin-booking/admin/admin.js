@@ -55,6 +55,29 @@ jQuery(function ($) {
         nmsUpdateStatus(ref, 'paid', $btn, true);
     });
 
+    // ── Mark deposit paid (admin manually records deposit received) ─────────────
+    $(document).on('click', '.nms-btn-deposit-paid', function () {
+        var $btn = $(this);
+        var ref  = $btn.data('ref');
+        if (!confirm('Mark the deposit for ' + ref + ' as received?\nStatus will change to Deposit Paid. The balance will be chased automatically before the event.')) return;
+        $btn.prop('disabled', true);
+        $.post(MBS_Admin.ajax_url, {
+            action: 'mbs_mark_deposit_paid',
+            nonce:  MBS_Admin.nonce,
+            ref:    ref
+        }, function (res) {
+            if (res.success) {
+                window.location.reload();
+            } else {
+                alert('Error: ' + (res.data || 'Could not update booking.'));
+                $btn.prop('disabled', false);
+            }
+        }).fail(function () {
+            alert('Network error — please try again.');
+            $btn.prop('disabled', false);
+        });
+    });
+
     // ── Mark refund processed (after modification decreased cost) ───────────────
     $(document).on('click', '.nms-btn-mark-refunded', function () {
         var $btn = $(this);
