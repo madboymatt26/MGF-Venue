@@ -32,6 +32,21 @@ class MBS_Bookings {
         return get_option( 'mbs_admin_email', 'bookings@needhamscouts.uk' );
     }
 
+    /**
+     * Get a human-readable label for a booking status.
+     */
+    public static function status_label( $status ) {
+        $labels = array(
+            'pending'      => 'Pending',
+            'confirmed'    => 'Confirmed',
+            'deposit_paid' => 'Deposit Paid',
+            'paid'         => 'Paid',
+            'cancelled'    => 'Cancelled',
+            'archived'     => 'Archived',
+        );
+        return $labels[ $status ] ?? ucfirst( $status );
+    }
+
     public static function get_bank_details() {
         return array(
             'sort_code'      => get_option( 'mbs_bank_sort_code', '12-34-56' ),

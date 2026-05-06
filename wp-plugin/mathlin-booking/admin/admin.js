@@ -290,6 +290,13 @@ jQuery(function ($) {
         $row.remove();
     });
 
+    // ── Deposit toggle (show/hide fields based on enabled state) ──────────────
+    $('#deposit_enabled').on('change', function () {
+        var enabled = $(this).val() === '1';
+        $('.mbs-deposit-field').toggle(enabled);
+        $('.mbs-no-deposit-field').toggle(!enabled);
+    });
+
     // ── Add pricing tier row ───────────────────────────────────────────────────
     $('#nms-add-tier').on('click', function () {
         var row = '<tr class="nms-tier-row">' +

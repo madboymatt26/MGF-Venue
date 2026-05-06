@@ -116,10 +116,6 @@
                     <th><label for="bank_account_name">Account Name</label></th>
                     <td><input type="text" id="bank_account_name" value="<?php echo esc_attr( get_option( 'mbs_bank_account_name', 'Needham Market Scout Group' ) ); ?>" class="regular-text" placeholder="Needham Market Scout Group"></td>
                 </tr>
-                <tr>
-                    <th><label for="payment_terms_days">Payment Terms</label></th>
-                    <td><input type="number" id="payment_terms_days" value="<?php echo esc_attr( get_option( 'mbs_payment_terms_days', 14 ) ); ?>" min="1" max="90" style="width:80px"> days</td>
-                </tr>
             </table>
         </div>
 
@@ -446,30 +442,37 @@ rest:
 
         <!-- Deposit Management -->
         <div class="nms-card">
-            <div class="nms-card-header"><h2>💰 Deposit Management</h2></div>
-            <p>Require a partial deposit at booking time, with the balance due before the event.</p>
+            <div class="nms-card-header"><h2>💰 Payment &amp; Deposits</h2></div>
+            <p>Configure how and when payment is collected from hirers.</p>
             <table class="form-table">
                 <tr>
-                    <th><label for="deposit_enabled">Deposits</label></th>
+                    <th><label for="deposit_enabled">Deposit System</label></th>
                     <td>
                         <select id="deposit_enabled">
-                            <option value="0" <?php selected( get_option( 'mbs_deposit_enabled', 0 ), 0 ); ?>>Disabled (full payment required)</option>
-                            <option value="1" <?php selected( get_option( 'mbs_deposit_enabled', 0 ), 1 ); ?>>Enabled</option>
+                            <option value="0" <?php selected( get_option( 'mbs_deposit_enabled', 0 ), 0 ); ?>>Disabled — full payment required upfront</option>
+                            <option value="1" <?php selected( get_option( 'mbs_deposit_enabled', 0 ), 1 ); ?>>Enabled — collect deposit then balance</option>
                         </select>
                     </td>
                 </tr>
-                <tr>
+                <tr class="mbs-deposit-field" <?php if ( ! get_option( 'mbs_deposit_enabled', 0 ) ) echo 'style="display:none;"'; ?>>
                     <th><label for="deposit_percentage">Deposit amount</label></th>
                     <td>
                         <input type="number" id="deposit_percentage" value="<?php echo esc_attr( get_option( 'mbs_deposit_percentage', 25 ) ); ?>" min="1" max="99" style="width:80px">%
                         <p class="description">Percentage of total cost required as deposit at booking time.</p>
                     </td>
                 </tr>
-                <tr>
+                <tr class="mbs-deposit-field" <?php if ( ! get_option( 'mbs_deposit_enabled', 0 ) ) echo 'style="display:none;"'; ?>>
                     <th><label for="deposit_balance_days">Balance due</label></th>
                     <td>
                         <input type="number" id="deposit_balance_days" value="<?php echo esc_attr( get_option( 'mbs_deposit_balance_days', 7 ) ); ?>" min="1" max="90" style="width:80px"> days before event
                         <p class="description">Remaining balance must be paid this many days before the event. If the booking is made within this window, 100% is due immediately.</p>
+                    </td>
+                </tr>
+                <tr class="mbs-no-deposit-field" <?php if ( get_option( 'mbs_deposit_enabled', 0 ) ) echo 'style="display:none;"'; ?>>
+                    <th><label for="payment_terms_days">Payment due within</label></th>
+                    <td>
+                        <input type="number" id="payment_terms_days" value="<?php echo esc_attr( get_option( 'mbs_payment_terms_days', 14 ) ); ?>" min="1" max="90" style="width:80px"> days of confirmation
+                        <p class="description">When deposits are disabled, full payment is due within this many days of the booking being confirmed.</p>
                     </td>
                 </tr>
             </table>

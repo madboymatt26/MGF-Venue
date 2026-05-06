@@ -89,6 +89,15 @@ class MBS_Email {
                 $body .= '<strong>Full payment of &pound;' . number_format( $total_amount, 2 ) . ' is due immediately</strong> as your event is within ' . $balance_days . ' days.';
                 $body .= '</div>';
             }
+        } elseif ( $total_amount > 0 ) {
+            // Deposits disabled — show standard payment terms
+            $bank = MBS_Bookings::get_bank_details();
+            $body .= '<div style="background:#f5f0ff;border:1px solid #e0d0f0;border-radius:6px;padding:16px;margin:16px 0;">';
+            $body .= '<strong>Payment due within ' . $bank['payment_days'] . ' days.</strong><br>';
+            $body .= 'Sort Code: ' . esc_html( $bank['sort_code'] ) . '<br>';
+            $body .= 'Account: ' . esc_html( $bank['account_number'] ) . '<br>';
+            $body .= 'Reference: ' . esc_html( $booking->invoice_number );
+            $body .= '</div>';
         }
 
         // Add Pay Now button if WooCommerce is available

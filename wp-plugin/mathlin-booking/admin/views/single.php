@@ -16,7 +16,7 @@ $kitchen_price = MBS_Bookings::get_kitchen_price();
             <div class="nms-card-header">
                 <h2>Booking Details</h2>
                 <div style="display:flex;gap:8px;align-items:center;">
-                    <span class="nms-status nms-status-<?php echo esc_attr( $booking->status ); ?>"><?php echo esc_html( ucfirst( $booking->status ) ); ?></span>
+                    <span class="nms-status nms-status-<?php echo esc_attr( $booking->status ); ?>"><?php echo esc_html( MBS_Bookings::status_label( $booking->status ) ); ?></span>
                     <button class="button button-small" id="nms-toggle-edit" style="background:rgba(255,255,255,0.2);color:#fff;border-color:rgba(255,255,255,0.4);">✏️ Edit</button>
                 </div>
             </div>

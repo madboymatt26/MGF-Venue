@@ -119,8 +119,10 @@ class MBS_Invoice {
                     <strong>Final balance due:</strong> &pound;<?php echo number_format( $balance_amount, 2 ); ?> — payable at least <?php echo $balance_days; ?> days before your event (by <?php echo date( 'j F Y', strtotime( $booking->booking_date . " -{$balance_days} days" ) ); ?>)<br><br>
                     <em>If a booking is made less than <?php echo $balance_days; ?> days before the event, the full amount is due immediately.</em>
                 </p>
+                <?php elseif ( $deposit_settings['enabled'] && (float) $booking->amount > 0 ) : ?>
+                <p>Full payment of &pound;<?php echo number_format( $booking->amount, 2 ); ?> is due immediately (event within <?php echo $balance_days; ?> days).</p>
                 <?php else : ?>
-                <p>Full payment of &pound;<?php echo number_format( $booking->amount, 2 ); ?> is due immediately.</p>
+                <p>Please make payment within <strong><?php echo esc_html( $bank['payment_days'] ); ?> days</strong> of confirmation.</p>
                 <?php endif; ?>
 
                 <h5>Payment Methods</h5>
@@ -280,8 +282,10 @@ class MBS_Invoice {
             <strong>Final balance due:</strong> &pound;<?php echo number_format( $balance_amount, 2 ); ?> — payable at least <?php echo $balance_days; ?> days before your event (by <?php echo date( 'j F Y', strtotime( $booking->booking_date . " -{$balance_days} days" ) ); ?>)<br><br>
             <em>If a booking is made less than <?php echo $balance_days; ?> days before the event, the full amount is due immediately.</em>
         </p>
+        <?php elseif ( $deposit_settings['enabled'] && (float) $booking->amount > 0 ) : ?>
+        <p>Full payment of &pound;<?php echo number_format( $booking->amount, 2 ); ?> is due immediately (event within <?php echo $balance_days; ?> days).</p>
         <?php else : ?>
-        <p>Full payment of &pound;<?php echo number_format( $booking->amount, 2 ); ?> is due immediately.</p>
+        <p>Please make payment within <strong><?php echo esc_html( $bank['payment_days'] ); ?> days</strong> of confirmation.</p>
         <?php endif; ?>
 
         <h5>Payment Methods</h5>

@@ -36,6 +36,7 @@
                 <option value="">All Statuses</option>
                 <option value="pending"   <?php selected( $status, 'pending' ); ?>>Pending</option>
                 <option value="confirmed" <?php selected( $status, 'confirmed' ); ?>>Confirmed</option>
+                <option value="deposit_paid" <?php selected( $status, 'deposit_paid' ); ?>>Deposit Paid</option>
                 <option value="paid" <?php selected( $status, 'paid' ); ?>>Paid</option>
                 <option value="cancelled" <?php selected( $status, 'cancelled' ); ?>>Cancelled</option>
             </select>
@@ -148,7 +149,7 @@
                     <td><?php echo $is_daily ? 'All day' : esc_html( $b->start_time . ' – ' . $b->end_time ); ?></td>
                     <td><?php echo esc_html( $b->attendees ); ?></td>
                     <td><strong>&pound;<?php echo number_format( $series_total, 2 ); ?></strong></td>
-                    <td><span class="nms-status nms-status-<?php echo esc_attr( $b->status ); ?>"><?php echo esc_html( ucfirst( $b->status ) ); ?></span></td>
+                    <td><span class="nms-status nms-status-<?php echo esc_attr( $b->status ); ?>"><?php echo esc_html( MBS_Bookings::status_label( $b->status ) ); ?></span></td>
                     <td>
                         <div class="nms-action-btns">
                             <button class="button button-small nms-toggle-series" data-series="<?php echo esc_attr( $b->series_id ); ?>">▶ Expand</button>
@@ -169,7 +170,7 @@
                     <td><?php echo ! empty( $sb->all_day ) ? 'All day' : esc_html( $sb->start_time . ' – ' . $sb->end_time ); ?></td>
                     <td></td>
                     <td>&pound;<?php echo number_format( $sb->amount, 2 ); ?></td>
-                    <td><span class="nms-status nms-status-<?php echo esc_attr( $sb->status ); ?>"><?php echo esc_html( ucfirst( $sb->status ) ); ?></span></td>
+                    <td><span class="nms-status nms-status-<?php echo esc_attr( $sb->status ); ?>"><?php echo esc_html( MBS_Bookings::status_label( $sb->status ) ); ?></span></td>
                     <td><a href="?page=mathlin-booking&action=view&ref=<?php echo esc_attr( $sb->ref ); ?>" class="button button-small">View</a></td>
                 </tr>
                 <?php } ?>
@@ -192,7 +193,7 @@
                     <td><strong>&pound;<?php echo number_format( $b->amount, 2 ); ?></strong></td>
                     <td>
                         <span class="nms-status nms-status-<?php echo esc_attr( $b->status ); ?>">
-                            <?php echo esc_html( ucfirst( $b->status ) ); ?>
+                            <?php echo esc_html( MBS_Bookings::status_label( $b->status ) ); ?>
                         </span>
                     </td>
                     <td>
