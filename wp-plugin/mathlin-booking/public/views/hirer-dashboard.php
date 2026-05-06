@@ -72,29 +72,53 @@ $spaces  = MBS_Bookings::get_spaces();
                             $is_past  = strtotime( $b->booking_date ) < strtotime( 'today' );
 
                             $status_styles = array(
-                                'pending'   => 'background:#fff3cd;color:#856404',
-                                'confirmed' => 'background:#d1fae5;color:#065f46',
-                                'paid'      => 'background:#dbeafe;color:#1e40af',
-                                'cancelled' => 'background:#fee2e2;color:#991b1b',
+                                'pending'      => 'background:#fff3cd;color:#856404',
+                                'confirmed'    => 'background:#d1fae5;color:#065f46',
+                                'deposit_paid' => 'background:#fef3c7;color:#92400e',
+                                'paid'         => 'background:#dbeafe;color:#1e40af',
+                                'cancelled'    => 'background:#fee2e2;color:#991b1b',
                             );
                             $badge_style = $status_styles[ $b->status ] ?? 'background:#f3f4f6;color:#6b7280';
+
+                            // Determine payment context for display
+                            $deposit_settings = MBS_Bookings::get_deposit_settings();
+                            $total_amount     = (float) $b->amount;
+                            $deposit_paid_amt = (float) ( $b->deposit_paid ?? 0 );
+                            $deposit_amount   = MBS_Bookings::calculate_deposit( $total_amount );
+                            $is_deposit_mode  = $deposit_settings['enabled'] && $total_amount > 0;
                         ?>
                         <tr style="border-bottom:1px solid #f0f0f0;<?php echo $is_past ? 'opacity:0.6;' : ''; ?>">
                             <td style="padding:10px 8px;font-weight:600;"><?php echo esc_html( $b->ref ); ?></td>
                             <td style="padding:10px 8px;"><?php echo esc_html( $b->space ); ?></td>
                             <td style="padding:10px 8px;"><?php echo esc_html( date( 'D j M Y', strtotime( $b->booking_date ) ) ); ?></td>
                             <td style="padding:10px 8px;"><?php echo esc_html( $time_str ); ?></td>
-                            <td style="padding:10px 8px;">&pound;<?php echo number_format( $b->amount, 2 ); ?></td>
+                            <td style="padding:10px 8px;">
+                                &pound;<?php echo number_format( $b->amount, 2 ); ?>
+                                <?php if ( $b->status === 'deposit_paid' && $deposit_paid_amt > 0 ) : ?>
+                                    <br><span style="font-size:0.65rem;color:#92400e;">Paid: &pound;<?php echo number_format( $deposit_paid_amt, 2 ); ?> | Due: &pound;<?php echo number_format( $total_amount - $deposit_paid_amt, 2 ); ?></span>
+                                <?php endif; ?>
+                            </td>
                             <td style="padding:10px 8px;">
                                 <span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:0.7rem;font-weight:700;text-transform:uppercase;<?php echo $badge_style; ?>">
-                                    <?php echo esc_html( $b->status ); ?>
+                                    <?php echo esc_html( MBS_Bookings::status_label( $b->status ) ); ?>
                                 </span>
                             </td>
                             <td style="padding:10px 8px;">
                                 <div style="display:flex;gap:4px;flex-wrap:wrap;">
-                                    <?php if ( in_array( $b->status, array( 'confirmed', 'deposit_paid' ) ) && MBS_Woo_Payment::is_available() ) : ?>
-                                        <a href="<?php echo esc_url( MBS_Woo_Payment::generate_payment_url( $b ) ); ?>" class="nms-btn nms-btn-sm" style="background:#2ecc71;color:#fff;border-color:#2ecc71;font-size:0.7rem;">Pay</a>
-                                    <?php endif; ?>
+                                    <?php if ( in_array( $b->status, array( 'confirmed', 'deposit_paid' ) ) && MBS_Woo_Payment::is_available() ) :
+                                        $pay_url = MBS_Woo_Payment::generate_payment_url( $b );
+                                        if ( $pay_url ) :
+                                            // Determine button label
+                                            if ( $b->status === 'deposit_paid' ) {
+                                                $pay_label = 'Pay Balance (£' . number_format( $total_amount - $deposit_paid_amt, 2 ) . ')';
+                                            } elseif ( $is_deposit_mode && ! MBS_Bookings::requires_full_payment( $b->booking_date ) ) {
+                                                $pay_label = 'Pay Deposit (£' . number_format( $deposit_amount, 2 ) . ')';
+                                            } else {
+                                                $pay_label = 'Pay (£' . number_format( $total_amount, 2 ) . ')';
+                                            }
+                                    ?>
+                                        <a href="<?php echo esc_url( $pay_url ); ?>" class="nms-btn nms-btn-sm" style="background:#2ecc71;color:#fff;border-color:#2ecc71;font-size:0.7rem;"><?php echo esc_html( $pay_label ); ?></a>
+                                    <?php endif; endif; ?>
                                     <a href="<?php echo esc_url( rest_url( 'mathlin/v1/bookings/' . $b->ref . '/ical' ) ); ?>" class="nms-btn nms-btn-sm" style="background:#f5f0ff;color:#7413DC;border-color:#e0d0f0;font-size:0.7rem;">📅</a>
                                     <?php
                                     $mod_url = MBS_Modification::get_modification_url( $b );
