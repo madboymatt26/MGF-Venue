@@ -201,7 +201,7 @@ class MBS_Public {
         check_ajax_referer( 'mbs_public_nonce', 'nonce' );
 
         // Honeypot: if the hidden field is filled, it's a bot — reject silently
-        if ( ! empty( $_POST['mbs_website_url'] ) ) {
+        if ( ! empty( $_POST['mbs_hp_field'] ) ) {
             wp_send_json_success( array( 'ref' => 'MBS-000000', 'message' => 'Booking submitted.' ) ); // Fake success to not alert the bot
         }
 

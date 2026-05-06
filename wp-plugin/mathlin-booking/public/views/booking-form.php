@@ -45,7 +45,8 @@
             <?php wp_nonce_field( 'mbs_public_nonce', 'nonce' ); ?>
             <!-- Honeypot: hidden from humans, filled by bots -->
             <div style="position:absolute;left:-9999px;top:-9999px;" aria-hidden="true">
-                <input type="text" name="mbs_website_url" tabindex="-1" autocomplete="off" value="">
+                <label for="mbs_hp_field">Leave this empty</label>
+                <input type="text" name="mbs_hp_field" id="mbs_hp_field" tabindex="-1" autocomplete="new-password" value="">
             </div>
 
             <?php
