@@ -579,7 +579,9 @@ class MBS_Admin {
         $booking = MBS_Bookings::get( $ref );
 
         if ( ! $booking ) wp_send_json_error( 'Booking not found.' );
-        if ( $booking->status !== 'confirmed' ) wp_send_json_error( 'Can only chase payment for confirmed bookings.' );
+        if ( ! in_array( $booking->status, array( 'confirmed', 'deposit_paid' ) ) ) {
+            wp_send_json_error( 'Can only chase payment for confirmed or deposit-paid bookings.' );
+        }
 
         MBS_Payment_Chaser::send_chase( $booking, true );
         wp_send_json_success( array( 'ref' => $ref, 'chase_count' => ( $booking->chase_count ?? 0 ) + 1 ) );
