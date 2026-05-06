@@ -48,14 +48,20 @@ $kitchen_price = MBS_Bookings::get_kitchen_price();
             $balance = (float) $booking->amount - $amount_paid;
             if ( $amount_paid > 0 && abs( $balance ) > 0.01 ) :
                 if ( $balance > 0 ) : ?>
-                    <div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:6px;padding:12px 16px;margin:0 1.5rem 1rem;color:#991b1b;font-weight:bold;">
-                        ⚠️ Balance Due: &pound;<?php echo number_format( $balance, 2 ); ?>
-                        <span style="font-weight:normal;font-size:13px;margin-left:8px;">(Paid: &pound;<?php echo number_format( $amount_paid, 2 ); ?> / Total: &pound;<?php echo number_format( $booking->amount, 2 ); ?>)</span>
+                    <div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:6px;padding:12px 16px;margin:0 1.5rem 1rem;color:#991b1b;font-weight:bold;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+                        <span>
+                            ⚠️ Balance Due: &pound;<?php echo number_format( $balance, 2 ); ?>
+                            <span style="font-weight:normal;font-size:13px;margin-left:8px;">(Paid: &pound;<?php echo number_format( $amount_paid, 2 ); ?> / Total: &pound;<?php echo number_format( $booking->amount, 2 ); ?>)</span>
+                        </span>
+                        <button class="button button-small nms-btn-mark-balance-paid" data-ref="<?php echo esc_attr( $booking->ref ); ?>" style="background:#2ecc71;color:#fff;border-color:#27ae60;">✓ Mark Balance Paid</button>
                     </div>
                 <?php else : ?>
-                    <div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:6px;padding:12px 16px;margin:0 1.5rem 1rem;color:#065f46;font-weight:bold;">
-                        💰 Refund / Credit Due: &pound;<?php echo number_format( abs( $balance ), 2 ); ?>
-                        <span style="font-weight:normal;font-size:13px;margin-left:8px;">(Paid: &pound;<?php echo number_format( $amount_paid, 2 ); ?> / Total: &pound;<?php echo number_format( $booking->amount, 2 ); ?>)</span>
+                    <div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:6px;padding:12px 16px;margin:0 1.5rem 1rem;color:#065f46;font-weight:bold;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+                        <span>
+                            💰 Refund / Credit Due: &pound;<?php echo number_format( abs( $balance ), 2 ); ?>
+                            <span style="font-weight:normal;font-size:13px;margin-left:8px;">(Paid: &pound;<?php echo number_format( $amount_paid, 2 ); ?> / Total: &pound;<?php echo number_format( $booking->amount, 2 ); ?>)</span>
+                        </span>
+                        <button class="button button-small nms-btn-mark-refunded" data-ref="<?php echo esc_attr( $booking->ref ); ?>" style="background:#3498db;color:#fff;border-color:#2980b9;">✓ Mark Refunded</button>
                     </div>
                 <?php endif;
             endif;

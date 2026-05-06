@@ -47,6 +47,37 @@ jQuery(function ($) {
         nmsUpdateStatus(ref, 'confirmed', $btn, redirect || true);
     });
 
+    // ── Mark balance paid (after modification increased cost) ───────────────────
+    $(document).on('click', '.nms-btn-mark-balance-paid', function () {
+        var $btn = $(this);
+        var ref  = $btn.data('ref');
+        if (!confirm('Mark the outstanding balance for ' + ref + ' as paid?\nThis will set the booking status to Paid.')) return;
+        nmsUpdateStatus(ref, 'paid', $btn, true);
+    });
+
+    // ── Mark refund processed (after modification decreased cost) ───────────────
+    $(document).on('click', '.nms-btn-mark-refunded', function () {
+        var $btn = $(this);
+        var ref  = $btn.data('ref');
+        if (!confirm('Confirm that the refund/credit for ' + ref + ' has been processed?\nThe balance alert will be cleared.')) return;
+        $btn.prop('disabled', true);
+        $.post(MBS_Admin.ajax_url, {
+            action: 'mbs_mark_refunded',
+            nonce:  MBS_Admin.nonce,
+            ref:    ref
+        }, function (res) {
+            if (res.success) {
+                window.location.reload();
+            } else {
+                alert('Error: ' + (res.data || 'Could not update booking.'));
+                $btn.prop('disabled', false);
+            }
+        }).fail(function () {
+            alert('Network error — please try again.');
+            $btn.prop('disabled', false);
+        });
+    });
+
     // ── Archive single booking ─────────────────────────────────────────────────
     $(document).on('click', '.nms-btn-archive', function () {
         var $btn     = $(this);

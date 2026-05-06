@@ -7,6 +7,7 @@ class MBS_Admin {
         add_action( 'admin_menu',            array( $this, 'add_menu' ) );
         add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
         add_action( 'wp_ajax_mbs_update_status',  array( $this, 'ajax_update_status' ) );
+        add_action( 'wp_ajax_mbs_mark_refunded',  array( $this, 'ajax_mark_refunded' ) );
         add_action( 'wp_ajax_mbs_delete_booking', array( $this, 'ajax_delete_booking' ) );
         add_action( 'wp_ajax_mbs_get_invoice',    array( $this, 'ajax_get_invoice' ) );
         add_action( 'wp_ajax_mbs_save_settings',  array( $this, 'ajax_save_settings' ) );
@@ -199,6 +200,24 @@ class MBS_Admin {
         $ref    = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
         $result = MBS_Bookings::delete( $ref );
         wp_send_json_success( array( 'deleted' => $ref ) );
+    }
+
+    /**
+     * Mark a refund/credit as processed after a modification reduced the cost.
+     * Sets status to 'paid' without sending a payment confirmation email.
+     */
+    public function ajax_mark_refunded() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
+
+        $ref = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
+        $booking = MBS_Bookings::get( $ref );
+        if ( ! $booking ) wp_send_json_error( 'Booking not found.' );
+
+        MBS_Bookings::update_status( $ref, 'paid' );
+        MBS_Audit_Log::log( $ref, 'refund_processed', 'Admin marked refund/credit as processed. Status set to Paid.' );
+
+        wp_send_json_success( array( 'ref' => $ref, 'status' => 'paid' ) );
     }
 
     public function ajax_get_invoice() {
