@@ -94,6 +94,7 @@
                 <th>Time</th>
                 <th>Attendees</th>
                 <th>Amount</th>
+                <th>Paid</th>
                 <th>Status</th>
                 <th>Actions</th>
             </tr>
@@ -149,6 +150,7 @@
                     <td><?php echo $is_daily ? 'All day' : esc_html( $b->start_time . ' – ' . $b->end_time ); ?></td>
                     <td><?php echo esc_html( $b->attendees ); ?></td>
                     <td><strong>&pound;<?php echo number_format( $series_total, 2 ); ?></strong></td>
+                    <td>—</td>
                     <td><span class="nms-status nms-status-<?php echo esc_attr( $b->status ); ?>"><?php echo esc_html( MBS_Bookings::status_label( $b->status ) ); ?></span></td>
                     <td>
                         <div class="nms-action-btns">
@@ -170,6 +172,18 @@
                     <td><?php echo ! empty( $sb->all_day ) ? 'All day' : esc_html( $sb->start_time . ' – ' . $sb->end_time ); ?></td>
                     <td></td>
                     <td>&pound;<?php echo number_format( $sb->amount, 2 ); ?></td>
+                    <td>
+                        <?php
+                        $sb_paid = (float) ( $sb->amount_paid ?? 0 );
+                        $sb_balance = (float) $sb->amount - $sb_paid;
+                        if ( $sb_paid > 0 && $sb_balance < -0.01 ) : ?>
+                            <span style="font-size:0.7rem;color:#1e40af;font-weight:600;">Refund: &pound;<?php echo number_format( abs( $sb_balance ), 2 ); ?></span>
+                        <?php elseif ( $sb_paid > 0 ) : ?>
+                            <span style="color:#065f46;font-size:0.8rem;">&pound;<?php echo number_format( $sb_paid, 2 ); ?></span>
+                        <?php else : ?>
+                            <span style="color:#6b7280;">—</span>
+                        <?php endif; ?>
+                    </td>
                     <td><span class="nms-status nms-status-<?php echo esc_attr( $sb->status ); ?>"><?php echo esc_html( MBS_Bookings::status_label( $sb->status ) ); ?></span></td>
                     <td><a href="?page=mathlin-booking&action=view&ref=<?php echo esc_attr( $sb->ref ); ?>" class="button button-small">View</a></td>
                 </tr>
@@ -191,6 +205,22 @@
                     <td><?php echo $is_daily ? 'All day' : esc_html( $b->start_time . ' – ' . $b->end_time ); ?></td>
                     <td><?php echo esc_html( $b->attendees ); ?></td>
                     <td><strong>&pound;<?php echo number_format( $b->amount, 2 ); ?></strong></td>
+                    <td>
+                        <?php
+                        $paid = (float) ( $b->amount_paid ?? 0 );
+                        $balance = (float) $b->amount - $paid;
+                        if ( $paid > 0 && $balance > 0.01 ) : ?>
+                            <span style="color:#065f46;">&pound;<?php echo number_format( $paid, 2 ); ?></span><br>
+                            <span style="font-size:0.7rem;color:#991b1b;font-weight:600;">Due: &pound;<?php echo number_format( $balance, 2 ); ?></span>
+                        <?php elseif ( $paid > 0 && $balance < -0.01 ) : ?>
+                            <span style="color:#065f46;">&pound;<?php echo number_format( $paid, 2 ); ?></span><br>
+                            <span style="font-size:0.7rem;color:#1e40af;font-weight:600;">Refund: &pound;<?php echo number_format( abs( $balance ), 2 ); ?></span>
+                        <?php elseif ( $paid > 0 ) : ?>
+                            <span style="color:#065f46;">&pound;<?php echo number_format( $paid, 2 ); ?> ✓</span>
+                        <?php else : ?>
+                            <span style="color:#6b7280;">—</span>
+                        <?php endif; ?>
+                    </td>
                     <td>
                         <span class="nms-status nms-status-<?php echo esc_attr( $b->status ); ?>">
                             <?php echo esc_html( MBS_Bookings::status_label( $b->status ) ); ?>

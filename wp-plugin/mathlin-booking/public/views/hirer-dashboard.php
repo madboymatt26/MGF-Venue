@@ -96,6 +96,8 @@ $spaces  = MBS_Bookings::get_spaces();
                                 &pound;<?php echo number_format( $b->amount, 2 ); ?>
                                 <?php if ( $amount_paid_val > 0 && $amount_paid_val < $total_amount ) : ?>
                                     <br><span style="font-size:0.65rem;color:#92400e;">Paid: &pound;<?php echo number_format( $amount_paid_val, 2 ); ?> | Due: &pound;<?php echo number_format( $total_amount - $amount_paid_val, 2 ); ?></span>
+                                <?php elseif ( $amount_paid_val > $total_amount + 0.01 ) : ?>
+                                    <br><span style="font-size:0.65rem;color:#1e40af;font-weight:600;">Refund due: &pound;<?php echo number_format( $amount_paid_val - $total_amount, 2 ); ?></span>
                                 <?php endif; ?>
                             </td>
                             <td style="padding:10px 8px;">
