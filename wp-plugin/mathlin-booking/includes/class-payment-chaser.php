@@ -152,7 +152,8 @@ class MBS_Payment_Chaser {
 
         $headers = array(
             'Content-Type: text/html; charset=UTF-8',
-            'From: Needham Market Scouts <' . $admin_email . '>',
+            'From: ' . $org['name'] . ' <' . get_option( 'admin_email', $admin_email ) . '>',
+            'Reply-To: ' . $admin_email,
         );
         wp_mail( $booking->email, $subject, $body, $headers );
 

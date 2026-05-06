@@ -323,9 +323,15 @@ class MBS_Email {
     private static function send( $to, $subject, $html_body, $attachments = array() ) {
         $admin_email = self::admin_email();
         $org = MBS_Email_Templates::get_org_settings();
+
+        // Use WordPress site email as the technical sender to avoid SPF/DKIM issues
+        // when the admin notification email is the same as the recipient.
+        // The Reply-To header ensures replies go to the admin email.
+        $from_email = get_option( 'admin_email', $admin_email );
         $headers = array(
             'Content-Type: text/html; charset=UTF-8',
-            'From: ' . $org['name'] . ' <' . $admin_email . '>',
+            'From: ' . $org['name'] . ' <' . $from_email . '>',
+            'Reply-To: ' . $admin_email,
         );
         // Use the email queue for automatic retry on failure
         MBS_Email_Queue::send( $to, $subject, $html_body, $headers, $attachments );

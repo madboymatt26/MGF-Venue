@@ -302,7 +302,8 @@ class MBS_Modification {
 
         MBS_Email_Queue::send( $admin_email, $subject, $body, array(
             'Content-Type: text/html; charset=UTF-8',
-            'From: ' . $org['name'] . ' <' . $admin_email . '>',
+            'From: ' . $org['name'] . ' <' . get_option( 'admin_email', $admin_email ) . '>',
+            'Reply-To: ' . $admin_email,
         ) );
     }
 
@@ -364,7 +365,8 @@ class MBS_Modification {
 
         MBS_Email_Queue::send( $booking->email, $subject, $body, array(
             'Content-Type: text/html; charset=UTF-8',
-            'From: ' . $org['name'] . ' <' . $admin_email . '>',
+            'From: ' . $org['name'] . ' <' . get_option( 'admin_email', $admin_email ) . '>',
+            'Reply-To: ' . $admin_email,
         ), $attachments );
     }
 
@@ -388,7 +390,8 @@ class MBS_Modification {
 
         MBS_Email_Queue::send( $booking->email, $subject, $body, array(
             'Content-Type: text/html; charset=UTF-8',
-            'From: ' . $org['name'] . ' <' . $admin_email . '>',
+            'From: ' . $org['name'] . ' <' . get_option( 'admin_email', $admin_email ) . '>',
+            'Reply-To: ' . $admin_email,
         ) );
     }
 }
