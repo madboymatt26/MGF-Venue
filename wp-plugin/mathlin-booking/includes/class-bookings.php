@@ -694,7 +694,7 @@ class MBS_Bookings {
     public static function update_series_status( $series_id, $status ) {
         global $wpdb;
         $table   = $wpdb->prefix . MBS_TABLE;
-        $allowed = array( 'pending', 'confirmed', 'cancelled', 'archived', 'paid' );
+        $allowed = array( 'pending', 'confirmed', 'deposit_paid', 'cancelled', 'archived', 'paid' );
         if ( ! in_array( $status, $allowed ) ) return false;
 
         $result = $wpdb->update(
@@ -750,7 +750,7 @@ class MBS_Bookings {
         $table = $wpdb->prefix . MBS_TABLE;
         $today = wp_date( 'Y-m-d' );
         return $wpdb->query( $wpdb->prepare(
-            "UPDATE {$table} SET status = 'archived' WHERE booking_date < %s AND status IN ('confirmed', 'cancelled')",
+            "UPDATE {$table} SET status = 'archived' WHERE booking_date < %s AND status IN ('confirmed', 'deposit_paid', 'cancelled')",
             $today
         ) );
     }
@@ -794,7 +794,7 @@ class MBS_Bookings {
             'archived'   => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status='archived'" ),
             'paid'       => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status='paid'" ),
             'revenue_fy' => (float) $wpdb->get_var( $wpdb->prepare(
-                "SELECT COALESCE(SUM(amount), 0) FROM {$table} WHERE status IN ('confirmed', 'paid') AND booking_date BETWEEN %s AND %s",
+                "SELECT COALESCE(SUM(amount), 0) FROM {$table} WHERE status IN ('confirmed', 'deposit_paid', 'paid') AND booking_date BETWEEN %s AND %s",
                 $fy_start, $fy_end
             ) ),
             'fy_label'   => $fy_label,

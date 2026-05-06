@@ -92,7 +92,7 @@ $spaces  = MBS_Bookings::get_spaces();
                             </td>
                             <td style="padding:10px 8px;">
                                 <div style="display:flex;gap:4px;flex-wrap:wrap;">
-                                    <?php if ( $b->status === 'confirmed' && MBS_Woo_Payment::is_available() ) : ?>
+                                    <?php if ( in_array( $b->status, array( 'confirmed', 'deposit_paid' ) ) && MBS_Woo_Payment::is_available() ) : ?>
                                         <a href="<?php echo esc_url( MBS_Woo_Payment::generate_payment_url( $b ) ); ?>" class="nms-btn nms-btn-sm" style="background:#2ecc71;color:#fff;border-color:#2ecc71;font-size:0.7rem;">Pay</a>
                                     <?php endif; ?>
                                     <a href="<?php echo esc_url( rest_url( 'mathlin/v1/bookings/' . $b->ref . '/ical' ) ); ?>" class="nms-btn nms-btn-sm" style="background:#f5f0ff;color:#7413DC;border-color:#e0d0f0;font-size:0.7rem;">📅</a>

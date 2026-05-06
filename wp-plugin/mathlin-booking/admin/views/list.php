@@ -203,19 +203,19 @@
                             <?php if ( $b->status === 'pending' ) { ?>
                                 <button class="button button-small button-primary nms-btn-confirm" data-ref="<?php echo esc_attr( $b->ref ); ?>">Confirm</button>
                             <?php } ?>
-                            <?php if ( $b->status === 'confirmed' ) { ?>
+                            <?php if ( $b->status === 'confirmed' || $b->status === 'deposit_paid' ) { ?>
                                 <button class="button button-small nms-btn-paid" data-ref="<?php echo esc_attr( $b->ref ); ?>">Mark Paid</button>
                             <?php } ?>
                             <?php if ( $b->status === 'paid' ) { ?>
                                 <button class="button button-small nms-btn-unpaid" data-ref="<?php echo esc_attr( $b->ref ); ?>">Undo Paid</button>
                             <?php } ?>
-                            <?php if ( $b->status !== 'cancelled' && $b->status !== 'archived' && $b->status !== 'paid' ) { ?>
+                            <?php if ( $b->status !== 'cancelled' && $b->status !== 'archived' && $b->status !== 'paid' && $b->status !== 'deposit_paid' ) { ?>
                                 <button class="button button-small nms-btn-cancel" data-ref="<?php echo esc_attr( $b->ref ); ?>">Cancel</button>
                             <?php } ?>
                             <?php if ( $b->status === 'cancelled' ) { ?>
                                 <button class="button button-small nms-btn-reopen" data-ref="<?php echo esc_attr( $b->ref ); ?>">Reopen</button>
                             <?php } ?>
-                            <?php if ( in_array( $b->status, array( 'confirmed', 'paid', 'cancelled' ) ) ) { ?>
+                            <?php if ( in_array( $b->status, array( 'confirmed', 'deposit_paid', 'paid', 'cancelled' ) ) ) { ?>
                                 <button class="button button-small nms-btn-archive" data-ref="<?php echo esc_attr( $b->ref ); ?>">Archive</button>
                             <?php } ?>
                         </div>

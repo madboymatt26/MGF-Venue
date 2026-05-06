@@ -36,7 +36,7 @@ class MBS_Accounting_Export {
 
         // Filter to only invoiceable statuses
         $bookings = array_filter( $bookings, function( $b ) {
-            return in_array( $b->status, array( 'confirmed', 'paid', 'archived' ) );
+            return in_array( $b->status, array( 'confirmed', 'deposit_paid', 'paid', 'archived' ) );
         } );
 
         $filename = 'invoices-' . $format . '-' . date( 'Y-m-d' ) . '.csv';

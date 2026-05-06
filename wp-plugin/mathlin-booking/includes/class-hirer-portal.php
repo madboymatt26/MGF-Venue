@@ -102,9 +102,9 @@ class MBS_Hirer_Portal {
 
         return array(
             'total'     => (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE email = %s AND status != 'archived'", $email ) ),
-            'upcoming'  => (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE email = %s AND booking_date >= CURDATE() AND status IN ('confirmed', 'paid')", $email ) ),
+            'upcoming'  => (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE email = %s AND booking_date >= CURDATE() AND status IN ('confirmed', 'deposit_paid', 'paid')", $email ) ),
             'pending'   => (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE email = %s AND status = 'pending'", $email ) ),
-            'total_spent' => (float) $wpdb->get_var( $wpdb->prepare( "SELECT COALESCE(SUM(amount), 0) FROM {$table} WHERE email = %s AND status IN ('confirmed', 'paid')", $email ) ),
+            'total_spent' => (float) $wpdb->get_var( $wpdb->prepare( "SELECT COALESCE(SUM(amount), 0) FROM {$table} WHERE email = %s AND status IN ('confirmed', 'deposit_paid', 'paid')", $email ) ),
         );
     }
 

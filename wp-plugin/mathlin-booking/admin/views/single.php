@@ -199,23 +199,26 @@ $kitchen_price = MBS_Bookings::get_kitchen_price();
                 <?php if ( $booking->status === 'pending' ) : ?>
                     <button class="button button-primary nms-btn-confirm" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">✓ Confirm Booking</button>
                 <?php endif; ?>
-                <?php if ( $booking->status === 'confirmed' ) : ?>
+                <?php if ( $booking->status === 'confirmed' || $booking->status === 'deposit_paid' ) : ?>
                     <button class="button button-primary nms-btn-paid" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">💰 Mark as Paid</button>
                     <button class="button nms-btn-chase" data-ref="<?php echo esc_attr( $booking->ref ); ?>">📧 Chase Payment</button>
                     <?php if ( $booking->chase_count > 0 ) : ?>
                         <small class="nms-muted" style="display:block;margin-top:4px;"><?php echo esc_html( $booking->chase_count ); ?> chase(s) sent<?php if ( $booking->last_chased ) echo ' — last: ' . esc_html( date( 'j M H:i', strtotime( $booking->last_chased ) ) ); ?></small>
                     <?php endif; ?>
+                    <?php if ( $booking->status === 'deposit_paid' ) : ?>
+                        <small class="nms-muted" style="display:block;margin-top:4px;">Deposit received: &pound;<?php echo number_format( (float) $booking->deposit_paid, 2 ); ?> — Balance outstanding: &pound;<?php echo number_format( (float) $booking->amount - (float) $booking->deposit_paid, 2 ); ?></small>
+                    <?php endif; ?>
                 <?php endif; ?>
                 <?php if ( $booking->status === 'paid' ) : ?>
                     <button class="button nms-btn-unpaid" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">↩ Undo Paid</button>
                 <?php endif; ?>
-                <?php if ( ! in_array( $booking->status, array( 'cancelled', 'archived', 'paid' ) ) ) : ?>
+                <?php if ( ! in_array( $booking->status, array( 'cancelled', 'archived', 'paid', 'deposit_paid' ) ) ) : ?>
                     <button class="button nms-btn-cancel" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">✗ Cancel Booking</button>
                 <?php endif; ?>
                 <?php if ( $booking->status === 'cancelled' ) : ?>
                     <button class="button nms-btn-reopen" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">↩ Reopen Booking</button>
                 <?php endif; ?>
-                <?php if ( in_array( $booking->status, array( 'confirmed', 'paid', 'cancelled' ) ) ) : ?>
+                <?php if ( in_array( $booking->status, array( 'confirmed', 'deposit_paid', 'paid', 'cancelled' ) ) ) : ?>
                     <button class="button nms-btn-archive" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">📦 Archive</button>
                 <?php endif; ?>
                 <a href="?page=mathlin-booking&action=invoice&ref=<?php echo esc_attr( $booking->ref ); ?>" class="button">🧾 View Invoice</a>

@@ -21,27 +21,27 @@ if ( $month >= 4 ) {
 // Bookings per month (last 12 months)
 $monthly = $wpdb->get_results(
     "SELECT DATE_FORMAT(booking_date, '%Y-%m') as month, COUNT(*) as count, SUM(amount) as revenue
-     FROM {$table} WHERE status IN ('confirmed', 'paid') AND booking_date >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
+     FROM {$table} WHERE status IN ('confirmed', 'deposit_paid', 'paid') AND booking_date >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
      GROUP BY month ORDER BY month ASC"
 );
 
 // Bookings by space
 $by_space = $wpdb->get_results(
     "SELECT space, COUNT(*) as count, SUM(amount) as revenue
-     FROM {$table} WHERE status IN ('confirmed', 'paid') AND booking_date BETWEEN '{$fy_start}' AND '{$fy_end}'
+     FROM {$table} WHERE status IN ('confirmed', 'deposit_paid', 'paid') AND booking_date BETWEEN '{$fy_start}' AND '{$fy_end}'
      GROUP BY space ORDER BY count DESC"
 );
 
 // Bookings by day of week
 $by_day = $wpdb->get_results(
     "SELECT DAYNAME(booking_date) as day_name, DAYOFWEEK(booking_date) as day_num, COUNT(*) as count
-     FROM {$table} WHERE status IN ('confirmed', 'paid') AND booking_date BETWEEN '{$fy_start}' AND '{$fy_end}'
+     FROM {$table} WHERE status IN ('confirmed', 'deposit_paid', 'paid') AND booking_date BETWEEN '{$fy_start}' AND '{$fy_end}'
      GROUP BY day_name, day_num ORDER BY day_num ASC"
 );
 
 // Revenue this FY vs last FY
 $revenue_fy = (float) $wpdb->get_var( $wpdb->prepare(
-    "SELECT COALESCE(SUM(amount), 0) FROM {$table} WHERE status IN ('confirmed', 'paid') AND booking_date BETWEEN %s AND %s",
+    "SELECT COALESCE(SUM(amount), 0) FROM {$table} WHERE status IN ('confirmed', 'deposit_paid', 'paid') AND booking_date BETWEEN %s AND %s",
     $fy_start, $fy_end
 ) );
 
@@ -53,13 +53,13 @@ if ( $month >= 4 ) {
     $prev_fy_end   = ( $year - 1 ) . '-03-31';
 }
 $revenue_prev = (float) $wpdb->get_var( $wpdb->prepare(
-    "SELECT COALESCE(SUM(amount), 0) FROM {$table} WHERE status IN ('confirmed', 'paid') AND booking_date BETWEEN %s AND %s",
+    "SELECT COALESCE(SUM(amount), 0) FROM {$table} WHERE status IN ('confirmed', 'deposit_paid', 'paid') AND booking_date BETWEEN %s AND %s",
     $prev_fy_start, $prev_fy_end
 ) );
 
 // Total bookings this FY
 $total_fy = (int) $wpdb->get_var( $wpdb->prepare(
-    "SELECT COUNT(*) FROM {$table} WHERE status IN ('confirmed', 'paid') AND booking_date BETWEEN %s AND %s",
+    "SELECT COUNT(*) FROM {$table} WHERE status IN ('confirmed', 'deposit_paid', 'paid') AND booking_date BETWEEN %s AND %s",
     $fy_start, $fy_end
 ) );
 
@@ -222,7 +222,7 @@ foreach ( $by_day as $d ) {
                     ELSE 0
                 END
             ), 0) FROM {$table}
-            WHERE space = %s AND status IN ('confirmed', 'paid') AND booking_date BETWEEN %s AND %s",
+            WHERE space = %s AND status IN ('confirmed', 'deposit_paid', 'paid') AND booking_date BETWEEN %s AND %s",
             $space_name, $fy_start, $fy_end
         ) );
         $pct = $total_available_hours > 0 ? round( ( $booked_hours / $total_available_hours ) * 100, 1 ) : 0;
