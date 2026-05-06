@@ -285,6 +285,12 @@ class MBS_Woo_Payment {
                     $wpdb->update( $table, array( 'deposit_paid' => $order_total ), array( 'ref' => $ref ) );
                     MBS_Audit_Log::log( $ref, 'deposit_paid', 'Deposit of £' . number_format( $order_total, 2 ) . ' received via WooCommerce Order #' . $order_id . '.', 0 );
                     $order->add_order_note( sprintf( 'Mathlin Booking %s: Deposit of £%s received. Balance of £%s due before event.', $ref, number_format( $order_total, 2 ), number_format( $booking_total - $order_total, 2 ) ) );
+
+                    // Send deposit received confirmation email
+                    $updated_booking = MBS_Bookings::get( $ref );
+                    if ( $updated_booking ) {
+                        MBS_Email::notify_deposit_received( $updated_booking, $order_total );
+                    }
                 } else {
                     // Full payment or balance payment
                     MBS_Bookings::update_status( $ref, 'paid' );

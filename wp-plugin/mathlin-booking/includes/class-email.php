@@ -167,6 +167,48 @@ class MBS_Email {
     }
 
     /**
+     * Send deposit received confirmation to the booker.
+     */
+    public static function notify_deposit_received( $booking, $deposit_amount ) {
+        $org         = MBS_Email_Templates::get_org_settings();
+        $total       = (float) $booking->amount;
+        $balance     = $total - $deposit_amount;
+        $dep_settings = MBS_Bookings::get_deposit_settings();
+        $balance_days = $dep_settings['balance_days'];
+        $balance_date = date( 'j F Y', strtotime( $booking->booking_date . " -{$balance_days} days" ) );
+
+        $subject = 'Deposit Received – ' . $booking->ref;
+
+        $body  = self::header();
+        $body .= '<h2 style="color:#46b450;">Deposit Received – Thank You!</h2>';
+        $body .= '<p>Hi ' . esc_html( $booking->name ) . ',</p>';
+        $body .= '<p>We have received your deposit payment. Here\'s a summary:</p>';
+
+        $body .= '<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:6px;padding:16px;margin:16px 0;">';
+        $body .= '<strong>Deposit paid:</strong> &pound;' . number_format( $deposit_amount, 2 ) . '<br>';
+        $body .= '<strong>Remaining balance:</strong> &pound;' . number_format( $balance, 2 ) . '<br>';
+        $body .= '<strong>Balance due by:</strong> ' . esc_html( $balance_date ) . ' (at least ' . $balance_days . ' days before your event)';
+        $body .= '</div>';
+
+        $body .= self::booking_table_obj( $booking );
+
+        // Pay balance button
+        if ( MBS_Woo_Payment::is_available() ) {
+            $pay_url = MBS_Woo_Payment::generate_payment_url( $booking );
+            if ( $pay_url ) {
+                $body .= '<p style="margin-top:16px;text-align:center;">';
+                $body .= '<a href="' . esc_url( $pay_url ) . '" style="background:#2ecc71;color:#fff;padding:14px 32px;border-radius:6px;text-decoration:none;font-weight:bold;font-size:16px;">💳 Pay Balance Now (&pound;' . number_format( $balance, 2 ) . ')</a>';
+                $body .= '</p>';
+                $body .= '<p style="text-align:center;font-size:13px;color:#666;">Or pay by bank transfer using the details on your invoice.</p>';
+            }
+        }
+
+        $body .= self::ical_button( $booking );
+        $body .= self::footer();
+        self::send( $booking->email, $subject, $body );
+    }
+
+    /**
      * Send a summary email for a recurring booking series.
      */
     public static function notify_recurring_summary( $series_id, $refs, $skipped, $name, $email, $space, $time_str ) {

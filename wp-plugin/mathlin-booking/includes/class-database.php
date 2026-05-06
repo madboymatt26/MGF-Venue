@@ -234,6 +234,16 @@ class MBS_Database {
         if ( empty( $col ) ) {
             $wpdb->query( "ALTER TABLE {$table} ADD COLUMN pricing_tier VARCHAR(30) NOT NULL DEFAULT 'standard' AFTER scout_use" );
         }
+
+        // v3.0.8: Migrate booking_confirmed email template to remove hardcoded "14 days" text
+        $saved_tpl = get_option( 'mbs_email_template_booking_confirmed', array() );
+        if ( ! empty( $saved_tpl['body'] ) && strpos( $saved_tpl['body'], 'Payment is due within 14 days' ) !== false ) {
+            $new_body = "Hi {name},\n\nGreat news — your booking has been confirmed!\n\nInvoice Number: {invoice}\n\nPlease see the payment schedule below and the attached invoice for full details.\n\nIf you have any questions, please contact us at {admin_email}.";
+            update_option( 'mbs_email_template_booking_confirmed', array(
+                'subject' => $saved_tpl['subject'],
+                'body'    => $new_body,
+            ) );
+        }
     }
 
     public static function on_deactivate() {
