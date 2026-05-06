@@ -280,6 +280,7 @@ jQuery(function ($) {
             github_token:    $('#github_token').val(),
             admin_email:     $('#admin_email').val(),
             kitchen_price:   $('#kitchen_price').val(),
+            kitchen_enabled: $('#kitchen_enabled').val(),
             bank_sort_code:     $('#bank_sort_code').val(),
             bank_account_number: $('#bank_account_number').val(),
             bank_account_name:  $('#bank_account_name').val(),

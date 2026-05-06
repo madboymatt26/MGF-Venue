@@ -48,6 +48,7 @@ class MBS_Public {
                 'nonce'           => wp_create_nonce( 'mbs_public_nonce' ),
                 'spaces'          => MBS_Bookings::get_spaces(),
                 'kitchen_price'   => MBS_Bookings::get_kitchen_price(),
+                'kitchen_enabled' => (bool) get_option( 'mbs_kitchen_enabled', 1 ),
                 'min_notice_days' => $notice_days,
                 'min_date'        => wp_date( 'Y-m-d', strtotime( "+{$notice_days} days" ) ),
                 'blocked_dates'   => self::get_blocked_dates_for_frontend(),

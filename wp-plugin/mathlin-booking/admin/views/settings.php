@@ -48,6 +48,15 @@
             <h4 style="margin-top:1.5rem">Kitchen Add-on</h4>
             <table class="form-table">
                 <tr>
+                    <th><label for="kitchen_enabled">Kitchen option</label></th>
+                    <td>
+                        <select id="kitchen_enabled">
+                            <option value="1" <?php selected( get_option( 'mbs_kitchen_enabled', 1 ), 1 ); ?>>Enabled — show on booking form</option>
+                            <option value="0" <?php selected( get_option( 'mbs_kitchen_enabled', 1 ), 0 ); ?>>Disabled — hide from booking form</option>
+                        </select>
+                    </td>
+                </tr>
+                <tr>
                     <th><label for="kitchen_price">Kitchen add-on price (£)</label></th>
                     <td>
                         <input type="number" id="kitchen_price" name="kitchen_price"

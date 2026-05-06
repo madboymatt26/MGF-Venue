@@ -307,6 +307,7 @@ class MBS_Admin {
         update_option( 'mbs_ha_webhook_url',  $webhook );
         update_option( 'mbs_min_notice_days', $notice_days );
         update_option( 'mbs_kitchen_price',   $kitchen_price );
+        update_option( 'mbs_kitchen_enabled', absint( $_POST['kitchen_enabled'] ?? 1 ) );
 
         // Reminder hours
         $reminder_hours = absint( $_POST['reminder_hours'] ?? 24 );

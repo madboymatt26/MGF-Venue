@@ -108,6 +108,7 @@
                             <?php endforeach; ?>
                         </select>
                     </div>
+                    <?php if ( get_option( 'mbs_kitchen_enabled', 1 ) ) : ?>
                     <div class="nms-form-group">
                         <label for="nms-kitchen">Kitchen Add-on</label>
                         <select id="nms-kitchen" name="kitchen">
@@ -115,6 +116,7 @@
                             <option value="1">Yes, include kitchen (£<?php echo number_format( MBS_Bookings::get_kitchen_price(), 0 ); ?>/session)</option>
                         </select>
                     </div>
+                    <?php endif; ?>
                 </div>
                 <div class="nms-form-row">
                     <div class="nms-form-group">

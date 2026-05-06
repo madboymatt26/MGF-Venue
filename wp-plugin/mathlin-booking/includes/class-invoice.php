@@ -26,7 +26,18 @@ class MBS_Invoice {
         $space_subtotal = $booking->amount - ( $booking->kitchen ? $kitchen_price : 0 );
         $issue_date     = date( 'j F Y', strtotime( $booking->created_at ) );
         $bank           = MBS_Bookings::get_bank_details();
-        $due_date       = date( 'j F Y', strtotime( $booking->created_at . ' +' . $bank['payment_days'] . ' days' ) );
+        $deposit_settings = MBS_Bookings::get_deposit_settings();
+
+        // Calculate due date based on deposit settings
+        if ( $deposit_settings['enabled'] && (float) $booking->amount > 0 ) {
+            $due_date = 'Immediately (deposit)';
+            if ( MBS_Bookings::requires_full_payment( $booking->booking_date ) ) {
+                $due_date = 'Immediately';
+            }
+        } else {
+            $due_date = date( 'j F Y', strtotime( $booking->created_at . ' +' . $bank['payment_days'] . ' days' ) );
+        }
+
         $booking_date   = date( 'l j F Y', strtotime( $booking->booking_date ) );
         $time_str       = $is_day_rate ? 'Full day' : ( $booking->start_time . ' – ' . $booking->end_time );
 
@@ -159,7 +170,18 @@ class MBS_Invoice {
         $space_subtotal = $booking->amount - ( $booking->kitchen ? $kitchen_price : 0 );
         $issue_date     = date( 'j F Y', strtotime( $booking->created_at ) );
         $bank           = MBS_Bookings::get_bank_details();
-        $due_date       = date( 'j F Y', strtotime( $booking->created_at . ' +' . $bank['payment_days'] . ' days' ) );
+        $deposit_settings = MBS_Bookings::get_deposit_settings();
+
+        // Calculate due date based on deposit settings
+        if ( $deposit_settings['enabled'] && (float) $booking->amount > 0 ) {
+            $due_date = 'Immediately (deposit)';
+            if ( MBS_Bookings::requires_full_payment( $booking->booking_date ) ) {
+                $due_date = 'Immediately';
+            }
+        } else {
+            $due_date = date( 'j F Y', strtotime( $booking->created_at . ' +' . $bank['payment_days'] . ' days' ) );
+        }
+
         $booking_date   = date( 'l j F Y', strtotime( $booking->booking_date ) );
         $time_str       = $is_day_rate ? 'Full day' : ( $booking->start_time . ' – ' . $booking->end_time );
         $admin_email    = MBS_Bookings::get_admin_email();
