@@ -138,7 +138,7 @@ class MBS_Hirer_Portal {
             wp_send_json_error( array( 'message' => 'Password must be at least 8 characters.' ) );
         }
         if ( email_exists( $email ) ) {
-            wp_send_json_error( array( 'message' => 'An account with this email already exists. Please log in instead.' ) );
+            wp_send_json_error( array( 'message' => 'Unable to create account. If you already have an account, please log in instead.' ) );
         }
 
         $user_id = wp_create_user( $email, $pass, $email );

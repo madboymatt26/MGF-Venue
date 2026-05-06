@@ -271,10 +271,16 @@ class MBS_Bookings {
             $insert['user_id'] = get_current_user_id();
         }
 
-        // SEC-001: Use transaction to prevent race condition double bookings
+        // SEC-001: Use transaction with row locking to prevent race condition double bookings
         $wpdb->query( 'START TRANSACTION' );
 
-        // Re-check conflicts inside the transaction
+        // Acquire an exclusive lock on the relevant date/space rows to prevent concurrent inserts
+        $wpdb->query( $wpdb->prepare(
+            "SELECT id FROM {$table} WHERE space = %s AND booking_date = %s AND status NOT IN ('cancelled','archived') FOR UPDATE",
+            sanitize_text_field( $data['space'] ), $date_from
+        ) );
+
+        // Re-check conflicts inside the transaction (now with lock held)
         $space_val = sanitize_text_field( $data['space'] );
         $tx_conflicts = self::check_conflicts(
             $space_val, $date_from,

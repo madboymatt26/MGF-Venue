@@ -511,7 +511,7 @@ class MBS_Admin {
 
     public function ajax_update_series_status() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
 
         $series_id = sanitize_text_field( $_POST['series_id'] ?? '' );
         $status    = sanitize_text_field( $_POST['status'] ?? '' );
