@@ -44,7 +44,7 @@ class MBS_Email_Templates {
             'booking_confirmed' => array(
                 'label'   => 'Booking Confirmed (to booker)',
                 'subject' => 'Booking Confirmed – {ref}',
-                'body'    => "Hi {name},\n\nGreat news — your booking has been confirmed!\n\nInvoice Number: {invoice}\n\nPayment is due within 14 days:\n{bank_details}\n\nIf you have any questions, please contact us at {admin_email}.",
+                'body'    => "Hi {name},\n\nGreat news — your booking has been confirmed!\n\nInvoice Number: {invoice}\n\nPlease see the payment schedule below and the attached invoice for full details.\n\nIf you have any questions, please contact us at {admin_email}.",
             ),
             'booking_cancelled' => array(
                 'label'   => 'Booking Cancelled (to booker)',

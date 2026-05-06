@@ -67,14 +67,45 @@ class MBS_Email {
         $body .= nl2br( esc_html( $body_text ) );
         $body .= self::booking_table_obj( $booking );
 
+        // Deposit-aware payment terms
+        $deposit_settings = MBS_Bookings::get_deposit_settings();
+        $total_amount     = (float) $booking->amount;
+
+        if ( $deposit_settings['enabled'] && $total_amount > 0 ) {
+            $requires_full  = MBS_Bookings::requires_full_payment( $booking->booking_date );
+            $deposit_amount = MBS_Bookings::calculate_deposit( $total_amount );
+            $balance_amount = $total_amount - $deposit_amount;
+            $balance_days   = $deposit_settings['balance_days'];
+
+            if ( ! $requires_full ) {
+                $body .= '<div style="background:#f5f0ff;border:1px solid #e0d0f0;border-radius:6px;padding:16px;margin:16px 0;">';
+                $body .= '<strong style="color:#7413DC;">Payment Schedule</strong><br><br>';
+                $body .= '&#9679; <strong>Deposit due now:</strong> &pound;' . number_format( $deposit_amount, 2 ) . ' (' . (int) $deposit_settings['percentage'] . '% of total)<br>';
+                $body .= '&#9679; <strong>Final balance:</strong> &pound;' . number_format( $balance_amount, 2 ) . ' — due by ' . date( 'j F Y', strtotime( $booking->booking_date . " -{$balance_days} days" ) ) . '<br><br>';
+                $body .= '<em style="font-size:13px;color:#6b7280;">Bookings made less than ' . $balance_days . ' days before the event require full payment immediately.</em>';
+                $body .= '</div>';
+            } else {
+                $body .= '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:6px;padding:16px;margin:16px 0;">';
+                $body .= '<strong>Full payment of &pound;' . number_format( $total_amount, 2 ) . ' is due immediately</strong> as your event is within ' . $balance_days . ' days.';
+                $body .= '</div>';
+            }
+        }
+
         // Add Pay Now button if WooCommerce is available
         if ( MBS_Woo_Payment::is_available() ) {
             $pay_url = MBS_Woo_Payment::generate_payment_url( $booking );
             if ( $pay_url ) {
+                // Label the button appropriately
+                $deposit_settings_check = MBS_Bookings::get_deposit_settings();
+                $btn_label = '💳 Pay Now Online';
+                if ( $deposit_settings_check['enabled'] && $total_amount > 0 && ! MBS_Bookings::requires_full_payment( $booking->booking_date ) ) {
+                    $btn_label = '💳 Pay Deposit Now (&pound;' . number_format( MBS_Bookings::calculate_deposit( $total_amount ), 2 ) . ')';
+                }
+
                 $body .= '<p style="margin-top:16px;text-align:center;">';
-                $body .= '<a href="' . esc_url( $pay_url ) . '" style="background:#2ecc71;color:#fff;padding:14px 32px;border-radius:6px;text-decoration:none;font-weight:bold;font-size:16px;">💳 Pay Now Online</a>';
+                $body .= '<a href="' . esc_url( $pay_url ) . '" style="background:#2ecc71;color:#fff;padding:14px 32px;border-radius:6px;text-decoration:none;font-weight:bold;font-size:16px;">' . $btn_label . '</a>';
                 $body .= '</p>';
-                $body .= '<p style="text-align:center;font-size:13px;color:#666;">Or pay by bank transfer using the details above.</p>';
+                $body .= '<p style="text-align:center;font-size:13px;color:#666;">Or pay by bank transfer using the details on the attached invoice.</p>';
             }
         }
 

@@ -103,9 +103,28 @@ class MBS_Invoice {
                 <div class="nms-inv-total-row nms-inv-grand"><span>Total Due</span><span>&pound;<?php echo number_format( $booking->amount, 2 ); ?></span></div>
             </div>
 
+            <?php
+            $deposit_settings = MBS_Bookings::get_deposit_settings();
+            $deposit_amount   = MBS_Bookings::calculate_deposit( (float) $booking->amount );
+            $balance_amount   = (float) $booking->amount - $deposit_amount;
+            $requires_full    = MBS_Bookings::requires_full_payment( $booking->booking_date );
+            $balance_days     = $deposit_settings['balance_days'];
+            ?>
+
             <div class="nms-inv-notes">
-                <h5>Payment Details</h5>
-                <p>Please make payment within <?php echo esc_html( $bank['payment_days'] ); ?> days quoting reference <strong><?php echo esc_html( $booking->invoice_number ); ?></strong>.<br>
+                <h5>Payment Terms</h5>
+                <?php if ( $deposit_settings['enabled'] && (float) $booking->amount > 0 && ! $requires_full ) : ?>
+                <p>
+                    <strong>Deposit due immediately:</strong> &pound;<?php echo number_format( $deposit_amount, 2 ); ?> (<?php echo (int) $deposit_settings['percentage']; ?>% of total)<br>
+                    <strong>Final balance due:</strong> &pound;<?php echo number_format( $balance_amount, 2 ); ?> — payable at least <?php echo $balance_days; ?> days before your event (by <?php echo date( 'j F Y', strtotime( $booking->booking_date . " -{$balance_days} days" ) ); ?>)<br><br>
+                    <em>If a booking is made less than <?php echo $balance_days; ?> days before the event, the full amount is due immediately.</em>
+                </p>
+                <?php else : ?>
+                <p>Full payment of &pound;<?php echo number_format( $booking->amount, 2 ); ?> is due immediately.</p>
+                <?php endif; ?>
+
+                <h5>Payment Methods</h5>
+                <p>Please quote reference <strong><?php echo esc_html( $booking->invoice_number ); ?></strong> with all payments.<br>
                 Bank Transfer: Sort Code <strong><?php echo esc_html( $bank['sort_code'] ); ?></strong> &bull; Account No. <strong><?php echo esc_html( $bank['account_number'] ); ?></strong><br>
                 Cheques payable to: <em><?php echo esc_html( $bank['account_name'] ); ?></em></p>
             </div>
@@ -245,9 +264,28 @@ class MBS_Invoice {
         <div class="total-row grand"><span>Total Due</span><span>&pound;<?php echo number_format( $booking->amount, 2 ); ?></span></div>
     </div>
 
+    <?php
+    $deposit_settings = MBS_Bookings::get_deposit_settings();
+    $deposit_amount   = MBS_Bookings::calculate_deposit( (float) $booking->amount );
+    $balance_amount   = (float) $booking->amount - $deposit_amount;
+    $requires_full    = MBS_Bookings::requires_full_payment( $booking->booking_date );
+    $balance_days     = $deposit_settings['balance_days'];
+    ?>
+
     <div class="notes">
-        <h5>Payment Details</h5>
-        <p>Please make payment within <?php echo esc_html( $bank['payment_days'] ); ?> days quoting reference <strong><?php echo esc_html( $booking->invoice_number ); ?></strong>.<br>
+        <h5>Payment Terms</h5>
+        <?php if ( $deposit_settings['enabled'] && (float) $booking->amount > 0 && ! $requires_full ) : ?>
+        <p>
+            <strong>Deposit due immediately:</strong> &pound;<?php echo number_format( $deposit_amount, 2 ); ?> (<?php echo (int) $deposit_settings['percentage']; ?>% of total)<br>
+            <strong>Final balance due:</strong> &pound;<?php echo number_format( $balance_amount, 2 ); ?> — payable at least <?php echo $balance_days; ?> days before your event (by <?php echo date( 'j F Y', strtotime( $booking->booking_date . " -{$balance_days} days" ) ); ?>)<br><br>
+            <em>If a booking is made less than <?php echo $balance_days; ?> days before the event, the full amount is due immediately.</em>
+        </p>
+        <?php else : ?>
+        <p>Full payment of &pound;<?php echo number_format( $booking->amount, 2 ); ?> is due immediately.</p>
+        <?php endif; ?>
+
+        <h5>Payment Methods</h5>
+        <p>Please quote reference <strong><?php echo esc_html( $booking->invoice_number ); ?></strong> with all payments.<br>
         Bank Transfer: Sort Code <strong><?php echo esc_html( $bank['sort_code'] ); ?></strong> &bull; Account No. <strong><?php echo esc_html( $bank['account_number'] ); ?></strong><br>
         Cheques payable to: <em><?php echo esc_html( $bank['account_name'] ); ?></em></p>
     </div>
