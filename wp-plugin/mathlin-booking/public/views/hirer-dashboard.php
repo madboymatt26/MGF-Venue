@@ -107,11 +107,13 @@ $spaces  = MBS_Bookings::get_spaces();
                             </td>
                             <td style="padding:10px 8px;">
                                 <div style="display:flex;gap:4px;flex-wrap:wrap;">
-                                    <?php if ( in_array( $b->status, array( 'confirmed', 'deposit_paid' ) ) && MBS_Woo_Payment::is_available() ) :
+                                    <?php
+                                    $balance_due = $total_amount - $amount_paid_val;
+                                    $show_pay = ( $balance_due > 0.01 ) && MBS_Woo_Payment::is_available() && ! in_array( $b->status, array( 'cancelled', 'archived' ) );
+                                    if ( $show_pay ) :
                                         $pay_url = MBS_Woo_Payment::generate_payment_url( $b );
                                         if ( $pay_url ) :
                                             // Determine button label based on amount_paid
-                                            $balance_due = $total_amount - $amount_paid_val;
                                             if ( $amount_paid_val > 0 ) {
                                                 $pay_label = 'Pay Balance (£' . number_format( $balance_due, 2 ) . ')';
                                             } elseif ( $is_deposit_mode && ! MBS_Bookings::requires_full_payment( $b->booking_date ) ) {

@@ -147,7 +147,9 @@ class MBS_Woo_Payment {
             wp_die( 'Invalid payment link. Please contact us for assistance.' );
         }
 
-        if ( ! in_array( $booking->status, array( 'confirmed', 'deposit_paid' ) ) ) {
+        // Allow payment if there's a balance due (regardless of status)
+        $balance = (float) $booking->amount - (float) ( $booking->amount_paid ?? 0 );
+        if ( $balance <= 0.01 || in_array( $booking->status, array( 'cancelled', 'archived' ) ) ) {
             wp_die( 'This booking is not available for payment. It may have already been paid or cancelled.' );
         }
 
@@ -267,8 +269,9 @@ class MBS_Woo_Payment {
             $booking = MBS_Bookings::get( $ref );
             if ( ! $booking ) continue;
 
-            // Only update if currently confirmed or deposit_paid (not already paid/cancelled)
-            if ( $booking->status === 'confirmed' || $booking->status === 'deposit_paid' ) {
+            // Process payment if there's a balance due (any non-cancelled/archived status)
+            $current_balance = (float) $booking->amount - (float) ( $booking->amount_paid ?? 0 );
+            if ( $current_balance > 0.01 && ! in_array( $booking->status, array( 'cancelled', 'archived' ) ) ) {
                 $deposit_settings = MBS_Bookings::get_deposit_settings();
                 $order_total      = (float) $order->get_total();
                 $booking_total    = (float) $booking->amount;

@@ -755,6 +755,18 @@ class MBS_Admin {
 
         $wpdb->update( $table, $update, array( 'ref' => $ref ) );
 
+        // Auto-update status if cost changed and there's now a balance due
+        $amount_paid_val = (float) ( $booking->amount_paid ?? 0 );
+        if ( $new_amount > $amount_paid_val && $amount_paid_val > 0 && $booking->status === 'paid' ) {
+            // Cost increased beyond what was paid — revert to confirmed
+            $wpdb->update( $table, array( 'status' => 'confirmed' ), array( 'ref' => $ref ) );
+            MBS_Audit_Log::log( $ref, 'status_changed', 'Status reverted to Confirmed: cost increased to £' . number_format( $new_amount, 2 ) . ' but only £' . number_format( $amount_paid_val, 2 ) . ' paid.' );
+        } elseif ( $new_amount <= $amount_paid_val && $amount_paid_val > 0 && $booking->status === 'confirmed' ) {
+            // Cost decreased to within what was paid — mark as paid
+            $wpdb->update( $table, array( 'status' => 'paid' ), array( 'ref' => $ref ) );
+            MBS_Audit_Log::log( $ref, 'status_changed', 'Status set to Paid: cost reduced to £' . number_format( $new_amount, 2 ) . ' (£' . number_format( $amount_paid_val, 2 ) . ' already paid).' );
+        }
+
         // Build change summary for audit log
         $changes = array();
         if ( $booking->space !== $update['space'] ) $changes[] = 'space: ' . $booking->space . ' → ' . $update['space'];
@@ -823,12 +835,15 @@ class MBS_Admin {
             }
             $body .= '</div>';
 
-            // Add Pay Now button if WooCommerce available
-            if ( MBS_Woo_Payment::is_available() && in_array( $booking->status, array( 'confirmed', 'deposit_paid' ) ) ) {
-                $pay_url = MBS_Woo_Payment::generate_payment_url( $booking );
-                if ( $pay_url ) {
-                    $body .= '<p style="text-align:center;margin:16px 0;"><a href="' . esc_url( $pay_url ) . '" style="background:#2ecc71;color:#fff;padding:14px 32px;border-radius:6px;text-decoration:none;font-weight:bold;font-size:16px;">💳 Pay Balance Now (&pound;' . number_format( $balance_due, 2 ) . ')</a></p>';
-                    $body .= '<p style="text-align:center;font-size:13px;color:#666;">Or pay by bank transfer using the details on your invoice.</p>';
+            // Add Pay Now button if WooCommerce available and balance is due
+            if ( MBS_Woo_Payment::is_available() ) {
+                $updated_for_pay = MBS_Bookings::get( $booking->ref );
+                if ( $updated_for_pay && in_array( $updated_for_pay->status, array( 'confirmed', 'deposit_paid' ) ) ) {
+                    $pay_url = MBS_Woo_Payment::generate_payment_url( $updated_for_pay );
+                    if ( $pay_url ) {
+                        $body .= '<p style="text-align:center;margin:16px 0;"><a href="' . esc_url( $pay_url ) . '" style="background:#2ecc71;color:#fff;padding:14px 32px;border-radius:6px;text-decoration:none;font-weight:bold;font-size:16px;">💳 Pay Balance Now (&pound;' . number_format( $balance_due, 2 ) . ')</a></p>';
+                        $body .= '<p style="text-align:center;font-size:13px;color:#666;">Or pay by bank transfer using the details on your invoice.</p>';
+                    }
                 }
             }
         } elseif ( $balance_due < -0.01 ) {
