@@ -25,8 +25,26 @@ jQuery(function ($) {
         var $btn     = $(this);
         var ref      = $btn.data('ref');
         var redirect = $btn.data('redirect');
-        if (!confirm('Reopen booking ' + ref + '? It will be set back to Pending status.')) return;
-        nmsUpdateStatus(ref, 'pending', $btn, redirect || true);
+        var status   = $btn.data('restore-status') || 'confirmed';
+        if (!confirm('Restore booking ' + ref + '? It will be set to ' + status.charAt(0).toUpperCase() + status.slice(1) + ' status (no email will be sent).')) return;
+        $btn.prop('disabled', true);
+        $.post(MBS_Admin.ajax_url, {
+            action: 'mbs_restore_booking',
+            nonce:  MBS_Admin.nonce,
+            ref:    ref,
+            status: status
+        }, function (res) {
+            if (res.success) {
+                if (redirect) window.location.reload();
+                else $btn.prop('disabled', false);
+            } else {
+                alert('Error: ' + (res.data || 'Could not restore booking.'));
+                $btn.prop('disabled', false);
+            }
+        }).fail(function () {
+            alert('Network error — please try again.');
+            $btn.prop('disabled', false);
+        });
     });
 
     // ── Mark as paid ───────────────────────────────────────────────────────────

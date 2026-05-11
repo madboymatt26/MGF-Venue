@@ -10,6 +10,7 @@ class MBS_Admin {
         add_action( 'wp_ajax_mbs_mark_refunded',  array( $this, 'ajax_mark_refunded' ) );
         add_action( 'wp_ajax_mbs_mark_deposit_paid', array( $this, 'ajax_mark_deposit_paid' ) );
         add_action( 'wp_ajax_mbs_undo_deposit',  array( $this, 'ajax_undo_deposit' ) );
+        add_action( 'wp_ajax_mbs_restore_booking', array( $this, 'ajax_restore_booking' ) );
         add_action( 'wp_ajax_mbs_delete_booking', array( $this, 'ajax_delete_booking' ) );
         add_action( 'wp_ajax_mbs_get_invoice',    array( $this, 'ajax_get_invoice' ) );
         add_action( 'wp_ajax_mbs_save_settings',  array( $this, 'ajax_save_settings' ) );
@@ -286,6 +287,37 @@ class MBS_Admin {
         MBS_Audit_Log::log( $ref, 'status_changed', 'Admin reverted Deposit Paid to Confirmed. Deposit record cleared.' );
 
         wp_send_json_success( array( 'ref' => $ref, 'status' => 'confirmed' ) );
+    }
+
+    /**
+     * Restore an archived/cancelled booking to a given status WITHOUT sending emails.
+     */
+    public function ajax_restore_booking() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
+
+        $ref    = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
+        $status = sanitize_text_field( $_POST['status'] ?? 'confirmed' );
+        $booking = MBS_Bookings::get( $ref );
+        if ( ! $booking ) wp_send_json_error( 'Booking not found.' );
+
+        // Only allow restoring from archived or cancelled
+        if ( ! in_array( $booking->status, array( 'archived', 'cancelled' ) ) ) {
+            wp_send_json_error( 'Booking must be archived or cancelled to restore.' );
+        }
+
+        // Only allow restoring to safe statuses
+        $allowed = array( 'confirmed', 'deposit_paid', 'paid' );
+        if ( ! in_array( $status, $allowed ) ) $status = 'confirmed';
+
+        // Direct DB update — bypasses update_status() to avoid triggering emails/webhooks
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_TABLE;
+        $wpdb->update( $table, array( 'status' => $status ), array( 'ref' => $ref ) );
+
+        MBS_Audit_Log::log( $ref, 'restored', 'Booking restored from ' . $booking->status . ' to ' . $status . ' (no notification sent).' );
+
+        wp_send_json_success( array( 'ref' => $ref, 'status' => $status ) );
     }
 
     public function ajax_get_invoice() {

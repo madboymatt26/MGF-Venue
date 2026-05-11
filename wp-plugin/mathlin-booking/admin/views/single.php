@@ -208,7 +208,10 @@ $kitchen_price = MBS_Bookings::get_kitchen_price();
                     <button class="button nms-btn-cancel" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">✗ Cancel Booking</button>
                 <?php endif; ?>
                 <?php if ( $booking->status === 'cancelled' ) : ?>
-                    <button class="button nms-btn-reopen" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">↩ Reopen Booking</button>
+                    <button class="button nms-btn-reopen" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1" data-restore-status="confirmed">↩ Restore to Confirmed</button>
+                <?php endif; ?>
+                <?php if ( $booking->status === 'archived' ) : ?>
+                    <button class="button nms-btn-reopen" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1" data-restore-status="confirmed">↩ Restore to Confirmed</button>
                 <?php endif; ?>
                 <?php if ( in_array( $booking->status, array( 'confirmed', 'deposit_paid', 'paid', 'cancelled' ) ) ) : ?>
                     <button class="button nms-btn-archive" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">📦 Archive</button>
