@@ -124,14 +124,14 @@
                         <input type="date" id="nms-date" name="booking_date" required
                                min="<?php
                                    $notice = (int) get_option( 'mbs_min_notice_days', 1 );
-                                   echo esc_attr( date( 'Y-m-d', strtotime( "+{$notice} days" ) ) );
+                                   echo esc_attr( wp_date( 'Y-m-d', strtotime( "+{$notice} days" ) ) );
                                ?>">
                         <p class="nms-field-hint" id="nms-date-hint"></p>
                     </div>
                     <div class="nms-form-group">
                         <label for="nms-date-end">End Date</label>
                         <input type="date" id="nms-date-end" name="booking_date_end"
-                               min="<?php echo esc_attr( date( 'Y-m-d', strtotime( "+{$notice} days" ) ) ); ?>">
+                               min="<?php echo esc_attr( wp_date( 'Y-m-d', strtotime( "+{$notice} days" ) ) ); ?>">
                         <p class="nms-field-hint">Leave blank for a single day booking</p>
                     </div>
                 </div>
@@ -178,7 +178,7 @@
                     <div class="nms-form-group" id="nms-repeat-until-group" style="display:none">
                         <label for="nms-repeat-until">Repeat Until <span class="nms-req">*</span></label>
                         <input type="date" id="nms-repeat-until" name="repeat_until"
-                               min="<?php echo esc_attr( date( 'Y-m-d', strtotime( '+7 days' ) ) ); ?>">
+                               min="<?php echo esc_attr( wp_date( 'Y-m-d', strtotime( '+7 days' ) ) ); ?>">
                         <p class="nms-field-hint">Booking will repeat every week until this date (max 52 weeks). Dates with conflicts will be skipped.</p>
                     </div>
                 </div>

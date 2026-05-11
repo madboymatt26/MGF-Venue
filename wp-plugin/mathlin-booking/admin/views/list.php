@@ -168,7 +168,7 @@
                     <td style="padding-left:24px;"><small><?php echo esc_html( $sb->ref ); ?></small></td>
                     <td></td>
                     <td></td>
-                    <td><?php echo esc_html( date( 'D j M Y', strtotime( $sb->booking_date ) ) ); ?></td>
+                    <td><?php echo esc_html( wp_date( 'D j M Y', strtotime( $sb->booking_date ) ) ); ?></td>
                     <td><?php echo ! empty( $sb->all_day ) ? 'All day' : esc_html( $sb->start_time . ' – ' . $sb->end_time ); ?></td>
                     <td></td>
                     <td>&pound;<?php echo number_format( $sb->amount, 2 ); ?></td>
@@ -201,7 +201,7 @@
                         <?php } ?>
                     </td>
                     <td><?php echo esc_html( $b->space ); ?></td>
-                    <td><?php echo esc_html( date( 'D j M Y', strtotime( $b->booking_date ) ) ); ?></td>
+                    <td><?php echo esc_html( wp_date( 'D j M Y', strtotime( $b->booking_date ) ) ); ?></td>
                     <td><?php echo $is_daily ? 'All day' : esc_html( $b->start_time . ' – ' . $b->end_time ); ?></td>
                     <td><?php echo esc_html( $b->attendees ); ?></td>
                     <td><strong>&pound;<?php echo number_format( $b->amount, 2 ); ?></strong></td>

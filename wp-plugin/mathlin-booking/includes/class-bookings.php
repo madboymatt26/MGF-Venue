@@ -748,10 +748,11 @@ class MBS_Bookings {
     public static function archive_past_bookings() {
         global $wpdb;
         $table = $wpdb->prefix . MBS_TABLE;
-        $today = wp_date( 'Y-m-d' );
+        $days_after = (int) get_option( 'mbs_auto_archive_days', 7 );
+        $threshold  = wp_date( 'Y-m-d', strtotime( "-{$days_after} days" ) );
         return $wpdb->query( $wpdb->prepare(
-            "UPDATE {$table} SET status = 'archived' WHERE booking_date < %s AND status IN ('confirmed', 'deposit_paid', 'cancelled')",
-            $today
+            "UPDATE {$table} SET status = 'archived' WHERE COALESCE(booking_date_end, booking_date) < %s AND status IN ('confirmed', 'deposit_paid', 'cancelled')",
+            $threshold
         ) );
     }
 
