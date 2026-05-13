@@ -36,11 +36,12 @@ class MBS_Auto_Archive {
         // Safety: only archive bookings where the event date is BOTH:
         // 1. In the past (before today)
         // 2. Older than the configured threshold
+        // Note: Use NULLIF to handle empty string booking_date_end values
         $count = $wpdb->query( $wpdb->prepare(
             "UPDATE {$table}
              SET status = 'archived'
-             WHERE COALESCE(booking_date_end, booking_date) < %s
-             AND COALESCE(booking_date_end, booking_date) < %s
+             WHERE COALESCE(NULLIF(booking_date_end, ''), booking_date) < %s
+             AND COALESCE(NULLIF(booking_date_end, ''), booking_date) < %s
              AND status IN ('confirmed', 'deposit_paid', 'cancelled', 'paid')",
             $today,
             $threshold

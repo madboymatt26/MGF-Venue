@@ -223,7 +223,7 @@ class MBS_Bookings {
         $ref     = self::generate_ref();
         $all_day = ! empty( $data['all_day'] );
         $date_from = sanitize_text_field( $data['booking_date'] );
-        $date_to   = sanitize_text_field( $data['booking_date_end'] ?? $data['booking_date'] );
+        $date_to   = ! empty( $data['booking_date_end'] ) ? sanitize_text_field( $data['booking_date_end'] ) : sanitize_text_field( $data['booking_date'] );
         $num_days  = max( 1, (int) round( ( strtotime( $date_to ) - strtotime( $date_from ) ) / 86400 ) + 1 );
 
         // SEC-003: Validate scout_use server-side — only allow if email is in volunteer list
@@ -751,7 +751,7 @@ class MBS_Bookings {
         $days_after = (int) get_option( 'mbs_auto_archive_days', 7 );
         $threshold  = wp_date( 'Y-m-d', strtotime( "-{$days_after} days" ) );
         return $wpdb->query( $wpdb->prepare(
-            "UPDATE {$table} SET status = 'archived' WHERE COALESCE(booking_date_end, booking_date) < %s AND status IN ('confirmed', 'deposit_paid', 'cancelled')",
+            "UPDATE {$table} SET status = 'archived' WHERE COALESCE(NULLIF(booking_date_end, ''), booking_date) < %s AND status IN ('confirmed', 'deposit_paid', 'cancelled')",
             $threshold
         ) );
     }

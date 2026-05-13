@@ -254,6 +254,9 @@ class MBS_Database {
                 'body'    => $new_body,
             ) );
         }
+
+        // v3.2.9: Fix empty string booking_date_end values — set to booking_date
+        $wpdb->query( "UPDATE {$table} SET booking_date_end = booking_date WHERE booking_date_end = '' OR booking_date_end = '0000-00-00'" );
     }
 
     public static function on_deactivate() {
