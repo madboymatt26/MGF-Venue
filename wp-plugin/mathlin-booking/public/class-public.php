@@ -18,6 +18,8 @@ class MBS_Public {
         add_action( 'wp_ajax_mbs_get_calendar',          array( $this, 'ajax_calendar' ) );
         add_action( 'wp_ajax_nopriv_mbs_get_day',        array( $this, 'ajax_get_day' ) );
         add_action( 'wp_ajax_mbs_get_day',               array( $this, 'ajax_get_day' ) );
+        add_action( 'wp_ajax_nopriv_mbs_get_blocked_dates', array( $this, 'ajax_get_blocked_dates' ) );
+        add_action( 'wp_ajax_mbs_get_blocked_dates',        array( $this, 'ajax_get_blocked_dates' ) );
         add_action( 'wp_ajax_nopriv_mbs_lookup_booking', array( $this, 'ajax_lookup_booking' ) );
         add_action( 'wp_ajax_mbs_lookup_booking',        array( $this, 'ajax_lookup_booking' ) );
     }
@@ -384,6 +386,34 @@ class MBS_Public {
         $month = absint( $_POST['month'] ?? wp_date('n') );
         $dates = MBS_Bookings::get_booked_dates( $year, $month );
         wp_send_json_success( $dates );
+    }
+
+    // ── AJAX: get blocked dates for a specific month ───────────────────────────
+    public function ajax_get_blocked_dates() {
+        check_ajax_referer( 'mbs_public_nonce', 'nonce' );
+        $year  = absint( $_POST['year']  ?? wp_date('Y') );
+        $month = absint( $_POST['month'] ?? wp_date('n') );
+
+        $from = sprintf( '%04d-%02d-01', $year, $month );
+        $to   = wp_date( 'Y-m-t', strtotime( $from ) );
+
+        $entries = MBS_Blocked_Dates::get_for_range( $from, $to );
+        $blocked = array();
+
+        foreach ( $entries as $entry ) {
+            $start = max( strtotime( $from ), strtotime( $entry->date_from ) );
+            $end   = min( strtotime( $to ), strtotime( $entry->date_to ) );
+
+            for ( $d = $start; $d <= $end; $d += 86400 ) {
+                $date_str = wp_date( 'Y-m-d', $d );
+                if ( ! isset( $blocked[ $date_str ] ) ) {
+                    $blocked[ $date_str ] = array();
+                }
+                $blocked[ $date_str ][] = $entry->space ?: '__all__';
+            }
+        }
+
+        wp_send_json_success( $blocked );
     }
 
     // ── AJAX: get bookings for a specific day ──────────────────────────────────

@@ -12,17 +12,33 @@ jQuery(function ($) {
     function loadCalendar(year, month) {
         // QA-009: Show loading state
         $('#nms-cal-days').css('opacity', '0.4');
+
+        // Load both booking counts AND blocked dates for this month
         $.post(NMS.ajax_url, {
             action: 'mbs_get_calendar',
             nonce:  NMS.nonce,
             year:   year,
             month:  month
         }, function (res) {
-            $('#nms-cal-days').css('opacity', '1');
             if (res.success) {
                 calData = res.data;
-                renderCalendar(year, month);
             }
+            // Also fetch blocked dates for this month
+            $.post(NMS.ajax_url, {
+                action: 'mbs_get_blocked_dates',
+                nonce:  NMS.nonce,
+                year:   year,
+                month:  month
+            }, function (bres) {
+                $('#nms-cal-days').css('opacity', '1');
+                if (bres.success && bres.data) {
+                    // Merge new blocked dates into NMS.blocked_dates
+                    for (var dateKey in bres.data) {
+                        NMS.blocked_dates[dateKey] = bres.data[dateKey];
+                    }
+                }
+                renderCalendar(year, month);
+            });
         });
     }
 
