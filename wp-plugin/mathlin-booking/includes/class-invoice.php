@@ -8,23 +8,30 @@ class MBS_Invoice {
      */
     public static function generate_html( $booking ) {
         $spaces      = MBS_Bookings::get_spaces();
-        $space_info  = $spaces[ $booking->space ] ?? array( 'rate' => 0, 'unit' => 'hr' );
-        $is_day_rate = $space_info['unit'] === 'day';
+        $space_info  = $spaces[ $booking->space ] ?? array();
         $kitchen_price = MBS_Bookings::get_kitchen_price();
+        $is_all_day  = ! empty( $booking->all_day );
 
-        if ( $is_day_rate ) {
-            $qty_label  = '1 day';
-            $unit_price = $space_info['rate'];
+        // Determine quantity and unit price from the actual booking data
+        if ( $is_all_day ) {
+            $rate_daily = (float) ( $space_info['rate_daily'] ?? $space_info['rate'] ?? 0 );
+            $date_from  = $booking->booking_date;
+            $date_to    = $booking->booking_date_end ?? $booking->booking_date;
+            $num_days   = max( 1, (int) round( ( strtotime( $date_to ) - strtotime( $date_from ) ) / 86400 ) + 1 );
+            $qty_label  = $num_days . ' day' . ( $num_days !== 1 ? 's' : '' );
+            $unit_price = $rate_daily;
         } else {
-            $start      = strtotime( $booking->start_time );
-            $end        = strtotime( $booking->end_time );
-            $hours      = $start && $end ? ceil( max( 0, ( $end - $start ) / 3600 ) ) : 0;
-            $qty_label  = $hours . ' hour' . ( $hours !== 1 ? 's' : '' );
-            $unit_price = $space_info['rate'];
+            $rate_hourly = (float) ( $space_info['rate_hourly'] ?? $space_info['rate'] ?? 0 );
+            $start       = strtotime( $booking->start_time );
+            $end         = strtotime( $booking->end_time );
+            if ( $end <= $start ) $end += 86400; // overnight
+            $hours       = $start && $end ? (int) ceil( max( 0, ( $end - $start ) / 3600 ) ) : 0;
+            $qty_label   = $hours . ' hour' . ( $hours !== 1 ? 's' : '' );
+            $unit_price  = $rate_hourly;
         }
 
-        $space_subtotal = $booking->amount - ( $booking->kitchen ? $kitchen_price : 0 );
-        $issue_date     = date( 'j F Y', strtotime( $booking->created_at ) );
+        $space_subtotal = (float) $booking->amount - ( $booking->kitchen ? $kitchen_price : 0 );
+        $issue_date     = wp_date( 'j F Y', strtotime( $booking->created_at ) );
         $bank           = MBS_Bookings::get_bank_details();
         $deposit_settings = MBS_Bookings::get_deposit_settings();
 
@@ -38,8 +45,8 @@ class MBS_Invoice {
             $due_date = date( 'j F Y', strtotime( $booking->created_at . ' +' . $bank['payment_days'] . ' days' ) );
         }
 
-        $booking_date   = date( 'l j F Y', strtotime( $booking->booking_date ) );
-        $time_str       = $is_day_rate ? 'Full day' : ( $booking->start_time . ' – ' . $booking->end_time );
+        $booking_date   = wp_date( 'l j F Y', strtotime( $booking->booking_date ) );
+        $time_str       = $is_all_day ? 'Full day' : ( $booking->start_time . ' – ' . $booking->end_time );
 
         $org            = MBS_Email_Templates::get_org_settings();
         $org_name       = $org['name'] ?? 'Needham Market Scout Group';
@@ -160,23 +167,30 @@ class MBS_Invoice {
      */
     public static function generate_email_invoice( $booking ) {
         $spaces      = MBS_Bookings::get_spaces();
-        $space_info  = $spaces[ $booking->space ] ?? array( 'rate' => 0, 'unit' => 'hr' );
-        $is_day_rate = $space_info['unit'] === 'day';
+        $space_info  = $spaces[ $booking->space ] ?? array();
         $kitchen_price = MBS_Bookings::get_kitchen_price();
+        $is_all_day  = ! empty( $booking->all_day );
 
-        if ( $is_day_rate ) {
-            $qty_label  = '1 day';
-            $unit_price = $space_info['rate'];
+        // Determine quantity and unit price from the actual booking data
+        if ( $is_all_day ) {
+            $rate_daily = (float) ( $space_info['rate_daily'] ?? $space_info['rate'] ?? 0 );
+            $date_from  = $booking->booking_date;
+            $date_to    = $booking->booking_date_end ?? $booking->booking_date;
+            $num_days   = max( 1, (int) round( ( strtotime( $date_to ) - strtotime( $date_from ) ) / 86400 ) + 1 );
+            $qty_label  = $num_days . ' day' . ( $num_days !== 1 ? 's' : '' );
+            $unit_price = $rate_daily;
         } else {
-            $start      = strtotime( $booking->start_time );
-            $end        = strtotime( $booking->end_time );
-            $hours      = $start && $end ? ceil( max( 0, ( $end - $start ) / 3600 ) ) : 0;
-            $qty_label  = $hours . ' hour' . ( $hours !== 1 ? 's' : '' );
-            $unit_price = $space_info['rate'];
+            $rate_hourly = (float) ( $space_info['rate_hourly'] ?? $space_info['rate'] ?? 0 );
+            $start       = strtotime( $booking->start_time );
+            $end         = strtotime( $booking->end_time );
+            if ( $end <= $start ) $end += 86400; // overnight
+            $hours       = $start && $end ? (int) ceil( max( 0, ( $end - $start ) / 3600 ) ) : 0;
+            $qty_label   = $hours . ' hour' . ( $hours !== 1 ? 's' : '' );
+            $unit_price  = $rate_hourly;
         }
 
-        $space_subtotal = $booking->amount - ( $booking->kitchen ? $kitchen_price : 0 );
-        $issue_date     = date( 'j F Y', strtotime( $booking->created_at ) );
+        $space_subtotal = (float) $booking->amount - ( $booking->kitchen ? $kitchen_price : 0 );
+        $issue_date     = wp_date( 'j F Y', strtotime( $booking->created_at ) );
         $bank           = MBS_Bookings::get_bank_details();
         $deposit_settings = MBS_Bookings::get_deposit_settings();
 
@@ -187,11 +201,11 @@ class MBS_Invoice {
                 $due_date = 'Immediately';
             }
         } else {
-            $due_date = date( 'j F Y', strtotime( $booking->created_at . ' +' . $bank['payment_days'] . ' days' ) );
+            $due_date = wp_date( 'j F Y', strtotime( $booking->created_at . ' +' . $bank['payment_days'] . ' days' ) );
         }
 
-        $booking_date   = date( 'l j F Y', strtotime( $booking->booking_date ) );
-        $time_str       = $is_day_rate ? 'Full day' : ( $booking->start_time . ' – ' . $booking->end_time );
+        $booking_date   = wp_date( 'l j F Y', strtotime( $booking->booking_date ) );
+        $time_str       = $is_all_day ? 'Full day' : ( $booking->start_time . ' – ' . $booking->end_time );
         $admin_email    = MBS_Bookings::get_admin_email();
 
         $org            = MBS_Email_Templates::get_org_settings();
