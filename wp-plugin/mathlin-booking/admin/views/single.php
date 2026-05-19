@@ -66,6 +66,38 @@ $kitchen_price = MBS_Bookings::get_kitchen_price();
                 <div class="nms-detail-item nms-detail-full"><label>Notes</label><span><?php echo nl2br( esc_html( $booking->notes ) ); ?></span></div>
                 <?php endif; ?>
                 <div class="nms-detail-item nms-detail-full"><label>Billing Address</label><span><?php echo nl2br( esc_html( $booking->address ) ); ?></span></div>
+                <?php
+                // Show WooCommerce payment billing address if available (for mismatch detection)
+                if ( class_exists( 'WooCommerce' ) ) {
+                    $woo_orders = wc_get_orders( array(
+                        'meta_key'   => '_mbs_booking_ref',
+                        'meta_value' => $booking->ref,
+                        'limit'      => 1,
+                        'orderby'    => 'date',
+                        'order'      => 'DESC',
+                    ) );
+                    if ( ! empty( $woo_orders ) ) {
+                        $woo_order = $woo_orders[0];
+                        $woo_addr  = trim( $woo_order->get_billing_address_1() . "\n" . $woo_order->get_billing_address_2() . "\n" . $woo_order->get_billing_city() . "\n" . $woo_order->get_billing_postcode() );
+                        $woo_addr  = preg_replace( '/\n{2,}/', "\n", $woo_addr );
+                        $booking_addr_norm = strtolower( preg_replace( '/[\s,]+/', ' ', trim( $booking->address ) ) );
+                        $woo_addr_norm     = strtolower( preg_replace( '/[\s,]+/', ' ', trim( $woo_addr ) ) );
+                        $is_mismatch = ( $booking_addr_norm !== $woo_addr_norm );
+
+                        if ( $is_mismatch ) : ?>
+                <div class="nms-detail-item nms-detail-full">
+                    <label>Payment Billing Address</label>
+                    <span style="<?php echo $is_mismatch ? 'color:#991b1b;font-weight:600;' : ''; ?>">
+                        <?php echo nl2br( esc_html( $woo_addr ) ); ?>
+                        <?php if ( $is_mismatch ) : ?>
+                            <br><span style="display:inline-block;margin-top:4px;padding:2px 8px;background:#fee2e2;border-radius:4px;font-size:0.75rem;font-weight:700;color:#991b1b;">⚠️ ADDRESS MISMATCH</span>
+                        <?php endif; ?>
+                    </span>
+                </div>
+                        <?php endif;
+                    }
+                }
+                ?>
                 <?php MBS_Custom_Fields::render_admin_display( $booking ); ?>
                 <div class="nms-detail-item"><label>Submitted</label><span><?php echo esc_html( date( 'j F Y H:i', strtotime( $booking->created_at ) ) ); ?></span></div>
                 <div class="nms-detail-item"><label>HA Notified</label><span><?php echo $booking->ha_notified ? '✅ Yes' : '—'; ?></span></div>
