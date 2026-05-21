@@ -310,3 +310,195 @@
     display: block;
     margin-bottom: 4px;
 }
+
+/* ===== MOBILE RESPONSIVE — Admin Panel ===== */
+
+/* Tablets (< 1024px) */
+@media (max-width: 1024px) {
+    .nms-stats-row {
+        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+        gap: 0.5rem;
+    }
+    .nms-stat-card { padding: 0.75rem; }
+    .nms-stat-val { font-size: 1.5rem; }
+    .nms-stat-label { font-size: 0.7rem; }
+}
+
+/* Mobile (< 782px — WordPress admin bar breakpoint) */
+@media (max-width: 782px) {
+    .nms-admin { padding: 0 8px; }
+
+    /* Hide bulk checkboxes on mobile */
+    .nms-bookings-table .nms-bulk-check,
+    .nms-bookings-table th:first-child { display: none; }
+    .nms-bulk-row { display: none; }
+
+    /* Stats: 2 columns on mobile */
+    .nms-stats-row {
+        grid-template-columns: 1fr 1fr;
+        gap: 0.5rem;
+        margin: 1rem 0;
+    }
+    .nms-stat-card { padding: 0.6rem 0.5rem; }
+    .nms-stat-val { font-size: 1.3rem; }
+
+    /* Filters: stack vertically */
+    .nms-filters {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .nms-filters form {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+    .nms-search-input { min-width: unset; width: 100%; }
+    .nms-filters select { width: 100%; }
+    .nms-filters .button { width: 100%; text-align: center; }
+    .nms-filters-right {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        margin-top: 0.5rem;
+    }
+
+    /* Bookings table: card layout on mobile */
+    .nms-bookings-table,
+    .nms-bookings-table thead,
+    .nms-bookings-table tbody,
+    .nms-bookings-table th,
+    .nms-bookings-table td,
+    .nms-bookings-table tr {
+        display: block;
+    }
+    .nms-bookings-table thead {
+        display: none; /* Hide table headers */
+    }
+    .nms-bookings-table tr {
+        background: #fff;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        margin-bottom: 0.75rem;
+        padding: 0.75rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    .nms-bookings-table td {
+        padding: 4px 0;
+        border: none;
+        text-align: left;
+        font-size: 0.85rem;
+        position: relative;
+        padding-left: 40%;
+    }
+    .nms-bookings-table td::before {
+        content: attr(data-label);
+        position: absolute;
+        left: 0;
+        width: 38%;
+        font-weight: 700;
+        font-size: 0.75rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+    }
+    /* First cell (ref) — make it prominent */
+    .nms-bookings-table td:first-child {
+        padding-left: 0;
+        padding-bottom: 6px;
+        margin-bottom: 6px;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.9rem;
+    }
+    .nms-bookings-table td:first-child::before { display: none; }
+
+    /* Actions cell — full width */
+    .nms-bookings-table td:last-child {
+        padding-left: 0;
+        padding-top: 8px;
+        margin-top: 4px;
+        border-top: 1px solid var(--border);
+    }
+    .nms-bookings-table td:last-child::before { display: none; }
+    .nms-action-btns {
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+    .nms-action-btns .button {
+        flex: 1 1 auto;
+        text-align: center;
+        min-width: 80px;
+    }
+
+    /* Bulk actions */
+    .nms-bulk-row {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    /* Single booking detail */
+    .nms-single-layout {
+        grid-template-columns: 1fr !important;
+    }
+    .nms-detail-grid {
+        grid-template-columns: 1fr !important;
+    }
+    .nms-actions-card .nms-action-list {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.5rem;
+    }
+    .nms-actions-card .button {
+        text-align: center;
+        font-size: 0.8rem;
+        padding: 8px 6px;
+    }
+
+    /* Cards */
+    .nms-card { border-radius: 6px; }
+    .nms-card-header { padding: 0.75rem 1rem; }
+    .nms-card-header h2 { font-size: 0.9rem; }
+    .nms-card > p,
+    .nms-card > table { padding: 0 1rem; }
+
+    /* Settings */
+    .nms-settings-layout { max-width: 100%; }
+    .form-table th { display: block; padding: 8px 0 2px; }
+    .form-table td { display: block; padding: 4px 0 12px; }
+    .regular-text { width: 100% !important; }
+
+    /* Calendar */
+    .nms-cal-grid td { height: 50px; }
+    .nms-cal-day-num { font-size: 12px; }
+    .nms-cal-badge { font-size: 9px; padding: 1px 4px; }
+    .nms-cal-nav h2, .nms-cal-title { font-size: 1.1rem; }
+
+    /* Invoice */
+    .nms-invoice { padding: 1rem; }
+    .nms-inv-header { flex-direction: column; gap: 0.75rem; }
+    .nms-inv-meta { text-align: left; }
+    .nms-inv-parties { grid-template-columns: 1fr; gap: 0.75rem; }
+    .nms-inv-table { font-size: 0.75rem; }
+    .nms-inv-table th, .nms-inv-table td { padding: 0.5rem; }
+}
+
+/* Small phones (< 480px) */
+@media (max-width: 480px) {
+    .nms-stats-row {
+        grid-template-columns: 1fr 1fr;
+    }
+    .nms-stat-val { font-size: 1.1rem; }
+    .nms-stat-label { font-size: 0.65rem; }
+
+    .nms-actions-card .nms-action-list {
+        grid-template-columns: 1fr;
+    }
+
+    .nms-bookings-table td {
+        padding-left: 0;
+    }
+    .nms-bookings-table td::before {
+        position: static;
+        display: block;
+        width: 100%;
+        margin-bottom: 2px;
+    }
+}

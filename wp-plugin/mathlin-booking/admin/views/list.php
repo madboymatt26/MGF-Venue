@@ -193,19 +193,19 @@
             ?>
                 <tr id="nms-row-<?php echo esc_attr( $b->ref ); ?>">
                     <td><input type="checkbox" class="nms-bulk-check" value="<?php echo esc_attr( $b->ref ); ?>"></td>
-                    <td><strong><?php echo esc_html( $b->ref ); ?></strong></td>
-                    <td>
+                    <td data-label="Ref"><strong><?php echo esc_html( $b->ref ); ?></strong></td>
+                    <td data-label="Name">
                         <?php echo esc_html( $b->name ); ?>
                         <?php if ( $b->organisation ) { ?>
                             <br><small class="nms-muted"><?php echo esc_html( $b->organisation ); ?></small>
                         <?php } ?>
                     </td>
-                    <td><?php echo esc_html( $b->space ); ?></td>
-                    <td><?php echo esc_html( wp_date( 'D j M Y', strtotime( $b->booking_date ) ) ); ?></td>
-                    <td><?php echo $is_daily ? 'All day' : esc_html( $b->start_time . ' – ' . $b->end_time ); ?></td>
-                    <td><?php echo esc_html( $b->attendees ); ?></td>
-                    <td><strong>&pound;<?php echo number_format( $b->amount, 2 ); ?></strong></td>
-                    <td>
+                    <td data-label="Space"><?php echo esc_html( $b->space ); ?></td>
+                    <td data-label="Date"><?php echo esc_html( wp_date( 'D j M Y', strtotime( $b->booking_date ) ) ); ?></td>
+                    <td data-label="Time"><?php echo $is_daily ? 'All day' : esc_html( $b->start_time . ' – ' . $b->end_time ); ?></td>
+                    <td data-label="Guests"><?php echo esc_html( $b->attendees ); ?></td>
+                    <td data-label="Amount"><strong>&pound;<?php echo number_format( $b->amount, 2 ); ?></strong></td>
+                    <td data-label="Paid">
                         <?php
                         $paid = (float) ( $b->amount_paid ?? 0 );
                         $balance = (float) $b->amount - $paid;
@@ -221,12 +221,12 @@
                             <span style="color:#6b7280;">—</span>
                         <?php endif; ?>
                     </td>
-                    <td>
+                    <td data-label="Status">
                         <span class="nms-status nms-status-<?php echo esc_attr( $b->status ); ?>">
                             <?php echo esc_html( MBS_Bookings::status_label( $b->status ) ); ?>
                         </span>
                     </td>
-                    <td>
+                    <td data-label="Actions">
                         <div class="nms-action-btns">
                             <a href="?page=mathlin-booking&action=view&ref=<?php echo esc_attr( $b->ref ); ?>" class="button button-small">View</a>
                             <a href="?page=mathlin-booking&action=invoice&ref=<?php echo esc_attr( $b->ref ); ?>" class="button button-small">Invoice</a>
