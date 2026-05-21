@@ -279,6 +279,7 @@ class MBS_Woo_Payment {
 
                 // Determine if this is a deposit payment or full/balance payment
                 if ( $booking->status === 'confirmed' && $deposit_settings['enabled']
+                     && (float) ( $booking->amount_paid ?? 0 ) == 0
                      && ! MBS_Bookings::requires_full_payment( $booking->booking_date )
                      && $order_total < $booking_total * 0.9 ) {
                     // This is a deposit payment
