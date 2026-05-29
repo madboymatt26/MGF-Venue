@@ -348,6 +348,7 @@ class MBS_Bookings {
             'limit'     => 200,
             'offset'    => 0,
             'exclude_archived' => true,
+            'exclude_scout'    => false,
         );
         $args = wp_parse_args( $args, $defaults );
 
@@ -359,6 +360,9 @@ class MBS_Bookings {
             $values[] = $args['status'];
         } elseif ( $args['exclude_archived'] ) {
             $where[] = "status != 'archived'";
+        }
+        if ( $args['exclude_scout'] ) {
+            $where[] = "scout_use = 0";
         }
         if ( $args['date_from'] ) {
             $where[]  = 'booking_date >= %s';

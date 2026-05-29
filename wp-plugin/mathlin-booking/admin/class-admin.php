@@ -12,6 +12,7 @@ class MBS_Admin {
         add_action( 'wp_ajax_mbs_undo_deposit',  array( $this, 'ajax_undo_deposit' ) );
         add_action( 'wp_ajax_mbs_restore_booking', array( $this, 'ajax_restore_booking' ) );
         add_action( 'wp_ajax_mbs_resend_access',   array( $this, 'ajax_resend_access' ) );
+        add_action( 'wp_ajax_mbs_create_scout_recurring', array( $this, 'ajax_create_scout_recurring' ) );
         add_action( 'wp_ajax_mbs_delete_booking', array( $this, 'ajax_delete_booking' ) );
         add_action( 'wp_ajax_mbs_get_invoice',    array( $this, 'ajax_get_invoice' ) );
         add_action( 'wp_ajax_mbs_save_settings',  array( $this, 'ajax_save_settings' ) );
@@ -62,6 +63,7 @@ class MBS_Admin {
             30
         );
         add_submenu_page( 'mathlin-booking', 'All Bookings', $bookings_label, $booking_cap, 'mathlin-booking', array( $this, 'render_dashboard' ) );
+        add_submenu_page( 'mathlin-booking', 'Scout Nights', '⚜️ Scout Nights', $booking_cap, 'mathlin-scout-nights', array( $this, 'render_scout_nights' ) );
         add_submenu_page( 'mathlin-booking', 'Calendar', 'Calendar', $booking_cap, 'mathlin-calendar', array( $this, 'render_calendar' ) );
         add_submenu_page( 'mathlin-booking', 'Archived', 'Archived', $booking_cap, 'mathlin-archived', array( $this, 'render_archived' ) );
         add_submenu_page( 'mathlin-booking', 'Blocked Dates', 'Blocked Dates', $booking_cap, 'mathlin-blocked', array( $this, 'render_blocked' ) );
@@ -131,7 +133,7 @@ class MBS_Admin {
         $stats    = MBS_Bookings::get_stats();
         $status   = isset( $_GET['status'] ) ? sanitize_text_field( $_GET['status'] ) : '';
         $search   = isset( $_GET['s'] )      ? sanitize_text_field( $_GET['s'] )      : '';
-        $bookings = MBS_Bookings::get_all( array( 'status' => $status, 'search' => $search, 'orderby' => 'booking_date', 'order' => 'ASC' ) );
+        $bookings = MBS_Bookings::get_all( array( 'status' => $status, 'search' => $search, 'orderby' => 'booking_date', 'order' => 'ASC', 'exclude_scout' => true ) );
         include MBS_PLUGIN_DIR . 'admin/views/list.php';
     }
 
@@ -165,6 +167,10 @@ class MBS_Admin {
         $search   = isset( $_GET['s'] ) ? sanitize_text_field( $_GET['s'] ) : '';
         $bookings = MBS_Bookings::get_all( array( 'status' => 'archived', 'search' => $search, 'exclude_archived' => false, 'orderby' => 'booking_date', 'order' => 'DESC' ) );
         include MBS_PLUGIN_DIR . 'admin/views/archived.php';
+    }
+
+    public function render_scout_nights() {
+        include MBS_PLUGIN_DIR . 'admin/views/scout-nights.php';
     }
 
     // ── AJAX handlers ──────────────────────────────────────────────────────────
@@ -343,6 +349,97 @@ class MBS_Admin {
         $wpdb->update( $wpdb->prefix . MBS_TABLE, array( 'access_sent' => 1 ), array( 'ref' => $ref ) );
 
         wp_send_json_success( array( 'ref' => $ref ) );
+    }
+
+    /**
+     * Create recurring scout night bookings from admin panel.
+     */
+    public function ajax_create_scout_recurring() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
+
+        $space      = sanitize_text_field( $_POST['space'] ?? '' );
+        $day_of_week = absint( $_POST['day_of_week'] ?? 1 ); // 1=Mon, 7=Sun
+        $start_time = sanitize_text_field( $_POST['start_time'] ?? '' );
+        $end_time   = sanitize_text_field( $_POST['end_time'] ?? '' );
+        $purpose    = sanitize_text_field( $_POST['purpose'] ?? 'Scout Night' );
+        $date_from  = sanitize_text_field( $_POST['date_from'] ?? '' );
+        $date_to    = sanitize_text_field( $_POST['date_to'] ?? '' );
+
+        if ( ! $space || ! $start_time || ! $end_time || ! $date_from || ! $date_to ) {
+            wp_send_json_error( 'Please fill in all fields.' );
+        }
+
+        // Map day number to PHP day name for strtotime
+        $days = array( 1 => 'Monday', 2 => 'Tuesday', 3 => 'Wednesday', 4 => 'Thursday', 5 => 'Friday', 6 => 'Saturday', 7 => 'Sunday' );
+        $day_name = $days[ $day_of_week ] ?? 'Monday';
+
+        // Find the first occurrence of this day on or after date_from
+        $current = strtotime( $date_from );
+        $end     = strtotime( $date_to );
+        $first_day = strtotime( "this {$day_name}", $current - 86400 );
+        if ( $first_day < $current ) $first_day = strtotime( "next {$day_name}", $current );
+
+        $series_id = MBS_Bookings::generate_series_id();
+        $created   = 0;
+        $skipped   = 0;
+
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_TABLE;
+
+        for ( $d = $first_day; $d <= $end; $d = strtotime( '+1 week', $d ) ) {
+            $date_str = wp_date( 'Y-m-d', $d );
+
+            // Check for conflicts
+            $conflicts = MBS_Bookings::check_conflicts( $space, $date_str, $start_time, $end_time, false );
+            if ( ! empty( $conflicts ) ) {
+                $skipped++;
+                continue;
+            }
+
+            // Check for blocked dates
+            if ( MBS_Blocked_Dates::is_blocked( $date_str, $space ) ) {
+                $skipped++;
+                continue;
+            }
+
+            $ref = MBS_Bookings::generate_ref();
+            $wpdb->insert( $table, array(
+                'ref'              => $ref,
+                'status'           => 'confirmed',
+                'name'             => $purpose,
+                'organisation'     => get_option( 'mbs_org_name', '1st Needham Market Scout Group' ),
+                'email'            => MBS_Bookings::get_admin_email(),
+                'phone'            => '',
+                'address'          => '',
+                'space'            => $space,
+                'kitchen'          => 0,
+                'booking_date'     => $date_str,
+                'booking_date_end' => $date_str,
+                'all_day'          => 0,
+                'scout_use'        => 1,
+                'start_time'       => $start_time,
+                'end_time'         => $end_time,
+                'attendees'        => 0,
+                'purpose'          => $purpose,
+                'amount'           => 0,
+                'amount_paid'      => 0,
+                'invoice_number'   => '',
+                'series_id'        => $series_id,
+                'modification_token' => wp_generate_password( 32, false ),
+            ) );
+            $created++;
+        }
+
+        if ( $created > 0 ) {
+            MBS_Audit_Log::log( $series_id, 'created', "Scout recurring: {$created} x {$purpose} ({$day_name}s, {$start_time}–{$end_time}) in {$space}. Skipped: {$skipped}" );
+        }
+
+        wp_send_json_success( array(
+            'created'   => $created,
+            'skipped'   => $skipped,
+            'series_id' => $series_id,
+        ) );
     }
 
     public function ajax_get_invoice() {
