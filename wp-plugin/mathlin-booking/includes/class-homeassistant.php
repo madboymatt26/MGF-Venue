@@ -7,6 +7,9 @@ class MBS_HomeAssistant {
         $webhook_url = get_option( 'mbs_ha_webhook_url', '' );
         if ( empty( $webhook_url ) ) return;
 
+        // Skip HA webhook for scout use bookings — HA handles scout heating locally
+        if ( ! empty( $booking->scout_use ) ) return;
+
         $payload = array(
             'event'        => 'booking_confirmed',
             'ref'          => $booking->ref,
@@ -35,6 +38,9 @@ class MBS_HomeAssistant {
     public static function notify_cancelled( $booking ) {
         $webhook_url = get_option( 'mbs_ha_webhook_url', '' );
         if ( empty( $webhook_url ) ) return;
+
+        // Skip HA webhook for scout use bookings — HA handles scout heating locally
+        if ( ! empty( $booking->scout_use ) ) return;
 
         $payload = array(
             'event'        => 'booking_cancelled',
