@@ -1059,6 +1059,94 @@ class MBS_Bookings {
     }
 
     /**
+     * Reopen all *future* cancelled bookings in a series (booking_date >= today).
+     *
+     * Symmetric with cancel_series_future(): sets them back to 'confirmed'
+     * without sending booker emails. Past bookings are not touched.
+     *
+     * @param string $series_id The SER-XXXXXX series reference.
+     * @return int|false Number of rows reopened, or false on failure.
+     */
+    public static function reopen_series_future( $series_id ) {
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_TABLE;
+        $today = wp_date( 'Y-m-d' );
+
+        $affected = $wpdb->get_results( $wpdb->prepare(
+            "SELECT * FROM {$table}
+             WHERE series_id = %s AND booking_date >= %s AND status = 'cancelled'",
+            $series_id,
+            $today
+        ) );
+
+        $result = $wpdb->query( $wpdb->prepare(
+            "UPDATE {$table} SET status = 'confirmed'
+             WHERE series_id = %s AND booking_date >= %s AND status = 'cancelled'",
+            $series_id,
+            $today
+        ) );
+
+        if ( $result === false ) return false;
+
+        MBS_Audit_Log::log(
+            $series_id,
+            'series_reopen',
+            'Reopened ' . (int) $result . ' future booking(s) in series (from ' . $today . ')'
+        );
+
+        // Re-notify Home Assistant so the calendar/automations pick them back up.
+        foreach ( $affected as $booking ) {
+            $booking->status = 'confirmed';
+            MBS_HomeAssistant::notify( $booking );
+            $wpdb->update( $table, array( 'ha_notified' => 1 ), array( 'ref' => $booking->ref ) );
+        }
+
+        return (int) $result;
+    }
+
+    /**
+     * Permanently delete an ENTIRE series — every booking, past and future.
+     *
+     * This is a hard delete intended for admin clean-up (e.g. a series created
+     * in error). It removes the historical record too, so callers should gate
+     * it behind an administrator capability and a clear confirmation.
+     *
+     * @param string $series_id The SER-XXXXXX series reference.
+     * @return int|false Number of rows deleted, or false on failure.
+     */
+    public static function delete_series( $series_id ) {
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_TABLE;
+
+        // Notify HA to clear any active (confirmed) future bookings first.
+        $today  = wp_date( 'Y-m-d' );
+        $active = $wpdb->get_results( $wpdb->prepare(
+            "SELECT * FROM {$table}
+             WHERE series_id = %s AND booking_date >= %s AND status IN ('confirmed','deposit_paid','paid')",
+            $series_id,
+            $today
+        ) );
+        foreach ( $active as $booking ) {
+            MBS_HomeAssistant::notify_cancelled( $booking );
+        }
+
+        $result = $wpdb->query( $wpdb->prepare(
+            "DELETE FROM {$table} WHERE series_id = %s",
+            $series_id
+        ) );
+
+        if ( $result === false ) return false;
+
+        MBS_Audit_Log::log(
+            $series_id,
+            'series_deleted',
+            'Permanently deleted entire series (' . (int) $result . ' booking(s), past and future)'
+        );
+
+        return (int) $result;
+    }
+
+    /**
      * Update admin notes for a booking.
      */
     public static function update_admin_notes( $ref, $notes ) {

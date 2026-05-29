@@ -26,6 +26,8 @@ class MBS_Admin {
         add_action( 'wp_ajax_mbs_cancel_scout_series', array( $this, 'ajax_cancel_scout_series' ) );
         add_action( 'wp_ajax_mbs_edit_scout_series', array( $this, 'ajax_edit_scout_series' ) );
         add_action( 'wp_ajax_mbs_extend_scout_series', array( $this, 'ajax_extend_scout_series' ) );
+        add_action( 'wp_ajax_mbs_reopen_scout_series', array( $this, 'ajax_reopen_scout_series' ) );
+        add_action( 'wp_ajax_mbs_delete_scout_series', array( $this, 'ajax_delete_scout_series' ) );
         add_action( 'wp_ajax_mbs_save_admin_notes', array( $this, 'ajax_save_admin_notes' ) );
         add_action( 'wp_ajax_mbs_chase_payment',  array( $this, 'ajax_chase_payment' ) );
         add_action( 'wp_ajax_mbs_save_email_settings', array( $this, 'ajax_save_email_settings' ) );
@@ -885,6 +887,53 @@ class MBS_Admin {
             'skipped'     => $result['skipped'],
             'cap_reached' => ! empty( $result['cap_reached'] ),
             'message'     => $msg,
+        ) );
+    }
+
+    /**
+     * Reopen all future cancelled bookings in a Scout Nights series.
+     */
+    public function ajax_reopen_scout_series() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
+
+        $series_id = sanitize_text_field( $_POST['series_id'] ?? '' );
+        if ( ! $series_id ) wp_send_json_error( 'No series ID provided.' );
+
+        $reopened = MBS_Bookings::reopen_series_future( $series_id );
+        if ( $reopened === false ) {
+            wp_send_json_error( 'Database error reopening the series.' );
+        }
+
+        wp_send_json_success( array(
+            'series_id' => $series_id,
+            'reopened'  => $reopened,
+            'message'   => $reopened > 0
+                ? $reopened . ' future booking(s) reopened in series ' . $series_id . '.'
+                : 'No cancelled future bookings to reopen in series ' . $series_id . '.',
+        ) );
+    }
+
+    /**
+     * Permanently delete an entire Scout Nights series (past and future).
+     * Administrator only, since it destroys the historical record.
+     */
+    public function ajax_delete_scout_series() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_delete_bookings() ) wp_send_json_error( 'Only administrators can permanently delete a series.', 403 );
+
+        $series_id = sanitize_text_field( $_POST['series_id'] ?? '' );
+        if ( ! $series_id ) wp_send_json_error( 'No series ID provided.' );
+
+        $deleted = MBS_Bookings::delete_series( $series_id );
+        if ( $deleted === false ) {
+            wp_send_json_error( 'Database error deleting the series.' );
+        }
+
+        wp_send_json_success( array(
+            'series_id' => $series_id,
+            'deleted'   => $deleted,
+            'message'   => $deleted . ' booking(s) permanently deleted from series ' . $series_id . '.',
         ) );
     }
 

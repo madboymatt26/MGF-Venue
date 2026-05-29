@@ -9,6 +9,7 @@ $bookings = MBS_Bookings::get_all( array(
 ) );
 // Filter to only scout_use bookings
 $bookings = array_filter( $bookings, function( $b ) { return ! empty( $b->scout_use ); } );
+$can_delete = current_user_can( 'manage_options' );
 ?>
 <div class="wrap mbs-admin">
     <h1>⚜️ Scout Nights</h1>
@@ -81,12 +82,15 @@ $bookings = array_filter( $bookings, function( $b ) { return ! empty( $b->scout_
                             <th>Date</th>
                             <th>Time</th>
                             <th>Series</th>
+                            <th>Status</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ( $bookings as $b ) : ?>
-                        <tr>
+                        <?php foreach ( $bookings as $b ) :
+                            $is_cancelled = ( $b->status === 'cancelled' );
+                        ?>
+                        <tr<?php echo $is_cancelled ? ' style="opacity:0.55;"' : ''; ?>>
                             <td><?php echo esc_html( $b->ref ); ?></td>
                             <td><strong><?php echo esc_html( $b->purpose ); ?></strong></td>
                             <td><?php echo esc_html( $b->space ); ?></td>
@@ -94,7 +98,18 @@ $bookings = array_filter( $bookings, function( $b ) { return ! empty( $b->scout_
                             <td><?php echo $b->all_day ? 'All day' : esc_html( $b->start_time . ' – ' . $b->end_time ); ?></td>
                             <td><?php echo esc_html( $b->series_id ?: '—' ); ?></td>
                             <td>
-                                <button class="button button-small nms-btn-cancel" data-ref="<?php echo esc_attr( $b->ref ); ?>">Cancel</button>
+                                <?php if ( $is_cancelled ) : ?>
+                                    <span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;background:#fde2e2;color:#991b1b;">Cancelled</span>
+                                <?php else : ?>
+                                    <span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;background:#d1fae5;color:#065f46;"><?php echo esc_html( ucfirst( $b->status ) ); ?></span>
+                                <?php endif; ?>
+                            </td>
+                            <td>
+                                <?php if ( $is_cancelled ) : ?>
+                                    <button class="button button-small nms-btn-reopen" data-ref="<?php echo esc_attr( $b->ref ); ?>" data-restore-status="confirmed" data-redirect="1">Reopen</button>
+                                <?php else : ?>
+                                    <button class="button button-small nms-btn-cancel" data-ref="<?php echo esc_attr( $b->ref ); ?>">Cancel</button>
+                                <?php endif; ?>
                                 <?php if ( ! empty( $b->series_id ) ) : ?>
                                 <button class="button button-small nms-btn-edit-series"
                                         data-series="<?php echo esc_attr( $b->series_id ); ?>"
@@ -102,7 +117,14 @@ $bookings = array_filter( $bookings, function( $b ) { return ! empty( $b->scout_
                                         data-start="<?php echo esc_attr( substr( (string) $b->start_time, 0, 5 ) ); ?>"
                                         data-end="<?php echo esc_attr( substr( (string) $b->end_time, 0, 5 ) ); ?>"
                                         data-purpose="<?php echo esc_attr( $b->purpose ); ?>">Edit Series</button>
-                                <button class="button button-small nms-btn-cancel-series" data-series="<?php echo esc_attr( $b->series_id ); ?>" style="background:#dc3232;border-color:#dc3232;color:#fff;">Cancel Entire Series</button>
+                                <?php if ( $is_cancelled ) : ?>
+                                <button class="button button-small nms-btn-reopen-series" data-series="<?php echo esc_attr( $b->series_id ); ?>">Reopen Series</button>
+                                <?php else : ?>
+                                <button class="button button-small nms-btn-cancel-series" data-series="<?php echo esc_attr( $b->series_id ); ?>" style="background:#dc3232;border-color:#dc3232;color:#fff;">Cancel Series</button>
+                                <?php endif; ?>
+                                <?php if ( $can_delete ) : ?>
+                                <button class="button button-small nms-btn-delete-series" data-series="<?php echo esc_attr( $b->series_id ); ?>" style="background:#7f1d1d;border-color:#7f1d1d;color:#fff;">Delete Series</button>
+                                <?php endif; ?>
                                 <?php endif; ?>
                             </td>
                         </tr>
@@ -213,12 +235,63 @@ jQuery(function($) {
                 alert(res.data.message);
                 window.location.reload();
             } else {
-                $btn.prop('disabled', false).text('Cancel Entire Series');
+                $btn.prop('disabled', false).text('Cancel Series');
                 alert('Error: ' + (res.data || 'Unknown error'));
             }
         }).fail(function() {
-            $btn.prop('disabled', false).text('Cancel Entire Series');
+            $btn.prop('disabled', false).text('Cancel Series');
             alert('Network error cancelling series.');
+        });
+    });
+
+    // ── Reopen an entire scout series (future cancelled bookings) ───────────────
+    $(document).on('click', '.nms-btn-reopen-series', function() {
+        var $btn     = $(this);
+        var seriesId = $btn.data('series');
+        if (!confirm('Reopen all future cancelled bookings in series ' + seriesId + '?\n\nThey will be set back to Confirmed (no emails are sent).')) return;
+
+        $btn.prop('disabled', true).text('Reopening…');
+        $.post(MBS_Admin.ajax_url, {
+            action:    'mbs_reopen_scout_series',
+            nonce:     MBS_Admin.nonce,
+            series_id: seriesId
+        }, function(res) {
+            if (res.success) {
+                alert(res.data.message);
+                window.location.reload();
+            } else {
+                $btn.prop('disabled', false).text('Reopen Series');
+                alert('Error: ' + (res.data || 'Unknown error'));
+            }
+        }).fail(function() {
+            $btn.prop('disabled', false).text('Reopen Series');
+            alert('Network error reopening series.');
+        });
+    });
+
+    // ── Permanently delete an entire scout series (past + future) ───────────────
+    $(document).on('click', '.nms-btn-delete-series', function() {
+        var $btn     = $(this);
+        var seriesId = $btn.data('series');
+        if (!confirm('⚠️ PERMANENTLY DELETE the entire series ' + seriesId + '?\n\nThis removes ALL bookings in the series — past and future — and cannot be undone.')) return;
+        if (!confirm('Are you absolutely sure? This is your last chance to cancel.')) return;
+
+        $btn.prop('disabled', true).text('Deleting…');
+        $.post(MBS_Admin.ajax_url, {
+            action:    'mbs_delete_scout_series',
+            nonce:     MBS_Admin.nonce,
+            series_id: seriesId
+        }, function(res) {
+            if (res.success) {
+                alert(res.data.message);
+                window.location.reload();
+            } else {
+                $btn.prop('disabled', false).text('Delete Series');
+                alert('Error: ' + (res.data || 'Unknown error'));
+            }
+        }).fail(function() {
+            $btn.prop('disabled', false).text('Delete Series');
+            alert('Network error deleting series.');
         });
     });
 
