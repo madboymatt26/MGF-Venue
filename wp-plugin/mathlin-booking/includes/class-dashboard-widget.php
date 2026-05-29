@@ -39,8 +39,9 @@ class MBS_Dashboard_Widget {
             'limit'   => 10,
         ) );
 
-        // Stats
-        $stats = MBS_Bookings::get_stats();
+        // Stats — exclude internal Scout Night bookings so the Pending/Confirmed
+        // figures reflect public / revenue-generating hires only.
+        $stats = MBS_Bookings::get_stats( true );
 
         ?>
         <style>

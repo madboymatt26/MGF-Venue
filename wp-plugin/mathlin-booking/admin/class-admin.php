@@ -23,6 +23,7 @@ class MBS_Admin {
         add_action( 'wp_ajax_mbs_delete_blocked', array( $this, 'ajax_delete_blocked' ) );
         add_action( 'wp_ajax_mbs_clear_expired_blocks', array( $this, 'ajax_clear_expired_blocks' ) );
         add_action( 'wp_ajax_mbs_update_series_status', array( $this, 'ajax_update_series_status' ) );
+        add_action( 'wp_ajax_mbs_cancel_scout_series', array( $this, 'ajax_cancel_scout_series' ) );
         add_action( 'wp_ajax_mbs_save_admin_notes', array( $this, 'ajax_save_admin_notes' ) );
         add_action( 'wp_ajax_mbs_chase_payment',  array( $this, 'ajax_chase_payment' ) );
         add_action( 'wp_ajax_mbs_save_email_settings', array( $this, 'ajax_save_email_settings' ) );
@@ -786,6 +787,29 @@ class MBS_Admin {
 
         $count = count( MBS_Bookings::get_series( $series_id ) );
         wp_send_json_success( array( 'series_id' => $series_id, 'status' => $status, 'count' => $count ) );
+    }
+
+    /**
+     * Bulk-cancel all future bookings in a Scout Nights series.
+     * Past bookings are preserved for the historical record.
+     */
+    public function ajax_cancel_scout_series() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
+
+        $series_id = sanitize_text_field( $_POST['series_id'] ?? '' );
+        if ( ! $series_id ) wp_send_json_error( 'No series ID provided.' );
+
+        $cancelled = MBS_Bookings::cancel_series_future( $series_id );
+        if ( $cancelled === false ) {
+            wp_send_json_error( 'Database error cancelling the series.' );
+        }
+
+        wp_send_json_success( array(
+            'series_id' => $series_id,
+            'cancelled' => $cancelled,
+            'message'   => $cancelled . ' future booking(s) cancelled in series ' . $series_id . '.',
+        ) );
     }
 
     public function ajax_save_admin_notes() {

@@ -776,7 +776,51 @@ class MBS_Bookings {
         return $result;
     }
 
-    // ── Admin Notes ────────────────────────────────────────────────────────────
+    /**
+     * Cancel all *future* bookings in a series (booking_date >= today).
+     *
+     * Used by the Scout Nights bulk "Cancel Entire Series" action. Past
+     * bookings are deliberately left untouched so the historical record of
+     * meetings that already took place is preserved.
+     *
+     * @param string $series_id The SER-XXXXXX series reference.
+     * @return int|false Number of rows cancelled, or false on failure.
+     */
+    public static function cancel_series_future( $series_id ) {
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_TABLE;
+        $today = wp_date( 'Y-m-d' );
+
+        // Grab the affected bookings first so we can notify HA after the update.
+        $affected = $wpdb->get_results( $wpdb->prepare(
+            "SELECT * FROM {$table}
+             WHERE series_id = %s AND booking_date >= %s AND status != 'cancelled'",
+            $series_id,
+            $today
+        ) );
+
+        $result = $wpdb->query( $wpdb->prepare(
+            "UPDATE {$table} SET status = 'cancelled'
+             WHERE series_id = %s AND booking_date >= %s AND status != 'cancelled'",
+            $series_id,
+            $today
+        ) );
+
+        if ( $result === false ) return false;
+
+        // Audit log + HA cancellation notices.
+        MBS_Audit_Log::log(
+            $series_id,
+            'series_bulk_cancel',
+            'Bulk-cancelled ' . (int) $result . ' future booking(s) in series (from ' . $today . ')'
+        );
+
+        foreach ( $affected as $booking ) {
+            MBS_HomeAssistant::notify_cancelled( $booking );
+        }
+
+        return (int) $result;
+    }
 
     /**
      * Update admin notes for a booking.
@@ -819,10 +863,18 @@ class MBS_Bookings {
 
     /**
      * Get stats with financial year support (April to March).
+     *
+     * @param bool $exclude_scout When true, internal Scout Night bookings
+     *                            (scout_use = 1) are excluded from the
+     *                            pending/confirmed/total counts so the figures
+     *                            reflect public / revenue-generating hires only.
      */
-    public static function get_stats() {
+    public static function get_stats( $exclude_scout = false ) {
         global $wpdb;
         $table = $wpdb->prefix . MBS_TABLE;
+
+        // Optional clause to strip internal Scout bookings from the metrics.
+        $scout_clause = $exclude_scout ? ' AND scout_use = 0' : '';
 
         // Calculate current financial year (April to March)
         $now   = new DateTime();
@@ -840,12 +892,12 @@ class MBS_Bookings {
         }
 
         return array(
-            'total'      => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status != 'archived'" ),
-            'pending'    => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status='pending'" ),
-            'confirmed'  => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status='confirmed'" ),
-            'cancelled'  => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status='cancelled'" ),
-            'archived'   => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status='archived'" ),
-            'paid'       => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status='paid'" ),
+            'total'      => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status != 'archived'{$scout_clause}" ),
+            'pending'    => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status='pending'{$scout_clause}" ),
+            'confirmed'  => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status='confirmed'{$scout_clause}" ),
+            'cancelled'  => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status='cancelled'{$scout_clause}" ),
+            'archived'   => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status='archived'{$scout_clause}" ),
+            'paid'       => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status='paid'{$scout_clause}" ),
             'revenue_fy' => (float) $wpdb->get_var( $wpdb->prepare(
                 "SELECT COALESCE(SUM(amount), 0) FROM {$table} WHERE status IN ('confirmed', 'deposit_paid', 'paid') AND booking_date BETWEEN %s AND %s",
                 $fy_start, $fy_end

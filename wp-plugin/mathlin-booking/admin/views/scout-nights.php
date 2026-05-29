@@ -95,6 +95,9 @@ $bookings = array_filter( $bookings, function( $b ) { return ! empty( $b->scout_
                             <td><?php echo esc_html( $b->series_id ?: '—' ); ?></td>
                             <td>
                                 <button class="button button-small nms-btn-cancel" data-ref="<?php echo esc_attr( $b->ref ); ?>">Cancel</button>
+                                <?php if ( ! empty( $b->series_id ) ) : ?>
+                                <button class="button button-small nms-btn-cancel-series" data-series="<?php echo esc_attr( $b->series_id ); ?>" style="background:#dc3232;border-color:#dc3232;color:#fff;">Cancel Entire Series</button>
+                                <?php endif; ?>
                             </td>
                         </tr>
                         <?php endforeach; ?>
@@ -134,6 +137,31 @@ jQuery(function($) {
         }).fail(function() {
             $btn.prop('disabled', false).text('⚜️ Create Recurring Scout Bookings');
             $msg.css('color', '#dc3232').text('✗ Network error');
+        });
+    });
+
+    // ── Cancel an entire scout series (future bookings only) ────────────────────
+    $(document).on('click', '.nms-btn-cancel-series', function() {
+        var $btn     = $(this);
+        var seriesId = $btn.data('series');
+        if (!confirm('Are you sure? This will cancel all future bookings in this series.')) return;
+
+        $btn.prop('disabled', true).text('Cancelling…');
+        $.post(MBS_Admin.ajax_url, {
+            action:    'mbs_cancel_scout_series',
+            nonce:     MBS_Admin.nonce,
+            series_id: seriesId
+        }, function(res) {
+            if (res.success) {
+                alert(res.data.message);
+                window.location.reload();
+            } else {
+                $btn.prop('disabled', false).text('Cancel Entire Series');
+                alert('Error: ' + (res.data || 'Unknown error'));
+            }
+        }).fail(function() {
+            $btn.prop('disabled', false).text('Cancel Entire Series');
+            alert('Network error cancelling series.');
         });
     });
 });
