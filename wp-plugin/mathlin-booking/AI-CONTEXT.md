@@ -1,4 +1,4 @@
-# AI-CONTEXT.md — Mathlin Booking System (v3.0.0)
+# AI-CONTEXT.md — Mathlin Booking System (v3.12.1)
 
 This document is designed for LLMs and AI agents to read before modifying this codebase. It maps the architecture, file relationships, and critical business logic rules.
 
@@ -26,9 +26,12 @@ All prefixed `mbs_`. Key ones:
 - `mbs_ha_webhook_url`, `mbs_org_name`, `mbs_org_logo_url`
 - `mbs_scout_volunteer_emails`, `mbs_github_token`
 - `mbs_deposit_enabled`, `mbs_deposit_percentage`, `mbs_deposit_balance_days`
-- `mbs_pricing_tiers` (JSON) — tier definitions with labels and multipliers
+- `mbs_pricing_tiers` (JSON) — tier definitions: `{key: {label, multiplier, bypass_access_gate, offline_invoicing}}`
 - `mbs_venue_capacity`, `mbs_curfew_saturday`, `mbs_curfew_sunday`
 - `mbs_booking_notice`, `mbs_facilities_text`, `mbs_terms_text`
+- `mbs_offline_payment_instructions` — BACS/PO instructions for offline (B2B) tiers; supports `{invoice}`/`{ref}`/`{amount}`
+- `mbs_access_enabled`, `mbs_access_code`, `mbs_access_instructions`, `mbs_access_hours_before`, `mbs_access_health_safety`
+- `mbs_auto_chase_enabled`, `mbs_auto_archive_days`, `mbs_reminder_hours`
 
 ### User Meta
 
@@ -57,7 +60,8 @@ mathlin-booking/
 │   ├── class-homeassistant.php      HA webhook + data formatting
 │   ├── class-blocked-dates.php      Blocked date management
 │   ├── class-reminders.php          WP-Cron booking reminders
-│   ├── class-payment-chaser.php     Overdue payment auto-chase + deposit balance reminders
+│   ├── class-access-details.php     ★ WP-Cron keysafe access-code emails (trust-based gating)
+│   ├── class-payment-chaser.php     Overdue payment auto-chase + deposit balance reminders + B2B statement reminder
 │   ├── class-auto-archive.php       WP-Cron auto-archive past bookings
 │   ├── class-csv-export.php         CSV download handler
 │   ├── class-dashboard-widget.php   wp-admin home widget
@@ -87,6 +91,8 @@ mathlin-booking/
 │       ├── archived.php             Archived bookings
 │       ├── blocked.php              Blocked dates management
 │       ├── custom-fields.php        Custom field editor
+│       ├── scout-nights.php         ★ Scout Nights: batch create + series cancel/reopen/edit/extend/delete
+│       ├── audit-log.php            Global audit log page (search + recent activity)
 │       └── requests.php             Modification request queue
 │
 └── public/
@@ -191,7 +197,9 @@ if status == 'deposit_paid':
 ```
 
 ### Payment Chaser Integration
-The payment chaser now also queries `deposit_paid` bookings where `booking_date <= today + balance_days`, sending balance reminders with pay links.
+The payment chaser queries `deposit_paid` bookings where `booking_date <= today + balance_days`, sending balance reminders with pay links. Balance owed is derived from `amount - amount_paid`.
+
+**B2B exemption:** if `MBS_Bookings::booking_is_offline($booking)` is true (the tier has `offline_invoicing` enabled), `send_chase()` returns early and calls `send_b2b_statement_reminder()` instead — a single calm reminder for the hirer's finance department, with no escalating "pay now or cancel" sequence.
 
 ---
 
@@ -201,13 +209,17 @@ The payment chaser now also queries `deposit_paid` bookings where `booking_date 
 - `mbs_pricing_tiers` option stores tier definitions:
   ```json
   {
-    "standard": {"label": "Standard", "multiplier": 1.0},
-    "community": {"label": "Charity / Community", "multiplier": 0.75},
-    "commercial": {"label": "Commercial", "multiplier": 1.5}
+    "standard":   {"label": "Standard", "multiplier": 1.0, "bypass_access_gate": false, "offline_invoicing": false},
+    "community":  {"label": "Charity / Community", "multiplier": 0.75},
+    "commercial": {"label": "Commercial", "multiplier": 1.5, "bypass_access_gate": true, "offline_invoicing": true}
   }
   ```
 - User meta `mbs_pricing_tier` stores the assigned tier per user
 - Spaces can optionally define `rate_hourly_[tier_key]` and `rate_daily_[tier_key]` for explicit tier rates
+
+### Per-tier flags
+- `bypass_access_gate` — trusted tiers receive their keysafe code once *confirmed/deposit_paid/paid* rather than strictly *paid* (see Access Details)
+- `offline_invoicing` — B2B (BACS/PO) tiers: suppresses all WooCommerce "Pay Now" buttons, injects `mbs_offline_payment_instructions` into emails, and routes the payment chaser to a gentle statement reminder instead of the escalating chase. Helpers: `MBS_Bookings::tier_is_offline()` / `booking_is_offline()`.
 
 ### Resolution Order
 1. Check for tier-specific rate on the space (e.g. `rate_hourly_community`)
@@ -238,6 +250,42 @@ Each space in `mbs_spaces` can have a `parent` field:
 - If booking a **parent** → returns all child space names
 
 Conflicts are checked against the requested space AND all related spaces.
+
+---
+
+## Scout Nights (Recurring Internal Bookings)
+
+Free, auto-confirmed recurring bookings for Scout sections. Flagged by `scout_use = 1` and grouped by `series_id` (`SER-XXXXXX`). Managed on the dedicated **Scout Nights** admin page (`admin/views/scout-nights.php`), kept separate from the public bookings list.
+
+### Key rules
+- Scout bookings are created with `status = 'confirmed'` and `amount = 0`.
+- They **block public-calendar availability** but are **excluded from dashboard/booking counters** — pass `$exclude_scout = true` to `MBS_Bookings::get_stats()`.
+- The All Bookings list query uses `exclude_scout => true`.
+
+### Series operations (all in `class-bookings.php`, AJAX in `class-admin.php`)
+
+| Method | AJAX action | Scope | Notes |
+|---|---|---|---|
+| `cancel_series_future()` | `mbs_cancel_scout_series` | future only (`booking_date >= today`) | preserves past; HA cancel notices |
+| `reopen_series_future()` | `mbs_reopen_scout_series` | future cancelled → confirmed | no emails; HA re-notify |
+| `update_series_future($fields)` | `mbs_edit_scout_series` | future only | per-date conflict check (clashes skipped/reported), cost recalculated, HA re-notify |
+| `extend_series($new_end)` | `mbs_extend_scout_series` | appends weekly occurrences | template = latest booking; **capped at 52 per run**; conflict/blocked check with row locking |
+| `delete_series($scope)` | `mbs_delete_scout_series` | `'future'` or `'all'` | **admin-only** (`can_delete_bookings()`); hard delete; HA cancel for active future |
+
+The "future only, preserve the past" philosophy is deliberate. Only `delete_series('all')` removes past rows.
+
+---
+
+## Access Details (Keysafe Codes)
+
+File: `includes/class-access-details.php`. WP-Cron job emails the keysafe code a configurable number of hours before the event.
+
+### Trust-based gating (`is_eligible_for_access()`)
+- Tiers with `bypass_access_gate` enabled → eligible at `confirmed`, `deposit_paid` or `paid`.
+- Standard tiers → strictly `paid` (100% settled).
+- `access_sent` column prevents duplicate sends; it is **reset to 0** on cancellation/refund (`on_order_refunded`, `update_status`) so a cancelled booker can't reuse a stale code.
+- The manual admin "Send Access Details" button (`MBS_Access_Details::resend()`) bypasses all status/tier checks.
+- Keysafe codes are **never** exposed in public REST payloads.
 
 ---
 
@@ -330,11 +378,24 @@ Admins can override scout_use when editing a booking (no email check — intenti
 | SEC-009 | idx_chase composite index for payment chaser | class-database.php |
 | SEC-010 | Audit log uses REMOTE_ADDR only (no X-Forwarded-For) | class-audit-log.php |
 
+### Security / Logic Audit Fixes (v3.5.1)
+
+| ID | Fix | Area |
+|---|---|---|
+| H1 | Undefined `$time_str` in `send_edit_notification` | class-admin.php |
+| H2 | `generate_payment_url` returns empty when no balance owed | class-woo-payment.php |
+| H3 | `ajax_undo_deposit` clears `amount_paid` alongside `deposit_paid` | class-admin.php |
+| M1 | Scout Nights batch insert wrapped in transaction + `FOR UPDATE` row lock | class-admin.php |
+| M2 | `requires_full_payment` uses `wp_date()` | class-bookings.php |
+| M3 | `format_conflict_message` uses `wp_date()` | class-bookings.php |
+
 ---
 
 ## Email System
 
-14 template types stored in `wp_options` as `mbs_email_template_{type}`. Each has a subject and body with placeholder tags.
+15 template types stored in `wp_options` as `mbs_email_template_{type}`. Each has a subject and body with placeholder tags.
+
+Types: `booking_received`, `admin_notification`, `booking_confirmed`, `booking_cancelled`, `payment_received`, `booking_reminder`, `access_details`, `chase_gentle`, `chase_overdue`, `chase_urgent`, `booking_edited`, `recurring_summary`, `modification_approved`, `modification_rejected`, `admin_mod_request`.
 
 Placeholders: `{name}`, `{ref}`, `{space}`, `{date}`, `{time}`, `{amount}`, `{invoice}`, `{admin_email}`, `{phone}`, `{org_name}`, `{org_address}`, `{charity_number}`, `{bank_details}`, `{pay_url}`, `{reason}`, `{organisation}`, `{attendees}`, `{purpose}`
 
@@ -350,7 +411,8 @@ All emails route through `MBS_Email_Queue::send()` which wraps `wp_mail()` with 
 | Hook | Schedule | Class | Purpose |
 |---|---|---|---|
 | `mbs_daily_reminders` | Daily 7am | MBS_Reminders | Booking reminder emails |
-| `mbs_daily_payment_chase` | Daily 9am | MBS_Payment_Chaser | Overdue payment + deposit balance reminders |
+| `mbs_daily_access_details` | Daily 8am | MBS_Access_Details | Keysafe access-code emails (trust-based gating) |
+| `mbs_daily_payment_chase` | Daily 9am | MBS_Payment_Chaser | Overdue payment + deposit balance reminders + B2B statement reminders |
 | `mbs_daily_auto_archive` | Daily 2am | MBS_Auto_Archive | Archive past bookings |
 | `mbs_process_email_queue` | Hourly | MBS_Email_Queue | Retry failed emails |
 
@@ -487,7 +549,7 @@ File: `includes/class-woo-ux.php`
 
 ---
 
-## Database Schema (v3.0.0)
+## Database Schema (v3.12.1)
 
 ### wp_mathlin_bookings
 | Column | Type | Notes |
@@ -514,12 +576,14 @@ File: `includes/class-woo-ux.php`
 | notes | TEXT | Booker notes |
 | amount | DECIMAL(8,2) | Total cost |
 | deposit_paid | DECIMAL(8,2) | Amount paid as deposit |
+| amount_paid | DECIMAL(8,2) | Total payments received (drives balance_due) — v3.2.0 |
 | invoice_number | VARCHAR(30) | INV-MBS-XXXXXX |
 | ha_notified | TINYINT(1) | HA webhook sent |
 | reminder_sent | TINYINT(1) | Reminder email sent |
+| access_sent | TINYINT(1) | Keysafe access email sent — v3.4.0; reset on cancel/refund |
 | chase_count | SMALLINT | Payment chase count |
 | last_chased | DATETIME | Last chase email sent |
-| series_id | VARCHAR(20) | Recurring series ID |
+| series_id | VARCHAR(20) | Recurring series ID (SER-XXXXXX) |
 | admin_notes | TEXT | Internal admin notes |
 | custom_fields | TEXT | JSON custom field responses |
 | modification_token | VARCHAR(64) | Secure token for payment/mod links |
@@ -527,3 +591,5 @@ File: `includes/class-woo-ux.php`
 | user_id | BIGINT | WordPress user ID (hirer portal) |
 | created_at | DATETIME | |
 | updated_at | DATETIME | Auto-updated |
+
+> Migrations are additive and idempotent in `MBS_Database::maybe_run_migrations()` — each new column is guarded by a `SHOW COLUMNS LIKE` check, so they run safely on existing installs when `MBS_VERSION` changes.
