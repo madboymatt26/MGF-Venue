@@ -257,6 +257,12 @@ class MBS_Database {
 
         // v3.2.9: Fix empty string booking_date_end values — set to booking_date
         $wpdb->query( "UPDATE {$table} SET booking_date_end = booking_date WHERE booking_date_end = '' OR booking_date_end = '0000-00-00'" );
+
+        // v3.4.0: Add access_sent column
+        $col = $wpdb->get_results( "SHOW COLUMNS FROM {$table} LIKE 'access_sent'" );
+        if ( empty( $col ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN access_sent TINYINT(1) NOT NULL DEFAULT 0 AFTER reminder_sent" );
+        }
     }
 
     public static function on_deactivate() {

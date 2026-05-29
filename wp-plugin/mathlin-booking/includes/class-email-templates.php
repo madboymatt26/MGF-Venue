@@ -61,6 +61,11 @@ class MBS_Email_Templates {
                 'subject' => 'Reminder: Your booking is coming up – {ref}',
                 'body'    => "Hi {name},\n\nJust a friendly reminder that your booking is coming up soon.\n\nSpace: {space}\nDate: {date}\nTime: {time}\n\nLocation: {org_address}\n\nIf you need to make any changes or cancel, please contact us at {admin_email} or call {phone}.\n\nWe look forward to seeing you!",
             ),
+            'access_details' => array(
+                'label'   => 'Access Details (to booker, before event)',
+                'subject' => 'Your Access Details – {ref}',
+                'body'    => "Hi {name},\n\nYour booking is coming up soon. Please find your access details below.\n\nPlease arrive on time and ensure the venue is locked up and secure when you leave.",
+            ),
             'chase_gentle' => array(
                 'label'   => 'Payment Chase #1 — Friendly Reminder',
                 'subject' => 'Payment Reminder – {invoice}',

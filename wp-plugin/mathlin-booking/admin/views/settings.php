@@ -337,6 +337,44 @@ rest:
             </table>
         </div>
 
+        <!-- Access Details -->
+        <div class="nms-card">
+            <div class="nms-card-header"><h2>🔑 Access Details</h2></div>
+            <p>Send keysafe/access code to paid bookers before their event. Admin team also receives a booking reminder.</p>
+            <table class="form-table">
+                <tr>
+                    <th><label for="access_enabled">Access emails</label></th>
+                    <td>
+                        <select id="access_enabled">
+                            <option value="0" <?php selected( get_option( 'mbs_access_enabled', 0 ), 0 ); ?>>Disabled</option>
+                            <option value="1" <?php selected( get_option( 'mbs_access_enabled', 0 ), 1 ); ?>>Enabled</option>
+                        </select>
+                    </td>
+                </tr>
+                <tr>
+                    <th><label for="access_code">Access code</label></th>
+                    <td>
+                        <input type="text" id="access_code" value="<?php echo esc_attr( get_option( 'mbs_access_code', '' ) ); ?>" class="regular-text" placeholder="e.g. 4829">
+                        <p class="description">The current keysafe/lock code. Update this whenever you change the physical code.</p>
+                    </td>
+                </tr>
+                <tr>
+                    <th><label for="access_instructions">Access instructions</label></th>
+                    <td>
+                        <textarea id="access_instructions" rows="4" class="large-text" placeholder="e.g. The keysafe is located on the wall to the right of the main entrance..."><?php echo esc_textarea( get_option( 'mbs_access_instructions', '' ) ); ?></textarea>
+                        <p class="description">Directions for finding and using the keysafe. Sent with the access code.</p>
+                    </td>
+                </tr>
+                <tr>
+                    <th><label for="access_hours_before">Send</label></th>
+                    <td>
+                        <input type="number" id="access_hours_before" value="<?php echo esc_attr( get_option( 'mbs_access_hours_before', 24 ) ); ?>" min="1" max="168" style="width:80px"> hours before booking
+                        <p class="description">Only sent to paid or deposit-paid bookings.</p>
+                    </td>
+                </tr>
+            </table>
+        </div>
+
         <!-- Booking Rules -->
         <div class="nms-card">
             <div class="nms-card-header"><h2>⚙️ Booking Rules</h2></div>

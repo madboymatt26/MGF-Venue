@@ -249,6 +249,12 @@ $kitchen_price = MBS_Bookings::get_kitchen_price();
                     <button class="button nms-btn-archive" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">📦 Archive</button>
                 <?php endif; ?>
                 <a href="?page=mathlin-booking&action=invoice&ref=<?php echo esc_attr( $booking->ref ); ?>" class="button">🧾 View Invoice</a>
+                <?php if ( get_option( 'mbs_access_enabled', 0 ) && in_array( $booking->status, array( 'paid', 'deposit_paid' ) ) ) : ?>
+                <button class="button nms-btn-resend-access" data-ref="<?php echo esc_attr( $booking->ref ); ?>">🔑 Send Access Details</button>
+                <?php if ( $booking->access_sent ) : ?>
+                    <small class="nms-muted" style="display:block;margin-top:4px;">Access details previously sent ✓</small>
+                <?php endif; ?>
+                <?php endif; ?>
                 <?php if ( current_user_can( 'manage_options' ) ) : ?>
                 <button class="button nms-btn-delete" data-ref="<?php echo esc_attr( $booking->ref ); ?>">🗑 Delete Booking</button>
                 <?php endif; ?>

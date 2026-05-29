@@ -171,6 +171,29 @@ jQuery(function ($) {
         });
     });
 
+    // ── Resend access details ──────────────────────────────────────────────────
+    $(document).on('click', '.nms-btn-resend-access', function () {
+        var $btn = $(this);
+        var ref  = $btn.data('ref');
+        if (!confirm('Send access details (keysafe code) to the booker for ' + ref + '?')) return;
+        $btn.prop('disabled', true).text('Sending…');
+        $.post(MBS_Admin.ajax_url, {
+            action: 'mbs_resend_access',
+            nonce:  MBS_Admin.nonce,
+            ref:    ref
+        }, function (res) {
+            if (res.success) {
+                $btn.text('✓ Sent').css('color', '#2ecc71');
+            } else {
+                alert('Error: ' + (res.data || 'Could not send access details.'));
+                $btn.prop('disabled', false).text('🔑 Send Access Details');
+            }
+        }).fail(function () {
+            alert('Network error — please try again.');
+            $btn.prop('disabled', false).text('🔑 Send Access Details');
+        });
+    });
+
     // ── Delete booking ─────────────────────────────────────────────────────────
     $(document).on('click', '.nms-btn-delete', function () {
         var $btn = $(this);
@@ -319,6 +342,10 @@ jQuery(function ($) {
             deposit_enabled:      $('#deposit_enabled').val(),
             deposit_percentage:   $('#deposit_percentage').val(),
             deposit_balance_days: $('#deposit_balance_days').val(),
+            access_enabled:       $('#access_enabled').val(),
+            access_code:          $('#access_code').val(),
+            access_instructions:  $('#access_instructions').val(),
+            access_hours_before:  $('#access_hours_before').val(),
             pricing_tiers:        tiers,
             spaces:              spaces
         }, function (res) {

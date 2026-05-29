@@ -11,6 +11,7 @@ class MBS_Admin {
         add_action( 'wp_ajax_mbs_mark_deposit_paid', array( $this, 'ajax_mark_deposit_paid' ) );
         add_action( 'wp_ajax_mbs_undo_deposit',  array( $this, 'ajax_undo_deposit' ) );
         add_action( 'wp_ajax_mbs_restore_booking', array( $this, 'ajax_restore_booking' ) );
+        add_action( 'wp_ajax_mbs_resend_access',   array( $this, 'ajax_resend_access' ) );
         add_action( 'wp_ajax_mbs_delete_booking', array( $this, 'ajax_delete_booking' ) );
         add_action( 'wp_ajax_mbs_get_invoice',    array( $this, 'ajax_get_invoice' ) );
         add_action( 'wp_ajax_mbs_save_settings',  array( $this, 'ajax_save_settings' ) );
@@ -320,6 +321,30 @@ class MBS_Admin {
         wp_send_json_success( array( 'ref' => $ref, 'status' => $status ) );
     }
 
+    /**
+     * Resend access details to a booker manually.
+     */
+    public function ajax_resend_access() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
+
+        $ref = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
+        $booking = MBS_Bookings::get( $ref );
+        if ( ! $booking ) wp_send_json_error( 'Booking not found.' );
+
+        if ( ! get_option( 'mbs_access_enabled', 0 ) || empty( get_option( 'mbs_access_code', '' ) ) ) {
+            wp_send_json_error( 'Access details not configured. Set up the access code in Settings.' );
+        }
+
+        MBS_Access_Details::resend( $booking );
+
+        // Mark as sent
+        global $wpdb;
+        $wpdb->update( $wpdb->prefix . MBS_TABLE, array( 'access_sent' => 1 ), array( 'ref' => $ref ) );
+
+        wp_send_json_success( array( 'ref' => $ref ) );
+    }
+
     public function ajax_get_invoice() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
         if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
@@ -441,6 +466,17 @@ class MBS_Admin {
         update_option( 'mbs_deposit_percentage', max( 1, min( 99, $deposit_pct ) ) );
         $deposit_days = absint( $_POST['deposit_balance_days'] ?? 7 );
         update_option( 'mbs_deposit_balance_days', max( 1, min( 90, $deposit_days ) ) );
+
+        // Access details settings
+        update_option( 'mbs_access_enabled', absint( $_POST['access_enabled'] ?? 0 ) );
+        if ( isset( $_POST['access_code'] ) ) {
+            update_option( 'mbs_access_code', sanitize_text_field( $_POST['access_code'] ) );
+        }
+        if ( isset( $_POST['access_instructions'] ) ) {
+            update_option( 'mbs_access_instructions', sanitize_textarea_field( $_POST['access_instructions'] ) );
+        }
+        $access_hours = absint( $_POST['access_hours_before'] ?? 24 );
+        update_option( 'mbs_access_hours_before', max( 1, min( 168, $access_hours ) ) );
 
         // Pricing tiers
         if ( isset( $_POST['pricing_tiers'] ) && is_array( $_POST['pricing_tiers'] ) ) {
