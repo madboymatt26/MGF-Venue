@@ -68,7 +68,7 @@ class MBS_Admin {
             30
         );
         add_submenu_page( 'mathlin-booking', 'All Bookings', $bookings_label, $booking_cap, 'mathlin-booking', array( $this, 'render_dashboard' ) );
-        add_submenu_page( 'mathlin-booking', 'Scout Nights', '⚜️ Scout Nights', $booking_cap, 'mathlin-scout-nights', array( $this, 'render_scout_nights' ) );
+        add_submenu_page( 'mathlin-booking', 'Scout Nights', 'Scout Nights', $booking_cap, 'mathlin-scout-nights', array( $this, 'render_scout_nights' ) );
         add_submenu_page( 'mathlin-booking', 'Calendar', 'Calendar', $booking_cap, 'mathlin-calendar', array( $this, 'render_calendar' ) );
         add_submenu_page( 'mathlin-booking', 'Archived', 'Archived', $booking_cap, 'mathlin-archived', array( $this, 'render_archived' ) );
         add_submenu_page( 'mathlin-booking', 'Blocked Dates', 'Blocked Dates', $booking_cap, 'mathlin-blocked', array( $this, 'render_blocked' ) );
@@ -136,7 +136,7 @@ class MBS_Admin {
     }
 
     private function render_list() {
-        $stats    = MBS_Bookings::get_stats();
+        $stats    = MBS_Bookings::get_stats( true ); // exclude internal Scout bookings from the counters
         $status   = isset( $_GET['status'] ) ? sanitize_text_field( $_GET['status'] ) : '';
         $search   = isset( $_GET['s'] )      ? sanitize_text_field( $_GET['s'] )      : '';
         $bookings = MBS_Bookings::get_all( array( 'status' => $status, 'search' => $search, 'orderby' => 'booking_date', 'order' => 'ASC', 'exclude_scout' => true ) );
