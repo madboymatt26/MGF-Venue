@@ -96,6 +96,12 @@ $bookings = array_filter( $bookings, function( $b ) { return ! empty( $b->scout_
                             <td>
                                 <button class="button button-small nms-btn-cancel" data-ref="<?php echo esc_attr( $b->ref ); ?>">Cancel</button>
                                 <?php if ( ! empty( $b->series_id ) ) : ?>
+                                <button class="button button-small nms-btn-edit-series"
+                                        data-series="<?php echo esc_attr( $b->series_id ); ?>"
+                                        data-space="<?php echo esc_attr( $b->space ); ?>"
+                                        data-start="<?php echo esc_attr( substr( (string) $b->start_time, 0, 5 ) ); ?>"
+                                        data-end="<?php echo esc_attr( substr( (string) $b->end_time, 0, 5 ) ); ?>"
+                                        data-purpose="<?php echo esc_attr( $b->purpose ); ?>">Edit Series</button>
                                 <button class="button button-small nms-btn-cancel-series" data-series="<?php echo esc_attr( $b->series_id ); ?>" style="background:#dc3232;border-color:#dc3232;color:#fff;">Cancel Entire Series</button>
                                 <?php endif; ?>
                             </td>
@@ -105,6 +111,44 @@ $bookings = array_filter( $bookings, function( $b ) { return ! empty( $b->scout_
                 </table>
             </div>
         <?php endif; ?>
+    </div>
+</div>
+
+<!-- Edit Series Modal -->
+<div id="nms-edit-series-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:100000;">
+    <div style="background:#fff;max-width:480px;margin:8vh auto;border-radius:8px;padding:24px;box-shadow:0 10px 40px rgba(0,0,0,0.3);">
+        <h2 style="margin-top:0;">⚜️ Edit Scout Series <span id="nms-edit-series-id" style="color:#7413DC;"></span></h2>
+        <p style="color:#6b7280;font-size:13px;">Changes apply to <strong>all future bookings</strong> in this series (today onwards). Past bookings are left unchanged. Any date where the new time clashes with another booking is skipped.</p>
+        <input type="hidden" id="nms-edit-series-series">
+        <div style="display:grid;gap:12px;margin:16px 0;">
+            <div>
+                <label class="nms-edit-label">Space</label>
+                <select id="nms-edit-series-space" style="width:100%;">
+                    <?php foreach ( $spaces as $name => $info ) : ?>
+                        <option value="<?php echo esc_attr( $name ); ?>"><?php echo esc_html( $name ); ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                <div>
+                    <label class="nms-edit-label">Start Time</label>
+                    <input type="time" id="nms-edit-series-start" style="width:100%;">
+                </div>
+                <div>
+                    <label class="nms-edit-label">End Time</label>
+                    <input type="time" id="nms-edit-series-end" style="width:100%;">
+                </div>
+            </div>
+            <div>
+                <label class="nms-edit-label">Section / Purpose</label>
+                <input type="text" id="nms-edit-series-purpose" style="width:100%;">
+            </div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;">
+            <button class="button" id="nms-edit-series-cancel">Cancel</button>
+            <button class="button button-primary" id="nms-edit-series-save">Save Changes to Series</button>
+        </div>
+        <span id="nms-edit-series-msg" style="display:block;margin-top:12px;"></span>
     </div>
 </div>
 
@@ -162,6 +206,59 @@ jQuery(function($) {
         }).fail(function() {
             $btn.prop('disabled', false).text('Cancel Entire Series');
             alert('Network error cancelling series.');
+        });
+    });
+
+    // ── Edit an entire scout series (future bookings only) ──────────────────────
+    $(document).on('click', '.nms-btn-edit-series', function() {
+        var $btn = $(this);
+        $('#nms-edit-series-series').val($btn.data('series'));
+        $('#nms-edit-series-id').text($btn.data('series'));
+        $('#nms-edit-series-space').val($btn.data('space'));
+        $('#nms-edit-series-start').val($btn.data('start'));
+        $('#nms-edit-series-end').val($btn.data('end'));
+        $('#nms-edit-series-purpose').val($btn.data('purpose'));
+        $('#nms-edit-series-msg').text('');
+        $('#nms-edit-series-modal').css('display', 'block');
+    });
+
+    $('#nms-edit-series-cancel').on('click', function() {
+        $('#nms-edit-series-modal').hide();
+    });
+
+    $('#nms-edit-series-save').on('click', function() {
+        var $btn = $(this);
+        var $msg = $('#nms-edit-series-msg');
+        var seriesId = $('#nms-edit-series-series').val();
+        var start = $('#nms-edit-series-start').val();
+        var end   = $('#nms-edit-series-end').val();
+
+        if (start && end && end <= start) {
+            $msg.css('color', '#dc3232').text('✗ End time must be after start time.');
+            return;
+        }
+        if (!confirm('Apply these changes to all future bookings in series ' + seriesId + '?')) return;
+
+        $btn.prop('disabled', true).text('Saving…');
+        $.post(MBS_Admin.ajax_url, {
+            action:     'mbs_edit_scout_series',
+            nonce:      MBS_Admin.nonce,
+            series_id:  seriesId,
+            space:      $('#nms-edit-series-space').val(),
+            start_time: start,
+            end_time:   end,
+            purpose:    $('#nms-edit-series-purpose').val()
+        }, function(res) {
+            $btn.prop('disabled', false).text('Save Changes to Series');
+            if (res.success) {
+                alert(res.data.message);
+                window.location.reload();
+            } else {
+                $msg.css('color', '#dc3232').text('✗ ' + (res.data || 'Error updating series'));
+            }
+        }).fail(function() {
+            $btn.prop('disabled', false).text('Save Changes to Series');
+            $msg.css('color', '#dc3232').text('✗ Network error');
         });
     });
 });

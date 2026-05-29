@@ -823,6 +823,110 @@ class MBS_Bookings {
     }
 
     /**
+     * Bulk-edit all *future* bookings in a series (booking_date >= today).
+     *
+     * Used by the Scout Nights "Edit Series" action to change the time, space
+     * or section for every upcoming occurrence in one go. Past bookings are
+     * left untouched. Each date is conflict-checked individually (excluding the
+     * booking's own row); any date where the new details would clash with
+     * another booking is skipped and reported back, so the rest still update.
+     *
+     * @param string $series_id The SER-XXXXXX series reference.
+     * @param array  $fields    Any of: space, start_time, end_time, purpose.
+     *                          Only keys that are present are changed.
+     * @return array|WP_Error  ['updated' => int, 'skipped' => array of dates]
+     */
+    public static function update_series_future( $series_id, $fields ) {
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_TABLE;
+        $today = wp_date( 'Y-m-d' );
+
+        $bookings = $wpdb->get_results( $wpdb->prepare(
+            "SELECT * FROM {$table}
+             WHERE series_id = %s AND booking_date >= %s AND status != 'cancelled'
+             ORDER BY booking_date ASC",
+            $series_id,
+            $today
+        ) );
+
+        if ( empty( $bookings ) ) {
+            return new WP_Error( 'no_bookings', 'No future bookings found in this series.' );
+        }
+
+        // Which fields are we changing? null = leave as-is.
+        $new_space   = isset( $fields['space'] )      ? sanitize_text_field( $fields['space'] )   : null;
+        $new_start   = isset( $fields['start_time'] ) ? sanitize_text_field( $fields['start_time'] ) : null;
+        $new_end     = isset( $fields['end_time'] )   ? sanitize_text_field( $fields['end_time'] ) : null;
+        $new_purpose = isset( $fields['purpose'] )    ? sanitize_text_field( $fields['purpose'] )  : null;
+
+        if ( $new_space === null && $new_start === null && $new_end === null && $new_purpose === null ) {
+            return new WP_Error( 'no_changes', 'No changes were provided.' );
+        }
+
+        $updated = 0;
+        $skipped = array();
+
+        foreach ( $bookings as $b ) {
+            $space   = $new_space !== null ? $new_space : $b->space;
+            $start   = $new_start !== null ? $new_start : $b->start_time;
+            $end     = $new_end   !== null ? $new_end   : $b->end_time;
+            $all_day = (bool) $b->all_day;
+
+            // If the space or time is changing, make sure the new slot is free
+            // (excluding this booking's own row so it doesn't clash with itself).
+            if ( $new_space !== null || $new_start !== null || $new_end !== null ) {
+                $conflicts = self::check_conflicts(
+                    $space,
+                    $b->booking_date,
+                    $all_day ? null : $start,
+                    $all_day ? null : $end,
+                    $all_day,
+                    $b->ref
+                );
+                if ( ! empty( $conflicts ) ) {
+                    $skipped[] = $b->booking_date;
+                    continue;
+                }
+            }
+
+            $update = array();
+            if ( $new_space !== null )   $update['space']      = $space;
+            if ( $new_start !== null )   $update['start_time'] = $all_day ? null : $start;
+            if ( $new_end !== null )     $update['end_time']   = $all_day ? null : $end;
+            if ( $new_purpose !== null ) $update['purpose']    = $new_purpose;
+
+            // Recalculate the cost for the new slot (scout-use bookings stay free).
+            $update['amount'] = self::calculate_cost(
+                $space, $start, $end, (bool) $b->kitchen, $all_day, 1, (bool) $b->scout_use
+            );
+
+            $wpdb->update( $table, $update, array( 'ref' => $b->ref ) );
+            $updated++;
+
+            // Keep Home Assistant in step for confirmed bookings whose slot moved.
+            if ( $b->status === 'confirmed' && ( $new_space !== null || $new_start !== null || $new_end !== null ) ) {
+                $fresh = self::get( $b->ref );
+                if ( $fresh ) MBS_HomeAssistant::notify( $fresh );
+            }
+        }
+
+        // Audit log
+        $changed = array();
+        if ( $new_space !== null )   $changed[] = 'space → ' . $new_space;
+        if ( $new_start !== null )   $changed[] = 'start → ' . $new_start;
+        if ( $new_end !== null )     $changed[] = 'end → ' . $new_end;
+        if ( $new_purpose !== null ) $changed[] = 'section → ' . $new_purpose;
+        MBS_Audit_Log::log(
+            $series_id,
+            'series_bulk_edit',
+            'Bulk-edited ' . $updated . ' future booking(s) (' . implode( ', ', $changed ) . ')'
+            . ( ! empty( $skipped ) ? '; skipped ' . count( $skipped ) . ' conflicting date(s)' : '' )
+        );
+
+        return array( 'updated' => $updated, 'skipped' => $skipped );
+    }
+
+    /**
      * Update admin notes for a booking.
      */
     public static function update_admin_notes( $ref, $notes ) {

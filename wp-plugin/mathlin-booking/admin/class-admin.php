@@ -24,6 +24,7 @@ class MBS_Admin {
         add_action( 'wp_ajax_mbs_clear_expired_blocks', array( $this, 'ajax_clear_expired_blocks' ) );
         add_action( 'wp_ajax_mbs_update_series_status', array( $this, 'ajax_update_series_status' ) );
         add_action( 'wp_ajax_mbs_cancel_scout_series', array( $this, 'ajax_cancel_scout_series' ) );
+        add_action( 'wp_ajax_mbs_edit_scout_series', array( $this, 'ajax_edit_scout_series' ) );
         add_action( 'wp_ajax_mbs_save_admin_notes', array( $this, 'ajax_save_admin_notes' ) );
         add_action( 'wp_ajax_mbs_chase_payment',  array( $this, 'ajax_chase_payment' ) );
         add_action( 'wp_ajax_mbs_save_email_settings', array( $this, 'ajax_save_email_settings' ) );
@@ -809,6 +810,45 @@ class MBS_Admin {
             'series_id' => $series_id,
             'cancelled' => $cancelled,
             'message'   => $cancelled . ' future booking(s) cancelled in series ' . $series_id . '.',
+        ) );
+    }
+
+    /**
+     * Bulk-edit all future bookings in a Scout Nights series (time/space/section).
+     * Past bookings are preserved; conflicting dates are skipped and reported.
+     */
+    public function ajax_edit_scout_series() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
+
+        $series_id = sanitize_text_field( $_POST['series_id'] ?? '' );
+        if ( ! $series_id ) wp_send_json_error( 'No series ID provided.' );
+
+        // Only pass through fields the admin actually filled in, so blank
+        // inputs leave the existing value untouched.
+        $fields = array();
+        if ( isset( $_POST['space'] ) && $_POST['space'] !== '' )      $fields['space']      = $_POST['space'];
+        if ( isset( $_POST['start_time'] ) && $_POST['start_time'] !== '' ) $fields['start_time'] = $_POST['start_time'];
+        if ( isset( $_POST['end_time'] ) && $_POST['end_time'] !== '' ) $fields['end_time']   = $_POST['end_time'];
+        if ( isset( $_POST['purpose'] ) && $_POST['purpose'] !== '' )  $fields['purpose']    = $_POST['purpose'];
+
+        if ( empty( $fields ) ) wp_send_json_error( 'No changes were provided.' );
+
+        $result = MBS_Bookings::update_series_future( $series_id, $fields );
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( $result->get_error_message() );
+        }
+
+        $msg = $result['updated'] . ' future booking(s) updated in series ' . $series_id . '.';
+        if ( ! empty( $result['skipped'] ) ) {
+            $msg .= ' ' . count( $result['skipped'] ) . ' date(s) skipped due to conflicts: ' . implode( ', ', $result['skipped'] ) . '.';
+        }
+
+        wp_send_json_success( array(
+            'series_id' => $series_id,
+            'updated'   => $result['updated'],
+            'skipped'   => $result['skipped'],
+            'message'   => $msg,
         ) );
     }
 
