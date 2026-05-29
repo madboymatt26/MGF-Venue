@@ -475,6 +475,9 @@ class MBS_Admin {
         if ( isset( $_POST['access_instructions'] ) ) {
             update_option( 'mbs_access_instructions', sanitize_textarea_field( $_POST['access_instructions'] ) );
         }
+        if ( isset( $_POST['access_health_safety'] ) ) {
+            update_option( 'mbs_access_health_safety', sanitize_textarea_field( $_POST['access_health_safety'] ) );
+        }
         $access_hours = absint( $_POST['access_hours_before'] ?? 24 );
         update_option( 'mbs_access_hours_before', max( 1, min( 168, $access_hours ) ) );
 

@@ -372,6 +372,13 @@ rest:
                         <p class="description">Only sent to paid or deposit-paid bookings.</p>
                     </td>
                 </tr>
+                <tr>
+                    <th><label for="access_health_safety">Health &amp; Safety</label></th>
+                    <td>
+                        <textarea id="access_health_safety" rows="5" class="large-text" placeholder="e.g. Fire exits are located at the front and rear of the building. First aid kit is in the kitchen..."><?php echo esc_textarea( get_option( 'mbs_access_health_safety', '' ) ); ?></textarea>
+                        <p class="description">Important safety information sent with the access details. Include fire exits, first aid, emergency contacts, etc.</p>
+                    </td>
+                </tr>
             </table>
         </div>
 

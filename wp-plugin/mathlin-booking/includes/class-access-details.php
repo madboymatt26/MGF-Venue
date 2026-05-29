@@ -109,6 +109,15 @@ class MBS_Access_Details {
             $body .= '</div>';
         }
 
+        // Health & Safety information
+        $hs_info = get_option( 'mbs_access_health_safety', '' );
+        if ( ! empty( $hs_info ) ) {
+            $body .= '<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;padding:16px;margin:16px 0;">';
+            $body .= '<strong>⚠️ Health &amp; Safety:</strong><br>';
+            $body .= wp_kses_post( nl2br( $hs_info ) );
+            $body .= '</div>';
+        }
+
         // Booking summary
         $body .= '<table style="width:100%;border-collapse:collapse;margin:16px 0;">';
         $body .= '<tr><td style="padding:8px 12px;background:#f5f0ff;font-weight:600;width:35%;border-bottom:1px solid #e0d0f0;">Reference</td><td style="padding:8px 12px;border-bottom:1px solid #e0d0f0;">' . esc_html( $booking->ref ) . '</td></tr>';
@@ -117,6 +126,18 @@ class MBS_Access_Details {
         $time_str = $booking->all_day ? 'All day' : ( $booking->start_time . ' – ' . $booking->end_time );
         $body .= '<tr><td style="padding:8px 12px;background:#f5f0ff;font-weight:600;border-bottom:1px solid #e0d0f0;">Time</td><td style="padding:8px 12px;border-bottom:1px solid #e0d0f0;">' . esc_html( $time_str ) . '</td></tr>';
         $body .= '</table>';
+
+        // Terms & Conditions link
+        $terms_page_id = (int) get_option( 'mbs_terms_page_id', 0 );
+        if ( $terms_page_id ) {
+            $terms_url = get_permalink( $terms_page_id );
+            if ( $terms_url ) {
+                $body .= '<p style="font-size:13px;color:#6b7280;margin-top:16px;padding:12px 16px;background:#f5f0ff;border-radius:6px;">';
+                $body .= 'By using this venue you agree to our <a href="' . esc_url( $terms_url ) . '" style="color:#7413DC;font-weight:600;">Terms &amp; Conditions of Hire</a>. ';
+                $body .= 'Please ensure all members of your party are aware of the conditions.';
+                $body .= '</p>';
+            }
+        }
 
         $body .= '<p style="font-size:13px;color:#6b7280;margin-top:16px;"><em>Please do not share this code with anyone outside your booking party.</em></p>';
         $body .= '</div></body></html>';

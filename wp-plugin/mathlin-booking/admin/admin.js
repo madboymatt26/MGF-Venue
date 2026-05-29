@@ -346,6 +346,7 @@ jQuery(function ($) {
             access_code:          $('#access_code').val(),
             access_instructions:  $('#access_instructions').val(),
             access_hours_before:  $('#access_hours_before').val(),
+            access_health_safety: $('#access_health_safety').val(),
             pricing_tiers:        tiers,
             spaces:              spaces
         }, function (res) {
