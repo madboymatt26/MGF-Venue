@@ -85,7 +85,7 @@ class MBS_Access_Details {
         }
 
         if ( $sent_count > 0 ) {
-            error_log( '[Mathlin Booking] Sent access details for ' . $sent_count . ' booking(s).' );
+            error_log( '[MGF Venue] Sent access details for ' . $sent_count . ' booking(s).' );
         }
     }
 

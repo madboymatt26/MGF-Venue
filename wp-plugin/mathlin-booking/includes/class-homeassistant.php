@@ -31,7 +31,7 @@ class MBS_HomeAssistant {
         ) );
 
         if ( is_wp_error( $response ) ) {
-            error_log( '[Mathlin Booking] HA webhook failed: ' . $response->get_error_message() );
+            error_log( '[MGF Venue] HA webhook failed: ' . $response->get_error_message() );
         }
     }
 

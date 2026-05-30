@@ -66,6 +66,6 @@ class MBS_Reminders {
             );
         }
 
-        error_log( '[Mathlin Booking] Sent ' . count( $bookings ) . ' reminder email(s).' );
+        error_log( '[MGF Venue] Sent ' . count( $bookings ) . ' reminder email(s).' );
     }
 }

@@ -48,7 +48,7 @@ class MBS_ICal {
 
         $ics  = "BEGIN:VCALENDAR\r\n";
         $ics .= "VERSION:2.0\r\n";
-        $ics .= "PRODID:-//Mathlin Booking System//EN\r\n";
+        $ics .= "PRODID:-//MGF Venue//EN\r\n";
         $ics .= "CALSCALE:GREGORIAN\r\n";
         $ics .= "METHOD:PUBLISH\r\n";
         $ics .= "BEGIN:VEVENT\r\n";
@@ -98,7 +98,7 @@ class MBS_ICal {
 
         $ics  = "BEGIN:VCALENDAR\r\n";
         $ics .= "VERSION:2.0\r\n";
-        $ics .= "PRODID:-//Mathlin Booking System//EN\r\n";
+        $ics .= "PRODID:-//MGF Venue//EN\r\n";
         $ics .= "CALSCALE:GREGORIAN\r\n";
         $ics .= "METHOD:PUBLISH\r\n";
         $ics .= "X-WR-CALNAME:Needham Market Scout Hall Bookings\r\n";

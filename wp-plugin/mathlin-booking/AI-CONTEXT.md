@@ -1,6 +1,8 @@
-# AI-CONTEXT.md — Mathlin Booking System (v3.12.1)
+# AI-CONTEXT.md — MGF Venue (v3.14.0)
 
 This document is designed for LLMs and AI agents to read before modifying this codebase. It maps the architecture, file relationships, and critical business logic rules.
+
+> **Branding note:** the product is named **MGF Venue** (renamed from "Mathlin Booking System" in v3.14.0, Phase 1 cosmetic rebrand). All internal identifiers were intentionally left on their original prefixes for backward compatibility: plugin slug/folder `mathlin-booking`, DB tables `wp_mathlin_*`, option keys `mbs_*`, cron hooks `mbs_daily_*`, AJAX actions `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`, capability `mbs_manage_bookings`, PHP class prefix `MBS_`, CSS prefix `nms-`.
 
 ---
 
@@ -510,7 +512,7 @@ File: `includes/class-woo-ux.php`
 
 ## Key Conventions
 
-- **PHP class prefix:** `MBS_` (Mathlin Booking System)
+- **PHP class prefix:** `MBS_` (legacy "Mathlin Booking System"; kept post-rebrand for backward compatibility)
 - **CSS class prefix:** `nms-` (legacy from original naming, kept for consistency)
 - **AJAX action prefix:** `mbs_`
 - **Option prefix:** `mbs_`

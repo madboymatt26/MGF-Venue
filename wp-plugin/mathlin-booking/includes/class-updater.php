@@ -69,7 +69,7 @@ class MBS_Updater {
             'timeout' => 10,
             'headers' => array(
                 'Accept'     => 'application/vnd.github.v3+json',
-                'User-Agent' => 'MathlinBookingUpdater/' . $this->current_version,
+                'User-Agent' => 'MGFVenueUpdater/' . $this->current_version,
             ),
         );
 
@@ -183,7 +183,7 @@ class MBS_Updater {
         $remote_version = $this->parse_version( $release['tag_name'] );
 
         $info = (object) array(
-            'name'            => 'Mathlin Booking System',
+            'name'            => 'MGF Venue',
             'slug'            => $this->slug,
             'version'         => $remote_version,
             'author'          => '<a href="https://github.com/madboymatt26">Needham Market Scout Group</a>',
@@ -193,7 +193,7 @@ class MBS_Updater {
             'downloaded'      => 0,
             'last_updated'    => $release['published_at'],
             'sections'        => array(
-                'description'  => 'Venue booking system for Needham Market Scout Group with Home Assistant integration.',
+                'description'  => 'Venue booking and management system for Needham Market Scout Group with Home Assistant integration.',
                 'changelog'    => nl2br( esc_html( $release['body'] ?? 'No changelog provided.' ) ),
             ),
             'download_link'   => $this->get_download_url( $release ),

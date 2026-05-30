@@ -92,7 +92,7 @@ class MBS_Payment_Chaser {
         }
 
         if ( $count > 0 ) {
-            error_log( "[Mathlin Booking] Auto-chased {$count} overdue payment(s)." );
+            error_log( "[MGF Venue] Auto-chased {$count} overdue payment(s)." );
         }
     }
 

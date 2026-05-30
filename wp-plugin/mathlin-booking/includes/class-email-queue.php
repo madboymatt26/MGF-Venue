@@ -39,7 +39,7 @@ class MBS_Email_Queue {
 
         if ( ! $result ) {
             self::queue( $to, $subject, $body, $headers, $attachments );
-            error_log( "[Mathlin Booking] Email to {$to} failed, queued for retry." );
+            error_log( "[MGF Venue] Email to {$to} failed, queued for retry." );
             return false;
         }
 
@@ -105,7 +105,7 @@ class MBS_Email_Queue {
                         array( 'status' => 'failed', 'attempts' => $attempts ),
                         array( 'id' => $email->id )
                     );
-                    error_log( "[Mathlin Booking] Email to {$email->to_email} permanently failed after {$attempts} attempts." );
+                    error_log( "[MGF Venue] Email to {$email->to_email} permanently failed after {$attempts} attempts." );
                 } else {
                     // Exponential backoff: 1hr, 4hr, 16hr
                     $delay_hours = pow( 4, $attempts - 1 );
@@ -120,7 +120,7 @@ class MBS_Email_Queue {
         }
 
         if ( $sent > 0 || $failed > 0 ) {
-            error_log( "[Mathlin Booking] Email queue: {$sent} sent, {$failed} failed/retrying." );
+            error_log( "[MGF Venue] Email queue: {$sent} sent, {$failed} failed/retrying." );
         }
 
         // UX-006: Clean up old entries
@@ -169,7 +169,7 @@ class MBS_Email_Queue {
             $cutoff_7
         ) );
         if ( $stalled > 0 ) {
-            error_log( "[Mathlin Booking] SEC-FIX-003: Force-failed {$stalled} stalled email queue entries older than 7 days." );
+            error_log( "[MGF Venue] SEC-FIX-003: Force-failed {$stalled} stalled email queue entries older than 7 days." );
         }
     }
 }

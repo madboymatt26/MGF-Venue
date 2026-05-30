@@ -2,7 +2,7 @@
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 /**
- * Mathlin Booking System – REST API
+ * MGF Venue – REST API
  *
  * Base URL: https://needhamscouts.uk/wp-json/mathlin/v1/
  *

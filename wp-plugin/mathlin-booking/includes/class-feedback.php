@@ -140,7 +140,7 @@ class MBS_Feedback {
         }
 
         if ( $sent > 0 ) {
-            error_log( '[Mathlin Booking] Sent ' . $sent . ' post-booking feedback request(s).' );
+            error_log( '[MGF Venue] Sent ' . $sent . ' post-booking feedback request(s).' );
         }
     }
 

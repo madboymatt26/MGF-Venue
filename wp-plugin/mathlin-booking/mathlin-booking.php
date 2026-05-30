@@ -1,9 +1,9 @@
 <?php
 /**
- * Plugin Name: Mathlin Booking System
+ * Plugin Name: MGF Venue
  * Plugin URI:  https://needhamscouts.uk
- * Description: Venue booking system for Needham Market Scout Group with Home Assistant integration.
- * Version:     3.13.1
+ * Description: Venue booking and management system for Needham Market Scout Group with Home Assistant integration.
+ * Version:     3.14.0
  * Author:      Needham Market Scout Group
  * License:     GPL-2.0+
  * Text Domain: mathlin-booking
@@ -11,7 +11,7 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'MBS_VERSION',    '3.13.1' );
+define( 'MBS_VERSION',    '3.14.0' );
 define( 'MBS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MBS_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'MBS_TABLE',      'mathlin_bookings' );
@@ -63,7 +63,7 @@ add_filter( 'wp_privacy_personal_data_exporters', 'mbs_register_privacy_exporter
 
 function mbs_register_privacy_eraser( $erasers ) {
     $erasers['mathlin-booking'] = array(
-        'eraser_friendly_name' => 'Mathlin Booking System',
+        'eraser_friendly_name' => 'MGF Venue',
         'callback'             => array( 'MBS_Bookings', 'gdpr_erase_personal_data' ),
     );
     return $erasers;
@@ -71,7 +71,7 @@ function mbs_register_privacy_eraser( $erasers ) {
 
 function mbs_register_privacy_exporter( $exporters ) {
     $exporters['mathlin-booking'] = array(
-        'exporter_friendly_name' => 'Mathlin Booking System',
+        'exporter_friendly_name' => 'MGF Venue',
         'callback'               => array( 'MBS_Bookings', 'gdpr_export_personal_data' ),
     );
     return $exporters;
@@ -140,7 +140,7 @@ function mbs_user_pricing_tier_field( $user ) {
     $tiers = MBS_Bookings::get_pricing_tiers();
     $current = get_user_meta( $user->ID, 'mbs_pricing_tier', true ) ?: 'standard';
     ?>
-    <h3>Mathlin Booking System</h3>
+    <h3>MGF Venue</h3>
     <table class="form-table">
         <tr>
             <th><label for="mbs_pricing_tier">Pricing Tier</label></th>

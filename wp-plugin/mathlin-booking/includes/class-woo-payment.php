@@ -341,7 +341,7 @@ class MBS_Woo_Payment {
                     0, true // $is_customer_note = false, $added_by_user = true (shows prominently)
                 );
                 MBS_Audit_Log::log( $ref, 'payment_error', 'Payment received via WooCommerce Order #' . $order_id . ' for CANCELLED booking. Manual refund required.', 0 );
-                error_log( "[Mathlin Booking] CRITICAL: Payment received for cancelled booking {$ref} (Order #{$order_id}). Manual refund required." );
+                error_log( "[MGF Venue] CRITICAL: Payment received for cancelled booking {$ref} (Order #{$order_id}). Manual refund required." );
                 $processed_any = true;
             }
         }

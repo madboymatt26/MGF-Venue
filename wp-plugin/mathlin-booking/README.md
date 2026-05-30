@@ -1,8 +1,10 @@
-# Mathlin Booking System
+# MGF Venue
 
-A comprehensive WordPress venue booking plugin built for Needham Market Scout Group, with Home Assistant integration.
+A comprehensive WordPress venue booking and management plugin built for Needham Market Scout Group, with Home Assistant integration.
 
-**Current Version:** 3.13.1  
+> **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
+
+**Current Version:** 3.14.0  
 **Requires WordPress:** 5.0+  
 **Requires PHP:** 7.4+  
 **Tested with WordPress:** 6.7  
@@ -166,6 +168,9 @@ Base: `/wp-json/mathlin/v1/`
 ---
 
 ## Changelog
+
+### v3.14.0
+- **Rebrand (Phase 1 — cosmetic):** product renamed from "Mathlin Booking System" to **MGF Venue**. Updated the plugin name/description header, user-profile section heading, WordPress privacy (GDPR) exporter/eraser labels, the updater "View details" name/description, iCal `PRODID`, REST API docblock, and developer log prefixes (`[MGF Venue]`). No internal identifiers changed (plugin slug, DB tables, option keys, cron hooks, AJAX actions, REST namespace, shortcodes, capability) — so existing data, integrations, and the auto-updater are unaffected.
 
 ### v3.13.1
 - **New:** Manual "Send Feedback Request" button on the admin booking page (mirrors "Send Access Details") — `MBS_Feedback::resend()` ignores the date window and `feedback_sent` flag, trusting the admin; audit-logged as `feedback_sent`.

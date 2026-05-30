@@ -48,7 +48,7 @@ class MBS_Auto_Archive {
         ) );
 
         if ( $count > 0 ) {
-            error_log( "[Mathlin Booking] Auto-archived {$count} past booking(s) (threshold: {$threshold})." );
+            error_log( "[MGF Venue] Auto-archived {$count} past booking(s) (threshold: {$threshold})." );
         }
     }
 }
