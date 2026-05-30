@@ -31,6 +31,7 @@ All prefixed `mbs_`. Key ones:
 - `mbs_booking_notice`, `mbs_facilities_text`, `mbs_terms_text`
 - `mbs_offline_payment_instructions` — BACS/PO instructions for offline (B2B) tiers; supports `{invoice}`/`{ref}`/`{amount}`
 - `mbs_access_enabled`, `mbs_access_code`, `mbs_access_instructions`, `mbs_access_hours_before`, `mbs_access_health_safety`
+- `mbs_feedback_enabled`, `mbs_feedback_review_url`, `mbs_feedback_subject`, `mbs_feedback_body`, `mbs_feedback_distribution_email` — post-booking feedback module
 - `mbs_auto_chase_enabled`, `mbs_auto_archive_days`, `mbs_reminder_hours`
 
 ### User Meta
@@ -52,6 +53,7 @@ mathlin-booking/
 ├── includes/
 │   ├── class-database.php           Table creation + migrations
 │   ├── class-bookings.php           ★ CRUD + pricing engine + deposits + tiers + space bundling
+│   ├── class-feedback.php           Post-booking feedback & review module (cron + secure form + distribution)
 │   ├── class-email.php              All email sending (uses templates) + invoice attachment helper
 │   ├── class-email-templates.php    Template storage + placeholder replacement
 │   ├── class-email-queue.php        Retry queue for failed emails
@@ -289,6 +291,18 @@ File: `includes/class-access-details.php`. WP-Cron job emails the keysafe code a
 
 ---
 
+## Post-Booking Feedback & Reviews
+
+File: `includes/class-feedback.php`. WP-Cron job (`mbs_daily_feedback`, daily 10am) emails hirers the day after their booking ends.
+
+- **Cron query:** effective end date (`booking_date_end` or `booking_date`) = yesterday, `scout_use = 0` (Scout/internal excluded), status in `paid/confirmed/deposit_paid`, `feedback_sent = 0`.
+- **Idempotency:** the `feedback_sent` column is set to 1 (with a `WHERE feedback_sent = 0` guard) **before** the mail is queued, so overlapping runs never double-send.
+- **Email tags:** `{hirer_name}`, `{booking_date}`, `{review_link}` (Google review button → `mbs_feedback_review_url`), `{feedback_link}` (private form button), `{space}`, `{ref}`, `{org_name}`.
+- **Secure private form:** `[mathlin_feedback]` shortcode. The `{feedback_link}` carries `?mbs_feedback=1&ref=…&token=…`; the token reuses the booking's `modification_token` column verified with `hash_equals()` (same pattern as `MBS_Modification`).
+- **Submission:** `wp_ajax(_nopriv)_mbs_submit_feedback` re-verifies the token, then emails the bundled rating + comments to `mbs_feedback_distribution_email` (falls back to admin email), with `Reply-To` set to the hirer. Logged as `feedback_received`.
+
+---
+
 ## Booking Status Flow
 
 ```
@@ -413,6 +427,7 @@ All emails route through `MBS_Email_Queue::send()` which wraps `wp_mail()` with 
 | `mbs_daily_reminders` | Daily 7am | MBS_Reminders | Booking reminder emails |
 | `mbs_daily_access_details` | Daily 8am | MBS_Access_Details | Keysafe access-code emails (trust-based gating) |
 | `mbs_daily_payment_chase` | Daily 9am | MBS_Payment_Chaser | Overdue payment + deposit balance reminders + B2B statement reminders |
+| `mbs_daily_feedback` | Daily 10am | MBS_Feedback | Post-booking feedback/review request (end date = yesterday, excludes scout_use) |
 | `mbs_daily_auto_archive` | Daily 2am | MBS_Auto_Archive | Archive past bookings |
 | `mbs_process_email_queue` | Hourly | MBS_Email_Queue | Retry failed emails |
 
@@ -581,6 +596,7 @@ File: `includes/class-woo-ux.php`
 | ha_notified | TINYINT(1) | HA webhook sent |
 | reminder_sent | TINYINT(1) | Reminder email sent |
 | access_sent | TINYINT(1) | Keysafe access email sent — v3.4.0; reset on cancel/refund |
+| feedback_sent | TINYINT(1) | Post-booking feedback request sent — v3.13.0 |
 | chase_count | SMALLINT | Payment chase count |
 | last_chased | DATETIME | Last chase email sent |
 | series_id | VARCHAR(20) | Recurring series ID (SER-XXXXXX) |

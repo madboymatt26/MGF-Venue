@@ -404,13 +404,69 @@ rest:
             </table>
         </div>
 
+        <!-- Post-Booking Feedback & Reviews -->
+        <div class="nms-card">
+            <div class="nms-card-header"><h2>💬 Post-Booking Feedback &amp; Reviews</h2></div>
+            <p>Automatically email hirers one day after their booking ends, asking for a Google review or private feedback. Scout/internal bookings are always excluded.</p>
+            <table class="form-table">
+                <tr>
+                    <th><label for="feedback_enabled">Feedback emails</label></th>
+                    <td>
+                        <select id="feedback_enabled">
+                            <option value="0" <?php selected( get_option( 'mbs_feedback_enabled', 0 ), 0 ); ?>>Disabled</option>
+                            <option value="1" <?php selected( get_option( 'mbs_feedback_enabled', 0 ), 1 ); ?>>Enabled</option>
+                        </select>
+                        <p class="description">Master switch for the automated post-booking feedback request. Runs daily at 10am via WP-Cron.</p>
+                    </td>
+                </tr>
+                <tr>
+                    <th><label for="feedback_review_url">Google Review URL</label></th>
+                    <td>
+                        <input type="url" id="feedback_review_url" value="<?php echo esc_attr( get_option( 'mbs_feedback_review_url', '' ) ); ?>" class="regular-text" placeholder="https://g.page/r/…/review">
+                        <p class="description">The public link where hirers can leave you a Google review. Used by the <code>{review_link}</code> tag.</p>
+                    </td>
+                </tr>
+                <tr>
+                    <th><label for="feedback_distribution_email">Distribution Email Address</label></th>
+                    <td>
+                        <input type="email" id="feedback_distribution_email" value="<?php echo esc_attr( get_option( 'mbs_feedback_distribution_email', '' ) ); ?>" class="regular-text" placeholder="feedback@needhamscouts.uk">
+                        <p class="description">Where private feedback submissions are routed. Defaults to the admin email if left blank.</p>
+                    </td>
+                </tr>
+                <tr>
+                    <th><label for="feedback_subject">Email Subject</label></th>
+                    <td>
+                        <input type="text" id="feedback_subject" value="<?php echo esc_attr( get_option( 'mbs_feedback_subject', 'How was your time at {org_name}?' ) ); ?>" class="regular-text" style="width:100%;max-width:500px;">
+                    </td>
+                </tr>
+                <tr>
+                    <th><label for="feedback_body">Email Body</label></th>
+                    <td>
+                        <?php
+                        wp_editor(
+                            get_option( 'mbs_feedback_body', MBS_Feedback::default_body() ),
+                            'feedback_body',
+                            array(
+                                'textarea_name' => 'feedback_body',
+                                'textarea_rows' => 10,
+                                'media_buttons' => false,
+                                'teeny'         => true,
+                            )
+                        );
+                        ?>
+                        <p class="description" style="margin-top:8px;">
+                            Supports placeholders: <code>{hirer_name}</code>, <code>{booking_date}</code>, <code>{review_link}</code> (Google review button), <code>{feedback_link}</code> (private feedback form button), <code>{space}</code>, <code>{ref}</code>, <code>{org_name}</code>.<br>
+                            <strong>Important:</strong> Create a WordPress page containing the <code>[mathlin_feedback]</code> shortcode so the private feedback form has somewhere to live.
+                        </p>
+                    </td>
+                </tr>
+            </table>
+        </div>
+
         <!-- Booking Rules -->
         <div class="nms-card">
             <div class="nms-card-header"><h2>⚙️ Booking Rules</h2></div>
             <p>Control how far in advance people can book.</p>
-            <table class="form-table">
-                <tr>
-                    <th><label for="min_notice_days">Minimum notice required</label></th>
                     <td>
                         <input type="number" id="min_notice_days" name="min_notice_days"
                                value="<?php echo esc_attr( get_option( 'mbs_min_notice_days', 1 ) ); ?>"

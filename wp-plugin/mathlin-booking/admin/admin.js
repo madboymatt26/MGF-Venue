@@ -350,6 +350,11 @@ jQuery(function ($) {
             access_instructions:  $('#access_instructions').val(),
             access_hours_before:  $('#access_hours_before').val(),
             access_health_safety: $('#access_health_safety').val(),
+            feedback_enabled:           $('#feedback_enabled').val(),
+            feedback_review_url:        $('#feedback_review_url').val(),
+            feedback_distribution_email: $('#feedback_distribution_email').val(),
+            feedback_subject:           $('#feedback_subject').val(),
+            feedback_body:              $('#feedback_body').val(),
             pricing_tiers:        tiers,
             spaces:              spaces
         }, function (res) {

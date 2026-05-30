@@ -3,7 +3,7 @@
  * Plugin Name: Mathlin Booking System
  * Plugin URI:  https://needhamscouts.uk
  * Description: Venue booking system for Needham Market Scout Group with Home Assistant integration.
- * Version:     3.12.1
+ * Version:     3.13.0
  * Author:      Needham Market Scout Group
  * License:     GPL-2.0+
  * Text Domain: mathlin-booking
@@ -11,7 +11,7 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'MBS_VERSION',    '3.12.1' );
+define( 'MBS_VERSION',    '3.13.0' );
 define( 'MBS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MBS_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'MBS_TABLE',      'mathlin_bookings' );
@@ -27,6 +27,7 @@ require_once MBS_PLUGIN_DIR . 'includes/class-blocked-dates.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-updater.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-reminders.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-access-details.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-feedback.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-ical.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-csv-export.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-dashboard-widget.php';
@@ -50,6 +51,7 @@ register_activation_hook( __FILE__, array( 'MBS_Database', 'create_tables' ) );
 register_deactivation_hook( __FILE__, array( 'MBS_Database', 'on_deactivate' ) );
 register_deactivation_hook( __FILE__, array( 'MBS_Reminders', 'deactivate' ) );
 register_deactivation_hook( __FILE__, array( 'MBS_Access_Details', 'deactivate' ) );
+register_deactivation_hook( __FILE__, array( 'MBS_Feedback', 'deactivate' ) );
 register_deactivation_hook( __FILE__, array( 'MBS_Auto_Archive', 'deactivate' ) );
 register_deactivation_hook( __FILE__, array( 'MBS_Payment_Chaser', 'deactivate' ) );
 register_deactivation_hook( __FILE__, array( 'MBS_Email_Queue', 'deactivate' ) );
@@ -90,6 +92,7 @@ function mbs_init() {
     $updater    = new MBS_Updater();
     $reminders  = new MBS_Reminders();
     $access_details = new MBS_Access_Details();
+    $feedback       = new MBS_Feedback();
     $csv_export   = new MBS_CSV_Export();
     $dashboard    = new MBS_Dashboard_Widget();
     $woo_payment  = new MBS_Woo_Payment();
@@ -109,6 +112,7 @@ function mbs_init() {
     $updater->init();
     $reminders->init();
     $access_details->init();
+    $feedback->init();
     $csv_export->init();
     $dashboard->init();
     $woo_payment->init();

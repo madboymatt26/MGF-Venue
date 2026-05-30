@@ -2,7 +2,7 @@
 
 A comprehensive WordPress venue booking plugin built for Needham Market Scout Group, with Home Assistant integration.
 
-**Current Version:** 3.12.1  
+**Current Version:** 3.13.0  
 **Requires WordPress:** 5.0+  
 **Requires PHP:** 7.4+  
 **Tested with WordPress:** 6.7  
@@ -166,6 +166,9 @@ Base: `/wp-json/mathlin/v1/`
 ---
 
 ## Changelog
+
+### v3.13.0
+- **New:** Post-Booking Feedback & Review module — emails hirers one day after their booking ends asking for a Google review (`{review_link}`) or private feedback (`{feedback_link}`). Daily WP-Cron (`mbs_daily_feedback`), excludes Scout/internal bookings (`scout_use = 0`), idempotent via the `feedback_sent` column. Configurable master toggle, Google Review URL, subject, WYSIWYG body, and distribution email. Secure frontend form via `[mathlin_feedback]` shortcode (reuses the `modification_token` + `hash_equals()` pattern); submissions are routed to the distribution address.
 
 ### v3.12.1
 - **Fix:** All Bookings stat cards (Active/Pending/Confirmed/Paid) now exclude internal Scout bookings, matching the rows shown below them

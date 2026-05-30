@@ -637,6 +637,22 @@ class MBS_Admin {
             update_option( 'mbs_offline_payment_instructions', wp_kses_post( $_POST['offline_payment_instructions'] ) );
         }
 
+        // Post-booking feedback & reviews settings
+        update_option( 'mbs_feedback_enabled', absint( $_POST['feedback_enabled'] ?? 0 ) );
+        if ( isset( $_POST['feedback_review_url'] ) ) {
+            update_option( 'mbs_feedback_review_url', esc_url_raw( $_POST['feedback_review_url'] ) );
+        }
+        if ( isset( $_POST['feedback_distribution_email'] ) ) {
+            $dist = sanitize_email( $_POST['feedback_distribution_email'] );
+            update_option( 'mbs_feedback_distribution_email', is_email( $dist ) ? $dist : '' );
+        }
+        if ( isset( $_POST['feedback_subject'] ) ) {
+            update_option( 'mbs_feedback_subject', sanitize_text_field( $_POST['feedback_subject'] ) );
+        }
+        if ( isset( $_POST['feedback_body'] ) ) {
+            update_option( 'mbs_feedback_body', wp_kses_post( $_POST['feedback_body'] ) );
+        }
+
         wp_send_json_success( array( 'saved' => true, 'min_notice_days' => $notice_days ) );
     }
 

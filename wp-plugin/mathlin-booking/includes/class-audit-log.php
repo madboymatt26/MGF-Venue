@@ -114,6 +114,8 @@ class MBS_Audit_Log {
             'payment_chase'     => '📧 Payment Reminder',
             'access_sent'       => '🔑 Access Details Sent',
             'access_resent'     => '🔑 Access Details Resent',
+            'feedback_sent'     => '💬 Feedback Request Sent',
+            'feedback_received' => '⭐ Feedback Received',
         );
         return $labels[ $action ] ?? ucfirst( str_replace( '_', ' ', $action ) );
     }

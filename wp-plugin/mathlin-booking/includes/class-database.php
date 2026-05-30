@@ -33,6 +33,7 @@ class MBS_Database {
             invoice_number  VARCHAR(30)  DEFAULT '',
             ha_notified     TINYINT(1)   NOT NULL DEFAULT 0,
             reminder_sent   TINYINT(1)   NOT NULL DEFAULT 0,
+            feedback_sent   TINYINT(1)   NOT NULL DEFAULT 0,
             chase_count     SMALLINT     NOT NULL DEFAULT 0,
             last_chased     DATETIME     DEFAULT NULL,
             series_id       VARCHAR(20)  DEFAULT NULL,
@@ -262,6 +263,12 @@ class MBS_Database {
         $col = $wpdb->get_results( "SHOW COLUMNS FROM {$table} LIKE 'access_sent'" );
         if ( empty( $col ) ) {
             $wpdb->query( "ALTER TABLE {$table} ADD COLUMN access_sent TINYINT(1) NOT NULL DEFAULT 0 AFTER reminder_sent" );
+        }
+
+        // v3.13.0: Add feedback_sent column (post-booking feedback & review module)
+        $col = $wpdb->get_results( "SHOW COLUMNS FROM {$table} LIKE 'feedback_sent'" );
+        if ( empty( $col ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN feedback_sent TINYINT(1) NOT NULL DEFAULT 0 AFTER reminder_sent" );
         }
     }
 
