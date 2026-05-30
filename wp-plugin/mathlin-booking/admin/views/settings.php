@@ -460,6 +460,18 @@ rest:
                         </p>
                     </td>
                 </tr>
+                <tr>
+                    <th>Reliable scheduling</th>
+                    <td>
+                        <p class="description" style="margin-top:0;">
+                            Feedback emails are sent by WP-Cron, which only runs when your site receives traffic. On a quiet site the daily job can run late. For dependable, on-time sending, disable WordPress's built-in pseudo-cron and use a real server cron:<br>
+                            1. Add to <code>wp-config.php</code>: <code>define( 'DISABLE_WP_CRON', true );</code><br>
+                            2. Add a server crontab entry (e.g. every 15 minutes):<br>
+                            <code>*/15 * * * * wget -q -O - https://needhamscouts.uk/wp-cron.php?doing_wp_cron &gt;/dev/null 2&gt;&amp;1</code><br>
+                            You can also use a free external service (e.g. cron-job.org) to hit that URL on a schedule.
+                        </p>
+                    </td>
+                </tr>
             </table>
         </div>
 

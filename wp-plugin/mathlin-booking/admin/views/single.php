@@ -255,6 +255,12 @@ $kitchen_price = MBS_Bookings::get_kitchen_price();
                     <small class="nms-muted" style="display:block;margin-top:4px;">Access details previously sent ✓</small>
                 <?php endif; ?>
                 <?php endif; ?>
+                <?php if ( get_option( 'mbs_feedback_enabled', 0 ) && empty( $booking->scout_use ) && in_array( $booking->status, array( 'confirmed', 'deposit_paid', 'paid' ) ) ) : ?>
+                <button class="button nms-btn-send-feedback" data-ref="<?php echo esc_attr( $booking->ref ); ?>">💬 Send Feedback Request</button>
+                <?php if ( ! empty( $booking->feedback_sent ) ) : ?>
+                    <small class="nms-muted" style="display:block;margin-top:4px;">Feedback request previously sent ✓</small>
+                <?php endif; ?>
+                <?php endif; ?>
                 <?php if ( current_user_can( 'manage_options' ) ) : ?>
                 <button class="button nms-btn-delete" data-ref="<?php echo esc_attr( $booking->ref ); ?>">🗑 Delete Booking</button>
                 <?php endif; ?>

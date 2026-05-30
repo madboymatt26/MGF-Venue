@@ -194,6 +194,29 @@ jQuery(function ($) {
         });
     });
 
+    // ── Send feedback request ───────────────────────────────────────────────────
+    $(document).on('click', '.nms-btn-send-feedback', function () {
+        var $btn = $(this);
+        var ref  = $btn.data('ref');
+        if (!confirm('Send a post-booking feedback / review request to the hirer for ' + ref + '?')) return;
+        $btn.prop('disabled', true).text('Sending…');
+        $.post(MBS_Admin.ajax_url, {
+            action: 'mbs_send_feedback_request',
+            nonce:  MBS_Admin.nonce,
+            ref:    ref
+        }, function (res) {
+            if (res.success) {
+                $btn.text('✓ Sent').css('color', '#2ecc71');
+            } else {
+                alert('Error: ' + (res.data || 'Could not send feedback request.'));
+                $btn.prop('disabled', false).text('💬 Send Feedback Request');
+            }
+        }).fail(function () {
+            alert('Network error — please try again.');
+            $btn.prop('disabled', false).text('💬 Send Feedback Request');
+        });
+    });
+
     // ── Delete booking ─────────────────────────────────────────────────────────
     $(document).on('click', '.nms-btn-delete', function () {
         var $btn = $(this);

@@ -361,6 +361,26 @@ class MBS_Feedback {
         return ob_get_clean();
     }
 
+    /**
+     * Manually send a feedback request for a specific booking (admin override).
+     *
+     * Unlike the cron, this ignores the date window and the feedback_sent flag,
+     * trusting the admin's explicit command — mirroring the "Send Access Details"
+     * manual button. Still marks feedback_sent = 1 and audit-logs the action.
+     */
+    public static function resend( $booking ) {
+        self::send_request_email( $booking );
+
+        global $wpdb;
+        $wpdb->update(
+            $wpdb->prefix . MBS_TABLE,
+            array( 'feedback_sent' => 1 ),
+            array( 'ref' => $booking->ref )
+        );
+
+        MBS_Audit_Log::log( $booking->ref, 'feedback_sent', 'Feedback request manually sent to hirer by admin.' );
+    }
+
     // ── AJAX: receive feedback submission ─────────────────────────────────────────
 
     /**

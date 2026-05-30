@@ -300,6 +300,8 @@ File: `includes/class-feedback.php`. WP-Cron job (`mbs_daily_feedback`, daily 10
 - **Email tags:** `{hirer_name}`, `{booking_date}`, `{review_link}` (Google review button → `mbs_feedback_review_url`), `{feedback_link}` (private form button), `{space}`, `{ref}`, `{org_name}`.
 - **Secure private form:** `[mathlin_feedback]` shortcode. The `{feedback_link}` carries `?mbs_feedback=1&ref=…&token=…`; the token reuses the booking's `modification_token` column verified with `hash_equals()` (same pattern as `MBS_Modification`).
 - **Submission:** `wp_ajax(_nopriv)_mbs_submit_feedback` re-verifies the token, then emails the bundled rating + comments to `mbs_feedback_distribution_email` (falls back to admin email), with `Reply-To` set to the hirer. Logged as `feedback_received`.
+- **Manual send:** admin "Send Feedback Request" button on the single booking view → `wp_ajax_mbs_send_feedback_request` → `MBS_Feedback::resend()`, which ignores the date window and `feedback_sent` flag (trusts the admin) and logs `feedback_sent`.
+- **WP-Cron caveat:** like all cron jobs here, `mbs_daily_feedback` only fires on site traffic. For on-time sending on a quiet site, set `DISABLE_WP_CRON` and add a real server crontab hitting `wp-cron.php` (documented in the settings card).
 
 ---
 

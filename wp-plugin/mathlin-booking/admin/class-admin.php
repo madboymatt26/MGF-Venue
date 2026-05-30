@@ -12,6 +12,7 @@ class MBS_Admin {
         add_action( 'wp_ajax_mbs_undo_deposit',  array( $this, 'ajax_undo_deposit' ) );
         add_action( 'wp_ajax_mbs_restore_booking', array( $this, 'ajax_restore_booking' ) );
         add_action( 'wp_ajax_mbs_resend_access',   array( $this, 'ajax_resend_access' ) );
+        add_action( 'wp_ajax_mbs_send_feedback_request', array( $this, 'ajax_send_feedback_request' ) );
         add_action( 'wp_ajax_mbs_create_scout_recurring', array( $this, 'ajax_create_scout_recurring' ) );
         add_action( 'wp_ajax_mbs_delete_booking', array( $this, 'ajax_delete_booking' ) );
         add_action( 'wp_ajax_mbs_get_invoice',    array( $this, 'ajax_get_invoice' ) );
@@ -355,6 +356,27 @@ class MBS_Admin {
         // Mark as sent
         global $wpdb;
         $wpdb->update( $wpdb->prefix . MBS_TABLE, array( 'access_sent' => 1 ), array( 'ref' => $ref ) );
+
+        wp_send_json_success( array( 'ref' => $ref ) );
+    }
+
+    /**
+     * Manually send a post-booking feedback request to a hirer.
+     * Trusts the admin: ignores the date window and the feedback_sent flag.
+     */
+    public function ajax_send_feedback_request() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
+
+        $ref = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
+        $booking = MBS_Bookings::get( $ref );
+        if ( ! $booking ) wp_send_json_error( 'Booking not found.' );
+
+        if ( ! get_option( 'mbs_feedback_enabled', 0 ) ) {
+            wp_send_json_error( 'Feedback emails are disabled. Enable them in Settings → Post-Booking Feedback & Reviews.' );
+        }
+
+        MBS_Feedback::resend( $booking );
 
         wp_send_json_success( array( 'ref' => $ref ) );
     }
