@@ -4,7 +4,7 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.16.0  
+**Current Version:** 3.16.1  
 **Requires WordPress:** 5.0+  
 **Requires PHP:** 7.4+  
 **Tested with WordPress:** 6.7  
@@ -168,6 +168,9 @@ Base: `/wp-json/mathlin/v1/`
 ---
 
 ## Changelog
+
+### v3.16.1
+- **Repo rename:** the GitHub repository was renamed `mathlin-booking` → `MGF-Venue`. Updated the auto-updater's repo reference and the Settings "Repository" display. GitHub keeps a redirect from the old name, so updates remain uninterrupted. The WordPress plugin slug/folder (`mathlin-booking`) is intentionally unchanged for backward compatibility.
 
 ### v3.16.0
 - **New analytics:** financial overview (Collected + collection rate, Outstanding debtors + overdue count, Deposits held, Kitchen income est., Avg lead time), demand/pipeline cards (upcoming 30/90 days, avg attendees, repeat-hirer rate, cancellation rate), YoY revenue badge, and new charts — Billed vs Collected vs Outstanding, Revenue by Pricing Tier, Bookings by Time of Day — plus Top Hirers and Conversion/Cancellation tables (public vs private, revenue lost). All commercial metrics exclude Scout bookings; occupancy still includes them.

@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 class MBS_Updater {
 
     /** GitHub owner/repo */
-    private $repo = 'madboymatt26/mathlin-booking';
+    private $repo = 'madboymatt26/MGF-Venue';
 
     /** Path inside the repo where the plugin lives */
     private $repo_subdir = 'wp-plugin/mathlin-booking';

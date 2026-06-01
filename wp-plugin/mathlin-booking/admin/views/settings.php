@@ -242,7 +242,7 @@ rest:
                 </tr>
                 <tr>
                     <th>Repository</th>
-                    <td><code>madboymatt26/mathlin-booking</code></td>
+                    <td><code>madboymatt26/MGF-Venue</code></td>
                 </tr>
                 <tr>
                     <th>Installed Version</th>
