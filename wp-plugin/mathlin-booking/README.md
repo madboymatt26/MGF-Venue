@@ -4,7 +4,7 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.17.2  
+**Current Version:** 3.17.3  
 **Requires WordPress:** 5.0+  
 **Requires PHP:** 7.4+  
 **Tested with WordPress:** 6.7  
@@ -168,6 +168,9 @@ Base: `/wp-json/mathlin/v1/`
 ---
 
 ## Changelog
+
+### v3.17.3
+- **Fix:** settings page form-table content was flush against the left card edge. Tables inside `.nms-card` now use `margin: 0 1.5rem` (tables ignore CSS `padding`), giving consistent inset alignment matching the card header and description text. Mobile breakpoint updated too.
 
 ### v3.17.2
 - **Migration:** automatically renames the existing WooCommerce payment product from "Scout Hall Booking Payment" to "Venue Booking Payment" on upgrade. Runs once (guarded by `mbs_woo_product_renamed` flag) so it won't overwrite any future admin customisation.

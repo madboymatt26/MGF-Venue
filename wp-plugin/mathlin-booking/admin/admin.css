@@ -79,10 +79,13 @@
 }
 .nms-card-header h2 { color: #fff; margin: 0; font-size: 1rem; }
 .nms-card > p,
-.nms-card > table,
 .nms-card > pre,
 .nms-card > h3 { padding: 0 1.5rem; }
 .nms-card > p { padding-top: 1rem; }
+.nms-card > table,
+.nms-card > .form-table { margin: 0 1.5rem; width: calc(100% - 3rem); }
+.nms-card .form-table th { padding-left: 0; }
+.nms-card .form-table td { padding-right: 0; }
 
 /* Single booking layout */
 .nms-single-layout { display: grid; grid-template-columns: 1fr 280px; gap: 1.5rem; align-items: start; }
@@ -457,7 +460,9 @@
     .nms-card-header { padding: 0.75rem 1rem; }
     .nms-card-header h2 { font-size: 0.9rem; }
     .nms-card > p,
-    .nms-card > table { padding: 0 1rem; }
+    .nms-card > pre { padding: 0 1rem; }
+    .nms-card > table,
+    .nms-card > .form-table { margin: 0 1rem; width: calc(100% - 2rem); }
 
     /* Settings */
     .nms-settings-layout { max-width: 100%; }
