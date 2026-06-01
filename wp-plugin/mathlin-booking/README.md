@@ -4,7 +4,7 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.17.1  
+**Current Version:** 3.17.2  
 **Requires WordPress:** 5.0+  
 **Requires PHP:** 7.4+  
 **Tested with WordPress:** 6.7  
@@ -168,6 +168,9 @@ Base: `/wp-json/mathlin/v1/`
 ---
 
 ## Changelog
+
+### v3.17.2
+- **Migration:** automatically renames the existing WooCommerce payment product from "Scout Hall Booking Payment" to "Venue Booking Payment" on upgrade. Runs once (guarded by `mbs_woo_product_renamed` flag) so it won't overwrite any future admin customisation.
 
 ### v3.17.1
 - **Fix:** Scout Nights menu visibility is now controlled by a dedicated **toggle** in Settings (default: Enabled) instead of being tied to whether Scout Volunteer Emails are configured. This correctly separates the admin feature from the front-end volunteer auto-detection.

@@ -270,6 +270,22 @@ class MBS_Database {
         if ( empty( $col ) ) {
             $wpdb->query( "ALTER TABLE {$table} ADD COLUMN feedback_sent TINYINT(1) NOT NULL DEFAULT 0 AFTER reminder_sent" );
         }
+
+        // v3.17.2: Rename the WooCommerce payment product to the generic name.
+        // Only runs once (guarded by a flag) so it doesn't overwrite any future
+        // admin customisation of the product name.
+        if ( ! get_option( 'mbs_woo_product_renamed', false ) ) {
+            $product_id = (int) get_option( 'mbs_woo_product_id', 0 );
+            if ( $product_id && function_exists( 'wc_get_product' ) ) {
+                $product = wc_get_product( $product_id );
+                if ( $product ) {
+                    $product->set_name( 'Venue Booking Payment' );
+                    $product->set_description( 'Payment for venue booking.' );
+                    $product->save();
+                }
+            }
+            update_option( 'mbs_woo_product_renamed', true );
+        }
     }
 
     public static function on_deactivate() {
