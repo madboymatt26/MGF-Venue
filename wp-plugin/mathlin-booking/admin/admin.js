@@ -356,6 +356,7 @@ jQuery(function ($) {
             auto_archive_days:   $('#auto_archive_days').val(),
             auto_chase_enabled:      $('#auto_chase_enabled').val(),
             scout_volunteer_emails:  $('#scout_volunteer_emails').val(),
+            scout_nights_enabled:    $('#scout_nights_enabled').val(),
             additional_emails:       $('#additional_emails').val(),
             venue_capacity:       $('#venue_capacity').val(),
             curfew_saturday:      $('#curfew_saturday').val(),

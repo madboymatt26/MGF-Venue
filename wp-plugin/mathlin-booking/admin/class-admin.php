@@ -73,8 +73,8 @@ class MBS_Admin {
             30
         );
         add_submenu_page( 'mathlin-booking', 'All Bookings', $bookings_label, $booking_cap, 'mathlin-booking', array( $this, 'render_dashboard' ) );
-        // Scout Nights: only show if scout volunteer emails are configured (feature is irrelevant otherwise)
-        if ( get_option( 'mbs_scout_volunteer_emails', '' ) ) {
+        // Scout Nights: only show if the feature is enabled in Settings
+        if ( get_option( 'mbs_scout_nights_enabled', 1 ) ) {
             add_submenu_page( 'mathlin-booking', 'Scout Nights', 'Scout Nights', $booking_cap, 'mathlin-scout-nights', array( $this, 'render_scout_nights' ) );
         }
         add_submenu_page( 'mathlin-booking', 'Calendar', 'Calendar', $booking_cap, 'mathlin-calendar', array( $this, 'render_calendar' ) );
@@ -584,6 +584,9 @@ class MBS_Admin {
         // Scout volunteer emails
         $scout_emails = sanitize_textarea_field( $_POST['scout_volunteer_emails'] ?? '' );
         update_option( 'mbs_scout_volunteer_emails', $scout_emails );
+
+        // Scout Nights feature toggle
+        update_option( 'mbs_scout_nights_enabled', absint( $_POST['scout_nights_enabled'] ?? 1 ) );
 
         // Update user meta for scout volunteers
         $email_list = array_filter( array_map( 'trim', explode( "\n", $scout_emails ) ) );

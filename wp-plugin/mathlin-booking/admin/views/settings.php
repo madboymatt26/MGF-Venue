@@ -554,6 +554,18 @@ rest:
                     </td>
                 </tr>
                 <tr>
+                    <th>Scout Nights Feature</th>
+                    <td>
+                        <select id="scout_nights_enabled">
+                            <option value="1" <?php selected( get_option( 'mbs_scout_nights_enabled', 1 ), 1 ); ?>>Enabled — show Scout Nights admin page</option>
+                            <option value="0" <?php selected( get_option( 'mbs_scout_nights_enabled', 1 ), 0 ); ?>>Disabled — hide from menu</option>
+                        </select>
+                        <p class="description">
+                            Enable this if your venue has recurring internal/organisational bookings (e.g. Scout section nights). When disabled, the Scout Nights menu item and the "Scout Use" booking flag are hidden.
+                        </p>
+                    </td>
+                </tr>
+                <tr>
                     <th>Scout Volunteer Emails</th>
                     <td>
                         <textarea id="scout_volunteer_emails" name="scout_volunteer_emails" rows="3" class="regular-text" style="width:100%;max-width:500px;"
