@@ -480,6 +480,9 @@ rest:
         <div class="nms-card">
             <div class="nms-card-header"><h2>⚙️ Booking Rules</h2></div>
             <p>Control how far in advance people can book.</p>
+            <table class="form-table">
+                <tr>
+                    <th><label for="min_notice_days">Minimum notice required</label></th>
                     <td>
                         <input type="number" id="min_notice_days" name="min_notice_days"
                                value="<?php echo esc_attr( get_option( 'mbs_min_notice_days', 1 ) ); ?>"
