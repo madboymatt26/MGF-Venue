@@ -82,7 +82,7 @@
                         <input type="email" id="admin_email" name="admin_email"
                                value="<?php echo esc_attr( MBS_Bookings::get_admin_email() ); ?>"
                                class="regular-text"
-                               placeholder="bookings@needhamscouts.uk">
+                               placeholder="bookings@example.com">
                         <p class="description">
                             Primary email for booking notifications and the "From" address on outgoing emails.
                         </p>
@@ -123,7 +123,7 @@
                 </tr>
                 <tr>
                     <th><label for="bank_account_name">Account Name</label></th>
-                    <td><input type="text" id="bank_account_name" value="<?php echo esc_attr( get_option( 'mbs_bank_account_name', 'Needham Market Scout Group' ) ); ?>" class="regular-text" placeholder="Needham Market Scout Group"></td>
+                    <td><input type="text" id="bank_account_name" value="<?php echo esc_attr( get_option( 'mbs_bank_account_name', '' ) ); ?>" class="regular-text" placeholder="Your Organisation Name"></td>
                 </tr>
             </table>
         </div>
@@ -197,10 +197,10 @@ rest:
 
     scan_interval: 86400
     sensor:
-      - name: "Scout Hall Today Booking Count"
+      - name: "Venue Today Booking Count"
         value_template: "{{ value_json | length }}"
 
-      - name: "Scout Hall First Booking Today"
+      - name: "Venue First Booking Today"
         value_template: >
           {% if value_json | length > 0 %}
             {{ value_json[0].space }} at {{ value_json[0].start_time }}
@@ -430,7 +430,7 @@ rest:
                 <tr>
                     <th><label for="feedback_distribution_email">Distribution Email Address</label></th>
                     <td>
-                        <input type="email" id="feedback_distribution_email" value="<?php echo esc_attr( get_option( 'mbs_feedback_distribution_email', '' ) ); ?>" class="regular-text" placeholder="feedback@needhamscouts.uk">
+                        <input type="email" id="feedback_distribution_email" value="<?php echo esc_attr( get_option( 'mbs_feedback_distribution_email', '' ) ); ?>" class="regular-text" placeholder="feedback@example.com">
                         <p class="description">Where private feedback submissions are routed. Defaults to the admin email if left blank.</p>
                     </td>
                 </tr>
@@ -468,7 +468,7 @@ rest:
                             Feedback emails are sent by WP-Cron, which only runs when your site receives traffic. On a quiet site the daily job can run late. For dependable, on-time sending, disable WordPress's built-in pseudo-cron and use a real server cron:<br>
                             1. Add to <code>wp-config.php</code>: <code>define( 'DISABLE_WP_CRON', true );</code><br>
                             2. Add a server crontab entry (e.g. every 15 minutes):<br>
-                            <code>*/15 * * * * wget -q -O - https://needhamscouts.uk/wp-cron.php?doing_wp_cron &gt;/dev/null 2&gt;&amp;1</code><br>
+                            <code>*/15 * * * * wget -q -O - <?php echo esc_html( home_url( '/wp-cron.php?doing_wp_cron' ) ); ?> &gt;/dev/null 2&gt;&amp;1</code><br>
                             You can also use a free external service (e.g. cron-job.org) to hit that URL on a schedule.
                         </p>
                     </td>

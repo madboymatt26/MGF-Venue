@@ -4,7 +4,7 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 /**
  * MGF Venue – REST API
  *
- * Base URL: https://needhamscouts.uk/wp-json/mathlin/v1/
+ * Base URL: /wp-json/mathlin/v1/
  *
  * Public (no auth):
  *   GET /bookings/upcoming

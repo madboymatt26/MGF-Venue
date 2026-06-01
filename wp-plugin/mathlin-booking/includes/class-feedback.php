@@ -66,7 +66,7 @@ class MBS_Feedback {
     public static function default_body() {
         return "<p>Hi {hirer_name},</p>\n"
             . "<p>Thank you for choosing our venue for your booking on {booking_date}. We hope everything went smoothly!</p>\n"
-            . "<p>If you have a moment, we'd be really grateful if you could leave us a quick Google review — it genuinely helps our small Scout Group.</p>\n"
+            . "<p>If you have a moment, we'd be really grateful if you could leave us a quick Google review — it genuinely helps us.</p>\n"
             . "<p>{review_link}</p>\n"
             . "<p>Prefer to tell us privately, or have something we should fix? You can send us confidential feedback here instead:</p>\n"
             . "<p>{feedback_link}</p>\n"

@@ -16,7 +16,7 @@ class MBS_Dashboard_Widget {
 
         wp_add_dashboard_widget(
             'mbs_dashboard_widget',
-            '⚜️ Scout Hall Bookings',
+            'MGF Venue — Bookings',
             array( $this, 'render_widget' )
         );
     }

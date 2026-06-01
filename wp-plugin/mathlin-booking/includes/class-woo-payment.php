@@ -64,7 +64,7 @@ class MBS_Woo_Payment {
 
         // Create the product
         $product = new WC_Product_Simple();
-        $product->set_name( 'Scout Hall Booking Payment' );
+        $product->set_name( 'Venue Booking Payment' );
         $product->set_slug( self::PRODUCT_SLUG );
         $product->set_status( 'publish' );           // Must be publish for guest checkout
         $product->set_catalog_visibility( 'hidden' ); // Hidden from shop/search/category pages
@@ -73,7 +73,7 @@ class MBS_Woo_Payment {
         $product->set_sold_individually( true );
         $product->set_virtual( true );
         $product->set_tax_status( 'none' ); // Charity exempt
-        $product->set_description( 'Payment for venue booking at Needham Market Scout Hall.' );
+        $product->set_description( 'Payment for venue booking.' );
         $product->set_reviews_allowed( false );
         $product->save();
 

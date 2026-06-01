@@ -70,7 +70,7 @@ if ( isset( $_GET['mbs_modify'] ) && $_GET['mbs_modify'] === '1' ) {
                     </div>
                     <div class="nms-form-group">
                         <label for="nms-reg-org">Organisation (optional)</label>
-                        <input type="text" id="nms-reg-org" name="organisation" placeholder="e.g. 1st Needham Market Scouts">
+                        <input type="text" id="nms-reg-org" name="organisation" placeholder="e.g. Acme Ltd">
                     </div>
                     <div class="nms-form-group">
                         <label for="nms-reg-pass">Password (min 8 characters)</label>

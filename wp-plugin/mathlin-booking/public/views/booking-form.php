@@ -67,7 +67,7 @@
                     </div>
                     <div class="nms-form-group">
                         <label for="nms-org">Organisation / Group</label>
-                        <input type="text" id="nms-org" name="organisation" placeholder="e.g. 1st Needham Market Scouts"
+                        <input type="text" id="nms-org" name="organisation" placeholder="e.g. Acme Ltd"
                                value="<?php echo esc_attr( $hirer['organisation'] ?? '' ); ?>">
                     </div>
                 </div>
@@ -85,7 +85,7 @@
                 </div>
                 <div class="nms-form-group">
                     <label for="nms-address">Billing Address <span class="nms-req">*</span></label>
-                    <textarea id="nms-address" name="address" rows="3" placeholder="123 High Street, Needham Market, IP6 8AA" required><?php echo esc_textarea( $hirer['address'] ?? '' ); ?></textarea>
+                    <textarea id="nms-address" name="address" rows="3" placeholder="123 High Street, Anytown, AB1 2CD" required><?php echo esc_textarea( $hirer['address'] ?? '' ); ?></textarea>
                 </div>
             </div>
 

@@ -4,7 +4,7 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.16.1  
+**Current Version:** 3.17.0  
 **Requires WordPress:** 5.0+  
 **Requires PHP:** 7.4+  
 **Tested with WordPress:** 6.7  
@@ -168,6 +168,18 @@ Base: `/wp-json/mathlin/v1/`
 ---
 
 ## Changelog
+
+### v3.17.0
+- **Multi-tenant readiness:** removed all hard-coded Needham Market / Scout Group references from runtime code. The plugin is now fully generic and configurable for any venue.
+  - All org defaults (name, address, phone, charity number, bank details, admin email) now fall back to empty or `get_bloginfo('name')` / `get_option('admin_email')` instead of Needham-specific values.
+  - iCal `LOCATION`, `X-WR-CALNAME`, and UID domain now use the configurable org address and site domain.
+  - WooCommerce payment product name/description now generic ("Venue Booking Payment").
+  - Form placeholders, HA test webhook message, cron example URL, and dashboard widget title all generic.
+  - Default T&Cs template: removed "scouting activities", "Scout Meeting", "camp store" references.
+  - Plugin header: Author → "MGF Venue", Plugin URI → GitHub repo, Description generic.
+  - Updater "View details" author and description generic.
+- **Scout Nights menu is now conditional:** only shows if Scout Volunteer Emails are configured in Settings. On a non-Scout installation the menu item is hidden entirely.
+- **Existing Needham installation unaffected:** all values are already saved in `wp_options` and override the (now-empty) defaults. No data migration needed.
 
 ### v3.16.1
 - **Repo rename:** the GitHub repository was renamed `mathlin-booking` → `MGF-Venue`. Updated the auto-updater's repo reference and the Settings "Repository" display. GitHub keeps a redirect from the old name, so updates remain uninterrupted. The WordPress plugin slug/folder (`mathlin-booking`) is intentionally unchanged for backward compatibility.

@@ -42,8 +42,8 @@ class MBS_ICal {
             ( $booking->notes ? 'Notes: ' . $booking->notes . '\n' : '' ) .
             'Amount: £' . number_format( $booking->amount, 2 )
         );
-        $location = self::escape( 'Needham Market Scout Hall, Crown St, Needham Market, IP6 8RY' );
-        $uid      = $booking->ref . '@needhamscouts.uk';
+        $location = self::escape( MBS_Email_Templates::get_org_settings()['address'] ?: get_bloginfo( 'name' ) );
+        $uid      = $booking->ref . '@' . wp_parse_url( home_url(), PHP_URL_HOST );
         $now      = gmdate( 'Ymd\THis\Z' );
 
         $ics  = "BEGIN:VCALENDAR\r\n";
@@ -101,7 +101,9 @@ class MBS_ICal {
         $ics .= "PRODID:-//MGF Venue//EN\r\n";
         $ics .= "CALSCALE:GREGORIAN\r\n";
         $ics .= "METHOD:PUBLISH\r\n";
-        $ics .= "X-WR-CALNAME:Needham Market Scout Hall Bookings\r\n";
+        $org = MBS_Email_Templates::get_org_settings();
+        $cal_name = $org['name'] ? $org['name'] . ' Bookings' : get_bloginfo( 'name' ) . ' Bookings';
+        $ics .= "X-WR-CALNAME:" . self::escape( $cal_name ) . "\r\n";
 
         foreach ( $bookings as $booking ) {
             if ( $booking->all_day ) {
@@ -116,7 +118,7 @@ class MBS_ICal {
             }
 
             $summary = self::escape( $booking->space . ' – ' . $booking->purpose );
-            $uid     = $booking->ref . '@needhamscouts.uk';
+            $uid     = $booking->ref . '@' . wp_parse_url( home_url(), PHP_URL_HOST );
             $now     = gmdate( 'Ymd\THis\Z' );
 
             $ics .= "BEGIN:VEVENT\r\n";
@@ -125,7 +127,7 @@ class MBS_ICal {
             $ics .= "{$dtstart}\r\n";
             $ics .= "{$dtend}\r\n";
             $ics .= "SUMMARY:{$summary}\r\n";
-            $ics .= "LOCATION:" . self::escape( 'Needham Market Scout Hall, Crown St, IP6 8RY' ) . "\r\n";
+            $ics .= "LOCATION:" . self::escape( $org['address'] ?: get_bloginfo( 'name' ) ) . "\r\n";
             $ics .= "STATUS:CONFIRMED\r\n";
             $ics .= "END:VEVENT\r\n";
         }

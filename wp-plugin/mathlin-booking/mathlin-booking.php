@@ -1,17 +1,17 @@
 <?php
 /**
  * Plugin Name: MGF Venue
- * Plugin URI:  https://needhamscouts.uk
- * Description: Venue booking and management system for Needham Market Scout Group with Home Assistant integration.
- * Version:     3.16.1
- * Author:      Needham Market Scout Group
+ * Plugin URI:  https://github.com/madboymatt26/MGF-Venue
+ * Description: Venue booking and management system with Home Assistant integration.
+ * Version:     3.17.0
+ * Author:      MGF Venue
  * License:     GPL-2.0+
  * Text Domain: mathlin-booking
  */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'MBS_VERSION',    '3.16.1' );
+define( 'MBS_VERSION',    '3.17.0' );
 define( 'MBS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MBS_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'MBS_TABLE',      'mathlin_bookings' );

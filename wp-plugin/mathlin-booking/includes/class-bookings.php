@@ -14,9 +14,8 @@ class MBS_Bookings {
 
     public static function get_default_spaces() {
         return array(
-            'Main Scout Hall' => array( 'rate_hourly' => 25, 'rate_daily' => 150, 'capacity' => 80 ),
-            'Meeting Room'    => array( 'rate_hourly' => 12, 'rate_daily' => 70,  'capacity' => 20 ),
-            'Outdoor Area'    => array( 'rate_hourly' => 10, 'rate_daily' => 40,  'capacity' => 100 ),
+            'Main Hall'    => array( 'rate_hourly' => 25, 'rate_daily' => 150, 'capacity' => 80 ),
+            'Meeting Room' => array( 'rate_hourly' => 12, 'rate_daily' => 70,  'capacity' => 20 ),
         );
     }
 
@@ -29,7 +28,7 @@ class MBS_Bookings {
     }
 
     public static function get_admin_email() {
-        return get_option( 'mbs_admin_email', 'bookings@needhamscouts.uk' );
+        return get_option( 'mbs_admin_email', get_option( 'admin_email' ) );
     }
 
     /**
@@ -49,9 +48,9 @@ class MBS_Bookings {
 
     public static function get_bank_details() {
         return array(
-            'sort_code'      => get_option( 'mbs_bank_sort_code', '12-34-56' ),
-            'account_number' => get_option( 'mbs_bank_account_number', '12345678' ),
-            'account_name'   => get_option( 'mbs_bank_account_name', 'Needham Market Scout Group' ),
+            'sort_code'      => get_option( 'mbs_bank_sort_code', '' ),
+            'account_number' => get_option( 'mbs_bank_account_number', '' ),
+            'account_name'   => get_option( 'mbs_bank_account_name', '' ),
             'payment_days'   => (int) get_option( 'mbs_payment_terms_days', 14 ),
         );
     }
@@ -1273,7 +1272,7 @@ class MBS_Bookings {
 <li>Any complaints concerning the premises must be made as soon as possible in writing to {org_name}.</li>
 <li>In the event of the premises being rendered unfit for the use it was hired for, {org_name} shall not be liable for any loss whatsoever.</li>
 <li>{org_name} reserves the right of free admission during the period of hire to observe compliance with the &lsquo;Conditions of Hire&rsquo;.</li>
-<li>{org_name} reserves the right to cancel bookings with 3 (three) months notice if the hall is required for scouting activities.</li>
+<li>{org_name} reserves the right to cancel bookings with 3 (three) months notice if the venue is required for the organisation&rsquo;s own activities.</li>
 <li>The selling of alcohol on the premises is forbidden (unless the hirer has obtained a licence).</li>
 <li>{org_name} does not have a Public Entertainments Licence.</li>
 <li>{org_name} has a NO Smoking Policy throughout the premises and grounds.</li>
@@ -1292,9 +1291,9 @@ c) Fire doors must be kept closed and not wedged open.<br>
 d) Extinguishers must not be taken from the wall to use as doorstops.<br>
 e) The Hirer must ensure they are familiar with locations of fire exits and extinguishers.<br>
 f) On detection of a fire, the Hirer must break a glass and assist evacuation of the building to the evacuation point (Car Park). Dial 999 to fire brigade.</li>
-<li>The Hirer shall be responsible for leaving the premises clean and tidy at the proper time and fit to be used by the next hirer or Scout Meeting. Toilets must be cleaned, floors swept/mopped, kitchen surfaces and sinks cleaned and bins emptied. (Floor cleaning equipment to be found in cleaning cupboard and brooms in cupboard under stairs). Crockery/cutlery &amp; cooking equipment must be washed/dried and stored away. All rubbish is to be bagged and taken away by the Hirer for disposal.</li>
+<li>The Hirer shall be responsible for leaving the premises clean and tidy at the proper time and fit to be used by the next hirer or event. Toilets must be cleaned, floors swept/mopped, kitchen surfaces and sinks cleaned and bins emptied. (Floor cleaning equipment to be found in cleaning cupboard and brooms in cupboard under stairs). Crockery/cutlery &amp; cooking equipment must be washed/dried and stored away. All rubbish is to be bagged and taken away by the Hirer for disposal.</li>
 <li>Hirers using the kitchen must leave it in a clean and acceptable state (see item 25) and should comply with notices posted in the kitchen. An additional cleaning charge may be levied if the Hirer fails to do this and additional cleaning is deemed necessary.</li>
-<li>The Hirer will not have access to {org_name}&rsquo;s camp store, dry store, mezzanine store or office.</li>
+<li>The Hirer will not have access to {org_name}&rsquo;s storage areas or office.</li>
 <li>The Hirer will not stick anything to the walls/doors or {org_name} notice boards.</li>
 <li>Telephone &ndash; the nearest public telephone is near the council offices on the high street, opposite the corner shop.</li>
 <li>The Hirer will wipe clean tables, which have been used and leave all tables &amp; chairs for the large hall tidily away in the chair/table store.</li>

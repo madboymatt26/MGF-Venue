@@ -8,7 +8,7 @@ if ( ! defined( 'ABSPATH' ) ) exit;
  *   {name}           — Booker's full name
  *   {organisation}   — Organisation/group name
  *   {ref}            — Booking reference (e.g. MBS-ABC123)
- *   {space}          — Space name (e.g. Main Scout Hall)
+ *   {space}          — Space name (e.g. Main Hall)
  *   {date}           — Formatted booking date (e.g. Saturday 10 May 2026)
  *   {time}           — Time range or "All day"
  *   {attendees}      — Number of attendees
@@ -232,10 +232,10 @@ class MBS_Email_Templates {
      */
     public static function get_org_settings() {
         return array(
-            'name'           => get_option( 'mbs_org_name', 'Needham Market Scout Group' ),
-            'address'        => get_option( 'mbs_org_address', 'Scout Hall, Crown St, Needham Market, IP6 8RY' ),
-            'phone'          => get_option( 'mbs_org_phone', '01449 797577' ),
-            'charity_number' => get_option( 'mbs_org_charity_number', '1038177' ),
+            'name'           => get_option( 'mbs_org_name', '' ),
+            'address'        => get_option( 'mbs_org_address', '' ),
+            'phone'          => get_option( 'mbs_org_phone', '' ),
+            'charity_number' => get_option( 'mbs_org_charity_number', '' ),
             'logo_url'       => get_option( 'mbs_org_logo_url', '' ),
         );
     }

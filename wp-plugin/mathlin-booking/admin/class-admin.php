@@ -73,7 +73,10 @@ class MBS_Admin {
             30
         );
         add_submenu_page( 'mathlin-booking', 'All Bookings', $bookings_label, $booking_cap, 'mathlin-booking', array( $this, 'render_dashboard' ) );
-        add_submenu_page( 'mathlin-booking', 'Scout Nights', 'Scout Nights', $booking_cap, 'mathlin-scout-nights', array( $this, 'render_scout_nights' ) );
+        // Scout Nights: only show if scout volunteer emails are configured (feature is irrelevant otherwise)
+        if ( get_option( 'mbs_scout_volunteer_emails', '' ) ) {
+            add_submenu_page( 'mathlin-booking', 'Scout Nights', 'Scout Nights', $booking_cap, 'mathlin-scout-nights', array( $this, 'render_scout_nights' ) );
+        }
         add_submenu_page( 'mathlin-booking', 'Calendar', 'Calendar', $booking_cap, 'mathlin-calendar', array( $this, 'render_calendar' ) );
         add_submenu_page( 'mathlin-booking', 'Archived', 'Archived', $booking_cap, 'mathlin-archived', array( $this, 'render_archived' ) );
         add_submenu_page( 'mathlin-booking', 'Blocked Dates', 'Blocked Dates', $booking_cap, 'mathlin-blocked', array( $this, 'render_blocked' ) );
@@ -484,7 +487,7 @@ class MBS_Admin {
                 'ref'              => $ref,
                 'status'           => 'confirmed',
                 'name'             => $purpose,
-                'organisation'     => get_option( 'mbs_org_name', '1st Needham Market Scout Group' ),
+                'organisation'     => get_option( 'mbs_org_name', get_bloginfo( 'name' ) ),
                 'email'            => MBS_Bookings::get_admin_email(),
                 'phone'            => '',
                 'address'          => '',
@@ -725,7 +728,7 @@ class MBS_Admin {
 
         $payload = array(
             'event'        => 'test',
-            'message'      => 'Test from Needham Market Scout Group booking system',
+            'message'      => 'Test webhook from ' . get_option( 'mbs_org_name', get_bloginfo( 'name' ) ) . ' booking system',
             'timestamp'    => current_time( 'c' ),
         );
 

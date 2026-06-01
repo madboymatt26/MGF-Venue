@@ -34,7 +34,7 @@ class MBS_Invoice {
         }
 
         $org            = MBS_Email_Templates::get_org_settings();
-        $org_name       = $org['name'] ?? 'Needham Market Scout Group';
+        $org_name       = $org['name'] ?: get_bloginfo( 'name' );
         $org_address    = $org['address'] ?? '';
         $org_phone      = $org['phone'] ?? '';
         $org_charity    = $org['charity_number'] ?? '';
@@ -177,7 +177,7 @@ class MBS_Invoice {
 
         $admin_email    = MBS_Bookings::get_admin_email();
         $org            = MBS_Email_Templates::get_org_settings();
-        $org_name       = $org['name'] ?? 'Needham Market Scout Group';
+        $org_name       = $org['name'] ?: get_bloginfo( 'name' );
         $org_address    = $org['address'] ?? '';
         $org_phone      = $org['phone'] ?? '';
         $org_charity    = $org['charity_number'] ?? '';
