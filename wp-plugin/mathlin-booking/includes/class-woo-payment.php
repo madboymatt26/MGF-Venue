@@ -305,6 +305,10 @@ class MBS_Woo_Payment {
                     if ( $updated_booking ) {
                         MBS_Email::notify_deposit_received( $updated_booking, $order_total );
                     }
+
+                    // Record the deposit actually received in the OSM finance ledger
+                    // (idempotent — the order id makes source_ref stable).
+                    do_action( 'mbs_payment_recorded', $ref, (float) $order_total, 'deposit', 'woo-order-' . $order_id );
                 } else {
                     // Full payment or balance payment
                     MBS_Bookings::update_status( $ref, 'paid' );
@@ -318,6 +322,10 @@ class MBS_Woo_Payment {
                     MBS_Audit_Log::log( $ref, 'paid', 'Payment received via WooCommerce Order #' . $order_id . '. Status updated to Paid.', 0 );
                     MBS_Email::notify_paid( $booking );
                     $order->add_order_note( sprintf( 'MGF Venue booking %s automatically marked as Paid.', $ref ) );
+
+                    // Record the amount received this transaction (balance or full)
+                    // in the OSM finance ledger — not the booking total.
+                    do_action( 'mbs_payment_recorded', $ref, (float) $order_total, ( $amount_paid_so_far > 0 ? 'balance' : 'full' ), 'woo-order-' . $order_id );
                 }
 
                 // Store order ID on the booking for cross-reference
@@ -380,6 +388,12 @@ class MBS_Woo_Payment {
                 $order->add_order_note(
                     sprintf( 'MGF Venue booking %s reverted to Confirmed due to refund. Access code flag reset.', $ref )
                 );
+
+                // Record a reversing (negative) entry in the OSM finance ledger.
+                $refunded = (float) $order->get_total_refunded();
+                if ( $refunded > 0 ) {
+                    do_action( 'mbs_payment_recorded', $ref, -1 * $refunded, 'refund', 'woo-refund-' . $order_id );
+                }
             }
         }
     }

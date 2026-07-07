@@ -4,7 +4,7 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.17.4  
+**Current Version:** 3.18.0  
 **Requires WordPress:** 5.0+  
 **Requires PHP:** 7.4+  
 **Tested with WordPress:** 6.7  
@@ -168,6 +168,15 @@ Base: `/wp-json/mathlin/v1/`
 ---
 
 ## Changelog
+
+### v3.18.0
+- **OSM finance integration reworked for proper accountancy.** The integration now records each payment *received* rather than firing the booking total once:
+  - **Standalone OAuth handshake:** a real "Connect to OSM" Authorization Code flow (with CSRF `state`), so the plugin no longer depends on the GilbertWeb Connector plugin to authenticate. The exact redirect URI is shown in Settings for registering the OSM OAuth app.
+  - **Sync ledger + idempotency:** every money event (deposit, balance, full payment, refund) is written to a new `wp_mathlin_osm_ledger` table keyed on a **unique `source_ref`**, so a re-fired hook or retried WooCommerce webhook can never create a duplicate income record. Deposits and balances post as separate records for the amounts actually taken; refunds post a reversing entry.
+  - **Retry queue:** failed pushes (OSM down, token expired) are retried hourly by cron and can be retried manually from a new reconciliation table on the OSM Integration page (with per-row status, OSM record id, and error).
+  - **Token auto-refresh** on `401`, secret masking in the settings UI (the client secret is never echoed back into the page), and a `mbs_payment_recorded` action fired from every WooCommerce and manual-admin payment/refund point.
+  - **Sandbox Mode remains the default** and now exercises the full ledger/idempotency/retry path without calling OSM. The finance endpoint and payload are filterable (`mbs_osm_finance_endpoint` / `mbs_osm_finance_payload`) so they can be corrected once verified against a live OSM section, without a release.
+  - Removed the dead `mbs_booking_status_changed` hook (it was never fired) and the old single-total push.
 
 ### v3.17.4
 - **Fix:** Booking Rules settings card had broken HTML — the `<table class="form-table">` opening tag and the first `<tr><th>` ("Minimum notice required") were missing, causing all fields to render as bare text flush-left outside any table structure. Restored the correct markup.

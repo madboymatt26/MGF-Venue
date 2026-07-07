@@ -246,8 +246,15 @@ class MBS_Admin {
                 // Set amount_paid = amount when marking as fully paid
                 global $wpdb;
                 $table = $wpdb->prefix . MBS_TABLE;
+                $prior_paid = (float) ( $booking->amount_paid ?? 0 );
+                $received   = (float) $booking->amount - $prior_paid;
                 $wpdb->update( $table, array( 'amount_paid' => $booking->amount ), array( 'ref' => $ref ) );
                 MBS_Email::notify_paid( $booking );
+
+                // Record the amount just settled in the OSM finance ledger.
+                if ( $received > 0.01 ) {
+                    do_action( 'mbs_payment_recorded', $ref, $received, ( $prior_paid > 0 ? 'balance' : 'full' ), 'manual-paid-' . $ref );
+                }
             }
         }
 
@@ -284,6 +291,12 @@ class MBS_Admin {
         MBS_Bookings::update_status( $ref, 'paid' );
         MBS_Audit_Log::log( $ref, 'refund_processed', 'Admin marked refund of £' . number_format( (float) $booking->amount_paid - (float) $booking->amount, 2 ) . ' as processed. Books balanced.' );
 
+        // Record a reversing (negative) entry in the OSM finance ledger.
+        $refunded = (float) $booking->amount_paid - (float) $booking->amount;
+        if ( $refunded > 0.01 ) {
+            do_action( 'mbs_payment_recorded', $ref, -1 * $refunded, 'refund', 'manual-refund-' . $ref );
+        }
+
         wp_send_json_success( array( 'ref' => $ref, 'status' => 'paid' ) );
     }
 
@@ -313,6 +326,9 @@ class MBS_Admin {
         if ( $updated_booking ) {
             MBS_Email::notify_deposit_received( $updated_booking, $deposit_amount );
         }
+
+        // Record the deposit received in the OSM finance ledger.
+        do_action( 'mbs_payment_recorded', $ref, (float) $deposit_amount, 'deposit', 'manual-deposit-' . $ref );
 
         MBS_Audit_Log::log( $ref, 'deposit_paid', 'Admin marked deposit of £' . number_format( $deposit_amount, 2 ) . ' as received (bank transfer). Balance of £' . number_format( (float) $booking->amount - $deposit_amount, 2 ) . ' outstanding.' );
 
@@ -1380,6 +1396,13 @@ class MBS_Admin {
             if ( $action === 'paid' ) {
                 $updated = MBS_Bookings::get( $ref );
                 if ( $updated ) MBS_Email::notify_paid( $updated );
+
+                // Record the amount just settled in the OSM finance ledger.
+                $prior_paid = (float) ( $booking->amount_paid ?? 0 );
+                $received   = (float) $booking->amount - $prior_paid;
+                if ( $received > 0.01 ) {
+                    do_action( 'mbs_payment_recorded', $ref, $received, ( $prior_paid > 0 ? 'balance' : 'full' ), 'bulk-paid-' . $ref );
+                }
             }
 
             $processed++;

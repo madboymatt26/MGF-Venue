@@ -125,6 +125,29 @@ class MBS_Database {
         ) {$charset};";
         dbDelta( $sql5 );
 
+        // OSM finance sync ledger — one row per money event (deposit/balance/
+        // refund). source_ref is UNIQUE, which is what makes the OSM push
+        // idempotent: a re-fired hook or retried webhook can't double-record.
+        $osm_ledger = $wpdb->prefix . 'mathlin_osm_ledger';
+        $sql6 = "CREATE TABLE IF NOT EXISTS {$osm_ledger} (
+            id            BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            booking_ref   VARCHAR(20)  NOT NULL,
+            source_ref    VARCHAR(120) NOT NULL,
+            type          VARCHAR(20)  NOT NULL DEFAULT 'balance',
+            amount        DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+            status        VARCHAR(20)  NOT NULL DEFAULT 'pending',
+            osm_record_id VARCHAR(64)  DEFAULT '',
+            attempts      SMALLINT     NOT NULL DEFAULT 0,
+            last_error    VARCHAR(255) DEFAULT '',
+            synced_at     DATETIME     DEFAULT NULL,
+            created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY uq_source (source_ref),
+            KEY idx_ref    (booking_ref),
+            KEY idx_status (status)
+        ) {$charset};";
+        dbDelta( $sql6 );
+
         update_option( 'mbs_db_version', MBS_VERSION );
     }
 
