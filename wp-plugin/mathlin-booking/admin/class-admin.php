@@ -555,8 +555,14 @@ class MBS_Admin {
         // Clamp kitchen price
         $kitchen_price = max( 0, $kitchen_price );
 
+        // Minimum booking duration (hours). 0 = feature disabled. Clamp to a
+        // sane 0–24h range; accepts fractional values (e.g. 1.5).
+        $min_duration = floatval( $_POST['min_duration_hours'] ?? 0 );
+        $min_duration = max( 0, min( 24, $min_duration ) );
+
         update_option( 'mbs_ha_webhook_url',  $webhook );
         update_option( 'mbs_min_notice_days', $notice_days );
+        update_option( 'mbs_min_duration_hours', $min_duration );
         update_option( 'mbs_kitchen_price',   $kitchen_price );
         update_option( 'mbs_kitchen_enabled', absint( $_POST['kitchen_enabled'] ?? 1 ) );
 
@@ -717,7 +723,7 @@ class MBS_Admin {
             update_option( 'mbs_feedback_body', wp_kses_post( $_POST['feedback_body'] ) );
         }
 
-        wp_send_json_success( array( 'saved' => true, 'min_notice_days' => $notice_days ) );
+        wp_send_json_success( array( 'saved' => true, 'min_notice_days' => $notice_days, 'min_duration_hours' => $min_duration ) );
     }
 
     public function ajax_test_ha() {

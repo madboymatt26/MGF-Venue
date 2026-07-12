@@ -343,6 +343,7 @@ jQuery(function ($) {
             nonce:           MBS_Admin.nonce,
             ha_webhook_url:  $('#ha_webhook_url').val(),
             min_notice_days: $('#min_notice_days').val(),
+            min_duration_hours: $('#min_duration_hours').val(),
             github_token:    $('#github_token').val(),
             admin_email:     $('#admin_email').val(),
             kitchen_price:   $('#kitchen_price').val(),

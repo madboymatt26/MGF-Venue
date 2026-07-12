@@ -52,6 +52,7 @@ class MBS_Public {
                 'kitchen_price'   => MBS_Bookings::get_kitchen_price(),
                 'kitchen_enabled' => (bool) get_option( 'mbs_kitchen_enabled', 1 ),
                 'min_notice_days' => $notice_days,
+                'min_duration_hours' => (float) get_option( 'mbs_min_duration_hours', 0 ),
                 'min_date'        => wp_date( 'Y-m-d', strtotime( "+{$notice_days} days" ) ),
                 'blocked_dates'   => self::get_blocked_dates_for_frontend(),
                 'is_logged_in'    => is_user_logged_in(),
@@ -272,6 +273,18 @@ class MBS_Public {
             }
             if ( strtotime( $end ) <= strtotime( $start ) ) {
                 wp_send_json_error( array( 'message' => 'End time must be after start time.' ) );
+            }
+
+            // Enforce minimum booking duration (runs just before availability /
+            // conflict checks, per the booking-rules requirement). Scout use is
+            // resolved here only for the exemption; the authoritative scout_use
+            // validation still happens server-side in MBS_Bookings::create().
+            $range_end   = sanitize_text_field( $_POST['booking_date_end'] ?? '' ) ?: $date;
+            $dur_days    = max( 1, (int) round( ( strtotime( $range_end ) - strtotime( $date ) ) / 86400 ) + 1 );
+            $is_scout    = ! empty( $_POST['scout_use'] );
+            $dur_check   = MBS_Bookings::validate_min_duration( $start, $end, false, $dur_days, $is_scout );
+            if ( is_wp_error( $dur_check ) ) {
+                wp_send_json_error( array( 'message' => $dur_check->get_error_message() ) );
             }
         }
 

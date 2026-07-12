@@ -346,6 +346,95 @@ jQuery(function ($) {
 
     $('#nms-space, #nms-start, #nms-end, #nms-kitchen, #nms-allday, #nms-date, #nms-date-end, #nms-recurring, #nms-repeat-until, #nms-scout-use').on('change', updateCost);
 
+    // ── Minimum booking duration (frontend UX) ──────────────────────────────────
+    // Mirrors MBS_Bookings::calculate_duration_hours()/validate_min_duration().
+    // Returns { ok: bool, hours: number, message: string }.
+    function checkMinDuration() {
+        var minHours = parseFloat(NMS.min_duration_hours) || 0;
+        var allDay   = $('#nms-allday').val() === '1';
+        var isScout  = $('#nms-scout-use').val() === '1';
+        var start    = $('#nms-start').val();
+        var end      = $('#nms-end').val();
+
+        // Feature off, all-day, scout use, or times not yet chosen: nothing to enforce.
+        if (minHours <= 0 || allDay || isScout || !start || !end) {
+            return { ok: true, hours: 0, message: '' };
+        }
+
+        var mins = timeToMins(end) - timeToMins(start);
+        var isOvernight = (mins <= 0);
+        if (isOvernight) mins += 1440; // span midnight → add 24h
+
+        // Multi-day hourly: mirror the effective-days rule from updateCost().
+        var dateFrom = $('#nms-date').val();
+        var dateTo   = $('#nms-date-end').val() || dateFrom;
+        var numDays  = 1;
+        if (dateFrom && dateTo) {
+            var diff = (new Date(dateTo + 'T00:00:00') - new Date(dateFrom + 'T00:00:00')) / 86400000;
+            numDays = Math.max(1, Math.round(diff) + 1);
+        }
+        var effectiveDays = numDays;
+        if (isOvernight && numDays === 2) effectiveDays = 1;
+
+        var hours = (mins / 60) * effectiveDays;
+        // Epsilon guard so an exactly-minimum booking isn't rejected by rounding.
+        var ok = (hours + 0.0001 >= minHours);
+
+        var minLabel = (Math.floor(minHours) === minHours)
+            ? String(minHours)
+            : String(minHours);
+        var hourWord = (minHours === 1) ? 'hour' : 'hours';
+
+        return {
+            ok: ok,
+            hours: hours,
+            message: ok ? '' : ('Bookings must be at least ' + minLabel + ' ' + hourWord + ' long. Please extend your end time.')
+        };
+    }
+
+    // Live UX: constrain the end-time input and show inline feedback whenever
+    // the start/end/day fields change.
+    function enforceMinDurationUI() {
+        var minHours = parseFloat(NMS.min_duration_hours) || 0;
+        var $hint = $('#nms-duration-hint');
+        var $end  = $('#nms-end');
+
+        if (minHours <= 0 || $('#nms-allday').val() === '1' || $('#nms-scout-use').val() === '1') {
+            $hint.hide();
+            $end.removeClass('nms-field-error');
+            return;
+        }
+
+        var start = $('#nms-start').val();
+        if (start) {
+            // Suggest the earliest valid end time (start + minimum) as the input's min.
+            var minEndMins = timeToMins(start) + Math.round(minHours * 60);
+            if (minEndMins < 1440) {
+                $end.attr('min', pad(Math.floor(minEndMins / 60)) + ':' + pad(minEndMins % 60));
+            } else {
+                // Minimum pushes into the next day (overnight) — can't express as
+                // a same-day input min, so leave it unset and rely on validation.
+                $end.removeAttr('min');
+            }
+        }
+
+        var res = checkMinDuration();
+        if (!res.ok) {
+            $end.addClass('nms-field-error');
+            $hint.text('⚠️ ' + res.message).css('color', '#e74c3c').show();
+        } else {
+            $end.removeClass('nms-field-error');
+            if (minHours > 0 && start && $('#nms-end').val()) {
+                var word = (minHours === 1) ? 'hour' : 'hours';
+                $hint.text('Minimum booking is ' + minHours + ' ' + word + '.').css('color', '#6b7280').show();
+            } else {
+                $hint.hide();
+            }
+        }
+    }
+
+    $('#nms-start, #nms-end, #nms-allday, #nms-scout-use, #nms-date, #nms-date-end').on('change', enforceMinDurationUI);
+
     // ── Recurring booking toggle ───────────────────────────────────────────────
     // Auto-select Scout Use for Scout Volunteers
     if (NMS.is_scout_volunteer) {
@@ -424,6 +513,16 @@ jQuery(function ($) {
         });
         if (!valid) {
             $err.text('Please fill in all required fields.').show();
+            return;
+        }
+
+        // Minimum booking duration guard — catches anyone who bypasses the UI
+        // constraints before we make the AJAX round-trip. The backend
+        // (MBS_Bookings::validate_min_duration) is still the authority.
+        var durRes = checkMinDuration();
+        if (!durRes.ok) {
+            $('#nms-end').addClass('nms-field-error');
+            $err.text(durRes.message).show();
             return;
         }
 

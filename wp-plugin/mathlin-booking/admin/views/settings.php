@@ -496,6 +496,22 @@ rest:
                     </td>
                 </tr>
                 <tr>
+                    <th><label for="min_duration_hours">Minimum booking duration</label></th>
+                    <td>
+                        <input type="number" id="min_duration_hours" name="min_duration_hours"
+                               value="<?php echo esc_attr( get_option( 'mbs_min_duration_hours', 0 ) ); ?>"
+                               min="0" max="24" step="0.5" style="width:80px"> hours
+                        <p class="description">
+                            The shortest hourly booking a customer may make.<br>
+                            <strong>0</strong> = no minimum (any length allowed) &bull;
+                            <strong>2</strong> = bookings must be at least 2 hours &bull;
+                            <strong>1.5</strong> = at least 90 minutes.<br>
+                            Applies to hourly bookings only. All-day and Scout/internal
+                            bookings are exempt.
+                        </p>
+                    </td>
+                </tr>
+                <tr>
                     <th><label for="reminder_hours">Email reminder</label></th>
                     <td>
                         <input type="number" id="reminder_hours" name="reminder_hours"

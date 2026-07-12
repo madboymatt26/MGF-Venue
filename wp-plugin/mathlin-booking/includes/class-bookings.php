@@ -199,6 +199,136 @@ class MBS_Bookings {
         return $related;
     }
 
+    // ── Minimum Booking Duration ─────────────────────────────────────────────────
+
+    /**
+     * Get the configured minimum booking duration in hours.
+     * 0 (the default) disables the feature entirely.
+     */
+    public static function get_min_duration_hours() {
+        return (float) get_option( 'mbs_min_duration_hours', 0 );
+    }
+
+    /**
+     * Calculate the effective duration of a booking in hours.
+     *
+     * This DELIBERATELY mirrors the duration maths inside calculate_cost() so
+     * the validation can never drift from the price the customer is charged:
+     *  - overnight bookings (end <= start) roll the end forward 24h,
+     *  - the "single continuous overnight block" rule collapses a 2-day span
+     *    into 1 effective day,
+     *  - multi-day hourly bookings multiply the per-slot hours by the number
+     *    of days.
+     *
+     * Note on timezones/DST: we intentionally subtract the wall-clock start/end
+     * times (a "10:00–12:00" slot is 2 hours regardless of any DST transition
+     * on that calendar day). Date rollover for overnight bookings is handled by
+     * the +86400 branch, and all "today"/date-range logic elsewhere uses
+     * wp_date() to stay BST/GMT safe. Returning a raw hour count here keeps the
+     * check consistent with the billed hours.
+     *
+     * @return float Hours (may be fractional). All-day bookings return 0 (exempt).
+     */
+    public static function calculate_duration_hours( $start_time, $end_time, $all_day = false, $num_days = 1 ) {
+        // All-day bookings are not time-bounded, so the minimum-duration rule
+        // does not apply to them.
+        if ( $all_day || ! $start_time || ! $end_time ) {
+            return 0;
+        }
+
+        $start = strtotime( $start_time );
+        $end   = strtotime( $end_time );
+        if ( $start === false || $end === false ) {
+            return 0;
+        }
+
+        // Mirror calculate_cost(): handle bookings spanning midnight.
+        $is_overnight = ( $end <= $start );
+        if ( $is_overnight ) {
+            $end += 86400;
+        }
+
+        $hours = max( 0, ( $end - $start ) / 3600 );
+
+        // Mirror calculate_cost() effective-days handling for multi-day hourly.
+        $effective_days = max( 1, (int) $num_days );
+        if ( $is_overnight && (int) $num_days === 2 ) {
+            $effective_days = 1; // Single continuous overnight block.
+        }
+
+        return $hours * $effective_days;
+    }
+
+    /**
+     * Validate a booking against the configured minimum duration.
+     *
+     * Returns true when the booking satisfies the minimum (or the feature is
+     * disabled / not applicable), or a WP_Error with a user-friendly message
+     * when the duration falls short.
+     *
+     * @param bool $scout_use  Scout/internal bookings are exempt (free & trusted).
+     */
+    public static function validate_min_duration( $start_time, $end_time, $all_day = false, $num_days = 1, $scout_use = false ) {
+        $min_hours = self::get_min_duration_hours();
+
+        // Feature disabled, all-day booking, or scout/internal use: nothing to enforce.
+        if ( $min_hours <= 0 || $all_day || $scout_use ) {
+            return true;
+        }
+
+        $duration = self::calculate_duration_hours( $start_time, $end_time, $all_day, $num_days );
+
+        // If we couldn't derive a duration (missing times), let the existing
+        // start/end validation handle it — don't produce a confusing message here.
+        if ( $duration <= 0 ) {
+            return true;
+        }
+
+        // Use a small epsilon so floating-point maths (e.g. 1.9999h) doesn't
+        // reject an otherwise-valid exactly-minimum booking.
+        if ( $duration + 0.0001 < $min_hours ) {
+            // Format the minimum tidily: "2" not "2.0", "1.5" kept as-is.
+            $min_label = ( floor( $min_hours ) == $min_hours )
+                ? number_format( $min_hours, 0 )
+                : rtrim( rtrim( number_format( $min_hours, 2 ), '0' ), '.' );
+            $hour_word = ( (float) $min_label === 1.0 ) ? 'hour' : 'hours';
+
+            return new WP_Error(
+                'min_duration',
+                sprintf(
+                    'Bookings must be at least %s %s long. Please extend your end time (this booking is currently %s).',
+                    $min_label,
+                    $hour_word,
+                    self::format_duration_label( $duration )
+                )
+            );
+        }
+
+        return true;
+    }
+
+    /**
+     * Human-friendly duration label, e.g. "1 hour 30 minutes", "2 hours".
+     */
+    public static function format_duration_label( $hours ) {
+        $total_minutes = (int) round( $hours * 60 );
+        $h = intdiv( $total_minutes, 60 );
+        $m = $total_minutes % 60;
+
+        $parts = array();
+        if ( $h > 0 ) {
+            $parts[] = $h . ' ' . ( $h === 1 ? 'hour' : 'hours' );
+        }
+        if ( $m > 0 ) {
+            $parts[] = $m . ' ' . ( $m === 1 ? 'minute' : 'minutes' );
+        }
+        if ( empty( $parts ) ) {
+            $parts[] = '0 minutes';
+        }
+
+        return implode( ' ', $parts );
+    }
+
     public static function calculate_cost( $space, $start_time, $end_time, $kitchen = false, $all_day = false, $num_days = 1, $scout_use = false, $tier = 'standard' ) {
         // Scout use bookings are free
         if ( $scout_use ) return 0;
@@ -276,6 +406,20 @@ class MBS_Bookings {
             $vol_emails = array_filter( array_map( 'trim', explode( "\n", get_option( 'mbs_scout_volunteer_emails', '' ) ) ) );
             $submitter_email = sanitize_email( $data['email'] ?? '' );
             $scout_use = in_array( strtolower( $submitter_email ), array_map( 'strtolower', $vol_emails ) );
+        }
+
+        // Enforce the minimum booking duration before doing any expensive work
+        // (locking transaction / conflict re-check). Fails fast and cheap.
+        // All-day and scout bookings are exempt (handled inside the validator).
+        $min_duration_check = self::validate_min_duration(
+            sanitize_text_field( $data['start_time'] ?? '' ),
+            sanitize_text_field( $data['end_time'] ?? '' ),
+            $all_day,
+            $num_days,
+            $scout_use
+        );
+        if ( is_wp_error( $min_duration_check ) ) {
+            return $min_duration_check;
         }
 
         $cost = self::calculate_cost(

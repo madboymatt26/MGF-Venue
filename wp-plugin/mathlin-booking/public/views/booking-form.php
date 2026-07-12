@@ -158,6 +158,9 @@
                         <input type="time" id="nms-end" name="end_time">
                     </div>
                 </div>
+                <div class="nms-form-row">
+                    <small id="nms-duration-hint" class="nms-hint" style="display:none;"></small>
+                </div>
                 <div class="nms-form-group">
                     <label for="nms-purpose">Purpose of Booking <span class="nms-req">*</span></label>
                     <input type="text" id="nms-purpose" name="purpose" placeholder="e.g. Birthday party, committee meeting, training day" required>

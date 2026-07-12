@@ -157,6 +157,21 @@ class MBS_Modification {
                             MBS_Audit_Log::log( $request->booking_ref, 'modification_rejected', 'Auto-rejected: conflicts with existing booking' );
                             return false;
                         }
+
+                        // Enforce minimum booking duration on the modified times,
+                        // alongside the conflict check. A change request must not
+                        // shorten a booking below the configured minimum.
+                        $mod_date_to  = $update['booking_date_end'] ?? $booking->booking_date_end ?? $check_date;
+                        $mod_num_days = max( 1, (int) round( ( strtotime( $mod_date_to ) - strtotime( $check_date ) ) / 86400 ) + 1 );
+                        $dur_check    = MBS_Bookings::validate_min_duration(
+                            $check_start, $check_end, $check_allday, $mod_num_days, (bool) $booking->scout_use
+                        );
+                        if ( is_wp_error( $dur_check ) ) {
+                            self::update_request_status( $request_id, 'rejected', $dur_check->get_error_message() );
+                            self::notify_booker_rejected( $booking, 'modify', $dur_check->get_error_message() );
+                            MBS_Audit_Log::log( $request->booking_ref, 'modification_rejected', 'Auto-rejected: below minimum booking duration' );
+                            return false;
+                        }
                     }
 
                     // Recalculate cost
