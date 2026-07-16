@@ -1,4 +1,4 @@
-# AI-CONTEXT.md — MGF Venue (v3.14.0)
+# AI-CONTEXT.md — MGF Venue (v3.18.0)
 
 This document is designed for LLMs and AI agents to read before modifying this codebase. It maps the architecture, file relationships, and critical business logic rules.
 
@@ -119,6 +119,14 @@ mathlin-booking/
 Files marked ★ are the most critical and most frequently modified.
 
 ---
+
+## MCP Integration
+
+`mcp-server/mgf-venue-mcp.ps1` is a dependency-free Windows STDIO MCP bridge for Codex. It authenticates to the WordPress REST API with a dedicated user's Application Password supplied only through environment variables.
+
+MCP-specific REST routes live below `/wp-json/mathlin/v1/admin/`. They return an explicit allow-list of booking fields and must never expose `modification_token`, access codes, stored audit IP addresses, credentials, or future database columns without a deliberate security review.
+
+Status writes require an `expected_status` precondition. Repeating the same requested status is a no-op, preventing duplicate notification emails. Hirer notifications are opt-in through `notify_hirer`; MCP instructions require explicit user authorization before enabling it.
 
 ## Cost Calculation Engine
 
