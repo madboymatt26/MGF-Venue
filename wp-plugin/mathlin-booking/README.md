@@ -4,7 +4,7 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.17.4  
+**Current Version:** 3.18.0
 **Requires WordPress:** 5.0+  
 **Requires PHP:** 7.4+  
 **Tested with WordPress:** 6.7  
@@ -163,11 +163,32 @@ Base: `/wp-json/mathlin/v1/`
 | `POST /bookings/{ref}/status` | Admin | Update status |
 | `GET /bookings/{ref}/payment-url` | Admin | Generate payment URL |
 
+### MCP/admin integration endpoints
+
+The repository includes a Windows STDIO MCP bridge in `mcp-server/`. It uses the shaped admin routes below so database-only security fields such as modification tokens are never returned to the MCP client.
+
+| Endpoint | Auth | Description |
+|---|---|---|
+| `GET /admin/bookings` | Booking manager | Filtered, paginated booking list |
+| `GET /admin/bookings/{ref}` | Booking manager | One shaped booking record |
+| `GET /admin/bookings/{ref}/audit` | Booking manager | Audit history without stored IP addresses |
+| `GET /admin/availability` | Booking manager | Blocked-date and conflict check |
+| `POST /admin/bookings/{ref}/status` | Booking manager | Idempotent status update with optional hirer notification |
+| `POST /admin/bookings/{ref}/notes` | Booking manager | Replace internal administrator notes |
+
+Authentication uses normal WordPress REST authentication. For a local Codex bridge, create a dedicated least-privilege booking-manager user and a WordPress Application Password; keep the password in `MGF_VENUE_APP_PASSWORD`, never in the repository or Codex config file. See `mcp-server/README.md`.
+
 > Note: keysafe access codes are never exposed in public REST payloads.
 
 ---
 
 ## Changelog
+
+### v3.18.0
+- **New:** least-privilege MCP/admin REST routes for shaped booking lists/details, conflict checks, audit history, idempotent status changes, and internal notes.
+- **Security:** MCP/admin booking responses use an explicit field allow-list; modification tokens, access codes, audit IP addresses, and unreviewed future columns are excluded.
+- **Safety:** status writes require an expected current status and make external confirmation/cancellation email opt-in, preventing duplicate or accidental notifications.
+- **Integration:** dependency-free Windows STDIO MCP bridge for Codex with read/write tool annotations and environment-only WordPress Application Password handling.
 
 ### v3.17.4
 - **Fix:** Booking Rules settings card had broken HTML — the `<table class="form-table">` opening tag and the first `<tr><th>` ("Minimum notice required") were missing, causing all fields to render as bare text flush-left outside any table structure. Restored the correct markup.
