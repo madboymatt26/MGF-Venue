@@ -7,7 +7,7 @@ $ProgressPreference = 'SilentlyContinue'
 $InformationPreference = 'SilentlyContinue'
 
 $script:ServerName = 'mgf-venue'
-$script:ServerVersion = '0.1.0'
+$script:ServerVersion = '0.2.0'
 $script:DefaultProtocolVersion = '2025-06-18'
 
 function Get-PropertyValue {
@@ -159,6 +159,45 @@ function Invoke-VenueApi {
     }
 }
 
+function Invoke-VenueDownload {
+    param(
+        [Parameter(Mandatory = $true)][string]$Action,
+        [AllowNull()][object]$Arguments,
+        [Parameter(Mandatory = $true)][string]$OutputPath
+    )
+
+    Assert-VenueConfiguration
+
+    $fullPath = [IO.Path]::GetFullPath($OutputPath)
+    if ([IO.Path]::GetExtension($fullPath).ToLowerInvariant() -ne '.csv') {
+        throw 'Admin exports must be saved with a .csv extension.'
+    }
+    $parent = Split-Path -Parent $fullPath
+    if (-not (Test-Path -LiteralPath $parent)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+
+    $baseUrl = $env:MGF_VENUE_BASE_URL.TrimEnd('/')
+    $credentialBytes = [Text.Encoding]::UTF8.GetBytes("$($env:MGF_VENUE_USERNAME):$($env:MGF_VENUE_APP_PASSWORD)")
+    $credential = [Convert]::ToBase64String($credentialBytes)
+    $headers = @{
+        Authorization = "Basic ${credential}"
+        Accept = 'text/csv, application/json'
+        'User-Agent' = "MGF-Venue-MCP/$($script:ServerVersion)"
+    }
+    $uri = "${baseUrl}/wp-json/mathlin/v1/admin/actions/${Action}"
+    $jsonBody = $Arguments | ConvertTo-Json -Depth 30 -Compress
+
+    try {
+        Invoke-WebRequest -Method Post -Uri $uri -Headers $headers -ContentType 'application/json; charset=utf-8' -Body $jsonBody -OutFile $fullPath
+    } catch {
+        throw (Get-WebErrorMessage $_)
+    }
+
+    $file = Get-Item -LiteralPath $fullPath
+    return @{ path = $file.FullName; bytes = $file.Length; action = $Action }
+}
+
 $script:Tools = @(
     @{
         name = 'list_bookings'
@@ -257,6 +296,68 @@ $script:Tools = @(
             additionalProperties = $false
         }
         annotations = @{ readOnlyHint = $false; destructiveHint = $false; idempotentHint = $true; openWorldHint = $true }
+    },
+    @{
+        name = 'get_admin_resource'
+        title = 'Read an MGF Venue admin resource'
+        description = 'Read the same supporting data shown in the MGF Venue admin pages. Stored secrets are returned only as configured/not-configured flags.'
+        inputSchema = @{
+            type = 'object'
+            properties = @{
+                resource = @{ type = 'string'; enum = @('capabilities', 'blocked_dates', 'series', 'requests', 'configuration', 'email_configuration', 'custom_fields', 'osm_configuration', 'analytics', 'invoice', 'payment_url') }
+                ref = @{ type = 'string'; description = 'Booking reference, required for invoice and payment_url.' }
+                series_id = @{ type = 'string'; description = 'Series identifier, required for series.' }
+                status = @{ type = 'string'; enum = @('pending', 'all'); default = 'pending' }
+                limit = @{ type = 'integer'; minimum = 1; maximum = 500; default = 100 }
+            }
+            required = @('resource')
+            additionalProperties = $false
+        }
+        annotations = @{ readOnlyHint = $true; destructiveHint = $false; idempotentHint = $true; openWorldHint = $true }
+    },
+    @{
+        name = 'run_admin_action'
+        title = 'Run an MGF Venue admin action'
+        description = 'Run an allow-listed action using the same handler as the MGF Venue web admin. This can change bookings, payments, settings or series, send external email, trigger Home Assistant, or permanently delete data. Inspect current state and obtain explicit user authorization before calling.'
+        inputSchema = @{
+            type = 'object'
+            properties = @{
+                action = @{
+                    type = 'string'
+                    enum = @(
+                        'update_status', 'delete_booking', 'mark_refunded', 'mark_deposit_paid',
+                        'undo_deposit', 'restore_booking', 'resend_access', 'send_feedback_request',
+                        'create_scout_recurring', 'save_settings', 'test_ha', 'check_update',
+                        'archive_past', 'add_blocked', 'delete_blocked', 'clear_expired_blocks',
+                        'update_series_status', 'cancel_scout_series', 'edit_scout_series',
+                        'extend_scout_series', 'reopen_scout_series', 'delete_scout_series',
+                        'save_admin_notes', 'chase_payment', 'save_email_settings',
+                        'save_custom_fields', 'edit_booking', 'approve_request', 'reject_request',
+                        'bulk_action', 'save_osm_settings', 'test_osm_connection', 'osm_get_sections'
+                    )
+                }
+                arguments = @{ type = 'object'; description = 'Arguments expected by the matching MGF Venue admin action.'; additionalProperties = $true }
+            }
+            required = @('action', 'arguments')
+            additionalProperties = $false
+        }
+        annotations = @{ readOnlyHint = $false; destructiveHint = $true; idempotentHint = $false; openWorldHint = $true }
+    },
+    @{
+        name = 'export_admin_data'
+        title = 'Export MGF Venue admin data'
+        description = 'Run the same CSV or accounting export as the Analytics/Bookings admin pages and save it to an explicit local .csv path.'
+        inputSchema = @{
+            type = 'object'
+            properties = @{
+                export = @{ type = 'string'; enum = @('export_csv', 'export_accounting') }
+                output_path = @{ type = 'string'; description = 'Absolute local path ending in .csv.' }
+                arguments = @{ type = 'object'; description = 'Export filters such as format, date_from and date_to.'; additionalProperties = $true }
+            }
+            required = @('export', 'output_path', 'arguments')
+            additionalProperties = $false
+        }
+        annotations = @{ readOnlyHint = $false; destructiveHint = $false; idempotentHint = $false; openWorldHint = $true }
     }
 )
 
@@ -310,6 +411,48 @@ function Invoke-MgfVenueTool {
             $body = @{ notes = Get-PropertyValue $Arguments 'notes' '' }
             return Invoke-VenueApi -Method POST -Path "/admin/bookings/${ref}/notes" -Body $body
         }
+        'get_admin_resource' {
+            $resource = [string](Get-PropertyValue $Arguments 'resource' '')
+            switch ($resource) {
+                'capabilities' { return Invoke-VenueApi -Method GET -Path '/admin/capabilities' }
+                'blocked_dates' { return Invoke-VenueApi -Method GET -Path '/admin/blocked-dates' }
+                'series' {
+                    $seriesId = [Uri]::EscapeDataString(([string](Get-PropertyValue $Arguments 'series_id' '')).ToUpperInvariant())
+                    return Invoke-VenueApi -Method GET -Path "/admin/series/${seriesId}"
+                }
+                'requests' {
+                    $query = ConvertTo-QueryString @{
+                        status = Get-PropertyValue $Arguments 'status' 'pending'
+                        limit = Get-PropertyValue $Arguments 'limit' 100
+                    }
+                    return Invoke-VenueApi -Method GET -Path "/admin/requests?${query}"
+                }
+                'configuration' { return Invoke-VenueApi -Method GET -Path '/admin/configuration' }
+                'email_configuration' { return Invoke-VenueApi -Method GET -Path '/admin/email-configuration' }
+                'custom_fields' { return Invoke-VenueApi -Method GET -Path '/admin/custom-fields' }
+                'osm_configuration' { return Invoke-VenueApi -Method GET -Path '/admin/osm-configuration' }
+                'analytics' { return Invoke-VenueApi -Method GET -Path '/admin/analytics' }
+                'invoice' {
+                    return Invoke-VenueApi -Method POST -Path '/admin/actions/get_invoice' -Body @{ ref = Get-PropertyValue $Arguments 'ref' '' }
+                }
+                'payment_url' {
+                    $ref = [Uri]::EscapeDataString(([string](Get-PropertyValue $Arguments 'ref' '')).ToUpperInvariant())
+                    return Invoke-VenueApi -Method GET -Path "/bookings/${ref}/payment-url"
+                }
+                default { throw "Unknown admin resource: ${resource}" }
+            }
+        }
+        'run_admin_action' {
+            $action = [string](Get-PropertyValue $Arguments 'action' '')
+            $actionArguments = Get-PropertyValue $Arguments 'arguments' @{}
+            return Invoke-VenueApi -Method POST -Path "/admin/actions/${action}" -Body $actionArguments
+        }
+        'export_admin_data' {
+            $export = [string](Get-PropertyValue $Arguments 'export' '')
+            $outputPath = [string](Get-PropertyValue $Arguments 'output_path' '')
+            $exportArguments = Get-PropertyValue $Arguments 'arguments' @{}
+            return Invoke-VenueDownload -Action $export -Arguments $exportArguments -OutputPath $outputPath
+        }
         default {
             throw "Unknown tool: ${Name}"
         }
@@ -350,7 +493,7 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
                     protocolVersion = $requestedProtocol
                     capabilities = @{ tools = @{ listChanged = $false } }
                     serverInfo = @{ name = $script:ServerName; version = $script:ServerVersion }
-                    instructions = 'Read a booking before changing it. For status writes, pass expected_status from the latest read. Never set notify_hirer=true unless the user explicitly authorized that external email. Treat booking contact details as private and do not copy them outside the booking workflow.'
+                    instructions = 'Read current state before changing it. For status writes, pass expected_status from the latest read. run_admin_action can send email, trigger Home Assistant, change payments/settings, or permanently delete data, so obtain explicit authorization for the exact action. Never set notify_hirer=true unless the user authorized that external email. Treat booking contact details and configuration as private.'
                 }
             }
             'notifications/initialized' {

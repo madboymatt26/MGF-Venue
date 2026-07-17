@@ -13,6 +13,20 @@ It calls the authenticated WordPress REST API at `/wp-json/mathlin/v1/admin/...`
 - `set_booking_status` — idempotently set pending, confirmed, or cancelled; external email is opt-in.
 - `update_admin_notes` — replace the private administrator note without emailing the hirer.
 
+- `get_admin_resource` reads blocked dates, series, change requests, invoices,
+  payment links, and redacted plugin/email/custom-field/OSM configuration.
+- `run_admin_action` invokes the same strictly allow-listed handler used by the
+  MGF Venue web admin for booking, payment, series, communication, blocked-date,
+  request, settings, custom-field, Home Assistant and OSM actions.
+- `export_admin_data` saves the web admin's booking/accounting exports to an
+  explicit local CSV path.
+
+The generic admin action tool is deliberately marked destructive so Codex asks
+for approval. The WordPress handler still performs its normal capability and
+input checks. Stored access codes, tokens, webhooks and OSM client credentials
+are never returned by read tools; configuration reads expose only whether those
+secrets are configured.
+
 The WordPress API response allow-list deliberately excludes `modification_token` and any future database fields unless they are explicitly reviewed and added.
 
 ## WordPress authentication

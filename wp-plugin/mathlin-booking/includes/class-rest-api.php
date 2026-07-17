@@ -177,6 +177,73 @@ class MBS_Rest_API {
                 'notes' => array( 'required' => true, 'sanitize_callback' => 'sanitize_textarea_field' ),
             ),
         ) );
+
+        // Strictly allow-listed bridge to the same handlers used by the MGF Venue
+        // admin screens. Reusing those handlers keeps emails, HA webhooks, audit
+        // entries, conflict checks and payment transitions identical to the UI.
+        register_rest_route( self::API_NAMESPACE, '/admin/actions/(?P<action>[a-z_]+)', array(
+            'methods'             => 'POST',
+            'callback'            => array( $this, 'dispatch_admin_action' ),
+            'permission_callback' => array( $this, 'booking_manager_permission' ),
+        ) );
+
+        register_rest_route( self::API_NAMESPACE, '/admin/capabilities', array(
+            'methods'             => 'GET',
+            'callback'            => array( $this, 'get_admin_capabilities' ),
+            'permission_callback' => array( $this, 'booking_manager_permission' ),
+        ) );
+
+        register_rest_route( self::API_NAMESPACE, '/admin/blocked-dates', array(
+            'methods'             => 'GET',
+            'callback'            => array( $this, 'get_admin_blocked_dates' ),
+            'permission_callback' => array( $this, 'booking_manager_permission' ),
+        ) );
+
+        register_rest_route( self::API_NAMESPACE, '/admin/series/(?P<series_id>[A-Z0-9\-]+)', array(
+            'methods'             => 'GET',
+            'callback'            => array( $this, 'get_admin_series' ),
+            'permission_callback' => array( $this, 'booking_manager_permission' ),
+        ) );
+
+        register_rest_route( self::API_NAMESPACE, '/admin/requests', array(
+            'methods'             => 'GET',
+            'callback'            => array( $this, 'get_admin_requests' ),
+            'permission_callback' => array( $this, 'booking_manager_permission' ),
+            'args'                => array(
+                'status' => array( 'default' => 'pending', 'sanitize_callback' => 'sanitize_key' ),
+                'limit'  => array( 'default' => 100, 'sanitize_callback' => 'absint' ),
+            ),
+        ) );
+
+        register_rest_route( self::API_NAMESPACE, '/admin/configuration', array(
+            'methods'             => 'GET',
+            'callback'            => array( $this, 'get_admin_configuration' ),
+            'permission_callback' => array( $this, 'admin_permission' ),
+        ) );
+
+        register_rest_route( self::API_NAMESPACE, '/admin/email-configuration', array(
+            'methods'             => 'GET',
+            'callback'            => array( $this, 'get_admin_email_configuration' ),
+            'permission_callback' => array( $this, 'admin_permission' ),
+        ) );
+
+        register_rest_route( self::API_NAMESPACE, '/admin/custom-fields', array(
+            'methods'             => 'GET',
+            'callback'            => array( $this, 'get_admin_custom_fields' ),
+            'permission_callback' => array( $this, 'admin_permission' ),
+        ) );
+
+        register_rest_route( self::API_NAMESPACE, '/admin/osm-configuration', array(
+            'methods'             => 'GET',
+            'callback'            => array( $this, 'get_admin_osm_configuration' ),
+            'permission_callback' => array( $this, 'admin_permission' ),
+        ) );
+
+        register_rest_route( self::API_NAMESPACE, '/admin/analytics', array(
+            'methods'             => 'GET',
+            'callback'            => array( $this, 'get_admin_analytics' ),
+            'permission_callback' => array( $this, 'booking_manager_permission' ),
+        ) );
     }
 
     public function get_upcoming( WP_REST_Request $request ) {
@@ -457,6 +524,192 @@ class MBS_Rest_API {
             'ref'     => $booking->ref,
             'notes'   => $updated ? $updated->admin_notes : $notes,
         ) );
+    }
+
+    /**
+     * Dispatch an authenticated REST request to an existing MGF Venue admin
+     * action. The handler map is deliberately closed; arbitrary WordPress AJAX
+     * callbacks cannot be invoked through this route.
+     *
+     * Existing handlers call wp_send_json_*() and terminate after producing the
+     * response, so their HTTP body and status are preserved exactly.
+     */
+    public function dispatch_admin_action( WP_REST_Request $request ) {
+        $handlers = $this->get_admin_action_handlers();
+        $action   = sanitize_key( $request->get_param( 'action' ) );
+
+        if ( ! isset( $handlers[ $action ] ) ) {
+            return new WP_Error( 'unknown_admin_action', 'That MGF Venue admin action is not available.', array( 'status' => 404 ) );
+        }
+
+        $payload = $request->get_json_params();
+        if ( ! is_array( $payload ) ) {
+            $payload = $request->get_body_params();
+        }
+        if ( ! is_array( $payload ) ) $payload = array();
+
+        // Application Password authentication establishes the WordPress user.
+        // The server-generated nonce lets the existing AJAX handler retain its
+        // normal CSRF and capability checks without exposing a nonce to clients.
+        $payload['nonce'] = wp_create_nonce( 'mbs_admin_nonce' );
+        $_POST            = $payload;
+        $_GET             = array_merge( $_GET, $payload );
+        $_REQUEST         = array_merge( $_REQUEST, $payload );
+
+        list( $class_name, $method_name ) = $handlers[ $action ];
+        $handler = new $class_name();
+        call_user_func( array( $handler, $method_name ) );
+
+        return new WP_Error( 'admin_action_no_response', 'The admin action completed without returning a response.', array( 'status' => 500 ) );
+    }
+
+    /**
+     * One-to-one allow-list for every action exposed by the MGF Venue admin UI.
+     */
+    private function get_admin_action_handlers() {
+        return array(
+            'update_status'         => array( 'MBS_Admin', 'ajax_update_status' ),
+            'delete_booking'        => array( 'MBS_Admin', 'ajax_delete_booking' ),
+            'mark_refunded'         => array( 'MBS_Admin', 'ajax_mark_refunded' ),
+            'mark_deposit_paid'     => array( 'MBS_Admin', 'ajax_mark_deposit_paid' ),
+            'undo_deposit'          => array( 'MBS_Admin', 'ajax_undo_deposit' ),
+            'restore_booking'       => array( 'MBS_Admin', 'ajax_restore_booking' ),
+            'resend_access'         => array( 'MBS_Admin', 'ajax_resend_access' ),
+            'send_feedback_request' => array( 'MBS_Admin', 'ajax_send_feedback_request' ),
+            'create_scout_recurring'=> array( 'MBS_Admin', 'ajax_create_scout_recurring' ),
+            'get_invoice'           => array( 'MBS_Admin', 'ajax_get_invoice' ),
+            'save_settings'         => array( 'MBS_Admin', 'ajax_save_settings' ),
+            'test_ha'               => array( 'MBS_Admin', 'ajax_test_ha' ),
+            'check_update'          => array( 'MBS_Admin', 'ajax_check_update' ),
+            'archive_past'          => array( 'MBS_Admin', 'ajax_archive_past' ),
+            'add_blocked'           => array( 'MBS_Admin', 'ajax_add_blocked' ),
+            'delete_blocked'        => array( 'MBS_Admin', 'ajax_delete_blocked' ),
+            'clear_expired_blocks'  => array( 'MBS_Admin', 'ajax_clear_expired_blocks' ),
+            'update_series_status'  => array( 'MBS_Admin', 'ajax_update_series_status' ),
+            'cancel_scout_series'   => array( 'MBS_Admin', 'ajax_cancel_scout_series' ),
+            'edit_scout_series'     => array( 'MBS_Admin', 'ajax_edit_scout_series' ),
+            'extend_scout_series'   => array( 'MBS_Admin', 'ajax_extend_scout_series' ),
+            'reopen_scout_series'   => array( 'MBS_Admin', 'ajax_reopen_scout_series' ),
+            'delete_scout_series'   => array( 'MBS_Admin', 'ajax_delete_scout_series' ),
+            'save_admin_notes'      => array( 'MBS_Admin', 'ajax_save_admin_notes' ),
+            'chase_payment'         => array( 'MBS_Admin', 'ajax_chase_payment' ),
+            'save_email_settings'   => array( 'MBS_Admin', 'ajax_save_email_settings' ),
+            'save_custom_fields'    => array( 'MBS_Admin', 'ajax_save_custom_fields' ),
+            'edit_booking'          => array( 'MBS_Admin', 'ajax_edit_booking' ),
+            'approve_request'       => array( 'MBS_Admin', 'ajax_approve_request' ),
+            'reject_request'        => array( 'MBS_Admin', 'ajax_reject_request' ),
+            'bulk_action'           => array( 'MBS_Admin', 'ajax_bulk_action' ),
+            'save_osm_settings'     => array( 'MBS_OSM_Integration', 'ajax_save_settings' ),
+            'test_osm_connection'   => array( 'MBS_OSM_Integration', 'ajax_test_connection' ),
+            'osm_get_sections'      => array( 'MBS_OSM_Integration', 'ajax_get_sections' ),
+            'export_csv'            => array( 'MBS_CSV_Export', 'handle_export' ),
+            'export_accounting'     => array( 'MBS_Accounting_Export', 'handle_export' ),
+        );
+    }
+
+    public function get_admin_capabilities() {
+        return rest_ensure_response( array(
+            'plugin_version' => MBS_VERSION,
+            'role'           => current_user_can( 'manage_options' ) ? 'administrator' : 'booking_manager',
+            'actions'        => array_keys( $this->get_admin_action_handlers() ),
+            'reads'          => array(
+                'bookings', 'booking', 'availability', 'audit', 'blocked_dates',
+                'series', 'requests', 'configuration', 'email_configuration',
+                'custom_fields', 'osm_configuration', 'analytics',
+            ),
+        ) );
+    }
+
+    public function get_admin_blocked_dates() {
+        return rest_ensure_response( array( 'items' => MBS_Blocked_Dates::get_all() ) );
+    }
+
+    public function get_admin_series( WP_REST_Request $request ) {
+        $series_id = strtoupper( sanitize_text_field( $request->get_param( 'series_id' ) ) );
+        $items     = MBS_Bookings::get_series( $series_id );
+        if ( empty( $items ) ) {
+            return new WP_Error( 'not_found', 'Booking series not found.', array( 'status' => 404 ) );
+        }
+        return rest_ensure_response( array(
+            'series_id' => $series_id,
+            'count'     => count( $items ),
+            'items'     => array_map( array( $this, 'format_admin_booking' ), $items ),
+        ) );
+    }
+
+    public function get_admin_requests( WP_REST_Request $request ) {
+        $status = sanitize_key( $request->get_param( 'status' ) ?: 'pending' );
+        $limit  = min( 500, max( 1, absint( $request->get_param( 'limit' ) ?: 100 ) ) );
+        $items  = ( $status === 'pending' )
+            ? MBS_Modification::get_pending()
+            : MBS_Modification::get_all_requests( $limit );
+        return rest_ensure_response( array( 'status' => $status, 'items' => $items ) );
+    }
+
+    public function get_admin_configuration() {
+        $keys = array(
+            'mbs_min_notice_days', 'mbs_min_duration_hours', 'mbs_kitchen_price',
+            'mbs_kitchen_enabled', 'mbs_reminder_hours', 'mbs_terms_page_id',
+            'mbs_auto_archive_days', 'mbs_additional_emails', 'mbs_auto_chase_enabled',
+            'mbs_scout_volunteer_emails', 'mbs_scout_nights_enabled', 'mbs_admin_email',
+            'mbs_bank_sort_code', 'mbs_bank_account_number', 'mbs_bank_account_name',
+            'mbs_payment_terms_days', 'mbs_deposit_enabled', 'mbs_deposit_percentage',
+            'mbs_deposit_balance_days', 'mbs_access_enabled', 'mbs_access_instructions',
+            'mbs_access_health_safety', 'mbs_access_hours_before', 'mbs_venue_capacity',
+            'mbs_curfew_saturday', 'mbs_curfew_sunday', 'mbs_payment_days_required',
+            'mbs_terms_text', 'mbs_booking_notice', 'mbs_facilities_text',
+            'mbs_offline_payment_instructions', 'mbs_feedback_enabled',
+            'mbs_feedback_review_url', 'mbs_feedback_distribution_email',
+            'mbs_feedback_subject', 'mbs_feedback_body',
+        );
+        $values = array();
+        foreach ( $keys as $key ) $values[ $key ] = get_option( $key, null );
+        $values['spaces']             = MBS_Bookings::get_spaces();
+        $values['pricing_tiers']      = MBS_Bookings::get_pricing_tiers();
+        $values['ha_webhook_configured'] = (bool) get_option( 'mbs_ha_webhook_url', '' );
+        $values['github_token_configured'] = (bool) get_option( 'mbs_github_token', '' );
+        $values['access_code_configured']  = (bool) get_option( 'mbs_access_code', '' );
+        return rest_ensure_response( $values );
+    }
+
+    public function get_admin_email_configuration() {
+        $templates = array();
+        foreach ( MBS_Email_Templates::get_template_types() as $type => $definition ) {
+            $templates[ $type ] = array_merge(
+                array( 'label' => $definition['label'] ),
+                MBS_Email_Templates::get_template( $type )
+            );
+        }
+        return rest_ensure_response( array(
+            'organisation' => MBS_Email_Templates::get_org_settings(),
+            'chasing'      => MBS_Email_Templates::get_chase_settings(),
+            'templates'    => $templates,
+        ) );
+    }
+
+    public function get_admin_custom_fields() {
+        return rest_ensure_response( array( 'items' => MBS_Custom_Fields::get_fields() ) );
+    }
+
+    public function get_admin_osm_configuration() {
+        $settings = MBS_OSM_Integration::get_settings();
+        $settings['client_id_configured']     = ! empty( $settings['client_id'] );
+        $settings['client_secret_configured'] = ! empty( $settings['client_secret'] );
+        unset( $settings['client_id'], $settings['client_secret'] );
+        $settings['gilbertweb_available'] = MBS_OSM_Integration::gilbertweb_available();
+        return rest_ensure_response( $settings );
+    }
+
+    /**
+     * Render the existing analytics view so the integration sees exactly the
+     * same metrics and date basis as the WordPress admin page. The HTML is kept
+     * intact because the page contains a broad set of derived charts and tables.
+     */
+    public function get_admin_analytics() {
+        ob_start();
+        include MBS_PLUGIN_DIR . 'admin/views/analytics.php';
+        $html = ob_get_clean();
+        return rest_ensure_response( array( 'html' => $html ) );
     }
 
     private function find_booking( WP_REST_Request $request ) {
