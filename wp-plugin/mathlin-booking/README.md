@@ -4,11 +4,26 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.19.0
+**Current Version:** 3.20.0
 **Requires WordPress:** 5.0+  
 **Requires PHP:** 7.4+  
 **Tested with WordPress:** 6.7  
 **License:** GPL-2.0+
+
+---
+
+## 3.20.0 MCP booking creation and audited parity
+
+- Adds an idempotent, capability-protected REST/MCP tool for creating normal
+  one-off or weekly recurring bookings, including administrator Scout-use
+  override, optional custom pricing, conflict/blocked-date validation and
+  opt-in hirer email.
+- Confirmed creations reuse the existing status transition so Home Assistant
+  notification and automatic paid status for free bookings remain consistent.
+- Adds global Audit Log and dashboard reads plus a Scout-only booking filter.
+- Extends transaction-time conflict protection across every day and related
+  parent/child space for multi-day bookings.
+- Capability discovery now reports role-appropriate reads and actions.
 
 ---
 

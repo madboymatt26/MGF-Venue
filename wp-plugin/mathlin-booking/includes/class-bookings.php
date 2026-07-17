@@ -390,7 +390,19 @@ class MBS_Bookings {
         return $ref;
     }
 
-    public static function create( $data ) {
+    /**
+     * Create a booking.
+     *
+     * The trusted-admin flag is deliberately a method argument rather than a
+     * request field. Public callers can therefore never self-authorise Scout
+     * use or a custom price by adding extra POST parameters.
+     *
+     * @param array $data Booking fields.
+     * @param bool  $trusted_admin_context Allow an authenticated booking
+     *                                     manager to override Scout use and
+     *                                     set an explicit non-negative amount.
+     */
+    public static function create( $data, $trusted_admin_context = false ) {
         global $wpdb;
         $table = $wpdb->prefix . MBS_TABLE;
 
@@ -405,7 +417,7 @@ class MBS_Bookings {
         if ( ! empty( $data['scout_use'] ) ) {
             $vol_emails = array_filter( array_map( 'trim', explode( "\n", get_option( 'mbs_scout_volunteer_emails', '' ) ) ) );
             $submitter_email = sanitize_email( $data['email'] ?? '' );
-            $scout_use = in_array( strtolower( $submitter_email ), array_map( 'strtolower', $vol_emails ) );
+            $scout_use = $trusted_admin_context || in_array( strtolower( $submitter_email ), array_map( 'strtolower', $vol_emails ), true );
         }
 
         // Enforce the minimum booking duration before doing any expensive work
@@ -431,6 +443,10 @@ class MBS_Bookings {
             $num_days,
             $scout_use
         );
+
+        if ( $trusted_admin_context && ! $scout_use && array_key_exists( 'custom_amount', $data ) && $data['custom_amount'] !== '' && $data['custom_amount'] !== null ) {
+            $cost = max( 0, round( (float) $data['custom_amount'], 2 ) );
+        }
 
         $insert = array(
             'ref'              => $ref,
@@ -477,23 +493,45 @@ class MBS_Bookings {
         // SEC-001: Use transaction with row locking to prevent race condition double bookings
         $wpdb->query( 'START TRANSACTION' );
 
-        // Acquire an exclusive lock on the relevant date/space rows to prevent concurrent inserts
-        $wpdb->query( $wpdb->prepare(
-            "SELECT id FROM {$table} WHERE space = %s AND booking_date = %s AND status NOT IN ('cancelled','archived') FOR UPDATE",
-            sanitize_text_field( $data['space'] ), $date_from
-        ) );
-
-        // Re-check conflicts inside the transaction (now with lock held)
         $space_val = sanitize_text_field( $data['space'] );
-        $tx_conflicts = self::check_conflicts(
-            $space_val, $date_from,
-            $all_day ? null : ( $data['start_time'] ?? '' ),
-            $all_day ? null : ( $data['end_time'] ?? '' ),
-            $all_day
-        );
-        if ( ! empty( $tx_conflicts ) ) {
-            $wpdb->query( 'ROLLBACK' );
-            return new WP_Error( 'conflict', self::format_conflict_message( $tx_conflicts ) );
+        $spaces_to_lock = array_unique( array_merge( array( $space_val ), self::get_related_spaces( $space_val ) ) );
+
+        // Lock and re-check every day in a multi-day booking, including related
+        // parent/child spaces. Previously only the first day and exact space
+        // were transactionally protected.
+        for ( $check_ts = strtotime( $date_from ), $end_ts = strtotime( $date_to ); $check_ts <= $end_ts; $check_ts += DAY_IN_SECONDS ) {
+            $check_date = wp_date( 'Y-m-d', $check_ts );
+            foreach ( $spaces_to_lock as $lock_space ) {
+                $wpdb->query( $wpdb->prepare(
+                    "SELECT id FROM {$table}
+                     WHERE space = %s AND status NOT IN ('cancelled','archived')
+                     AND (booking_date = %s OR (booking_date_end IS NOT NULL AND booking_date <= %s AND booking_date_end >= %s))
+                     FOR UPDATE",
+                    $lock_space,
+                    $check_date,
+                    $check_date,
+                    $check_date,
+                    $check_date
+                ) );
+            }
+
+            $blocked = MBS_Blocked_Dates::is_blocked( $check_date, $space_val );
+            if ( $blocked ) {
+                $wpdb->query( 'ROLLBACK' );
+                return new WP_Error( 'blocked_date', 'The venue is blocked on ' . $check_date . ( $blocked->reason ? ': ' . $blocked->reason : '.' ) );
+            }
+
+            $tx_conflicts = self::check_conflicts(
+                $space_val,
+                $check_date,
+                $all_day ? null : ( $data['start_time'] ?? '' ),
+                $all_day ? null : ( $data['end_time'] ?? '' ),
+                $all_day
+            );
+            if ( ! empty( $tx_conflicts ) ) {
+                $wpdb->query( 'ROLLBACK' );
+                return new WP_Error( 'conflict', self::format_conflict_message( $tx_conflicts ) );
+            }
         }
 
         $result = $wpdb->insert( $table, $insert );
@@ -537,6 +575,7 @@ class MBS_Bookings {
             'offset'    => 0,
             'exclude_archived' => true,
             'exclude_scout'    => false,
+            'scout_only'       => false,
         );
         $args = wp_parse_args( $args, $defaults );
 
@@ -549,7 +588,9 @@ class MBS_Bookings {
         } elseif ( $args['exclude_archived'] ) {
             $where[] = "status != 'archived'";
         }
-        if ( $args['exclude_scout'] ) {
+        if ( $args['scout_only'] ) {
+            $where[] = "scout_use = 1";
+        } elseif ( $args['exclude_scout'] ) {
             $where[] = "scout_use = 0";
         }
         if ( $args['date_from'] ) {
@@ -787,9 +828,11 @@ class MBS_Bookings {
      *
      * @param array  $data       Base booking data
      * @param string $repeat_until  End date for recurrence (Y-m-d)
+     * @param bool   $trusted_admin_context Forward the explicit trusted admin
+     *                                      context to each occurrence.
      * @return array  Array of created booking refs, or WP_Error
      */
-    public static function create_recurring( $data, $repeat_until ) {
+    public static function create_recurring( $data, $repeat_until, $trusted_admin_context = false ) {
         $series_id  = self::generate_series_id();
         $start_date = sanitize_text_field( $data['booking_date'] );
         $end_date   = sanitize_text_field( $repeat_until );
@@ -835,7 +878,7 @@ class MBS_Bookings {
             $booking_data['booking_date'] = $date_str;
             $booking_data['booking_date_end'] = $date_str;
 
-            $result = self::create( $booking_data );
+            $result = self::create( $booking_data, $trusted_admin_context );
 
             if ( is_wp_error( $result ) ) {
                 $current += 7 * 86400;

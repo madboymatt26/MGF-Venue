@@ -7,7 +7,7 @@ $ProgressPreference = 'SilentlyContinue'
 $InformationPreference = 'SilentlyContinue'
 
 $script:ServerName = 'mgf-venue'
-$script:ServerVersion = '0.2.0'
+$script:ServerVersion = '0.3.0'
 $script:DefaultProtocolVersion = '2025-06-18'
 
 function Get-PropertyValue {
@@ -216,10 +216,47 @@ $script:Tools = @(
                 offset = @{ type = 'integer'; minimum = 0; default = 0 }
                 exclude_archived = @{ type = 'boolean'; default = $true }
                 exclude_scout = @{ type = 'boolean'; default = $false }
+                scout_only = @{ type = 'boolean'; default = $false; description = 'Return only internal Scout-use bookings.' }
             }
             additionalProperties = $false
         }
         annotations = @{ readOnlyHint = $true; destructiveHint = $false; idempotentHint = $true; openWorldHint = $true }
+    },
+    @{
+        name = 'create_booking'
+        title = 'Create a venue booking'
+        description = 'Create a normal one-off booking or an optional weekly series. Scout use is free. New confirmed bookings use the normal status transition, including Home Assistant notification and automatic paid status for a £0 one-off booking. notify_hirer defaults to false. Reuse the same idempotency_key when retrying an uncertain call.'
+        inputSchema = @{
+            type = 'object'
+            properties = @{
+                idempotency_key = @{ type = 'string'; minLength = 8; maxLength = 128; description = 'Stable unique key for this intended booking.' }
+                name = @{ type = 'string'; description = 'Contact name. Defaults to the purpose for Scout use.' }
+                organisation = @{ type = 'string' }
+                email = @{ type = 'string'; description = 'Contact email. Defaults to the current WordPress user/admin email.' }
+                phone = @{ type = 'string' }
+                address = @{ type = 'string' }
+                space = @{ type = 'string' }
+                booking_date = @{ type = 'string'; description = 'Start date in YYYY-MM-DD format.' }
+                booking_date_end = @{ type = 'string'; description = 'Optional inclusive end date in YYYY-MM-DD format.' }
+                repeat_until = @{ type = 'string'; description = 'Optional weekly recurrence end date in YYYY-MM-DD format, up to 52 weeks. Cannot be combined with a multi-day booking_date_end.' }
+                start_time = @{ type = 'string'; description = 'Required for timed bookings, HH:MM.' }
+                end_time = @{ type = 'string'; description = 'Required for timed bookings, HH:MM.' }
+                all_day = @{ type = 'boolean'; default = $false }
+                scout_use = @{ type = 'boolean'; default = $false; description = 'Internal Scout use; calculated charge is £0.' }
+                kitchen = @{ type = 'boolean'; default = $false }
+                attendees = @{ type = 'integer'; minimum = 0; default = 0 }
+                purpose = @{ type = 'string' }
+                notes = @{ type = 'string' }
+                is_public = @{ type = 'boolean'; default = $false }
+                status = @{ type = 'string'; enum = @('pending', 'confirmed'); default = 'confirmed' }
+                custom_amount = @{ type = 'number'; minimum = 0; description = 'Optional administrator price override.' }
+                custom_fields = @{ type = 'object'; additionalProperties = @{ type = 'string' } }
+                notify_hirer = @{ type = 'boolean'; default = $false; description = 'Send the normal booking/confirmation email only when explicitly authorised.' }
+            }
+            required = @('idempotency_key', 'space', 'booking_date', 'purpose')
+            additionalProperties = $false
+        }
+        annotations = @{ readOnlyHint = $false; destructiveHint = $false; idempotentHint = $true; openWorldHint = $true }
     },
     @{
         name = 'get_booking'
@@ -304,11 +341,12 @@ $script:Tools = @(
         inputSchema = @{
             type = 'object'
             properties = @{
-                resource = @{ type = 'string'; enum = @('capabilities', 'blocked_dates', 'series', 'requests', 'configuration', 'email_configuration', 'custom_fields', 'osm_configuration', 'analytics', 'invoice', 'payment_url') }
+                resource = @{ type = 'string'; enum = @('capabilities', 'dashboard', 'blocked_dates', 'series', 'requests', 'global_audit', 'configuration', 'email_configuration', 'custom_fields', 'osm_configuration', 'analytics', 'invoice', 'payment_url') }
                 ref = @{ type = 'string'; description = 'Booking reference, required for invoice and payment_url.' }
                 series_id = @{ type = 'string'; description = 'Series identifier, required for series.' }
                 status = @{ type = 'string'; enum = @('pending', 'all'); default = 'pending' }
-                limit = @{ type = 'integer'; minimum = 1; maximum = 500; default = 100 }
+                search = @{ type = 'string'; description = 'Search reference, action, details or user for global_audit.' }
+                limit = @{ type = 'integer'; minimum = 1; maximum = 1000; default = 100 }
             }
             required = @('resource')
             additionalProperties = $false
@@ -370,7 +408,7 @@ function Invoke-MgfVenueTool {
     switch ($Name) {
         'list_bookings' {
             $queryValues = @{}
-            foreach ($key in @('status', 'date_from', 'date_to', 'search', 'orderby', 'order', 'limit', 'offset', 'exclude_archived', 'exclude_scout')) {
+            foreach ($key in @('status', 'date_from', 'date_to', 'search', 'orderby', 'order', 'limit', 'offset', 'exclude_archived', 'exclude_scout', 'scout_only')) {
                 $value = Get-PropertyValue $Arguments $key $null
                 if ($null -ne $value) { $queryValues[$key] = $value }
             }
@@ -378,6 +416,9 @@ function Invoke-MgfVenueTool {
             $path = '/admin/bookings'
             if ($query) { $path += "?${query}" }
             return Invoke-VenueApi -Method GET -Path $path
+        }
+        'create_booking' {
+            return Invoke-VenueApi -Method POST -Path '/admin/bookings/create' -Body $Arguments
         }
         'get_booking' {
             $ref = [Uri]::EscapeDataString(([string](Get-PropertyValue $Arguments 'ref' '')).ToUpperInvariant())
@@ -415,6 +456,7 @@ function Invoke-MgfVenueTool {
             $resource = [string](Get-PropertyValue $Arguments 'resource' '')
             switch ($resource) {
                 'capabilities' { return Invoke-VenueApi -Method GET -Path '/admin/capabilities' }
+                'dashboard' { return Invoke-VenueApi -Method GET -Path '/admin/dashboard' }
                 'blocked_dates' { return Invoke-VenueApi -Method GET -Path '/admin/blocked-dates' }
                 'series' {
                     $seriesId = [Uri]::EscapeDataString(([string](Get-PropertyValue $Arguments 'series_id' '')).ToUpperInvariant())
@@ -426,6 +468,13 @@ function Invoke-MgfVenueTool {
                         limit = Get-PropertyValue $Arguments 'limit' 100
                     }
                     return Invoke-VenueApi -Method GET -Path "/admin/requests?${query}"
+                }
+                'global_audit' {
+                    $query = ConvertTo-QueryString @{
+                        search = Get-PropertyValue $Arguments 'search' ''
+                        limit = Get-PropertyValue $Arguments 'limit' 200
+                    }
+                    return Invoke-VenueApi -Method GET -Path "/admin/audit?${query}"
                 }
                 'configuration' { return Invoke-VenueApi -Method GET -Path '/admin/configuration' }
                 'email_configuration' { return Invoke-VenueApi -Method GET -Path '/admin/email-configuration' }
@@ -493,7 +542,7 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
                     protocolVersion = $requestedProtocol
                     capabilities = @{ tools = @{ listChanged = $false } }
                     serverInfo = @{ name = $script:ServerName; version = $script:ServerVersion }
-                    instructions = 'Read current state before changing it. For status writes, pass expected_status from the latest read. run_admin_action can send email, trigger Home Assistant, change payments/settings, or permanently delete data, so obtain explicit authorization for the exact action. Never set notify_hirer=true unless the user authorized that external email. Treat booking contact details and configuration as private.'
+                    instructions = 'Read current state before changing it. Before create_booking, confirm the exact date, time and space, check availability, use a stable idempotency_key, and leave notify_hirer false unless external email was explicitly authorised. For status writes, pass expected_status from the latest read. run_admin_action can send email, trigger Home Assistant, change payments/settings, or permanently delete data, so obtain explicit authorization for the exact action. Treat booking contact details and configuration as private.'
                 }
             }
             'notifications/initialized' {

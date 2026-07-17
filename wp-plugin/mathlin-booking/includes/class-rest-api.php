@@ -116,6 +116,19 @@ class MBS_Rest_API {
                 'offset'           => array( 'default' => 0, 'sanitize_callback' => 'absint' ),
                 'exclude_archived' => array( 'default' => true, 'sanitize_callback' => 'rest_sanitize_boolean' ),
                 'exclude_scout'    => array( 'default' => false, 'sanitize_callback' => 'rest_sanitize_boolean' ),
+                'scout_only'       => array( 'default' => false, 'sanitize_callback' => 'rest_sanitize_boolean' ),
+            ),
+        ) );
+
+        register_rest_route( self::API_NAMESPACE, '/admin/bookings/create', array(
+            'methods'             => 'POST',
+            'callback'            => array( $this, 'create_admin_booking' ),
+            'permission_callback' => array( $this, 'booking_manager_permission' ),
+            'args'                => array(
+                'idempotency_key' => array( 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ),
+                'space'           => array( 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ),
+                'booking_date'    => array( 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ),
+                'purpose'         => array( 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ),
             ),
         ) );
 
@@ -213,6 +226,22 @@ class MBS_Rest_API {
                 'status' => array( 'default' => 'pending', 'sanitize_callback' => 'sanitize_key' ),
                 'limit'  => array( 'default' => 100, 'sanitize_callback' => 'absint' ),
             ),
+        ) );
+
+        register_rest_route( self::API_NAMESPACE, '/admin/audit', array(
+            'methods'             => 'GET',
+            'callback'            => array( $this, 'get_admin_global_audit' ),
+            'permission_callback' => array( $this, 'booking_manager_permission' ),
+            'args'                => array(
+                'search' => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
+                'limit'  => array( 'default' => 200, 'sanitize_callback' => 'absint' ),
+            ),
+        ) );
+
+        register_rest_route( self::API_NAMESPACE, '/admin/dashboard', array(
+            'methods'             => 'GET',
+            'callback'            => array( $this, 'get_admin_dashboard' ),
+            'permission_callback' => array( $this, 'booking_manager_permission' ),
         ) );
 
         register_rest_route( self::API_NAMESPACE, '/admin/configuration', array(
@@ -318,6 +347,209 @@ class MBS_Rest_API {
     }
 
     /**
+     * Create a normal one-off booking from a trusted admin integration.
+     *
+     * This deliberately uses the core booking creator and status transition
+     * methods so pricing, conflict checks, audit logging, Home Assistant and
+     * the free-booking auto-paid rule stay identical to existing web flows.
+     */
+    public function create_admin_booking( WP_REST_Request $request ) {
+        $idempotency_key = sanitize_text_field( $request->get_param( 'idempotency_key' ) ?? '' );
+        if ( strlen( $idempotency_key ) < 8 || strlen( $idempotency_key ) > 128 ) {
+            return new WP_Error( 'invalid_idempotency_key', 'idempotency_key must be between 8 and 128 characters.', array( 'status' => 400 ) );
+        }
+
+        $transient_key = 'mbs_admin_create_' . substr( hash( 'sha256', get_current_user_id() . ':' . $idempotency_key ), 0, 40 );
+        $existing_ref  = get_transient( $transient_key );
+        if ( $existing_ref ) {
+            if ( strpos( $existing_ref, 'SER-' ) === 0 ) {
+                $existing_series = MBS_Bookings::get_series( $existing_ref );
+                if ( ! empty( $existing_series ) ) {
+                    return rest_ensure_response( array(
+                        'created'           => false,
+                        'idempotent_replay' => true,
+                        'notified_hirer'    => false,
+                        'series'            => array(
+                            'series_id' => $existing_ref,
+                            'count'     => count( $existing_series ),
+                            'items'     => array_map( array( $this, 'format_admin_booking' ), $existing_series ),
+                        ),
+                    ) );
+                }
+            }
+            $existing = MBS_Bookings::get( $existing_ref );
+            if ( $existing ) {
+                return rest_ensure_response( array(
+                    'created'            => false,
+                    'idempotent_replay'  => true,
+                    'notified_hirer'     => false,
+                    'booking'            => $this->format_admin_booking( $existing ),
+                ) );
+            }
+            delete_transient( $transient_key );
+        }
+
+        $space       = sanitize_text_field( $request->get_param( 'space' ) ?? '' );
+        $date_from   = sanitize_text_field( $request->get_param( 'booking_date' ) ?? '' );
+        $date_to     = sanitize_text_field( $request->get_param( 'booking_date_end' ) ?? '' ) ?: $date_from;
+        $repeat_until = sanitize_text_field( $request->get_param( 'repeat_until' ) ?? '' );
+        $all_day     = rest_sanitize_boolean( $request->get_param( 'all_day' ) );
+        $start_time  = sanitize_text_field( $request->get_param( 'start_time' ) ?? '' );
+        $end_time    = sanitize_text_field( $request->get_param( 'end_time' ) ?? '' );
+        $purpose     = sanitize_text_field( $request->get_param( 'purpose' ) ?? '' );
+        $status      = sanitize_key( $request->get_param( 'status' ) ?: 'confirmed' );
+        $scout_use   = rest_sanitize_boolean( $request->get_param( 'scout_use' ) );
+        $notify      = rest_sanitize_boolean( $request->get_param( 'notify_hirer' ) );
+        $spaces      = MBS_Bookings::get_spaces();
+
+        if ( ! isset( $spaces[ $space ] ) ) {
+            return new WP_Error( 'invalid_space', 'Unknown venue space.', array( 'status' => 400 ) );
+        }
+        if ( ! $this->is_valid_date( $date_from ) || ! $this->is_valid_date( $date_to ) ) {
+            return new WP_Error( 'invalid_date', 'Booking dates must use YYYY-MM-DD.', array( 'status' => 400 ) );
+        }
+        if ( $date_from < wp_date( 'Y-m-d' ) ) {
+            return new WP_Error( 'past_date', 'Administrators cannot create a booking in the past.', array( 'status' => 400 ) );
+        }
+        if ( $date_to < $date_from ) {
+            return new WP_Error( 'invalid_date_range', 'booking_date_end must be on or after booking_date.', array( 'status' => 400 ) );
+        }
+        if ( ( strtotime( $date_to ) - strtotime( $date_from ) ) > 366 * DAY_IN_SECONDS ) {
+            return new WP_Error( 'date_range_too_long', 'A booking cannot span more than 367 days.', array( 'status' => 400 ) );
+        }
+        if ( $repeat_until ) {
+            if ( ! $this->is_valid_date( $repeat_until ) || $repeat_until < $date_from ) {
+                return new WP_Error( 'invalid_repeat_until', 'repeat_until must be on or after booking_date and use YYYY-MM-DD.', array( 'status' => 400 ) );
+            }
+            if ( $date_to !== $date_from ) {
+                return new WP_Error( 'recurring_multi_day_unsupported', 'Weekly recurring creation cannot also use a multi-day booking_date_end.', array( 'status' => 400 ) );
+            }
+            if ( ( strtotime( $repeat_until ) - strtotime( $date_from ) ) > 364 * DAY_IN_SECONDS ) {
+                return new WP_Error( 'repeat_range_too_long', 'Weekly recurring creation is limited to 52 weeks.', array( 'status' => 400 ) );
+            }
+        }
+        if ( ! $purpose ) {
+            return new WP_Error( 'missing_purpose', 'purpose is required.', array( 'status' => 400 ) );
+        }
+        if ( ! in_array( $status, array( 'pending', 'confirmed' ), true ) ) {
+            return new WP_Error( 'invalid_status', 'New bookings can be pending or confirmed.', array( 'status' => 400 ) );
+        }
+        if ( ! $all_day ) {
+            if ( ! $this->is_valid_time( $start_time ) || ! $this->is_valid_time( $end_time ) ) {
+                return new WP_Error( 'invalid_time', 'Timed bookings require HH:MM start and end times.', array( 'status' => 400 ) );
+            }
+            if ( strtotime( $end_time ) <= strtotime( $start_time ) ) {
+                return new WP_Error( 'invalid_time_range', 'end_time must be after start_time.', array( 'status' => 400 ) );
+            }
+        }
+
+        $current_user = wp_get_current_user();
+        $name          = sanitize_text_field( $request->get_param( 'name' ) ?? '' );
+        $email         = sanitize_email( $request->get_param( 'email' ) ?? '' );
+        if ( ! $name ) $name = $scout_use ? $purpose : sanitize_text_field( $current_user->display_name );
+        if ( ! $email ) $email = sanitize_email( $current_user->user_email ?: MBS_Bookings::get_admin_email() );
+        if ( ! is_email( $email ) ) {
+            return new WP_Error( 'invalid_email', 'A valid booking contact email is required.', array( 'status' => 400 ) );
+        }
+
+        $custom_fields = $request->get_param( 'custom_fields' );
+        if ( ! is_array( $custom_fields ) ) $custom_fields = array();
+        $custom_check = MBS_Custom_Fields::validate_submission( array( 'custom_fields' => $custom_fields ) );
+        if ( is_wp_error( $custom_check ) ) return $custom_check;
+
+        $data = array(
+            'name'             => $name,
+            'organisation'     => sanitize_text_field( $request->get_param( 'organisation' ) ?: get_option( 'mbs_org_name', get_bloginfo( 'name' ) ) ),
+            'email'            => $email,
+            'phone'            => sanitize_text_field( $request->get_param( 'phone' ) ?? '' ),
+            'address'          => sanitize_textarea_field( $request->get_param( 'address' ) ?? '' ),
+            'space'            => $space,
+            'kitchen'          => rest_sanitize_boolean( $request->get_param( 'kitchen' ) ),
+            'booking_date'     => $date_from,
+            'booking_date_end' => $date_to,
+            'all_day'          => $all_day,
+            'scout_use'        => $scout_use,
+            'start_time'       => $all_day ? '' : $start_time,
+            'end_time'         => $all_day ? '' : $end_time,
+            'attendees'        => absint( $request->get_param( 'attendees' ) ?? 0 ),
+            'purpose'          => $purpose,
+            'notes'            => sanitize_textarea_field( $request->get_param( 'notes' ) ?? '' ),
+            'is_public'        => rest_sanitize_boolean( $request->get_param( 'is_public' ) ),
+            'custom_fields'    => $custom_fields,
+        );
+
+        $custom_amount = $request->get_param( 'custom_amount' );
+        if ( $custom_amount !== null && $custom_amount !== '' ) {
+            if ( ! is_numeric( $custom_amount ) || (float) $custom_amount < 0 ) {
+                return new WP_Error( 'invalid_custom_amount', 'custom_amount must be a non-negative number.', array( 'status' => 400 ) );
+            }
+            if ( $scout_use && (float) $custom_amount !== 0.0 ) {
+                return new WP_Error( 'scout_booking_must_be_free', 'Scout-use bookings must have a zero amount.', array( 'status' => 400 ) );
+            }
+            $data['custom_amount'] = (float) $custom_amount;
+        }
+
+        if ( $repeat_until ) {
+            $result = MBS_Bookings::create_recurring( $data, $repeat_until, true );
+            if ( is_wp_error( $result ) ) return $result;
+
+            if ( $status === 'confirmed' && MBS_Bookings::update_series_status( $result['series_id'], 'confirmed' ) === false ) {
+                return new WP_Error( 'confirmation_failed', 'The booking series was created but could not be confirmed.', array( 'status' => 500, 'series_id' => $result['series_id'] ) );
+            }
+
+            $series_items = MBS_Bookings::get_series( $result['series_id'] );
+            if ( $notify ) {
+                MBS_Email::notify_recurring_summary(
+                    $result['series_id'],
+                    $result['refs'],
+                    $result['skipped'],
+                    $name,
+                    $email,
+                    $space,
+                    $all_day ? 'All day' : ( $start_time . ' – ' . $end_time )
+                );
+            }
+
+            set_transient( $transient_key, $result['series_id'], DAY_IN_SECONDS );
+            return rest_ensure_response( array(
+                'created'           => true,
+                'idempotent_replay' => false,
+                'notified_hirer'    => (bool) $notify,
+                'series'            => array(
+                    'series_id' => $result['series_id'],
+                    'count'     => count( $series_items ),
+                    'skipped'   => $result['skipped'],
+                    'items'     => array_map( array( $this, 'format_admin_booking' ), $series_items ),
+                ),
+            ) );
+        }
+
+        $result = MBS_Bookings::create( $data, true );
+        if ( is_wp_error( $result ) ) return $result;
+
+        if ( $status === 'confirmed' && MBS_Bookings::update_status( $result['ref'], 'confirmed' ) === false ) {
+            return new WP_Error( 'confirmation_failed', 'Booking was created but could not be confirmed.', array( 'status' => 500, 'ref' => $result['ref'] ) );
+        }
+
+        $booking = MBS_Bookings::get( $result['ref'] );
+        if ( $notify && $booking ) {
+            if ( $status === 'confirmed' ) {
+                MBS_Email::notify_confirmed( $booking );
+            } else {
+                MBS_Email::notify_booker( $result );
+            }
+        }
+
+        set_transient( $transient_key, $result['ref'], DAY_IN_SECONDS );
+        return rest_ensure_response( array(
+            'created'           => true,
+            'idempotent_replay' => false,
+            'notified_hirer'    => (bool) $notify,
+            'booking'           => $this->format_admin_booking( $booking ),
+        ) );
+    }
+
+    /**
      * Return a filtered, paginated booking list for trusted admin integrations.
      */
     public function get_admin_bookings( WP_REST_Request $request ) {
@@ -335,6 +567,7 @@ class MBS_Rest_API {
             'offset'           => $offset,
             'exclude_archived' => rest_sanitize_boolean( $request->get_param( 'exclude_archived' ) ),
             'exclude_scout'    => rest_sanitize_boolean( $request->get_param( 'exclude_scout' ) ),
+            'scout_only'       => rest_sanitize_boolean( $request->get_param( 'scout_only' ) ),
         );
 
         $bookings = MBS_Bookings::get_all( $args );
@@ -373,6 +606,46 @@ class MBS_Rest_API {
         }, MBS_Audit_Log::get_for_booking( $booking->ref ) );
 
         return rest_ensure_response( array( 'ref' => $booking->ref, 'items' => $entries ) );
+    }
+
+    /**
+     * Return the global Audit Log with the same search and row limits as the
+     * admin page. Stored IP addresses and numeric user IDs are omitted.
+     */
+    public function get_admin_global_audit( WP_REST_Request $request ) {
+        $search = sanitize_text_field( $request->get_param( 'search' ) ?? '' );
+        $limit  = max( 20, min( 1000, absint( $request->get_param( 'limit' ) ?: 200 ) ) );
+        $rows   = $search !== '' ? MBS_Audit_Log::search( $search, $limit ) : MBS_Audit_Log::get_recent( $limit );
+
+        $items = array_map( function( $entry ) {
+            return array(
+                'ref'        => $entry->ref,
+                'action'     => $entry->action,
+                'label'      => MBS_Audit_Log::action_label( $entry->action ),
+                'details'    => $entry->details,
+                'user_name'  => $entry->user_name,
+                'created_at' => $entry->created_at,
+            );
+        }, $rows );
+
+        return rest_ensure_response( array(
+            'search' => $search,
+            'limit'  => $limit,
+            'count'  => count( $items ),
+            'items'  => $items,
+        ) );
+    }
+
+    /**
+     * Return the compact counters shown around the booking dashboard without
+     * requiring integrations to render and scrape an admin HTML page.
+     */
+    public function get_admin_dashboard() {
+        return rest_ensure_response( array(
+            'external_bookings'       => MBS_Bookings::get_stats( true ),
+            'all_bookings'            => MBS_Bookings::get_stats( false ),
+            'pending_change_requests' => MBS_Modification::get_pending_count(),
+        ) );
     }
 
     /**
@@ -608,15 +881,32 @@ class MBS_Rest_API {
     }
 
     public function get_admin_capabilities() {
+        $is_admin = current_user_can( 'manage_options' );
+        $actions  = array_merge( array( 'create_booking' ), array_keys( $this->get_admin_action_handlers() ) );
+        $reads    = array(
+            'bookings', 'booking', 'availability', 'audit', 'global_audit',
+            'dashboard', 'blocked_dates', 'series', 'requests', 'analytics',
+        );
+
+        if ( $is_admin ) {
+            $reads = array_merge( $reads, array(
+                'configuration', 'email_configuration', 'custom_fields', 'osm_configuration',
+            ) );
+        } else {
+            $admin_only_actions = array(
+                'delete_booking', 'save_settings', 'test_ha', 'check_update',
+                'delete_scout_series', 'save_email_settings', 'save_custom_fields',
+                'save_osm_settings', 'test_osm_connection', 'osm_get_sections',
+                'export_csv', 'export_accounting',
+            );
+            $actions = array_values( array_diff( $actions, $admin_only_actions ) );
+        }
+
         return rest_ensure_response( array(
             'plugin_version' => MBS_VERSION,
-            'role'           => current_user_can( 'manage_options' ) ? 'administrator' : 'booking_manager',
-            'actions'        => array_keys( $this->get_admin_action_handlers() ),
-            'reads'          => array(
-                'bookings', 'booking', 'availability', 'audit', 'blocked_dates',
-                'series', 'requests', 'configuration', 'email_configuration',
-                'custom_fields', 'osm_configuration', 'analytics',
-            ),
+            'role'           => $is_admin ? 'administrator' : 'booking_manager',
+            'actions'        => $actions,
+            'reads'          => $reads,
         ) );
     }
 
