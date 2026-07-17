@@ -184,7 +184,7 @@ class MBS_Modification {
                     $date_to   = $update['booking_date_end'] ?? $booking->booking_date_end ?? $date_from;
                     $num_days  = max( 1, (int) round( ( strtotime( $date_to ) - strtotime( $date_from ) ) / 86400 ) + 1 );
 
-                    $new_amount = MBS_Bookings::calculate_cost( $space, $start, $end, (bool) $kitchen, (bool) $all_day, $num_days, (bool) $booking->scout_use );
+                    $new_amount = MBS_Bookings::calculate_cost( $space, $start, $end, (bool) $kitchen, (bool) $all_day, $num_days, (bool) $booking->scout_use, MBS_Bookings::get_booking_tier( $booking ) );
                     $update['amount'] = $new_amount;
 
                     // Auto-confirm: determine correct status based on amount_paid

@@ -345,9 +345,10 @@ class MBS_Public {
             // Send admin notification
             $first_booking_data = $_POST;
             $first_booking_data['ref'] = $result['refs'][0];
+            $first_booking = MBS_Bookings::get( $result['refs'][0] );
             MBS_Email::notify_admin( array_merge( $first_booking_data, array(
                 'ref' => $result['refs'][0],
-                'amount' => MBS_Bookings::calculate_cost( $space, $_POST['start_time'] ?? '', $_POST['end_time'] ?? '', ! empty( $_POST['kitchen'] ), $all_day ),
+                'amount' => $first_booking ? (float) $first_booking->amount : 0,
             ) ) );
 
             // Send recurring summary email to booker

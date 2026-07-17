@@ -399,6 +399,7 @@ class MBS_Rest_API {
         $purpose     = sanitize_text_field( $request->get_param( 'purpose' ) ?? '' );
         $status      = sanitize_key( $request->get_param( 'status' ) ?: 'confirmed' );
         $scout_use   = rest_sanitize_boolean( $request->get_param( 'scout_use' ) );
+        $pricing_tier = sanitize_key( $request->get_param( 'pricing_tier' ) ?: 'standard' );
         $notify      = rest_sanitize_boolean( $request->get_param( 'notify_hirer' ) );
         $spaces      = MBS_Bookings::get_spaces();
 
@@ -433,6 +434,9 @@ class MBS_Rest_API {
         }
         if ( ! in_array( $status, array( 'pending', 'confirmed' ), true ) ) {
             return new WP_Error( 'invalid_status', 'New bookings can be pending or confirmed.', array( 'status' => 400 ) );
+        }
+        if ( ! isset( MBS_Bookings::get_pricing_tiers()[ $pricing_tier ] ) ) {
+            return new WP_Error( 'invalid_pricing_tier', 'Unknown pricing tier.', array( 'status' => 400 ) );
         }
         if ( ! $all_day ) {
             if ( ! $this->is_valid_time( $start_time ) || ! $this->is_valid_time( $end_time ) ) {
@@ -469,6 +473,7 @@ class MBS_Rest_API {
             'booking_date_end' => $date_to,
             'all_day'          => $all_day,
             'scout_use'        => $scout_use,
+            'pricing_tier'     => $pricing_tier,
             'start_time'       => $all_day ? '' : $start_time,
             'end_time'         => $all_day ? '' : $end_time,
             'attendees'        => absint( $request->get_param( 'attendees' ) ?? 0 ),

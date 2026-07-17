@@ -18,7 +18,9 @@ if ( ! $booking || in_array( $booking->status, array( 'cancelled', 'archived' ) 
 $all_spaces    = MBS_Bookings::get_spaces();
 $is_daily      = ! empty( $booking->all_day );
 $time_str      = $is_daily ? 'All day' : ( $booking->start_time . ' – ' . $booking->end_time );
-$kitchen_price = MBS_Bookings::get_kitchen_price();
+$pricing_tier  = MBS_Bookings::get_booking_tier( $booking );
+$tier_multiplier = MBS_Bookings::get_tier_multiplier( $pricing_tier );
+$kitchen_price = MBS_Bookings::get_tiered_kitchen_price( $pricing_tier );
 ?>
 
 <div class="nms-wrap">
@@ -87,7 +89,7 @@ $kitchen_price = MBS_Bookings::get_kitchen_price();
                         <label for="nms-mod-kitchen">Kitchen</label>
                         <select id="nms-mod-kitchen" name="new_kitchen">
                             <option value="0" <?php selected( $booking->kitchen, 0 ); ?>>No</option>
-                            <option value="1" <?php selected( $booking->kitchen, 1 ); ?>>Yes (+&pound;<?php echo number_format( $kitchen_price, 0 ); ?>)</option>
+                            <option value="1" <?php selected( $booking->kitchen, 1 ); ?>>Yes (+&pound;<?php echo number_format( $kitchen_price, 2 ); ?>)</option>
                         </select>
                     </div>
                 </div>
@@ -163,6 +165,8 @@ $kitchen_price = MBS_Bookings::get_kitchen_price();
 jQuery(function($) {
     var spacesData = <?php echo wp_json_encode( $all_spaces ); ?>;
     var kitchenPrice = <?php echo (float) $kitchen_price; ?>;
+    var pricingTier = <?php echo wp_json_encode( $pricing_tier ); ?>;
+    var tierMultiplier = <?php echo (float) $tier_multiplier; ?>;
     var originalAmount = <?php echo (float) $booking->amount; ?>;
 
     // Toggle modify vs cancel
@@ -217,8 +221,12 @@ jQuery(function($) {
 
         var cost = 0;
         if (info) {
-            var rateHourly = parseFloat(info.rate_hourly || 0);
-            var rateDaily  = parseFloat(info.rate_daily || 0);
+            var tierHourlyKey = 'rate_hourly_' + pricingTier;
+            var tierDailyKey  = 'rate_daily_' + pricingTier;
+            var rateHourly = parseFloat(info[tierHourlyKey] || 0);
+            var rateDaily  = parseFloat(info[tierDailyKey] || 0);
+            if (rateHourly <= 0) rateHourly = parseFloat(info.rate_hourly || 0) * tierMultiplier;
+            if (rateDaily <= 0) rateDaily = parseFloat(info.rate_daily || info.rate || 0) * tierMultiplier;
 
             if (isFullDay) {
                 cost = rateDaily * numDays;

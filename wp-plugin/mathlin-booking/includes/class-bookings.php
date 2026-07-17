@@ -27,6 +27,16 @@ class MBS_Bookings {
         return (float) get_option( 'mbs_kitchen_price', 10 );
     }
 
+    /**
+     * Get the kitchen add-on price after applying a pricing tier.
+     *
+     * Kitchen is part of the hire charge, so it follows the same configured
+     * multiplier as the room rather than remaining at the standard rate.
+     */
+    public static function get_tiered_kitchen_price( $tier = 'standard' ) {
+        return round( self::get_kitchen_price() * self::get_tier_multiplier( $tier ), 2 );
+    }
+
     public static function get_admin_email() {
         return get_option( 'mbs_admin_email', get_option( 'admin_email' ) );
     }
@@ -376,7 +386,7 @@ class MBS_Bookings {
             $cost  = $hours * $rate_hourly * $effective_days;
         }
 
-        if ( $kitchen ) $cost += self::get_kitchen_price();
+        if ( $kitchen ) $cost += self::get_tiered_kitchen_price( $tier );
         return round( $cost, 2 );
     }
 
@@ -434,6 +444,13 @@ class MBS_Bookings {
             return $min_duration_check;
         }
 
+        $tier = $trusted_admin_context && ! empty( $data['pricing_tier'] )
+            ? sanitize_key( $data['pricing_tier'] )
+            : self::get_user_tier();
+        if ( ! isset( self::get_pricing_tiers()[ $tier ] ) ) {
+            $tier = 'standard';
+        }
+
         $cost = self::calculate_cost(
             sanitize_text_field( $data['space'] ),
             sanitize_text_field( $data['start_time'] ?? '' ),
@@ -441,7 +458,8 @@ class MBS_Bookings {
             ! empty( $data['kitchen'] ),
             $all_day,
             $num_days,
-            $scout_use
+            $scout_use,
+            $tier
         );
 
         if ( $trusted_admin_context && ! $scout_use && array_key_exists( 'custom_amount', $data ) && $data['custom_amount'] !== '' && $data['custom_amount'] !== null ) {
@@ -462,6 +480,7 @@ class MBS_Bookings {
             'booking_date_end' => $date_to,
             'all_day'          => $all_day ? 1 : 0,
             'scout_use'        => $scout_use ? 1 : 0,
+            'pricing_tier'     => $tier,
             'start_time'       => ! empty( $data['start_time'] ) ? sanitize_text_field( $data['start_time'] ) : null,
             'end_time'         => ! empty( $data['end_time'] )   ? sanitize_text_field( $data['end_time'] )   : null,
             'attendees'        => absint( $data['attendees'] ),
@@ -1083,7 +1102,8 @@ class MBS_Bookings {
 
             // Recalculate the cost for the new slot (scout-use bookings stay free).
             $update['amount'] = self::calculate_cost(
-                $space, $start, $end, (bool) $b->kitchen, $all_day, 1, (bool) $b->scout_use
+                $space, $start, $end, (bool) $b->kitchen, $all_day, 1, (bool) $b->scout_use,
+                self::get_booking_tier( $b )
             );
 
             $wpdb->update( $table, $update, array( 'ref' => $b->ref ) );
@@ -1187,7 +1207,8 @@ class MBS_Bookings {
             // Recalculate cost for this occurrence (scout-use stays free).
             $amount = self::calculate_cost(
                 $template->space, $template->start_time, $template->end_time,
-                (bool) $template->kitchen, $all_day, 1, (bool) $template->scout_use
+                (bool) $template->kitchen, $all_day, 1, (bool) $template->scout_use,
+                self::get_booking_tier( $template )
             );
 
             $ref = self::generate_ref();
@@ -1205,6 +1226,7 @@ class MBS_Bookings {
                 'booking_date_end' => $date_str,
                 'all_day'          => $all_day ? 1 : 0,
                 'scout_use'        => (int) $template->scout_use,
+                'pricing_tier'     => self::get_booking_tier( $template ),
                 'start_time'       => $all_day ? null : $template->start_time,
                 'end_time'         => $all_day ? null : $template->end_time,
                 'attendees'        => (int) $template->attendees,

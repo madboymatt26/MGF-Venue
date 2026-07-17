@@ -113,7 +113,7 @@
                         <label for="nms-kitchen">Kitchen Add-on</label>
                         <select id="nms-kitchen" name="kitchen">
                             <option value="">No kitchen required</option>
-                            <option value="1">Yes, include kitchen (£<?php echo number_format( MBS_Bookings::get_kitchen_price(), 0 ); ?>/session)</option>
+                            <option value="1">Yes, include kitchen (£<?php echo number_format( MBS_Bookings::get_tiered_kitchen_price( MBS_Bookings::get_user_tier() ), 2 ); ?>/session)</option>
                         </select>
                     </div>
                     <?php endif; ?>

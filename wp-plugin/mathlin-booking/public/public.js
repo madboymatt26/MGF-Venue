@@ -271,8 +271,10 @@ jQuery(function ($) {
             }
         }
 
-        var kitchenPrice = parseFloat(NMS.kitchen_price) || 10;
-        var singleTotal = spaceCost + (kitchen ? kitchenPrice : 0);
+        var kitchenPrice = parseFloat(NMS.kitchen_price);
+        if (isNaN(kitchenPrice)) kitchenPrice = 10;
+        var tieredKitchenPrice = Math.round(kitchenPrice * multiplier * 100) / 100;
+        var singleTotal = spaceCost + (kitchen ? tieredKitchenPrice : 0);
 
         // Check for Scout Use (free booking)
         var isScoutUse = $('#nms-scout-use').val() === '1';
@@ -300,7 +302,7 @@ jQuery(function ($) {
         $('#nms-cost-space-val').text('£' + total2dp(isScoutUse ? 0 : spaceCost));
         $('#nms-cost-kitchen-row').toggle(kitchen && !isScoutUse);
         if (kitchen && !isScoutUse) {
-            $('#nms-cost-kitchen-row').find('span').last().text('£' + total2dp(kitchenPrice));
+            $('#nms-cost-kitchen-row').find('span').last().text('£' + total2dp(tieredKitchenPrice));
         }
 
         // Show tier label if not standard

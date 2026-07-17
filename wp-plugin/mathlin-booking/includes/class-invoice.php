@@ -7,7 +7,7 @@ class MBS_Invoice {
      * Generate invoice HTML for display in the admin dashboard.
      */
     public static function generate_html( $booking ) {
-        $kitchen_price = MBS_Bookings::get_kitchen_price();
+        $kitchen_price = MBS_Bookings::get_tiered_kitchen_price( MBS_Bookings::get_booking_tier( $booking ) );
         $is_all_day    = ! empty( $booking->all_day );
         $space_subtotal = (float) $booking->amount - ( $booking->kitchen ? $kitchen_price : 0 );
 
@@ -150,7 +150,7 @@ class MBS_Invoice {
      * Generate a standalone HTML invoice suitable for email attachment.
      */
     public static function generate_email_invoice( $booking ) {
-        $kitchen_price = MBS_Bookings::get_kitchen_price();
+        $kitchen_price = MBS_Bookings::get_tiered_kitchen_price( MBS_Bookings::get_booking_tier( $booking ) );
         $is_all_day    = ! empty( $booking->all_day );
         $space_subtotal = (float) $booking->amount - ( $booking->kitchen ? $kitchen_price : 0 );
 

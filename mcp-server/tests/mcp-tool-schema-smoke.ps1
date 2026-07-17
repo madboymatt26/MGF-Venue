@@ -23,6 +23,7 @@ foreach ( $required in @('idempotency_key', 'space', 'booking_date', 'purpose') 
 if ( $create.annotations.readOnlyHint -ne $false -or $create.annotations.idempotentHint -ne $true ) {
     throw 'create_booking safety annotations are incorrect.'
 }
+if ( $null -eq $create.inputSchema.properties.pricing_tier ) { throw 'create_booking is missing pricing_tier.' }
 
 $listBookings = $tools | Where-Object { $_.name -eq 'list_bookings' }
 if ( $null -eq $listBookings.inputSchema.properties.scout_only ) { throw 'list_bookings is missing scout_only.' }

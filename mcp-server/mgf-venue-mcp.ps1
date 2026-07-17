@@ -7,7 +7,7 @@ $ProgressPreference = 'SilentlyContinue'
 $InformationPreference = 'SilentlyContinue'
 
 $script:ServerName = 'mgf-venue'
-$script:ServerVersion = '0.3.0'
+$script:ServerVersion = '0.3.1'
 $script:DefaultProtocolVersion = '2025-06-18'
 
 function Get-PropertyValue {
@@ -243,6 +243,7 @@ $script:Tools = @(
                 end_time = @{ type = 'string'; description = 'Required for timed bookings, HH:MM.' }
                 all_day = @{ type = 'boolean'; default = $false }
                 scout_use = @{ type = 'boolean'; default = $false; description = 'Internal Scout use; calculated charge is £0.' }
+                pricing_tier = @{ type = 'string'; default = 'standard'; description = 'Configured pricing tier to apply, for example standard, community, or commercial.' }
                 kitchen = @{ type = 'boolean'; default = $false }
                 attendees = @{ type = 'integer'; minimum = 0; default = 0 }
                 purpose = @{ type = 'string' }

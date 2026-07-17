@@ -101,13 +101,21 @@ $deposits_held = (float) $wpdb->get_var(
      WHERE status = 'deposit_paid' AND scout_use = 0"
 );
 
-// Kitchen add-on uptake & income (this FY)
-$kitchen_price  = MBS_Bookings::get_kitchen_price();
-$kitchen_count  = (int) $wpdb->get_var( $wpdb->prepare(
-    "SELECT COUNT(*) FROM {$table} WHERE kitchen = 1 AND status IN ('confirmed', 'deposit_paid', 'paid') AND scout_use = 0 AND booking_date BETWEEN %s AND %s",
+// Kitchen add-on uptake & estimated income (this FY), grouped by the tier
+// actually stored on each booking so discounted/uplifted rates are reflected.
+$kitchen_by_tier = $wpdb->get_results( $wpdb->prepare(
+    "SELECT COALESCE(NULLIF(pricing_tier, ''), 'standard') AS tier, COUNT(*) AS count
+     FROM {$table} WHERE kitchen = 1 AND status IN ('confirmed', 'deposit_paid', 'paid')
+     AND scout_use = 0 AND booking_date BETWEEN %s AND %s GROUP BY tier",
     $fy_start, $fy_end
 ) );
-$kitchen_income = $kitchen_count * (float) $kitchen_price;
+$kitchen_count  = 0;
+$kitchen_income = 0;
+foreach ( $kitchen_by_tier as $kitchen_tier ) {
+    $tier_count      = (int) $kitchen_tier->count;
+    $kitchen_count  += $tier_count;
+    $kitchen_income += $tier_count * MBS_Bookings::get_tiered_kitchen_price( $kitchen_tier->tier );
+}
 
 // ── Demand: average booking lead time (days between created and event) ────────
 $avg_lead_time = (float) $wpdb->get_var( $wpdb->prepare(

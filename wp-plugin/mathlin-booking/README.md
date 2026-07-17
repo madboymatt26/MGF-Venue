@@ -4,11 +4,24 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.20.0
+**Current Version:** 3.20.1
 **Requires WordPress:** 5.0+  
 **Requires PHP:** 7.4+  
 **Tested with WordPress:** 6.7  
 **License:** GPL-2.0+
+
+---
+
+## 3.20.1 Tier-consistent pricing
+
+- Applies the configured pricing-tier multiplier to the kitchen add-on as well
+  as the room, including the public estimate, modification/admin estimates,
+  stored total, invoices and analytics.
+- Stores the selected pricing tier on new bookings and preserves it when a
+  booking or recurring series is edited or extended.
+- Adds an optional `pricing_tier` field to MCP booking creation so an
+  administrator can create Community/Charity or other configured-tier bookings
+  without using a manual amount override.
 
 ---
 

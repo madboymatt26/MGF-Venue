@@ -1136,7 +1136,8 @@ class MBS_Admin {
             ! empty( $_POST['kitchen'] ),
             $all_day,
             $num_days,
-            $scout_use
+            $scout_use,
+            MBS_Bookings::get_booking_tier( $booking )
         );
 
         // QA-007: Custom price override
