@@ -180,9 +180,8 @@
                     </div>
                     <div class="nms-form-group" id="nms-repeat-until-group" style="display:none">
                         <label for="nms-repeat-until">Repeat Until <span class="nms-req">*</span></label>
-                        <input type="date" id="nms-repeat-until" name="repeat_until"
-                               min="<?php echo esc_attr( wp_date( 'Y-m-d', strtotime( '+7 days' ) ) ); ?>">
-                        <p class="nms-field-hint">Booking will repeat every week until this date (max 52 weeks). Dates with conflicts will be skipped.</p>
+                        <input type="date" id="nms-repeat-until" name="repeat_until">
+                        <p class="nms-field-hint">Booking will repeat weekly for up to one calendar year (maximum 53 dates). Dates with conflicts will be skipped.</p>
                     </div>
                 </div>
 

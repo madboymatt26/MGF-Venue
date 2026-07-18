@@ -293,7 +293,7 @@ jQuery(function ($) {
             var startMs = new Date(dateFrom + 'T00:00:00').getTime();
             var endMs   = new Date(repeatUntil + 'T00:00:00').getTime();
             numWeeks = Math.max(1, Math.floor((endMs - startMs) / (7 * 86400000)) + 1);
-            numWeeks = Math.min(numWeeks, 52);
+            numWeeks = Math.min(numWeeks, 53);
         }
 
         var grandTotal = singleTotal * numWeeks;
@@ -443,18 +443,42 @@ jQuery(function ($) {
         $('#nms-scout-use').val('1').trigger('change');
     }
 
+    function formatLocalDate(date) {
+        var year = date.getFullYear();
+        var month = String(date.getMonth() + 1).padStart(2, '0');
+        var day = String(date.getDate()).padStart(2, '0');
+        return year + '-' + month + '-' + day;
+    }
+
+    function updateRecurrenceDateLimits() {
+        var startValue = $('#nms-date').val();
+        var $until = $('#nms-repeat-until');
+        if (!startValue) {
+            $until.removeAttr('min max');
+            return;
+        }
+
+        var parts = startValue.split('-').map(Number);
+        var maximum = new Date(parts[0], parts[1] - 1, parts[2]);
+        maximum.setFullYear(maximum.getFullYear() + 1);
+        $until.attr('min', startValue).attr('max', formatLocalDate(maximum));
+
+        var selected = $until.val();
+        if (selected && (selected < startValue || selected > formatLocalDate(maximum))) {
+            $until.val('');
+        }
+    }
+
     $('#nms-recurring').on('change', function () {
         var isRecurring = $(this).val() === '1';
         $('#nms-repeat-until-group').toggle(isRecurring);
         if (!isRecurring) {
             $('#nms-repeat-until').val('');
         } else {
-            // Set max date to 52 weeks from now
-            var maxDate = new Date();
-            maxDate.setDate(maxDate.getDate() + 364);
-            $('#nms-repeat-until').attr('max', maxDate.toISOString().split('T')[0]);
+            updateRecurrenceDateLimits();
         }
     });
+    $('#nms-date').on('change', updateRecurrenceDateLimits);
 
     // When switching to full day, also hide the error message if it was about time fields
     $('#nms-allday').on('change', function () {
@@ -533,8 +557,15 @@ jQuery(function ($) {
         // UX-004: Confirm before submitting recurring bookings
         if ($('#nms-recurring').val() === '1' && $('#nms-repeat-until').val()) {
             var dateFrom = $('#nms-date').val();
+            var dateTo = $('#nms-date-end').val() || dateFrom;
             var repeatUntil = $('#nms-repeat-until').val();
             if (dateFrom && repeatUntil) {
+                if (dateTo !== dateFrom) {
+                    $('#nms-date-end').addClass('nms-field-error');
+                    $err.text('Recurring requests must be for a single-day booking. Please submit multi-day hires separately.').show();
+                    $btn.prop('disabled', false).text('Submit Booking Request');
+                    return;
+                }
                 var weeks = Math.max(1, Math.floor((new Date(repeatUntil + 'T00:00:00') - new Date(dateFrom + 'T00:00:00')) / (7 * 86400000)) + 1);
                 if (!confirm('You are about to create up to ' + weeks + ' weekly bookings. Dates with conflicts will be skipped.\n\nContinue?')) {
                     $btn.prop('disabled', false).text('Submit Booking Request');

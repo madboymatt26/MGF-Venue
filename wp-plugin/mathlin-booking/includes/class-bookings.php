@@ -839,7 +839,23 @@ class MBS_Bookings {
      * Generate a unique series ID for recurring bookings.
      */
     public static function generate_series_id() {
-        return 'SER-' . strtoupper( substr( base_convert( uniqid(), 16, 36 ), -6 ) );
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_TABLE;
+
+        do {
+            try {
+                $suffix = strtoupper( bin2hex( random_bytes( 6 ) ) );
+            } catch ( Exception $e ) {
+                $suffix = strtoupper( wp_generate_password( 12, false, false ) );
+            }
+            $series_id = 'SER-' . $suffix;
+            $exists = $wpdb->get_var( $wpdb->prepare(
+                "SELECT id FROM {$table} WHERE series_id = %s LIMIT 1",
+                $series_id
+            ) );
+        } while ( $exists );
+
+        return $series_id;
     }
 
     /**
@@ -852,25 +868,16 @@ class MBS_Bookings {
      * @return array  Array of created booking refs, or WP_Error
      */
     public static function create_recurring( $data, $repeat_until, $trusted_admin_context = false ) {
-        $series_id  = self::generate_series_id();
-        $start_date = sanitize_text_field( $data['booking_date'] );
-        $end_date   = sanitize_text_field( $repeat_until );
-        $refs       = array();
-        $conflicts  = array();
-
-        $current = strtotime( $start_date );
-        $end     = strtotime( $end_date );
-
-        if ( $current > $end ) {
-            return new WP_Error( 'invalid_range', 'Repeat-until date must be after the booking date.' );
+        $dates = MBS_Recurrence::weekly_dates( $data, $repeat_until );
+        if ( is_wp_error( $dates ) ) {
+            return $dates;
         }
 
-        // Limit to 52 weeks max to prevent abuse
-        $max_occurrences = 52;
-        $count = 0;
+        $series_id  = self::generate_series_id();
+        $refs       = array();
+        $occurrences = array();
 
-        while ( $current <= $end && $count < $max_occurrences ) {
-            $date_str = wp_date( 'Y-m-d', $current );
+        foreach ( $dates as $date_str ) {
 
             // Check for conflicts on each date
             $all_day = ! empty( $data['all_day'] );
@@ -885,10 +892,20 @@ class MBS_Bookings {
             // Check blocked dates
             $blocked = MBS_Blocked_Dates::is_blocked( $date_str, sanitize_text_field( $data['space'] ) );
 
-            if ( ! empty( $date_conflicts ) || $blocked ) {
-                $conflicts[] = $date_str;
-                $current += 7 * 86400; // Skip this week
-                $count++;
+            if ( ! empty( $date_conflicts ) ) {
+                $occurrences[] = array(
+                    'date'    => $date_str,
+                    'status'  => 'conflict',
+                    'message' => self::format_conflict_message( $date_conflicts ),
+                );
+                continue;
+            }
+            if ( $blocked ) {
+                $occurrences[] = array(
+                    'date'    => $date_str,
+                    'status'  => 'blocked',
+                    'message' => $blocked->reason ? sanitize_text_field( $blocked->reason ) : 'This date is blocked.',
+                );
                 continue;
             }
 
@@ -900,36 +917,99 @@ class MBS_Bookings {
             $result = self::create( $booking_data, $trusted_admin_context );
 
             if ( is_wp_error( $result ) ) {
-                $current += 7 * 86400;
-                $count++;
-                continue;
+                // A conflict or blocked date can appear between the pre-check
+                // and the transaction-time re-check. Those remain date-level
+                // outcomes. Any other failure is systemic and aborts the run.
+                $code = $result->get_error_code();
+                if ( in_array( $code, array( 'conflict', 'blocked_date' ), true ) ) {
+                    $occurrences[] = array(
+                        'date'    => $date_str,
+                        'status'  => $code === 'conflict' ? 'conflict' : 'blocked',
+                        'message' => $result->get_error_message(),
+                    );
+                    continue;
+                }
+
+                $occurrences[] = array(
+                    'date'    => $date_str,
+                    'status'  => 'error',
+                    'message' => $result->get_error_message(),
+                );
+                return new WP_Error(
+                    'recurrence_create_failed',
+                    'The recurring request stopped because a booking could not be saved. No later dates were attempted.',
+                    array(
+                        'series_id'   => $series_id,
+                        'occurrences' => $occurrences,
+                    )
+                );
             }
 
             // Link to series
             global $wpdb;
             $table = $wpdb->prefix . MBS_TABLE;
-            $wpdb->update(
+            $linked = $wpdb->update(
                 $table,
                 array( 'series_id' => $series_id ),
                 array( 'ref' => $result['ref'] ),
                 array( '%s' ), array( '%s' )
             );
 
+            $verified_series = $linked === false ? null : $wpdb->get_var( $wpdb->prepare(
+                "SELECT series_id FROM {$table} WHERE ref = %s",
+                $result['ref']
+            ) );
+            if ( $linked === false || $verified_series !== $series_id ) {
+                // Do not leave the just-created occurrence silently orphaned.
+                $wpdb->delete( $table, array( 'ref' => $result['ref'] ), array( '%s' ) );
+                $occurrences[] = array(
+                    'date'    => $date_str,
+                    'status'  => 'error',
+                    'message' => 'The booking was saved but could not be linked to its series.',
+                );
+                return new WP_Error(
+                    'series_link_failed',
+                    'The recurring request stopped because an occurrence could not be linked to the series.',
+                    array(
+                        'series_id'   => $series_id,
+                        'occurrences' => $occurrences,
+                    )
+                );
+            }
+
             $refs[] = $result['ref'];
-            $current += 7 * 86400; // Next week
-            $count++;
+            $occurrences[] = array(
+                'date'   => $date_str,
+                'status' => 'accepted',
+                'ref'    => $result['ref'],
+            );
         }
 
         if ( empty( $refs ) ) {
-            return new WP_Error( 'no_bookings', 'Could not create any bookings. All dates had conflicts or were blocked.' );
+            return new WP_Error(
+                'no_bookings',
+                'Could not create any bookings. All dates had conflicts or were blocked.',
+                array(
+                    'series_id'   => $series_id,
+                    'occurrences' => $occurrences,
+                )
+            );
         }
+
+        $skipped = array_values( array_map(
+            static function ( $occurrence ) { return $occurrence['date']; },
+            array_filter( $occurrences, static function ( $occurrence ) {
+                return $occurrence['status'] !== 'accepted';
+            } )
+        ) );
 
         return array(
             'series_id'  => $series_id,
             'refs'       => $refs,
             'created'    => count( $refs ),
-            'skipped'    => $conflicts,
-            'total_weeks' => $count,
+            'skipped'    => $skipped,
+            'total_weeks' => count( $dates ),
+            'occurrences' => $occurrences,
         );
     }
 

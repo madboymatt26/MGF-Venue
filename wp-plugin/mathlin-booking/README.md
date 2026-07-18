@@ -4,11 +4,23 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.20.1
+**Current Version:** 3.20.2
 **Requires WordPress:** 5.0+  
 **Requires PHP:** 7.4+  
 **Tested with WordPress:** 6.7  
 **License:** GPL-2.0+
+
+---
+
+## 3.20.2 Recurrence safety
+
+- Generates weekly dates with `DateTimeImmutable` in the WordPress timezone so
+  the local weekday remains stable across GMT/BST changes.
+- Validates real dates, a required repeat-until date, a one-calendar-year/53
+  occurrence limit, and rejects recurring multi-day requests.
+- Reports an explicit accepted, conflict, blocked, or error result for every
+  attempted date and stops on systemic persistence failures.
+- Uses collision-checked series references and verifies every occurrence link.
 
 ---
 
