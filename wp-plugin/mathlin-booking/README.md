@@ -4,11 +4,22 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.20.2
+**Current Version:** 3.21.0
 **Requires WordPress:** 5.0+  
 **Requires PHP:** 7.4+  
 **Tested with WordPress:** 6.7  
 **License:** GPL-2.0+
+
+---
+
+## 3.21.0 Consolidated billing domain
+
+- Adds first-class recurring series, immutable consolidated invoice and credit
+  documents, invoice items, payment transactions and booking allocations.
+- Stores all new financial values as integer minor units and rejects floats at
+  the financial-write boundary.
+- Makes issued financial lines immutable; voids, credits, payments and refunds
+  are retained as additive, idempotent ledger records.
 
 ---
 

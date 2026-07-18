@@ -108,6 +108,115 @@ class MBS_Database {
         ) {$charset};";
         dbDelta( $series_sql );
 
+        // Immutable consolidated invoice documents. All financial values use
+        // integer minor units (pence for GBP); no floating-point values are
+        // persisted in this domain.
+        $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
+        $invoice_sql = "CREATE TABLE {$invoice_table} (
+            id                    BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            invoice_ref           VARCHAR(30)  NOT NULL,
+            document_type         VARCHAR(20)  NOT NULL DEFAULT 'invoice',
+            parent_invoice_id     BIGINT(20) UNSIGNED DEFAULT NULL,
+            series_ref            VARCHAR(20)  DEFAULT NULL,
+            status                VARCHAR(20)  NOT NULL DEFAULT 'draft',
+            version               BIGINT(20) UNSIGNED NOT NULL DEFAULT 1,
+            contact_name          VARCHAR(100) NOT NULL,
+            contact_organisation  VARCHAR(100) DEFAULT '',
+            contact_email         VARCHAR(150) NOT NULL,
+            contact_address       TEXT         DEFAULT '',
+            billing_mode          VARCHAR(30)  NOT NULL DEFAULT 'monthly',
+            period_start          DATE         DEFAULT NULL,
+            period_end            DATE         DEFAULT NULL,
+            currency              CHAR(3)      NOT NULL DEFAULT 'GBP',
+            subtotal_minor        BIGINT(20)   NOT NULL DEFAULT 0,
+            tax_minor             BIGINT(20)   NOT NULL DEFAULT 0,
+            total_minor           BIGINT(20)   NOT NULL DEFAULT 0,
+            paid_minor            BIGINT(20)   NOT NULL DEFAULT 0,
+            credited_minor        BIGINT(20)   NOT NULL DEFAULT 0,
+            idempotency_key       VARCHAR(64)  NOT NULL,
+            issued_at             DATETIME     DEFAULT NULL,
+            due_at                DATETIME     DEFAULT NULL,
+            voided_at             DATETIME     DEFAULT NULL,
+            void_reason           VARCHAR(255) DEFAULT '',
+            reminder_count        SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            last_reminded_at      DATETIME     DEFAULT NULL,
+            created_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY invoice_ref (invoice_ref),
+            UNIQUE KEY invoice_idempotency (idempotency_key),
+            KEY idx_invoice_series (series_ref),
+            KEY idx_invoice_status_due (status, due_at),
+            KEY idx_invoice_period (period_start, period_end),
+            KEY idx_invoice_parent (parent_invoice_id)
+        ) {$charset};";
+        dbDelta( $invoice_sql );
+
+        $item_table = $wpdb->prefix . MBS_INVOICE_ITEM_TABLE;
+        $item_sql = "CREATE TABLE {$item_table} (
+            id                    BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            item_ref              VARCHAR(30) NOT NULL,
+            invoice_id            BIGINT(20) UNSIGNED NOT NULL,
+            item_type             VARCHAR(20) NOT NULL DEFAULT 'hire',
+            booking_ref           VARCHAR(20) DEFAULT NULL,
+            service_date          DATE        DEFAULT NULL,
+            description           VARCHAR(255) NOT NULL,
+            quantity_milli        BIGINT(20)  NOT NULL DEFAULT 1000,
+            unit_amount_minor     BIGINT(20)  NOT NULL DEFAULT 0,
+            line_total_minor      BIGINT(20)  NOT NULL DEFAULT 0,
+            pricing_snapshot_json LONGTEXT    DEFAULT NULL,
+            created_at            DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY item_ref (item_ref),
+            KEY idx_item_invoice (invoice_id),
+            KEY idx_item_booking (booking_ref),
+            KEY idx_item_service_date (service_date)
+        ) {$charset};";
+        dbDelta( $item_sql );
+
+        $transaction_table = $wpdb->prefix . MBS_PAYMENT_TRANSACTION_TABLE;
+        $transaction_sql = "CREATE TABLE {$transaction_table} (
+            id                      BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            transaction_ref         VARCHAR(40) NOT NULL,
+            invoice_id              BIGINT(20) UNSIGNED NOT NULL,
+            provider                VARCHAR(30) NOT NULL,
+            provider_transaction_id VARCHAR(100) DEFAULT NULL,
+            transaction_type        VARCHAR(20) NOT NULL DEFAULT 'payment',
+            status                  VARCHAR(20) NOT NULL DEFAULT 'pending',
+            amount_minor            BIGINT(20) UNSIGNED NOT NULL,
+            currency                CHAR(3)     NOT NULL DEFAULT 'GBP',
+            idempotency_key         VARCHAR(100) NOT NULL,
+            metadata_json           LONGTEXT    DEFAULT NULL,
+            occurred_at             DATETIME    DEFAULT NULL,
+            created_at              DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at              DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY transaction_ref (transaction_ref),
+            UNIQUE KEY transaction_idempotency (idempotency_key),
+            UNIQUE KEY provider_transaction (provider, provider_transaction_id),
+            KEY idx_transaction_invoice (invoice_id, status),
+            KEY idx_transaction_occurred (occurred_at)
+        ) {$charset};";
+        dbDelta( $transaction_sql );
+
+        $allocation_table = $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE;
+        $allocation_sql = "CREATE TABLE {$allocation_table} (
+            id                    BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            invoice_id            BIGINT(20) UNSIGNED NOT NULL,
+            booking_ref           VARCHAR(20) NOT NULL,
+            active_booking_ref    VARCHAR(20) DEFAULT NULL,
+            allocated_minor       BIGINT(20)  NOT NULL DEFAULT 0,
+            status                VARCHAR(20) NOT NULL DEFAULT 'active',
+            released_at           DATETIME    DEFAULT NULL,
+            created_at            DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at            DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY active_booking (active_booking_ref),
+            KEY idx_allocation_invoice (invoice_id, status),
+            KEY idx_allocation_booking (booking_ref)
+        ) {$charset};";
+        dbDelta( $allocation_sql );
+
         // Blocked dates table
         $blocked_table = $wpdb->prefix . 'mathlin_blocked_dates';
         $sql2 = "CREATE TABLE IF NOT EXISTS {$blocked_table} (

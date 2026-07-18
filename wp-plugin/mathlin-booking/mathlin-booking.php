@@ -3,7 +3,7 @@
  * Plugin Name: MGF Venue
  * Plugin URI:  https://github.com/madboymatt26/MGF-Venue
  * Description: Venue booking and management system with Home Assistant integration.
- * Version:     3.20.2
+ * Version:     3.21.0
  * Author:      MGF Venue
  * License:     GPL-2.0+
  * Text Domain: mathlin-booking
@@ -11,16 +11,22 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'MBS_VERSION',    '3.20.2' );
+define( 'MBS_VERSION',    '3.21.0' );
 define( 'MBS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MBS_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'MBS_TABLE',      'mathlin_bookings' );
 define( 'MBS_SERIES_TABLE', 'mathlin_booking_series' );
+define( 'MBS_INVOICE_TABLE', 'mathlin_invoices' );
+define( 'MBS_INVOICE_ITEM_TABLE', 'mathlin_invoice_items' );
+define( 'MBS_PAYMENT_TRANSACTION_TABLE', 'mathlin_payment_transactions' );
+define( 'MBS_BILLING_ALLOCATION_TABLE', 'mathlin_billing_allocations' );
 
 // ── Load includes ──────────────────────────────────────────────────────────────
 require_once MBS_PLUGIN_DIR . 'includes/class-database.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-recurrence.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-series.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-money.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-billing-ledger.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-bookings.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-email.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-invoice.php';
