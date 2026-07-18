@@ -498,21 +498,21 @@ class MBS_Rest_API {
             $result = MBS_Bookings::create_recurring( $data, $repeat_until, true );
             if ( is_wp_error( $result ) ) return $result;
 
-            if ( $status === 'confirmed' && MBS_Bookings::update_series_status( $result['series_id'], 'confirmed' ) === false ) {
-                return new WP_Error( 'confirmation_failed', 'The booking series was created but could not be confirmed.', array( 'status' => 500, 'series_id' => $result['series_id'] ) );
+            if ( $status === 'confirmed' ) {
+                $approval = MBS_Series::approve(
+                    $result['series_id'],
+                    'pending',
+                    (int) $result['series']->version,
+                    (bool) $notify
+                );
+                if ( is_wp_error( $approval ) ) {
+                    return new WP_Error( 'confirmation_failed', $approval->get_error_message(), array( 'status' => 500, 'series_id' => $result['series_id'] ) );
+                }
             }
 
             $series_items = MBS_Bookings::get_series( $result['series_id'] );
-            if ( $notify ) {
-                MBS_Email::notify_recurring_summary(
-                    $result['series_id'],
-                    $result['refs'],
-                    $result['skipped'],
-                    $name,
-                    $email,
-                    $space,
-                    $all_day ? 'All day' : ( $start_time . ' – ' . $end_time )
-                );
+            if ( $notify && $status !== 'confirmed' ) {
+                MBS_Email::notify_recurring_summary( $result['series'], $result['occurrences'] );
             }
 
             set_transient( $transient_key, $result['series_id'], DAY_IN_SECONDS );
@@ -864,6 +864,7 @@ class MBS_Rest_API {
             'delete_blocked'        => array( 'MBS_Admin', 'ajax_delete_blocked' ),
             'clear_expired_blocks'  => array( 'MBS_Admin', 'ajax_clear_expired_blocks' ),
             'update_series_status'  => array( 'MBS_Admin', 'ajax_update_series_status' ),
+            'resend_series_confirmation' => array( 'MBS_Admin', 'ajax_resend_series_confirmation' ),
             'cancel_scout_series'   => array( 'MBS_Admin', 'ajax_cancel_scout_series' ),
             'edit_scout_series'     => array( 'MBS_Admin', 'ajax_edit_scout_series' ),
             'extend_scout_series'   => array( 'MBS_Admin', 'ajax_extend_scout_series' ),

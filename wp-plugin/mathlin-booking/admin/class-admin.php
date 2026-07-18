@@ -25,6 +25,7 @@ class MBS_Admin {
         add_action( 'wp_ajax_mbs_delete_blocked', array( $this, 'ajax_delete_blocked' ) );
         add_action( 'wp_ajax_mbs_clear_expired_blocks', array( $this, 'ajax_clear_expired_blocks' ) );
         add_action( 'wp_ajax_mbs_update_series_status', array( $this, 'ajax_update_series_status' ) );
+        add_action( 'wp_ajax_mbs_resend_series_confirmation', array( $this, 'ajax_resend_series_confirmation' ) );
         add_action( 'wp_ajax_mbs_cancel_scout_series', array( $this, 'ajax_cancel_scout_series' ) );
         add_action( 'wp_ajax_mbs_edit_scout_series', array( $this, 'ajax_edit_scout_series' ) );
         add_action( 'wp_ajax_mbs_extend_scout_series', array( $this, 'ajax_extend_scout_series' ) );
@@ -874,19 +875,60 @@ class MBS_Admin {
 
         if ( ! $series_id ) wp_send_json_error( 'No series ID provided.' );
 
-        $result = MBS_Bookings::update_series_status( $series_id, $status );
+        $series = MBS_Series::get( $series_id );
+        if ( $series ) {
+            $expected_status  = sanitize_text_field( $_POST['expected_status'] ?? '' );
+            $expected_version = absint( $_POST['expected_version'] ?? 0 );
+            if ( $expected_status === '' || $expected_version < 1 ) {
+                wp_send_json_error( 'Series status and version preconditions are required. Refresh and try again.', 409 );
+            }
 
+            if ( $status === 'confirmed' ) {
+                $result = MBS_Series::approve( $series_id, $expected_status, $expected_version, true );
+                $count  = is_wp_error( $result ) ? 0 : (int) $result['updated'];
+            } elseif ( $status === 'cancelled' ) {
+                $scope  = sanitize_key( $_POST['scope'] ?? 'all' );
+                $result = MBS_Series::cancel( $series_id, $scope, $expected_status, $expected_version );
+                $count  = is_wp_error( $result ) ? 0 : (int) $result['cancelled'];
+            } else {
+                wp_send_json_error( 'First-class series support only approval or cancellation through this action.' );
+            }
+            if ( is_wp_error( $result ) ) {
+                wp_send_json_error( $result->get_error_message(), $result->get_error_code() === 'series_precondition_failed' ? 409 : 400 );
+            }
+            wp_send_json_success( array(
+                'series_id'   => $series_id,
+                'status'      => $status,
+                'count'       => $count,
+                'no_op'       => ! empty( $result['no_op'] ),
+                'email_sent'  => $result['email_sent'] ?? null,
+                'new_version' => isset( $result['series']->version ) ? (int) $result['series']->version : $expected_version,
+            ) );
+        }
+
+        // Legacy series retain their historical per-occurrence behaviour until
+        // they are deliberately adopted into first-class series metadata.
+        $result = MBS_Bookings::update_series_status( $series_id, $status );
         if ( $status === 'confirmed' ) {
-            $bookings = MBS_Bookings::get_series( $series_id );
-            foreach ( $bookings as $booking ) {
+            foreach ( MBS_Bookings::get_series( $series_id ) as $booking ) {
                 if ( $booking->status === 'confirmed' ) {
                     MBS_Email::notify_confirmed( $booking );
                 }
             }
         }
-
         $count = count( MBS_Bookings::get_series( $series_id ) );
-        wp_send_json_success( array( 'series_id' => $series_id, 'status' => $status, 'count' => $count ) );
+        wp_send_json_success( array( 'series_id' => $series_id, 'status' => $status, 'count' => $count, 'legacy' => true ) );
+    }
+
+    public function ajax_resend_series_confirmation() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
+        $series_id = sanitize_text_field( $_POST['series_id'] ?? '' );
+        $result = MBS_Series::resend_confirmation( $series_id );
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( $result->get_error_message() );
+        }
+        wp_send_json_success( $result );
     }
 
     /**
@@ -1061,6 +1103,9 @@ class MBS_Admin {
             wp_send_json_error( 'Can only chase payment for confirmed or deposit-paid bookings.' );
         }
 
+        if ( ! MBS_Payment_Chaser::should_chase_occurrence( $booking ) ) {
+            wp_send_json_error( MBS_Payment_Chaser::chase_suppression_message( $booking ) );
+        }
         MBS_Payment_Chaser::send_chase( $booking, true );
         wp_send_json_success( array( 'ref' => $ref, 'chase_count' => ( $booking->chase_count ?? 0 ) + 1 ) );
     }

@@ -129,6 +129,8 @@
                 foreach ( $series_bookings as $sb_calc ) {
                     $series_total += (float) $sb_calc->amount;
                 }
+                $series_record = MBS_Series::get( $b->series_id );
+                $series_status = $series_record ? $series_record->status : $b->status;
                 $first_date  = $series_bookings[0]->booking_date;
                 $last_date   = $series_bookings[ $series_count - 1 ]->booking_date;
                 ?>
@@ -151,15 +153,23 @@
                     <td><?php echo esc_html( $b->attendees ); ?></td>
                     <td><strong>&pound;<?php echo number_format( $series_total, 2 ); ?></strong></td>
                     <td>—</td>
-                    <td><span class="nms-status nms-status-<?php echo esc_attr( $b->status ); ?>"><?php echo esc_html( MBS_Bookings::status_label( $b->status ) ); ?></span></td>
+                    <td><span class="nms-status nms-status-<?php echo esc_attr( $series_status ); ?>"><?php echo esc_html( MBS_Bookings::status_label( $series_status ) ); ?></span></td>
                     <td>
                         <div class="nms-action-btns">
                             <button class="button button-small nms-toggle-series" data-series="<?php echo esc_attr( $b->series_id ); ?>">▶ Expand</button>
                             <a href="?page=mathlin-booking&action=view&ref=<?php echo esc_attr( $b->ref ); ?>" class="button button-small">View</a>
-                            <?php if ( $b->status === 'pending' ) { ?>
-                                <button class="button button-small button-primary nms-btn-series-status" data-series="<?php echo esc_attr( $b->series_id ); ?>" data-status="confirmed">Confirm All</button>
+                            <?php if ( $series_status === 'pending' ) { ?>
+                                <button class="button button-small button-primary nms-btn-series-status" data-series="<?php echo esc_attr( $b->series_id ); ?>" data-status="confirmed" data-expected-status="<?php echo esc_attr( $series_status ); ?>" data-expected-version="<?php echo esc_attr( $series_record ? $series_record->version : 0 ); ?>">Approve Series</button>
                             <?php } ?>
-                            <button class="button button-small nms-btn-series-status" data-series="<?php echo esc_attr( $b->series_id ); ?>" data-status="cancelled">Cancel All</button>
+                            <?php if ( $series_record && $series_status === 'confirmed' ) { ?>
+                                <button class="button button-small nms-btn-resend-series" data-series="<?php echo esc_attr( $b->series_id ); ?>">Resend Approval</button>
+                            <?php } ?>
+                            <?php if ( $series_record ) { ?>
+                                <button class="button button-small nms-btn-series-status" data-series="<?php echo esc_attr( $b->series_id ); ?>" data-status="cancelled" data-scope="future" data-expected-status="<?php echo esc_attr( $series_status ); ?>" data-expected-version="<?php echo esc_attr( $series_record->version ); ?>">Cancel Future</button>
+                                <button class="button button-small nms-btn-series-status" data-series="<?php echo esc_attr( $b->series_id ); ?>" data-status="cancelled" data-scope="all" data-expected-status="<?php echo esc_attr( $series_status ); ?>" data-expected-version="<?php echo esc_attr( $series_record->version ); ?>">Cancel All</button>
+                            <?php } else { ?>
+                                <button class="button button-small nms-btn-series-status" data-series="<?php echo esc_attr( $b->series_id ); ?>" data-status="cancelled">Cancel All</button>
+                            <?php } ?>
                         </div>
                     </td>
                 </tr>

@@ -288,6 +288,29 @@ class MBS_Email {
         self::send( $series->contact_email, $subject, $body );
     }
 
+    /** Send the single approval email for a first-class recurring series. */
+    public static function notify_series_confirmed( $series, $bookings ) {
+        $subject = 'Recurring Booking Approved – ' . $series->series_ref;
+        $body  = self::header();
+        $body .= '<h2 style="color:#7413DC;">Your recurring booking is approved</h2>';
+        $body .= '<p>Hi ' . esc_html( $series->contact_name ) . ',</p>';
+        $body .= '<p>We’ve approved your recurring booking request. This one message confirms the dates listed below.</p>';
+        $body .= self::series_request_table( $series );
+        $body .= '<h3 style="color:#7413DC;margin-top:24px;">Confirmed dates</h3><ul style="margin:8px 0;padding-left:20px;">';
+        foreach ( $bookings as $booking ) {
+            $body .= '<li style="margin-bottom:4px;">' . esc_html( wp_date( 'l j F Y', strtotime( $booking->booking_date ) ) ) . '</li>';
+        }
+        $body .= '</ul>';
+        if ( $series->billing_treatment === 'manual_consolidated' ) {
+            $body .= '<p><strong>Billing:</strong> We will manage billing for this series separately. No annual payment, occurrence invoice or individual payment link is created by this approval.</p>';
+        } elseif ( $series->billing_treatment === 'none' ) {
+            $body .= '<p><strong>Billing:</strong> No charge applies to this series.</p>';
+        }
+        $body .= '<p>If you have any questions, just reply to this email.</p>';
+        $body .= self::footer();
+        return self::send( $series->contact_email, $subject, $body );
+    }
+
     private static function series_request_table( $series ) {
         $time = ! empty( $series->all_day )
             ? 'All day'
@@ -547,6 +570,6 @@ class MBS_Email {
             'Reply-To: ' . $admin_email,
         );
         // Use the email queue for automatic retry on failure
-        MBS_Email_Queue::send( $to, $subject, $html_body, $headers, $attachments );
+        return MBS_Email_Queue::send( $to, $subject, $html_body, $headers, $attachments );
     }
 }

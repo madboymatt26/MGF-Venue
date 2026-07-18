@@ -51,6 +51,7 @@ class MBS_Bookings {
             'deposit_paid' => 'Deposit Paid',
             'paid'         => 'Paid',
             'cancelled'    => 'Cancelled',
+            'cancelled_future' => 'Future Cancelled',
             'archived'     => 'Archived',
         );
         return $labels[ $status ] ?? ucfirst( $status );

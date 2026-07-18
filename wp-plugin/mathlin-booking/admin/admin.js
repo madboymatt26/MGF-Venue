@@ -650,21 +650,47 @@ jQuery(function ($) {
         var $btn     = $(this);
         var seriesId = $btn.data('series');
         var status   = $btn.data('status');
+        var scope    = $btn.data('scope') || 'all';
+        var expectedStatus = $btn.data('expected-status') || '';
+        var expectedVersion = parseInt($btn.data('expected-version'), 10) || 0;
         var label    = status.charAt(0).toUpperCase() + status.slice(1);
 
-        if (!confirm(label + ' ALL bookings in series ' + seriesId + '?')) return;
+        var scopeLabel = status === 'cancelled' && scope === 'future' ? ' future bookings in ' : ' all bookings in ';
+        if (!confirm(label + scopeLabel + 'series ' + seriesId + '?')) return;
         $btn.prop('disabled', true);
 
         $.post(MBS_Admin.ajax_url, {
             action:    'mbs_update_series_status',
             nonce:     MBS_Admin.nonce,
             series_id: seriesId,
-            status:    status
+            status:    status,
+            scope:     scope,
+            expected_status: expectedStatus,
+            expected_version: expectedVersion
         }, function (res) {
             $btn.prop('disabled', false);
             if (res.success) {
                 alert(res.data.count + ' booking(s) ' + status + '.');
                 window.location.reload();
+            } else {
+                alert('Error: ' + (res.data || 'Unknown error'));
+            }
+        });
+    });
+
+    $(document).on('click', '.nms-btn-resend-series', function () {
+        var $btn = $(this);
+        var seriesId = $btn.data('series');
+        if (!confirm('Resend the consolidated approval email for ' + seriesId + '?')) return;
+        $btn.prop('disabled', true);
+        $.post(MBS_Admin.ajax_url, {
+            action: 'mbs_resend_series_confirmation',
+            nonce: MBS_Admin.nonce,
+            series_id: seriesId
+        }, function (res) {
+            $btn.prop('disabled', false);
+            if (res.success) {
+                alert(res.data.sent ? 'Approval email sent.' : 'The email could not be sent immediately and was queued for retry.');
             } else {
                 alert('Error: ' + (res.data || 'Unknown error'));
             }

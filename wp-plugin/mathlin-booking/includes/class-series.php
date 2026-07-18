@@ -134,4 +134,220 @@ class MBS_Series {
         $decoded = json_decode( (string) ( $series->exceptions_json ?? '' ), true );
         return is_array( $decoded ) ? $decoded : array();
     }
+
+    /** Resolve how an occurrence participates in payment chasing. */
+    public static function billing_treatment_for_booking( $booking ) {
+        if ( ! empty( $booking->scout_use ) ) {
+            return 'none';
+        }
+        if ( empty( $booking->series_id ) ) {
+            return 'one_off';
+        }
+        $series = self::get( $booking->series_id );
+        if ( ! $series ) {
+            return 'legacy_per_occurrence';
+        }
+        return $series->billing_treatment ?: 'manual_consolidated';
+    }
+
+    /**
+     * Idempotently approve a first-class series with optimistic preconditions.
+     * Only pending occurrences transition; all financial/history statuses are
+     * preserved exactly as they are.
+     */
+    public static function approve( $series_ref, $expected_status, $expected_version, $notify_hirer = true ) {
+        global $wpdb;
+        $series_table  = $wpdb->prefix . MBS_SERIES_TABLE;
+        $booking_table = $wpdb->prefix . MBS_TABLE;
+        $series_ref    = sanitize_text_field( $series_ref );
+
+        $wpdb->query( 'START TRANSACTION' );
+        $series = $wpdb->get_row( $wpdb->prepare(
+            "SELECT * FROM {$series_table} WHERE series_ref = %s FOR UPDATE",
+            $series_ref
+        ) );
+        if ( ! $series ) {
+            $wpdb->query( 'ROLLBACK' );
+            return new WP_Error( 'series_not_found', 'Recurring series not found.' );
+        }
+
+        // Safe retry after a completed transition: no email, audit or HA replay.
+        if ( $series->status === 'confirmed' ) {
+            $wpdb->query( 'ROLLBACK' );
+            return array(
+                'series'      => $series,
+                'transitioned' => false,
+                'no_op'       => true,
+                'updated'     => 0,
+                'email_sent'  => ! empty( $series->confirmation_sent_at ),
+            );
+        }
+        if ( $series->status !== 'pending' ) {
+            $wpdb->query( 'ROLLBACK' );
+            return new WP_Error( 'invalid_series_transition', 'Only a pending recurring series can be approved.' );
+        }
+        if ( $expected_status !== $series->status || (int) $expected_version !== (int) $series->version ) {
+            $wpdb->query( 'ROLLBACK' );
+            return new WP_Error( 'series_precondition_failed', 'The recurring series changed since it was loaded. Refresh and try again.' );
+        }
+
+        $affected = $wpdb->get_results( $wpdb->prepare(
+            "SELECT * FROM {$booking_table} WHERE series_id = %s AND status = 'pending' FOR UPDATE",
+            $series_ref
+        ) );
+        $updated = $wpdb->query( $wpdb->prepare(
+            "UPDATE {$booking_table} SET status = 'confirmed' WHERE series_id = %s AND status = 'pending'",
+            $series_ref
+        ) );
+        if ( $updated === false ) {
+            $wpdb->query( 'ROLLBACK' );
+            return new WP_Error( 'series_occurrence_update_failed', 'Could not confirm the pending occurrences.' );
+        }
+
+        $series_updated = $wpdb->query( $wpdb->prepare(
+            "UPDATE {$series_table}
+             SET status = 'confirmed', version = version + 1, updated_at = %s
+             WHERE series_ref = %s AND status = 'pending' AND version = %d",
+            current_time( 'mysql' ),
+            $series_ref,
+            (int) $expected_version
+        ) );
+        if ( $series_updated !== 1 ) {
+            $wpdb->query( 'ROLLBACK' );
+            return new WP_Error( 'series_concurrent_update', 'The recurring series was updated by another request. Refresh and try again.' );
+        }
+        $wpdb->query( 'COMMIT' );
+
+        foreach ( $affected as $booking ) {
+            $booking->status = 'confirmed';
+            MBS_HomeAssistant::notify( $booking );
+            $wpdb->update( $booking_table, array( 'ha_notified' => 1 ), array( 'ref' => $booking->ref ) );
+        }
+        MBS_Audit_Log::log(
+            $series_ref,
+            'series_confirmed',
+            'Approved recurring series; confirmed ' . (int) $updated . ' pending occurrence(s). Preserved all non-pending statuses.'
+        );
+
+        $fresh = self::get( $series_ref );
+        $email_sent = false;
+        if ( $notify_hirer && $fresh ) {
+            $email_sent = MBS_Email::notify_series_confirmed( $fresh, self::active_occurrences( $series_ref ) );
+            if ( $email_sent ) {
+                $sent_at = current_time( 'mysql' );
+                $wpdb->update(
+                    $series_table,
+                    array( 'confirmation_sent_at' => $sent_at ),
+                    array( 'series_ref' => $series_ref, 'status' => 'confirmed' )
+                );
+                $fresh->confirmation_sent_at = $sent_at;
+            }
+        }
+
+        return array(
+            'series'       => $fresh,
+            'transitioned' => true,
+            'no_op'        => false,
+            'updated'      => (int) $updated,
+            'email_sent'   => $email_sent,
+        );
+    }
+
+    /** Explicitly resend the consolidated approval email without a transition. */
+    public static function resend_confirmation( $series_ref ) {
+        global $wpdb;
+        $series = self::get( $series_ref );
+        if ( ! $series ) {
+            return new WP_Error( 'series_not_found', 'Recurring series not found.' );
+        }
+        if ( $series->status !== 'confirmed' ) {
+            return new WP_Error( 'series_not_confirmed', 'Only a confirmed recurring series has an approval email to resend.' );
+        }
+
+        $sent = MBS_Email::notify_series_confirmed( $series, self::active_occurrences( $series_ref ) );
+        if ( $sent ) {
+            $sent_at = current_time( 'mysql' );
+            $wpdb->update(
+                $wpdb->prefix . MBS_SERIES_TABLE,
+                array( 'confirmation_sent_at' => $sent_at ),
+                array( 'series_ref' => $series_ref, 'status' => 'confirmed' )
+            );
+        }
+        MBS_Audit_Log::log( $series_ref, 'series_confirmation_resent', $sent ? 'Consolidated approval email resent.' : 'Consolidated approval email queued after immediate send failure.' );
+        return array( 'sent' => $sent, 'queued' => ! $sent );
+    }
+
+    /** Safely cancel all occurrences or future occurrences only. */
+    public static function cancel( $series_ref, $scope, $expected_status, $expected_version ) {
+        global $wpdb;
+        $series_table  = $wpdb->prefix . MBS_SERIES_TABLE;
+        $booking_table = $wpdb->prefix . MBS_TABLE;
+        $series_ref = sanitize_text_field( $series_ref );
+        $scope = $scope === 'future' ? 'future' : 'all';
+
+        $wpdb->query( 'START TRANSACTION' );
+        $series = $wpdb->get_row( $wpdb->prepare(
+            "SELECT * FROM {$series_table} WHERE series_ref = %s FOR UPDATE",
+            $series_ref
+        ) );
+        if ( ! $series ) {
+            $wpdb->query( 'ROLLBACK' );
+            return new WP_Error( 'series_not_found', 'Recurring series not found.' );
+        }
+        if ( $series->status === 'cancelled' || ( $series->status === 'cancelled_future' && $scope === 'future' ) ) {
+            $wpdb->query( 'ROLLBACK' );
+            return array( 'transitioned' => false, 'no_op' => true, 'cancelled' => 0, 'series' => $series );
+        }
+        if ( $expected_status !== $series->status || (int) $expected_version !== (int) $series->version ) {
+            $wpdb->query( 'ROLLBACK' );
+            return new WP_Error( 'series_precondition_failed', 'The recurring series changed since it was loaded. Refresh and try again.' );
+        }
+
+        $date_sql = $scope === 'future' ? ' AND booking_date >= %s' : '';
+        $select_sql = "SELECT * FROM {$booking_table} WHERE series_id = %s AND status NOT IN ('cancelled','archived'){$date_sql} FOR UPDATE";
+        $update_sql = "UPDATE {$booking_table} SET status = 'cancelled', access_sent = 0 WHERE series_id = %s AND status NOT IN ('cancelled','archived'){$date_sql}";
+        $params = array( $series_ref );
+        if ( $scope === 'future' ) {
+            $params[] = wp_date( 'Y-m-d' );
+        }
+        $affected = $wpdb->get_results( $wpdb->prepare( $select_sql, $params ) );
+        $cancelled = $wpdb->query( $wpdb->prepare( $update_sql, $params ) );
+        if ( $cancelled === false ) {
+            $wpdb->query( 'ROLLBACK' );
+            return new WP_Error( 'series_cancel_failed', 'Could not cancel the selected occurrences.' );
+        }
+        $new_status = $scope === 'future' ? 'cancelled_future' : 'cancelled';
+        $series_updated = $wpdb->query( $wpdb->prepare(
+            "UPDATE {$series_table} SET status = %s, version = version + 1, updated_at = %s
+             WHERE series_ref = %s AND status = %s AND version = %d",
+            $new_status, current_time( 'mysql' ), $series_ref, $series->status, (int) $series->version
+        ) );
+        if ( $series_updated !== 1 ) {
+            $wpdb->query( 'ROLLBACK' );
+            return new WP_Error( 'series_concurrent_update', 'The recurring series was updated by another request. Refresh and try again.' );
+        }
+        $wpdb->query( 'COMMIT' );
+
+        foreach ( $affected as $booking ) {
+            if ( ! empty( $booking->ha_notified ) ) {
+                MBS_HomeAssistant::notify_cancelled( $booking );
+            }
+        }
+        MBS_Audit_Log::log( $series_ref, 'series_cancelled', 'Cancelled ' . (int) $cancelled . ' ' . $scope . ' occurrence(s).' );
+        return array(
+            'transitioned' => true,
+            'no_op'        => false,
+            'cancelled'    => (int) $cancelled,
+            'series'       => self::get( $series_ref ),
+        );
+    }
+
+    public static function active_occurrences( $series_ref ) {
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_TABLE;
+        return $wpdb->get_results( $wpdb->prepare(
+            "SELECT * FROM {$table} WHERE series_id = %s AND status NOT IN ('cancelled','archived') ORDER BY booking_date ASC",
+            sanitize_text_field( $series_ref )
+        ) );
+    }
 }
