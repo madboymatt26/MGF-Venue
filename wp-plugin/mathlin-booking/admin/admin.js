@@ -697,6 +697,70 @@ jQuery(function ($) {
         });
     });
 
+    $(document).on('click', '.nms-btn-series-pause', function () {
+        var $btn = $(this);
+        var paused = parseInt($btn.data('paused'), 10) === 1;
+        if (!confirm((paused ? 'Pause' : 'Resume') + ' consolidated billing for this series? Occurrence bookings will not be changed.')) return;
+        $btn.prop('disabled', true);
+        $.post(MBS_Admin.ajax_url, {
+            action: 'mbs_pause_series', nonce: MBS_Admin.nonce,
+            series_ref: $btn.data('series'), paused: paused ? 1 : 0,
+            expected_status: $btn.data('expected-status'), expected_version: $btn.data('expected-version')
+        }, function (res) {
+            if (res.success) window.location.reload();
+            else { alert('Error: ' + (res.data || 'Unknown error')); $btn.prop('disabled', false); }
+        }).fail(function () { alert('Network error — please try again.'); $btn.prop('disabled', false); });
+    });
+
+    $(document).on('submit', '.nms-series-billing-form', function (event) {
+        event.preventDefault();
+        var $form = $(this);
+        var $button = $form.find('button[type="submit"]');
+        var $message = $form.find('.nms-series-billing-message');
+        var data = $form.serializeArray();
+        data.push({name: 'action', value: 'mbs_configure_series_billing'});
+        data.push({name: 'nonce', value: MBS_Admin.nonce});
+        $button.prop('disabled', true).text('Saving…');
+        $.post(MBS_Admin.ajax_url, data, function (res) {
+            if (res.success) { $message.text('Saved. Refreshing…'); window.location.reload(); }
+            else { $message.text('Error: ' + (res.data || 'Unknown error')); $button.prop('disabled', false).text('Save billing arrangement'); }
+        }).fail(function () { $message.text('Network error — please try again.'); $button.prop('disabled', false).text('Save billing arrangement'); });
+    });
+
+    $(document).on('click', '.nms-series-catch-up', function () {
+        var $btn = $(this);
+        if (!confirm('Generate every consolidated invoice whose issue date is due today? This is safe to repeat.')) return;
+        $btn.prop('disabled', true).text('Generating…');
+        $.post(MBS_Admin.ajax_url, { action: 'mbs_catch_up_series_billing', nonce: MBS_Admin.nonce }, function (res) {
+            if (res.success) window.location.reload();
+            else { alert('Error: ' + (res.data || 'Unknown error')); $btn.prop('disabled', false).text('Generate all invoices due today'); }
+        }).fail(function () { alert('Network error — please try again.'); $btn.prop('disabled', false).text('Generate all invoices due today'); });
+    });
+
+    $(document).on('submit', '.nms-manual-invoice-payment', function (event) {
+        event.preventDefault();
+        var $form = $(this);
+        var raw = $.trim($form.find('[name="amount"]').val());
+        var match = raw.match(/^(\d+)(?:\.(\d{1,2}))?$/);
+        if (!match) { alert('Enter a valid positive amount with no more than two decimal places.'); return; }
+        var amountMinor = (parseInt(match[1], 10) * 100) + parseInt((match[2] || '').padEnd(2, '0') || '0', 10);
+        if (amountMinor < 1) { alert('The payment must be greater than zero.'); return; }
+        if (!confirm('Record an offline payment of £' + (amountMinor / 100).toFixed(2) + '?')) return;
+        var key = window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() : ('manual-' + Date.now() + '-' + Math.random().toString(16).slice(2));
+        var $button = $form.find('button');
+        $button.prop('disabled', true).text('Recording…');
+        $.post(MBS_Admin.ajax_url, {
+            action: 'mbs_record_invoice_manual_payment', nonce: MBS_Admin.nonce,
+            invoice_ref: $form.find('[name="invoice_ref"]').val(),
+            expected_version: $form.find('[name="expected_version"]').val(),
+            amount_minor: amountMinor.toString(), idempotency_key: key,
+            note: $form.find('[name="note"]').val()
+        }, function (res) {
+            if (res.success) window.location.reload();
+            else { alert('Error: ' + (res.data || 'Unknown error')); $button.prop('disabled', false).text('Record payment'); }
+        }).fail(function () { alert('Network error — please try again.'); $button.prop('disabled', false).text('Record payment'); });
+    });
+
     // ── Save admin notes ───────────────────────────────────────────────────────
     $(document).on('click', '#nms-save-notes', function () {
         var $btn = $(this);

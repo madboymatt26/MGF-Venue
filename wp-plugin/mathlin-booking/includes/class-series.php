@@ -6,6 +6,28 @@ if ( ! defined( 'ABSPATH' ) ) exit;
  */
 class MBS_Series {
 
+    public static function get_all( $args = array() ) {
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_SERIES_TABLE;
+        $status = sanitize_key( $args['status'] ?? '' );
+        $search = sanitize_text_field( $args['search'] ?? '' );
+        $limit = max( 1, min( 500, (int) ( $args['limit'] ?? 100 ) ) );
+        $where = array( '1=1' );
+        $params = array();
+        if ( $status ) {
+            $where[] = 'status = %s';
+            $params[] = $status;
+        }
+        if ( $search ) {
+            $like = '%' . $wpdb->esc_like( $search ) . '%';
+            $where[] = '(series_ref LIKE %s OR contact_name LIKE %s OR contact_organisation LIKE %s OR contact_email LIKE %s)';
+            array_push( $params, $like, $like, $like, $like );
+        }
+        $sql = "SELECT * FROM {$table} WHERE " . implode( ' AND ', $where ) . ' ORDER BY created_at DESC LIMIT %d';
+        $params[] = $limit;
+        return $wpdb->get_results( $wpdb->prepare( $sql, $params ) );
+    }
+
     public static function get( $series_ref ) {
         global $wpdb;
         $table = $wpdb->prefix . MBS_SERIES_TABLE;
@@ -111,6 +133,7 @@ class MBS_Series {
             'exceptions_json'      => wp_json_encode( $exceptions ),
             'billing_mode'         => $is_scout ? 'none' : 'monthly',
             'billing_treatment'    => $is_scout ? 'none' : 'manual_consolidated',
+            'deposit_policy'       => 'none',
             'payment_method'       => $is_scout ? 'none' : ( MBS_Bookings::tier_is_offline( $tier ) ? 'offline_bacs' : 'online' ),
             'automatic_reminders'  => $is_scout ? 0 : 1,
             'invoice_lead_days'    => max( 0, (int) get_option( 'mbs_series_invoice_lead_days', 28 ) ),
@@ -136,6 +159,47 @@ class MBS_Series {
     public static function exceptions( $series ) {
         $decoded = json_decode( (string) ( $series->exceptions_json ?? '' ), true );
         return is_array( $decoded ) ? $decoded : array();
+    }
+
+    public static function occurrences( $series_ref, $include_archived = true ) {
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_TABLE;
+        $archived = $include_archived ? '' : " AND status != 'archived'";
+        return $wpdb->get_results( $wpdb->prepare(
+            "SELECT * FROM {$table} WHERE series_id = %s{$archived} ORDER BY booking_date ASC, start_time ASC",
+            sanitize_text_field( $series_ref )
+        ) );
+    }
+
+    public static function invoices( $series_ref ) {
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_INVOICE_TABLE;
+        return $wpdb->get_results( $wpdb->prepare(
+            "SELECT * FROM {$table} WHERE series_ref = %s ORDER BY period_start ASC, created_at ASC",
+            sanitize_text_field( $series_ref )
+        ) );
+    }
+
+    /** Pause or resume invoice generation without rewriting occurrences. */
+    public static function set_paused( $series_ref, $paused, $expected_status, $expected_version ) {
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_SERIES_TABLE;
+        $series = self::get( $series_ref );
+        if ( ! $series ) return new WP_Error( 'series_not_found', 'Recurring series not found.' );
+        if ( $series->status !== $expected_status || (int) $series->version !== (int) $expected_version ) {
+            return new WP_Error( 'series_precondition_failed', 'The recurring series changed since it was loaded. Refresh and try again.' );
+        }
+        $target = $paused ? 'paused' : 'confirmed';
+        if ( $series->status === $target ) return array( 'series' => $series, 'no_op' => true );
+        if ( $paused && $series->status !== 'confirmed' ) return new WP_Error( 'invalid_series_transition', 'Only a confirmed series can be paused.' );
+        if ( ! $paused && $series->status !== 'paused' ) return new WP_Error( 'invalid_series_transition', 'Only a paused series can be resumed.' );
+        $updated = $wpdb->query( $wpdb->prepare(
+            "UPDATE {$table} SET status = %s, version = version + 1, updated_at = %s WHERE series_ref = %s AND status = %s AND version = %d",
+            $target, current_time( 'mysql' ), sanitize_text_field( $series_ref ), $series->status, (int) $series->version
+        ) );
+        if ( $updated !== 1 ) return new WP_Error( 'series_precondition_failed', 'The recurring series changed since it was loaded. Refresh and try again.' );
+        MBS_Audit_Log::log( $series_ref, $paused ? 'series_paused' : 'series_resumed', $paused ? 'Invoice generation paused; occurrences were unchanged.' : 'Invoice generation resumed; occurrences were unchanged.' );
+        return array( 'series' => self::get( $series_ref ), 'no_op' => false );
     }
 
     /** Resolve how an occurrence participates in payment chasing. */
@@ -337,11 +401,13 @@ class MBS_Series {
             }
         }
         MBS_Audit_Log::log( $series_ref, 'series_cancelled', 'Cancelled ' . (int) $cancelled . ' ' . $scope . ' occurrence(s).' );
+        $fresh = self::get( $series_ref );
+        MBS_Email::notify_series_cancelled( $fresh, self::active_occurrences( $series_ref ) );
         return array(
             'transitioned' => true,
             'no_op'        => false,
             'cancelled'    => (int) $cancelled,
-            'series'       => self::get( $series_ref ),
+            'series'       => $fresh,
         );
     }
 

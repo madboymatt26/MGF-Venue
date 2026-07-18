@@ -290,11 +290,12 @@ class MBS_Email {
 
     /** Send the single approval email for a first-class recurring series. */
     public static function notify_series_confirmed( $series, $bookings ) {
-        $subject = 'Recurring Booking Approved – ' . $series->series_ref;
+        $template = MBS_Email_Templates::get_template( 'series_confirmed' );
+        $data = self::series_placeholder_data( $series );
+        $subject = MBS_Email_Templates::replace_placeholders( $template['subject'], $data );
         $body  = self::header();
         $body .= '<h2 style="color:#7413DC;">Your recurring booking is approved</h2>';
-        $body .= '<p>Hi ' . esc_html( $series->contact_name ) . ',</p>';
-        $body .= '<p>We’ve approved your recurring booking request. This one message confirms the dates listed below.</p>';
+        $body .= wp_kses_post( wpautop( MBS_Email_Templates::replace_placeholders( $template['body'], $data ) ) );
         $body .= self::series_request_table( $series );
         $body .= '<h3 style="color:#7413DC;margin-top:24px;">Confirmed dates</h3><ul style="margin:8px 0;padding-left:20px;">';
         foreach ( $bookings as $booking ) {
@@ -311,14 +312,72 @@ class MBS_Email {
         return self::send( $series->contact_email, $subject, $body );
     }
 
+    /** Send one customer-branded notification for an issued invoice. */
+    public static function notify_invoice_issued( $invoice, $series, $items ) {
+        $template = MBS_Email_Templates::get_template( 'invoice_issued' );
+        $data = self::invoice_placeholder_data( $invoice, $series );
+        $extra = array(
+            '{due_date}' => $invoice->due_at ? wp_date( 'j F Y', strtotime( $invoice->due_at ) ) : 'on receipt',
+            '{balance}' => MBS_Money::format( MBS_Billing_Ledger::balance_minor( $invoice ), $invoice->currency ),
+        );
+        $subject = MBS_Email_Templates::replace_placeholders( $template['subject'], $data, $extra );
+        $body = self::header();
+        $body .= wp_kses_post( wpautop( MBS_Email_Templates::replace_placeholders( $template['body'], $data, $extra ) ) );
+        $body .= self::invoice_summary_html( $invoice, $items );
+        $body .= self::invoice_payment_html( $invoice, $series );
+        $body .= self::footer();
+        return self::send( $invoice->contact_email, $subject, $body );
+    }
+
+    /** Send one receipt for a newly recorded invoice payment. */
+    public static function notify_invoice_payment_received( $invoice, $series, $transaction ) {
+        $template = MBS_Email_Templates::get_template( 'invoice_payment_received' );
+        $data = self::invoice_placeholder_data( $invoice, $series );
+        $extra = array(
+            '{payment_amount}' => MBS_Money::format( (int) $transaction->amount_minor, $invoice->currency ),
+            '{balance}' => MBS_Money::format( MBS_Billing_Ledger::balance_minor( $invoice ), $invoice->currency ),
+        );
+        $subject = MBS_Email_Templates::replace_placeholders( $template['subject'], $data, $extra );
+        $body = self::header();
+        $body .= wp_kses_post( wpautop( MBS_Email_Templates::replace_placeholders( $template['body'], $data, $extra ) ) );
+        $body .= '<p><strong>Transaction reference:</strong> ' . esc_html( $transaction->transaction_ref ) . '</p>';
+        $body .= self::footer();
+        return self::send( $invoice->contact_email, $subject, $body );
+    }
+
+    public static function notify_series_changed( $series, $bookings ) {
+        return self::notify_series_state_template( 'series_changed', $series, $bookings );
+    }
+
+    public static function notify_series_cancelled( $series, $bookings ) {
+        return self::notify_series_state_template( 'series_cancelled', $series, $bookings );
+    }
+
+    private static function notify_series_state_template( $type, $series, $bookings ) {
+        $template = MBS_Email_Templates::get_template( $type );
+        $data = self::series_placeholder_data( $series );
+        $subject = MBS_Email_Templates::replace_placeholders( $template['subject'], $data );
+        $body = self::header();
+        $body .= wp_kses_post( wpautop( MBS_Email_Templates::replace_placeholders( $template['body'], $data ) ) );
+        if ( $bookings ) {
+            $dates = array();
+            foreach ( $bookings as $booking ) $dates[] = array( 'status' => 'accepted', 'date' => $booking->booking_date, 'ref' => $booking->ref );
+            $body .= self::series_dates_html( $dates, false );
+        }
+        $body .= '<p>If you have any questions, just reply to this email.</p>' . self::footer();
+        return self::send( $series->contact_email, $subject, $body );
+    }
+
     /** Send the sole automatic reminder for a consolidated invoice. */
     public static function notify_invoice_reminder( $invoice, $series, $items ) {
         $balance = MBS_Billing_Ledger::balance_minor( $invoice );
-        $subject = 'Invoice Reminder – ' . $invoice->invoice_ref;
+        $template = MBS_Email_Templates::get_template( 'invoice_reminder' );
+        $data = self::invoice_placeholder_data( $invoice, $series );
+        $extra = array( '{balance}' => MBS_Money::format( $balance, $invoice->currency ) );
+        $subject = MBS_Email_Templates::replace_placeholders( $template['subject'], $data, $extra );
         $body  = self::header();
         $body .= '<h2 style="color:#7413DC;">Invoice reminder</h2>';
-        $body .= '<p>Hi ' . esc_html( $invoice->contact_name ) . ',</p>';
-        $body .= '<p>This is the single automatic reminder for consolidated invoice <strong>' . esc_html( $invoice->invoice_ref ) . '</strong>.</p>';
+        $body .= wp_kses_post( wpautop( MBS_Email_Templates::replace_placeholders( $template['body'], $data, $extra ) ) );
         $body .= '<table style="width:100%;border-collapse:collapse;margin:16px 0;">';
         $body .= '<tr><td style="padding:8px;background:#f5f0ff;font-weight:600;">Invoice</td><td style="padding:8px;">' . esc_html( $invoice->invoice_ref ) . '</td></tr>';
         $body .= '<tr><td style="padding:8px;background:#f5f0ff;font-weight:600;">Period</td><td style="padding:8px;">' . esc_html( wp_date( 'j M Y', strtotime( $invoice->period_start ) ) . ' – ' . wp_date( 'j M Y', strtotime( $invoice->period_end ) ) ) . '</td></tr>';
@@ -343,6 +402,49 @@ class MBS_Email {
         $body .= '<p>If payment is already in progress, please disregard this reminder. For any query, reply to this email.</p>';
         $body .= self::footer();
         return self::send( $invoice->contact_email, $subject, $body );
+    }
+
+    private static function series_placeholder_data( $series ) {
+        return array(
+            'name' => $series->contact_name, 'organisation' => $series->contact_organisation,
+            'ref' => $series->series_ref, 'space' => $series->space,
+            'booking_date' => $series->start_date, 'start_time' => $series->start_time,
+            'end_time' => $series->end_time, 'all_day' => $series->all_day,
+            'attendees' => $series->attendees, 'purpose' => $series->purpose,
+            'amount' => $series->estimated_total, 'invoice_number' => '',
+        );
+    }
+
+    private static function invoice_placeholder_data( $invoice, $series ) {
+        return array(
+            'name' => $invoice->contact_name, 'organisation' => $invoice->contact_organisation,
+            'ref' => $invoice->series_ref, 'space' => $series ? $series->space : '',
+            'booking_date' => $invoice->period_start, 'start_time' => '', 'end_time' => '',
+            'all_day' => true, 'attendees' => '', 'purpose' => $series ? $series->purpose : '',
+            'amount' => MBS_Money::decimal( (int) $invoice->total_minor ),
+            'invoice_number' => $invoice->invoice_ref,
+        );
+    }
+
+    private static function invoice_summary_html( $invoice, $items ) {
+        $html = '<table style="width:100%;border-collapse:collapse;margin:16px 0;">';
+        foreach ( $items as $item ) {
+            $html .= '<tr><td style="padding:8px;border-bottom:1px solid #e0d0f0;">' . esc_html( $item->description ) . '</td>';
+            $html .= '<td style="padding:8px;border-bottom:1px solid #e0d0f0;text-align:right;">' . esc_html( MBS_Money::format( (int) $item->line_total_minor, $invoice->currency ) ) . '</td></tr>';
+        }
+        $html .= '<tr><td style="padding:10px 8px;font-weight:700;">Invoice total</td><td style="padding:10px 8px;text-align:right;font-weight:700;">' . esc_html( MBS_Money::format( (int) $invoice->total_minor, $invoice->currency ) ) . '</td></tr>';
+        return $html . '</table>';
+    }
+
+    private static function invoice_payment_html( $invoice, $series ) {
+        $balance = MBS_Billing_Ledger::balance_minor( $invoice );
+        if ( $balance <= 0 ) return '';
+        if ( $series && $series->payment_method === 'offline_bacs' ) {
+            $payment = (object) array( 'invoice_number' => $invoice->invoice_ref, 'ref' => $invoice->series_ref, 'amount' => MBS_Money::decimal( $balance ), 'amount_paid' => 0 );
+            return self::offline_payment_block( $payment, (float) MBS_Money::decimal( $balance ) );
+        }
+        $pay_url = MBS_Invoice_Payment::generate_payment_url( $invoice );
+        return $pay_url ? '<p style="text-align:center;margin:24px 0;"><a href="' . esc_url( $pay_url ) . '" style="background:#2ecc71;color:#fff;padding:14px 32px;border-radius:6px;text-decoration:none;font-weight:bold;">Pay this invoice ' . esc_html( MBS_Money::format( $balance, $invoice->currency ) ) . '</a></p>' : '';
     }
 
     private static function series_request_table( $series ) {

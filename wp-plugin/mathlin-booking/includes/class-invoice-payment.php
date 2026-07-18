@@ -56,6 +56,7 @@ class MBS_Invoice_Payment {
         if ( ! is_wp_error( $result ) && MBS_Billing_Ledger::balance_minor( $result['invoice'] ) <= 0 ) {
             self::mark_covered_occurrences_paid( $result['invoice'] );
         }
+        if ( ! is_wp_error( $result ) ) self::send_payment_receipt_if_needed( $result );
         return $result;
     }
 
@@ -91,7 +92,28 @@ class MBS_Invoice_Payment {
             if ( MBS_Billing_Ledger::balance_minor( $result['invoice'] ) <= 0 ) self::mark_covered_occurrences_paid( $result['invoice'] );
             MBS_Audit_Log::log( $invoice_ref, 'invoice_manual_payment', 'Manual invoice payment recorded: ' . MBS_Money::format( $amount ) . '.' );
         }
+        if ( ! is_wp_error( $result ) ) self::send_payment_receipt_if_needed( $result );
         return $result;
+    }
+
+    /** Claim one receipt per completed payment transaction, including partial payments. */
+    private static function send_payment_receipt_if_needed( $result ) {
+        global $wpdb;
+        if ( empty( $result['created'] ) || empty( $result['transaction'] ) || empty( $result['invoice'] ) ) return false;
+        $transaction = $result['transaction'];
+        if ( $transaction->transaction_type !== 'payment' || $transaction->status !== 'completed' || ! empty( $transaction->receipt_sent_at ) ) return false;
+        $now = current_time( 'mysql' );
+        $table = $wpdb->prefix . MBS_PAYMENT_TRANSACTION_TABLE;
+        $claimed = $wpdb->query( $wpdb->prepare(
+            "UPDATE {$table} SET receipt_sent_at = %s, updated_at = %s WHERE id = %d AND receipt_sent_at IS NULL",
+            $now, $now, (int) $transaction->id
+        ) );
+        if ( $claimed !== 1 ) return false;
+        $transaction->receipt_sent_at = $now;
+        $series = ! empty( $result['invoice']->series_ref ) ? MBS_Series::get( $result['invoice']->series_ref ) : null;
+        $sent = MBS_Email::notify_invoice_payment_received( $result['invoice'], $series, $transaction );
+        MBS_Audit_Log::log( $result['invoice']->invoice_ref, 'invoice_payment_receipt', $sent ? 'Invoice payment receipt sent.' : 'Invoice payment receipt queued after immediate send failure.' );
+        return true;
     }
 
     /** Claim and send the single allowed reminder for an invoice. */

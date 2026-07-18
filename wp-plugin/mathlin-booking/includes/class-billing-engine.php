@@ -31,11 +31,19 @@ class MBS_Billing_Engine {
         $table = $wpdb->prefix . MBS_SERIES_TABLE;
         $mode = sanitize_key( $configuration['billing_mode'] ?? '' );
         $treatment = sanitize_key( $configuration['billing_treatment'] ?? '' );
+        $payment_method = sanitize_key( $configuration['payment_method'] ?? 'online' );
+        $deposit_policy = sanitize_key( $configuration['deposit_policy'] ?? 'none' );
         if ( ! in_array( $mode, array( 'monthly', 'termly', 'legacy_per_occurrence', 'upfront', 'none' ), true ) ) {
             return new WP_Error( 'invalid_billing_mode', 'Invalid billing mode.' );
         }
         if ( ! in_array( $treatment, array( 'manual_consolidated', 'invoice_managed', 'legacy_per_occurrence', 'none' ), true ) ) {
             return new WP_Error( 'invalid_billing_treatment', 'Invalid billing treatment.' );
+        }
+        if ( ! in_array( $payment_method, array( 'online', 'offline_bacs', 'none' ), true ) ) {
+            return new WP_Error( 'invalid_payment_method', 'Invalid payment method.' );
+        }
+        if ( $deposit_policy !== 'none' ) {
+            return new WP_Error( 'unsupported_deposit_policy', 'Consolidated recurring series currently support no deposit only.' );
         }
         $lead_days = max( 0, min( 365, (int) ( $configuration['invoice_lead_days'] ?? 28 ) ) );
         $terms_days = max( 0, min( 365, (int) ( $configuration['payment_terms_days'] ?? 14 ) ) );
@@ -46,9 +54,11 @@ class MBS_Billing_Engine {
             "UPDATE {$table}
              SET billing_mode = %s, billing_treatment = %s, invoice_lead_days = %d,
                  payment_terms_days = %d, billing_schedule_json = %s,
+                 payment_method = %s, deposit_policy = %s,
                  version = version + 1, updated_at = %s
              WHERE series_ref = %s AND version = %d",
             $mode, $treatment, $lead_days, $terms_days, wp_json_encode( $schedule ),
+            $payment_method, $deposit_policy,
             current_time( 'mysql' ), sanitize_text_field( $series_ref ), (int) $expected_version
         ) );
         if ( $updated !== 1 ) return new WP_Error( 'series_precondition_failed', 'The recurring series changed since it was loaded.' );
@@ -232,6 +242,7 @@ class MBS_Billing_Engine {
         if ( is_wp_error( $created ) ) return $created;
         $invoice = $created['invoice'];
         if ( $invoice->status !== 'draft' ) {
+            self::send_invoice_if_needed( $invoice, $series );
             return array( 'series_ref' => $series->series_ref, 'period_key' => $period['period_key'], 'status' => 'existing', 'invoice_ref' => $invoice->invoice_ref );
         }
 
@@ -259,11 +270,30 @@ class MBS_Billing_Engine {
         }
         $issued = MBS_Billing_Ledger::issue_invoice( $invoice->invoice_ref, (int) $invoice->version );
         if ( is_wp_error( $issued ) ) return $issued;
+        self::send_invoice_if_needed( $issued['invoice'], $series );
         return array(
             'series_ref' => $series->series_ref, 'period_key' => $period['period_key'],
             'status' => $created['created'] ? 'created' : 'resumed', 'invoice_ref' => $invoice->invoice_ref,
             'occurrence_count' => $period['occurrence_count'], 'total_minor' => $period['total_minor'],
         );
+    }
+
+    /** Atomically claim the sole automatic issued-invoice email. */
+    private static function send_invoice_if_needed( $invoice, $series ) {
+        global $wpdb;
+        if ( ! $invoice || $invoice->document_type !== 'invoice' || ! in_array( $invoice->status, array( 'issued', 'part_paid', 'paid' ), true ) ) return false;
+        if ( ! empty( $invoice->issued_email_sent_at ) ) return false;
+        $now = current_time( 'mysql' );
+        $table = $wpdb->prefix . MBS_INVOICE_TABLE;
+        $claimed = $wpdb->query( $wpdb->prepare(
+            "UPDATE {$table} SET issued_email_sent_at = %s, updated_at = %s WHERE id = %d AND issued_email_sent_at IS NULL",
+            $now, $now, (int) $invoice->id
+        ) );
+        if ( $claimed !== 1 ) return false;
+        $invoice->issued_email_sent_at = $now;
+        $sent = MBS_Email::notify_invoice_issued( $invoice, $series, MBS_Billing_Ledger::get_items( $invoice->id ) );
+        MBS_Audit_Log::log( $invoice->invoice_ref, 'invoice_issued_email', $sent ? 'Consolidated invoice email sent.' : 'Consolidated invoice email queued after immediate send failure.' );
+        return true;
     }
 
     /** Credit cancelled occurrences that were already frozen onto issued bills. */

@@ -27,6 +27,9 @@ class MBS_Admin {
         add_action( 'wp_ajax_mbs_update_series_status', array( $this, 'ajax_update_series_status' ) );
         add_action( 'wp_ajax_mbs_resend_series_confirmation', array( $this, 'ajax_resend_series_confirmation' ) );
         add_action( 'wp_ajax_mbs_record_invoice_manual_payment', array( $this, 'ajax_record_invoice_manual_payment' ) );
+        add_action( 'wp_ajax_mbs_configure_series_billing', array( $this, 'ajax_configure_series_billing' ) );
+        add_action( 'wp_ajax_mbs_pause_series', array( $this, 'ajax_pause_series' ) );
+        add_action( 'wp_ajax_mbs_catch_up_series_billing', array( $this, 'ajax_catch_up_series_billing' ) );
         add_action( 'wp_ajax_mbs_cancel_scout_series', array( $this, 'ajax_cancel_scout_series' ) );
         add_action( 'wp_ajax_mbs_edit_scout_series', array( $this, 'ajax_edit_scout_series' ) );
         add_action( 'wp_ajax_mbs_extend_scout_series', array( $this, 'ajax_extend_scout_series' ) );
@@ -75,6 +78,7 @@ class MBS_Admin {
             30
         );
         add_submenu_page( 'mathlin-booking', 'All Bookings', $bookings_label, $booking_cap, 'mathlin-booking', array( $this, 'render_dashboard' ) );
+        add_submenu_page( 'mathlin-booking', 'Recurring Series', 'Recurring Series', $booking_cap, 'mathlin-series', array( $this, 'render_series' ) );
         // Scout Nights: only show if the feature is enabled in Settings
         if ( get_option( 'mbs_scout_nights_enabled', 1 ) ) {
             add_submenu_page( 'mathlin-booking', 'Scout Nights', 'Scout Nights', $booking_cap, 'mathlin-scout-nights', array( $this, 'render_scout_nights' ) );
@@ -145,6 +149,10 @@ class MBS_Admin {
      */
     private static function can_delete_bookings() {
         return current_user_can( 'manage_options' );
+    }
+
+    private static function invoice_manages_occurrence( $booking ) {
+        return $booking && in_array( MBS_Series::billing_treatment_for_booking( $booking ), array( 'manual_consolidated', 'invoice_managed', 'none' ), true );
     }
 
     public function enqueue_assets( $hook ) {
@@ -221,6 +229,20 @@ class MBS_Admin {
         include MBS_PLUGIN_DIR . 'admin/views/scout-nights.php';
     }
 
+    public function render_series() {
+        $ref = sanitize_text_field( $_GET['ref'] ?? '' );
+        $status = sanitize_key( $_GET['status'] ?? '' );
+        $search = sanitize_text_field( $_GET['s'] ?? '' );
+        $series = $ref ? MBS_Series::get( $ref ) : null;
+        $series_rows = $ref ? array() : MBS_Series::get_all( array( 'status' => $status, 'search' => $search ) );
+        $occurrences = $series ? MBS_Series::occurrences( $series->series_ref ) : array();
+        $exceptions = $series ? MBS_Series::exceptions( $series ) : array();
+        $invoices = $series ? MBS_Series::invoices( $series->series_ref ) : array();
+        $preview = $series ? MBS_Billing_Engine::preview( $series->series_ref ) : array();
+        $audit = $series ? MBS_Audit_Log::get_for_booking( $series->series_ref ) : array();
+        include MBS_PLUGIN_DIR . 'admin/views/series.php';
+    }
+
     // ── AJAX handlers ──────────────────────────────────────────────────────────
     public function ajax_update_status() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
@@ -229,6 +251,15 @@ class MBS_Admin {
         $ref    = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
         $status = sanitize_text_field( $_POST['status'] ?? '' );
         $reason = sanitize_textarea_field( $_POST['reason'] ?? '' );
+
+        $current = MBS_Bookings::get( $ref );
+        if ( ! $current ) wp_send_json_error( 'Booking not found.' );
+        if ( $status === 'confirmed' && ! empty( $current->series_id ) && MBS_Series::get( $current->series_id ) ) {
+            wp_send_json_error( 'Approve this occurrence through its recurring-series screen so only one confirmation is sent.', 409 );
+        }
+        if ( in_array( $status, array( 'paid', 'deposit_paid' ), true ) && self::invoice_manages_occurrence( $current ) ) {
+            wp_send_json_error( 'Record payment against the consolidated invoice, not an individual occurrence.', 409 );
+        }
 
         $result = MBS_Bookings::update_status( $ref, $status );
 
@@ -277,6 +308,7 @@ class MBS_Admin {
         $ref = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
         $booking = MBS_Bookings::get( $ref );
         if ( ! $booking ) wp_send_json_error( 'Booking not found.' );
+        if ( self::invoice_manages_occurrence( $booking ) ) wp_send_json_error( 'Record credits or refunds through the consolidated invoice ledger.', 409 );
 
         // Set amount_paid = amount to balance the books (refund has been processed)
         global $wpdb;
@@ -300,6 +332,7 @@ class MBS_Admin {
         $ref = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
         $booking = MBS_Bookings::get( $ref );
         if ( ! $booking ) wp_send_json_error( 'Booking not found.' );
+        if ( self::invoice_manages_occurrence( $booking ) ) wp_send_json_error( 'Recurring consolidated series do not use per-occurrence deposits.', 409 );
         if ( $booking->status !== 'confirmed' ) wp_send_json_error( 'Booking must be in Confirmed status to mark deposit paid.' );
 
         $deposit_amount = MBS_Bookings::calculate_deposit( (float) $booking->amount );
@@ -331,6 +364,7 @@ class MBS_Admin {
         $ref = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
         $booking = MBS_Bookings::get( $ref );
         if ( ! $booking ) wp_send_json_error( 'Booking not found.' );
+        if ( self::invoice_manages_occurrence( $booking ) ) wp_send_json_error( 'Recurring consolidated series do not use per-occurrence deposits.', 409 );
         if ( $booking->status !== 'deposit_paid' ) wp_send_json_error( 'Booking is not in Deposit Paid status.' );
 
         MBS_Bookings::update_status( $ref, 'confirmed' );
@@ -357,6 +391,9 @@ class MBS_Admin {
         $status = sanitize_text_field( $_POST['status'] ?? 'confirmed' );
         $booking = MBS_Bookings::get( $ref );
         if ( ! $booking ) wp_send_json_error( 'Booking not found.' );
+        if ( self::invoice_manages_occurrence( $booking ) && in_array( $status, array( 'deposit_paid', 'paid' ), true ) ) {
+            wp_send_json_error( 'Restore consolidated-series payment state through the invoice ledger.', 409 );
+        }
 
         // Only allow restoring from archived or cancelled
         if ( ! in_array( $booking->status, array( 'archived', 'cancelled' ) ) ) {
@@ -956,6 +993,57 @@ class MBS_Admin {
             'balance_minor' => MBS_Billing_Ledger::balance_minor( $result['invoice'] ),
             'idempotent_replay' => ! empty( $result['idempotent_replay'] ),
         ) );
+    }
+
+    public function ajax_configure_series_billing() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to change series billing.', 403 );
+        $series_ref = sanitize_text_field( $_POST['series_ref'] ?? '' );
+        $expected_version = absint( $_POST['expected_version'] ?? 0 );
+        if ( ! $series_ref || $expected_version < 1 ) wp_send_json_error( 'Series reference and current version are required.', 400 );
+
+        $schedule = array();
+        $schedule_json = wp_unslash( $_POST['billing_schedule_json'] ?? '' );
+        if ( $schedule_json !== '' ) {
+            $schedule = json_decode( $schedule_json, true );
+            if ( ! is_array( $schedule ) ) wp_send_json_error( 'The term schedule is not valid JSON.', 400 );
+        }
+        $result = MBS_Billing_Engine::configure_series( $series_ref, array(
+            'billing_mode' => sanitize_key( $_POST['billing_mode'] ?? '' ),
+            'billing_treatment' => sanitize_key( $_POST['billing_treatment'] ?? '' ),
+            'payment_method' => sanitize_key( $_POST['payment_method'] ?? '' ),
+            'deposit_policy' => 'none',
+            'invoice_lead_days' => absint( $_POST['invoice_lead_days'] ?? 28 ),
+            'payment_terms_days' => absint( $_POST['payment_terms_days'] ?? 14 ),
+            'billing_schedule' => $schedule,
+        ), $expected_version );
+        if ( is_wp_error( $result ) ) wp_send_json_error( $result->get_error_message(), $result->get_error_code() === 'series_precondition_failed' ? 409 : 400 );
+        MBS_Audit_Log::log( $series_ref, 'series_billing_changed', 'Billing changed to ' . $result->billing_mode . ' / ' . $result->billing_treatment . ' using ' . $result->payment_method . '.' );
+        if ( in_array( $result->status, array( 'confirmed', 'paused' ), true ) ) {
+            MBS_Email::notify_series_changed( $result, MBS_Series::active_occurrences( $series_ref ) );
+        }
+        wp_send_json_success( array( 'series_ref' => $series_ref, 'version' => (int) $result->version ) );
+    }
+
+    public function ajax_pause_series() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to pause series billing.', 403 );
+        $result = MBS_Series::set_paused(
+            sanitize_text_field( $_POST['series_ref'] ?? '' ),
+            ! empty( $_POST['paused'] ),
+            sanitize_key( $_POST['expected_status'] ?? '' ),
+            absint( $_POST['expected_version'] ?? 0 )
+        );
+        if ( is_wp_error( $result ) ) wp_send_json_error( $result->get_error_message(), $result->get_error_code() === 'series_precondition_failed' ? 409 : 400 );
+        wp_send_json_success( array( 'status' => $result['series']->status, 'version' => (int) $result['series']->version, 'no_op' => ! empty( $result['no_op'] ) ) );
+    }
+
+    public function ajax_catch_up_series_billing() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to generate invoices.', 403 );
+        $result = MBS_Billing_Engine::catch_up( wp_date( 'Y-m-d' ) );
+        if ( is_wp_error( $result ) ) wp_send_json_error( $result->get_error_message(), 400 );
+        wp_send_json_success( $result );
     }
 
     /**
