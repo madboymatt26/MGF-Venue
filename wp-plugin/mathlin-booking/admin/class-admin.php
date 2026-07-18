@@ -30,6 +30,7 @@ class MBS_Admin {
         add_action( 'wp_ajax_mbs_configure_series_billing', array( $this, 'ajax_configure_series_billing' ) );
         add_action( 'wp_ajax_mbs_pause_series', array( $this, 'ajax_pause_series' ) );
         add_action( 'wp_ajax_mbs_catch_up_series_billing', array( $this, 'ajax_catch_up_series_billing' ) );
+        add_action( 'wp_ajax_mbs_extend_external_series', array( $this, 'ajax_extend_external_series' ) );
         add_action( 'wp_ajax_mbs_cancel_scout_series', array( $this, 'ajax_cancel_scout_series' ) );
         add_action( 'wp_ajax_mbs_edit_scout_series', array( $this, 'ajax_edit_scout_series' ) );
         add_action( 'wp_ajax_mbs_extend_scout_series', array( $this, 'ajax_extend_scout_series' ) );
@@ -926,7 +927,7 @@ class MBS_Admin {
                 $count  = is_wp_error( $result ) ? 0 : (int) $result['updated'];
             } elseif ( $status === 'cancelled' ) {
                 $scope  = sanitize_key( $_POST['scope'] ?? 'all' );
-                $result = MBS_Series::cancel( $series_id, $scope, $expected_status, $expected_version );
+                $result = MBS_Series::cancel( $series_id, $scope, $expected_status, $expected_version, true );
                 $count  = is_wp_error( $result ) ? 0 : (int) $result['cancelled'];
             } else {
                 wp_send_json_error( 'First-class series support only approval or cancellation through this action.' );
@@ -1016,6 +1017,7 @@ class MBS_Admin {
             'invoice_lead_days' => absint( $_POST['invoice_lead_days'] ?? 28 ),
             'payment_terms_days' => absint( $_POST['payment_terms_days'] ?? 14 ),
             'billing_schedule' => $schedule,
+            'adopt_legacy' => ! empty( $_POST['adopt_legacy'] ),
         ), $expected_version );
         if ( is_wp_error( $result ) ) wp_send_json_error( $result->get_error_message(), $result->get_error_code() === 'series_precondition_failed' ? 409 : 400 );
         MBS_Audit_Log::log( $series_ref, 'series_billing_changed', 'Billing changed to ' . $result->billing_mode . ' / ' . $result->billing_treatment . ' using ' . $result->payment_method . '.' );
@@ -1044,6 +1046,19 @@ class MBS_Admin {
         $result = MBS_Billing_Engine::catch_up( wp_date( 'Y-m-d' ) );
         if ( is_wp_error( $result ) ) wp_send_json_error( $result->get_error_message(), 400 );
         wp_send_json_success( $result );
+    }
+
+    public function ajax_extend_external_series() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to extend series.', 403 );
+        $result = MBS_Series::extend(
+            sanitize_text_field( $_POST['series_ref'] ?? '' ),
+            sanitize_text_field( $_POST['repeat_until'] ?? '' ),
+            absint( $_POST['expected_version'] ?? 0 ),
+            true
+        );
+        if ( is_wp_error( $result ) ) wp_send_json_error( $result->get_error_message(), $result->get_error_code() === 'series_precondition_failed' ? 409 : 400 );
+        wp_send_json_success( array( 'series_ref' => $result['series']->series_ref, 'version' => (int) $result['series']->version, 'created' => count( $result['created'] ), 'skipped' => (int) $result['skipped'] ) );
     }
 
     /**
@@ -1316,6 +1331,29 @@ class MBS_Admin {
         $new_start = sanitize_text_field( $_POST['start_time'] ?? '' );
         $new_end   = sanitize_text_field( $_POST['end_time'] ?? '' );
         $new_allday = ! empty( $_POST['all_day'] );
+
+        $billing_fields_changed =
+            $new_space !== $booking->space ||
+            $new_date !== $booking->booking_date ||
+            $date_to !== ( $booking->booking_date_end ?: $booking->booking_date ) ||
+            $new_start !== (string) $booking->start_time ||
+            $new_end !== (string) $booking->end_time ||
+            $new_allday !== (bool) $booking->all_day ||
+            ( ! empty( $_POST['kitchen'] ) ) !== (bool) $booking->kitchen ||
+            $scout_use !== (bool) $booking->scout_use ||
+            abs( $old_amount - $new_amount ) > 0.009;
+        if ( $billing_fields_changed ) {
+            $allocation = MBS_Billing_Ledger::get_active_booking_allocation( $ref );
+            if ( $allocation ) {
+                wp_send_json_error(
+                    sprintf(
+                        'This occurrence is already included on invoice %s. Cancel it through the recurring-series controls so the invoice is credited, then add a replacement occurrence; issued invoice details cannot be overwritten.',
+                        $allocation->invoice_ref
+                    ),
+                    409
+                );
+            }
+        }
 
         if ( $new_space !== $booking->space || $new_date !== $booking->booking_date ||
              $new_start !== $booking->start_time || $new_end !== $booking->end_time ) {

@@ -304,6 +304,8 @@ class MBS_Email {
         $body .= '</ul>';
         if ( $series->billing_treatment === 'manual_consolidated' ) {
             $body .= '<p><strong>Billing:</strong> We will manage billing for this series separately. No annual payment, occurrence invoice or individual payment link is created by this approval.</p>';
+        } elseif ( $series->billing_treatment === 'invoice_managed' ) {
+            $body .= '<p><strong>Billing:</strong> We will issue one consolidated ' . esc_html( str_replace( '_', ' ', $series->billing_mode ) ) . ' invoice in advance. Each invoice covers only its listed booking dates; no annual payment or occurrence-level payment link is created.</p>';
         } elseif ( $series->billing_treatment === 'none' ) {
             $body .= '<p><strong>Billing:</strong> No charge applies to this series.</p>';
         }
@@ -459,6 +461,8 @@ class MBS_Email {
             'Available dates submitted'   => (int) $series->accepted_count,
             'Price per booking'           => '&pound;' . number_format( (float) $series->price_per_booking, 2 ),
             'Estimated full series value' => '&pound;' . number_format( (float) $series->estimated_total, 2 ),
+            'Billing frequency'           => ucfirst( str_replace( '_', ' ', $series->billing_mode ) ) . ' in advance',
+            'Payment method'              => $series->payment_method === 'offline_bacs' ? 'Invoice (BACS / purchase order)' : ( $series->payment_method === 'none' ? 'No payment required' : 'Online invoice payment' ),
             'Amount due at submission'    => '&pound;0.00',
         );
         $html = '<table style="width:100%;border-collapse:collapse;margin:16px 0;">';

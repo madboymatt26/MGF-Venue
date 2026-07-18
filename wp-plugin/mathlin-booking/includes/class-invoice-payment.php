@@ -6,7 +6,7 @@ class MBS_Invoice_Payment {
 
     public static function generate_payment_url( $invoice ) {
         if ( ! MBS_Woo_Payment::is_available() ) return '';
-        if ( ! in_array( $invoice->status, array( 'issued', 'part_paid' ), true ) ) return '';
+        if ( ! in_array( $invoice->status, array( 'issued', 'part_paid', 'overdue' ), true ) ) return '';
         if ( MBS_Billing_Ledger::balance_minor( $invoice ) <= 0 ) return '';
         $series = ! empty( $invoice->series_ref ) ? MBS_Series::get( $invoice->series_ref ) : null;
         if ( $series && $series->payment_method === 'offline_bacs' ) return '';
@@ -126,7 +126,7 @@ class MBS_Invoice_Payment {
             $wpdb->query( 'ROLLBACK' );
             return new WP_Error( 'invoice_not_found', 'Invoice not found.' );
         }
-        if ( ! in_array( $invoice->status, array( 'issued', 'part_paid' ), true ) || MBS_Billing_Ledger::balance_minor( $invoice ) <= 0 ) {
+        if ( ! in_array( $invoice->status, array( 'issued', 'part_paid', 'overdue' ), true ) || MBS_Billing_Ledger::balance_minor( $invoice ) <= 0 ) {
             $wpdb->query( 'ROLLBACK' );
             return array( 'sent' => false, 'no_op' => true, 'reason' => 'not_outstanding' );
         }
@@ -141,7 +141,7 @@ class MBS_Invoice_Payment {
         }
         $now = current_time( 'mysql' );
         $claimed = $wpdb->query( $wpdb->prepare(
-            "UPDATE {$invoice_table} SET reminder_count = 1, last_reminded_at = %s, updated_at = %s WHERE id = %d AND reminder_count = 0",
+            "UPDATE {$invoice_table} SET reminder_count = 1, status = 'overdue', last_reminded_at = %s, updated_at = %s WHERE id = %d AND reminder_count = 0",
             $now, $now, (int) $invoice->id
         ) );
         if ( $claimed !== 1 ) {
@@ -161,7 +161,7 @@ class MBS_Invoice_Payment {
         $rows = $wpdb->get_results( $wpdb->prepare(
             "SELECT i.invoice_ref FROM {$invoice_table} i
              LEFT JOIN {$series_table} s ON s.series_ref = i.series_ref
-             WHERE i.document_type = 'invoice' AND i.status IN ('issued','part_paid')
+             WHERE i.document_type = 'invoice' AND i.status IN ('issued','part_paid','overdue')
              AND i.due_at <= %s AND i.reminder_count = 0
              AND (s.series_ref IS NULL OR s.automatic_reminders = 1)
              ORDER BY i.due_at ASC LIMIT 20",

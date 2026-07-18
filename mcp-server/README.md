@@ -12,6 +12,17 @@ It calls the authenticated WordPress REST API at `/wp-json/mathlin/v1/admin/...`
 - `get_booking_audit` — retrieve the booking action history without stored IP addresses.
 - `set_booking_status` — idempotently set pending, confirmed, or cancelled; external email is opt-in.
 - `update_admin_notes` — replace the private administrator note without emailing the hirer.
+- `list_series` / `get_series` — read first-class or registered legacy series,
+  occurrences, exceptions, previews, invoices and audit without token/hash fields.
+- `approve_series` — approve with expected status/version and a stable
+  idempotency key; customer confirmation is opt-in.
+- `configure_series_billing` — configure monthly/termly/upfront/legacy/no-charge
+  billing and online/offline payment. Legacy adoption must be explicit.
+- `update_series_state` — pause, resume, extend or cancel future/all dates with
+  optimistic concurrency; customer email is opt-in.
+- `list_invoices` / `get_invoice` — read safe invoice, item and transaction data.
+- `record_invoice_payment` — record exact-minor-unit offline payments with
+  invoice version and idempotency protection.
 
 - `get_admin_resource` reads blocked dates, series, change requests, invoices,
   payment links, and redacted plugin/email/custom-field/OSM configuration.
@@ -27,7 +38,9 @@ input checks. Stored access codes, tokens, webhooks and OSM client credentials
 are never returned by read tools; configuration reads expose only whether those
 secrets are configured.
 
-The WordPress API response allow-list deliberately excludes `modification_token` and any future database fields unless they are explicitly reviewed and added.
+The WordPress API response allow-lists deliberately exclude
+`modification_token`, invoice bearer tokens, payment-token hashes, financial
+idempotency hashes and any future database fields unless explicitly reviewed.
 
 ## WordPress authentication
 
@@ -61,7 +74,8 @@ tool_timeout_sec = 60
 enabled = true
 ```
 
-The `writes` approval mode allows read tools normally while prompting for the status and note tools.
+The `writes` approval mode allows read tools normally while prompting for
+booking/series status, billing and payment writes.
 
 After saving the configuration, restart Codex and use `/mcp` to verify that `mgf_venue` is connected.
 

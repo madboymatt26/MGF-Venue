@@ -33,7 +33,7 @@ if ( preg_match( '/FOREIGN\s+KEY\s*\(/i', $database ) ) {
     exit( 1 );
 }
 
-contains_text( $series, "'manual_consolidated'", 'New external series receive explicit consolidated billing treatment.' );
+contains_text( $series, "'billing_treatment'    => \$is_scout ? 'none' : 'invoice_managed'", 'New external series default to invoice-managed monthly billing.' );
 contains_text( $series, "hash( 'sha256'", 'Terms content is hashed.' );
 contains_text( $public, 'notify_admin_series', 'Public submission sends one series-level admin notification.' );
 contains_text( $public, 'notify_recurring_summary', 'Public submission sends one series-level request receipt.' );

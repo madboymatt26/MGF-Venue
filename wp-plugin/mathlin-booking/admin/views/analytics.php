@@ -70,35 +70,65 @@ $avg_value = $total_fy > 0 ? $revenue_fy / $total_fy : 0;
 $paid_count     = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE status = 'paid' AND scout_use = 0 AND booking_date BETWEEN %s AND %s", $fy_start, $fy_end ) );
 $unpaid_count   = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE status = 'confirmed' AND scout_use = 0 AND booking_date BETWEEN %s AND %s", $fy_start, $fy_end ) );
 
-// ── Financial: billed vs collected vs outstanding (this FY, commercial only) ──
-$billed_fy = $revenue_fy; // SUM(amount) already computed above
-$collected_fy = (float) $wpdb->get_var( $wpdb->prepare(
-    "SELECT COALESCE(SUM(amount_paid), 0) FROM {$table} WHERE status IN ('confirmed', 'deposit_paid', 'paid') AND scout_use = 0 AND booking_date BETWEEN %s AND %s",
+// ── Financial: immutable invoices + genuinely legacy unallocated bookings ────
+$invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
+$transaction_table = $wpdb->prefix . MBS_PAYMENT_TRANSACTION_TABLE;
+$allocation_table = $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE;
+$legacy_billed = (float) $wpdb->get_var( $wpdb->prepare(
+    "SELECT COALESCE(SUM(b.amount), 0) FROM {$table} b
+     WHERE b.status IN ('confirmed','deposit_paid','paid') AND b.scout_use = 0
+     AND b.booking_date BETWEEN %s AND %s AND NOT EXISTS (SELECT 1 FROM {$allocation_table} a WHERE a.booking_ref = b.ref)",
     $fy_start, $fy_end
 ) );
+$invoice_billed_minor = (int) $wpdb->get_var( $wpdb->prepare(
+    "SELECT COALESCE(SUM(total_minor), 0) FROM {$invoice_table}
+     WHERE document_type IN ('invoice','credit_note') AND status NOT IN ('draft','void') AND DATE(issued_at) BETWEEN %s AND %s",
+    $fy_start, $fy_end
+) );
+$billed_fy = $legacy_billed + ( $invoice_billed_minor / 100 );
+$legacy_collected = (float) $wpdb->get_var( $wpdb->prepare(
+    "SELECT COALESCE(SUM(b.amount_paid), 0) FROM {$table} b
+     WHERE b.scout_use = 0 AND b.booking_date BETWEEN %s AND %s
+     AND NOT EXISTS (SELECT 1 FROM {$allocation_table} a WHERE a.booking_ref = b.ref)",
+    $fy_start, $fy_end
+) );
+$invoice_collected_minor = (int) $wpdb->get_var( $wpdb->prepare(
+    "SELECT COALESCE(SUM(CASE WHEN t.transaction_type = 'payment' THEN t.amount_minor ELSE -t.amount_minor END), 0)
+     FROM {$transaction_table} t INNER JOIN {$invoice_table} i ON i.id = t.invoice_id
+     WHERE t.status = 'completed' AND DATE(t.occurred_at) BETWEEN %s AND %s",
+    $fy_start, $fy_end
+) );
+$collected_fy = $legacy_collected + ( $invoice_collected_minor / 100 );
 
 // Outstanding debtors: balance still owed on live (non-cancelled, non-archived)
 // bookings, regardless of event date — this is money currently chaseable.
-$outstanding_total = (float) $wpdb->get_var(
-    "SELECT COALESCE(SUM(GREATEST(amount - amount_paid, 0)), 0) FROM {$table}
-     WHERE status IN ('confirmed', 'deposit_paid') AND scout_use = 0"
+$legacy_outstanding = (float) $wpdb->get_var(
+    "SELECT COALESCE(SUM(GREATEST(b.amount - b.amount_paid, 0)), 0) FROM {$table} b
+     WHERE b.status IN ('confirmed','deposit_paid') AND b.scout_use = 0
+     AND NOT EXISTS (SELECT 1 FROM {$allocation_table} a WHERE a.booking_ref = b.ref)"
 );
+$invoice_outstanding_minor = (int) $wpdb->get_var(
+    "SELECT COALESCE(SUM(GREATEST(total_minor - paid_minor - credited_minor, 0)), 0) FROM {$invoice_table}
+     WHERE document_type = 'invoice' AND status IN ('issued','part_paid','overdue')"
+);
+$outstanding_total = $legacy_outstanding + ( $invoice_outstanding_minor / 100 );
 $outstanding_count = (int) $wpdb->get_var(
-    "SELECT COUNT(*) FROM {$table}
-     WHERE status IN ('confirmed', 'deposit_paid') AND scout_use = 0 AND (amount - amount_paid) > 0.01"
-);
+    "SELECT COUNT(*) FROM {$table} b WHERE b.status IN ('confirmed','deposit_paid') AND b.scout_use = 0
+     AND (b.amount - b.amount_paid) > 0.01 AND NOT EXISTS (SELECT 1 FROM {$allocation_table} a WHERE a.booking_ref = b.ref)"
+) + (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$invoice_table} WHERE document_type = 'invoice' AND status IN ('issued','part_paid','overdue') AND total_minor > paid_minor + credited_minor" );
 $overdue_count = (int) $wpdb->get_var(
-    "SELECT COUNT(*) FROM {$table}
-     WHERE status IN ('confirmed', 'deposit_paid') AND scout_use = 0 AND (amount - amount_paid) > 0.01 AND chase_count > 0"
-);
+    "SELECT COUNT(*) FROM {$table} b WHERE b.status IN ('confirmed','deposit_paid') AND b.scout_use = 0
+     AND (b.amount - b.amount_paid) > 0.01 AND b.chase_count > 0 AND NOT EXISTS (SELECT 1 FROM {$allocation_table} a WHERE a.booking_ref = b.ref)"
+) + (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$invoice_table} WHERE document_type = 'invoice' AND status IN ('issued','part_paid','overdue') AND due_at < %s AND total_minor > paid_minor + credited_minor", current_time( 'mysql' ) ) );
 
 // Collection rate (% of billed income actually received) this FY
 $collection_rate = $billed_fy > 0 ? round( ( $collected_fy / $billed_fy ) * 100, 1 ) : 0;
 
 // Deposits held: money received on bookings not yet fully paid
 $deposits_held = (float) $wpdb->get_var(
-    "SELECT COALESCE(SUM(amount_paid), 0) FROM {$table}
-     WHERE status = 'deposit_paid' AND scout_use = 0"
+    "SELECT COALESCE(SUM(b.amount_paid), 0) FROM {$table} b
+     WHERE b.status = 'deposit_paid' AND b.scout_use = 0
+     AND NOT EXISTS (SELECT 1 FROM {$allocation_table} a WHERE a.booking_ref = b.ref)"
 );
 
 // Kitchen add-on uptake & estimated income (this FY), grouped by the tier

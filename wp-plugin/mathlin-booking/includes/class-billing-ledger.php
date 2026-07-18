@@ -10,6 +10,27 @@ if ( ! defined( 'ABSPATH' ) ) exit;
  */
 class MBS_Billing_Ledger {
 
+    /**
+     * Return the active invoice allocation for an occurrence, if one exists.
+     *
+     * Callers use this to prevent an issued financial snapshot being silently
+     * contradicted by a later edit to the authoritative booking row.
+     */
+    public static function get_active_booking_allocation( $booking_ref ) {
+        global $wpdb;
+        $allocation_table = $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE;
+        $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
+        return $wpdb->get_row( $wpdb->prepare(
+            "SELECT a.invoice_id, a.booking_ref, a.allocated_minor, i.invoice_ref, i.status AS invoice_status,
+                    i.document_type, i.version AS invoice_version
+             FROM {$allocation_table} a
+             INNER JOIN {$invoice_table} i ON i.id = a.invoice_id
+             WHERE a.active_booking_ref = %s AND a.status = 'active'
+             LIMIT 1",
+            sanitize_text_field( $booking_ref )
+        ) );
+    }
+
     public static function get_invoice( $invoice_ref ) {
         global $wpdb;
         $table = $wpdb->prefix . MBS_INVOICE_TABLE;
@@ -185,7 +206,7 @@ class MBS_Billing_Ledger {
             $wpdb->query( 'ROLLBACK' );
             return array( 'invoice' => $invoice, 'voided' => false, 'no_op' => true );
         }
-        if ( $invoice->document_type !== 'invoice' || ! in_array( $invoice->status, array( 'issued', 'part_paid' ), true ) ) return self::rollback_error( 'invoice_cannot_void', 'Only an issued invoice can be voided.' );
+        if ( $invoice->document_type !== 'invoice' || ! in_array( $invoice->status, array( 'issued', 'part_paid', 'overdue' ), true ) ) return self::rollback_error( 'invoice_cannot_void', 'Only an issued invoice can be voided.' );
         if ( (int) $invoice->paid_minor !== 0 ) return self::rollback_error( 'paid_invoice_requires_credit', 'A paid invoice cannot be voided; create a credit/refund adjustment.' );
         if ( (int) $invoice->version !== (int) $expected_version ) return self::rollback_error( 'invoice_precondition_failed', 'The invoice changed since it was loaded.' );
         $now = current_time( 'mysql' );
@@ -312,7 +333,8 @@ class MBS_Billing_Ledger {
                 ? (int) $invoice->paid_minor + $amount
                 : max( 0, (int) $invoice->paid_minor - $amount );
             $covered = $paid + (int) $invoice->credited_minor;
-            $invoice_status = $covered >= (int) $invoice->total_minor ? 'paid' : ( $paid > 0 ? 'part_paid' : 'issued' );
+            $is_overdue = ! empty( $invoice->due_at ) && $invoice->due_at < $now;
+            $invoice_status = $covered >= (int) $invoice->total_minor ? 'paid' : ( $is_overdue ? 'overdue' : ( $paid > 0 ? 'part_paid' : 'issued' ) );
             $wpdb->query( $wpdb->prepare(
                 "UPDATE {$invoice_table} SET paid_minor = %d, status = %s, version = version + 1, updated_at = %s WHERE id = %d",
                 $paid, $invoice_status, $now, (int) $invoice->id

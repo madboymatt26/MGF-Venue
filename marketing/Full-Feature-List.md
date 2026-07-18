@@ -9,7 +9,7 @@
 - Booking form with real-time, tier-aware cost calculation
 - Single, multi-day, and full-day (all-day) bookings
 - Overnight booking handling (a 22:00→02:00 block counts as one continuous session, not two days)
-- Recurring weekly bookings (up to 52 weeks)
+- Recurring weekly bookings (up to one calendar year inclusive, maximum 53 dates)
 - Conflict detection that prevents double bookings, including parent/child space bundling
 - Configurable minimum-notice period
 - Admin-configurable custom form fields ("Additional Information" section)

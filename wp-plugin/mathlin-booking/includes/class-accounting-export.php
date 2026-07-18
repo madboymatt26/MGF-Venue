@@ -34,10 +34,7 @@ class MBS_Accounting_Export {
             'exclude_archived' => false,
         ) );
 
-        // Filter to only invoiceable statuses
-        $bookings = array_filter( $bookings, function( $b ) {
-            return in_array( $b->status, array( 'confirmed', 'deposit_paid', 'paid', 'archived' ) );
-        } );
+        $records = self::normalise_records( $bookings, $date_from, $date_to );
 
         $filename = 'invoices-' . $format . '-' . date( 'Y-m-d' ) . '.csv';
 
@@ -50,13 +47,13 @@ class MBS_Accounting_Export {
 
         switch ( $format ) {
             case 'sage':
-                self::export_sage( $output, $bookings );
+                self::export_sage( $output, $records );
                 break;
             case 'quickbooks':
-                self::export_quickbooks( $output, $bookings );
+                self::export_quickbooks( $output, $records );
                 break;
             default:
-                self::export_xero( $output, $bookings );
+                self::export_xero( $output, $records );
                 break;
         }
 
@@ -64,11 +61,50 @@ class MBS_Accounting_Export {
         exit;
     }
 
+    /** Combine legacy unallocated bookings and the immutable invoice domain once. */
+    private static function normalise_records( $bookings, $date_from, $date_to ) {
+        global $wpdb;
+        $allocation_table = $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE;
+        $allocated = array_fill_keys( $wpdb->get_col( "SELECT DISTINCT booking_ref FROM {$allocation_table}" ), true );
+        $records = array();
+        $bank = MBS_Bookings::get_bank_details();
+        foreach ( $bookings as $booking ) {
+            if ( ! in_array( $booking->status, array( 'confirmed', 'deposit_paid', 'paid', 'archived' ), true ) || isset( $allocated[ $booking->ref ] ) ) continue;
+            $records[] = (object) array(
+                'contact_name' => $booking->organisation ?: $booking->name, 'email' => $booking->email,
+                'invoice_number' => $booking->invoice_number, 'invoice_date' => $booking->created_at,
+                'due_date' => wp_date( 'Y-m-d', strtotime( $booking->created_at . ' +' . (int) $bank['payment_days'] . ' days' ) ),
+                'total_decimal' => number_format( (float) $booking->amount, 2, '.', '' ),
+                'description' => $booking->space . ' hire – ' . wp_date( 'j M Y', strtotime( $booking->booking_date ) ),
+                'booking_ref' => $booking->ref, 'purpose' => $booking->purpose,
+            );
+        }
+
+        $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
+        $item_table = $wpdb->prefix . MBS_INVOICE_ITEM_TABLE;
+        $where = array( "i.status NOT IN ('draft','void')" ); $params = array();
+        if ( $date_from ) { $where[] = 'it.service_date >= %s'; $params[] = $date_from; }
+        if ( $date_to ) { $where[] = 'it.service_date <= %s'; $params[] = $date_to; }
+        $sql = "SELECT i.*, it.item_ref, it.booking_ref, it.description, it.line_total_minor, it.service_date
+                FROM {$invoice_table} i INNER JOIN {$item_table} it ON it.invoice_id = i.id
+                WHERE " . implode( ' AND ', $where ) . ' ORDER BY it.service_date ASC, i.id ASC, it.id ASC';
+        $rows = $params ? $wpdb->get_results( $wpdb->prepare( $sql, $params ) ) : $wpdb->get_results( $sql );
+        foreach ( $rows as $row ) {
+            $records[] = (object) array(
+                'contact_name' => $row->contact_organisation ?: $row->contact_name, 'email' => $row->contact_email,
+                'invoice_number' => $row->invoice_ref, 'invoice_date' => $row->issued_at ?: $row->created_at,
+                'due_date' => $row->due_at ?: $row->issued_at, 'total_decimal' => MBS_Money::decimal( (int) $row->line_total_minor ),
+                'description' => $row->description, 'booking_ref' => $row->booking_ref ?: $row->item_ref,
+                'purpose' => $row->document_type === 'credit_note' ? 'Credit note' : 'Venue hire',
+            );
+        }
+        return $records;
+    }
+
     /**
      * Xero CSV format.
      */
-    private static function export_xero( $output, $bookings ) {
-        $bank = MBS_Bookings::get_bank_details();
+    private static function export_xero( $output, $records ) {
 
         fputcsv( $output, array(
             '*ContactName', 'EmailAddress', '*InvoiceNumber', '*InvoiceDate',
@@ -76,20 +112,13 @@ class MBS_Accounting_Export {
             'AccountCode', '*Currency', 'TaxType',
         ) );
 
-        foreach ( $bookings as $b ) {
-            $due_date = date( 'd/m/Y', strtotime( $b->created_at . ' +' . $bank['payment_days'] . ' days' ) );
-            $desc     = $b->space . ' hire – ' . date( 'j M Y', strtotime( $b->booking_date ) );
-
+        foreach ( $records as $record ) {
             fputcsv( $output, array(
-                $b->organisation ?: $b->name,
-                $b->email,
-                $b->invoice_number,
-                date( 'd/m/Y', strtotime( $b->created_at ) ),
-                $due_date,
-                number_format( $b->amount, 2, '.', '' ),
-                $desc,
+                $record->contact_name, $record->email, $record->invoice_number,
+                date( 'd/m/Y', strtotime( $record->invoice_date ) ), date( 'd/m/Y', strtotime( $record->due_date ) ),
+                $record->total_decimal, $record->description,
                 1,
-                number_format( $b->amount, 2, '.', '' ),
+                $record->total_decimal,
                 '200', // Sales account code
                 'GBP',
                 'No VAT',
@@ -100,23 +129,22 @@ class MBS_Accounting_Export {
     /**
      * Sage CSV format.
      */
-    private static function export_sage( $output, $bookings ) {
-        $bank = MBS_Bookings::get_bank_details();
+    private static function export_sage( $output, $records ) {
 
         fputcsv( $output, array(
             'Type', 'Account Reference', 'Nominal A/C Ref', 'Date',
             'Reference', 'Details', 'Net Amount', 'Tax Code', 'Tax Amount',
         ) );
 
-        foreach ( $bookings as $b ) {
+        foreach ( $records as $record ) {
             fputcsv( $output, array(
                 'SI', // Sales Invoice
-                $b->invoice_number,
+                $record->invoice_number,
                 '4000', // Sales nominal code
-                date( 'd/m/Y', strtotime( $b->created_at ) ),
-                $b->ref,
-                $b->space . ' hire – ' . $b->name,
-                number_format( $b->amount, 2, '.', '' ),
+                date( 'd/m/Y', strtotime( $record->invoice_date ) ),
+                $record->booking_ref,
+                $record->description,
+                $record->total_decimal,
                 'T0', // Zero-rated (charity)
                 '0.00',
             ) );
@@ -126,8 +154,7 @@ class MBS_Accounting_Export {
     /**
      * QuickBooks CSV format.
      */
-    private static function export_quickbooks( $output, $bookings ) {
-        $bank = MBS_Bookings::get_bank_details();
+    private static function export_quickbooks( $output, $records ) {
 
         fputcsv( $output, array(
             'InvoiceNo', 'Customer', 'InvoiceDate', 'DueDate',
@@ -135,20 +162,18 @@ class MBS_Accounting_Export {
             'ItemAmount', 'Memo',
         ) );
 
-        foreach ( $bookings as $b ) {
-            $due_date = date( 'm/d/Y', strtotime( $b->created_at . ' +' . $bank['payment_days'] . ' days' ) );
-
+        foreach ( $records as $record ) {
             fputcsv( $output, array(
-                $b->invoice_number,
-                $b->organisation ?: $b->name,
-                date( 'm/d/Y', strtotime( $b->created_at ) ),
-                $due_date,
+                $record->invoice_number,
+                $record->contact_name,
+                date( 'm/d/Y', strtotime( $record->invoice_date ) ),
+                date( 'm/d/Y', strtotime( $record->due_date ) ),
                 'Venue Hire',
-                $b->space . ' – ' . date( 'M j, Y', strtotime( $b->booking_date ) ),
+                $record->description,
                 1,
-                number_format( $b->amount, 2, '.', '' ),
-                number_format( $b->amount, 2, '.', '' ),
-                $b->purpose,
+                $record->total_decimal,
+                $record->total_decimal,
+                $record->purpose,
             ) );
         }
     }

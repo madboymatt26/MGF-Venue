@@ -33,6 +33,14 @@ $dates = MBS_Recurrence::weekly_dates(
 );
 assert_same( array( '2026-03-22', '2026-03-29', '2026-04-05', '2026-04-12' ), $dates, 'Weekly dates stay on Sunday through the BST transition.' );
 
+$dates = MBS_Recurrence::weekly_dates( array( 'booking_date' => '2026-09-27' ), '2026-12-20' );
+assert_same( 13, count( $dates ), 'A 13-occurrence series is generated exactly.' );
+assert_same( '2026-10-25', $dates[4], 'Weekly dates stay local through the autumn GMT transition.' );
+
+$dates = MBS_Recurrence::weekly_dates( array( 'booking_date' => '2028-02-07' ), '2029-01-29' );
+assert_same( 52, count( $dates ), 'A 52-occurrence series starting months in the future is generated exactly.' );
+assert_same( '2028-02-28', $dates[3], 'Leap-year February dates remain real weekly dates.' );
+
 $dates = MBS_Recurrence::weekly_dates( array( 'booking_date' => '2024-01-01' ), '2024-12-30' );
 assert_same( 53, count( $dates ), 'A valid calendar year can contain 53 weekly occurrences.' );
 assert_same( '2024-12-30', end( $dates ), 'The 53rd occurrence is retained.' );

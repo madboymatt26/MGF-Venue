@@ -1,7 +1,7 @@
 # MGF Venue admin parity
 
-Version 3.20.0 was audited against every MGF Venue WordPress admin menu page,
-all 36 privileged `wp_ajax_mbs_*` hooks, the public booking form operations and
+Version 3.21.0 was audited against every MGF Venue WordPress admin menu page,
+all 42 privileged `wp_ajax_mbs_*` hooks, the public booking form operations and
 the MCP tool schemas. The static parity smoke test now fails whenever a future
 privileged admin AJAX hook is not represented in the closed REST action map.
 
@@ -17,6 +17,8 @@ privileged admin AJAX hook is not represented in the closed REST action map.
 | Calendar and availability | Calendar/date reads, blocked dates and conflict-aware availability checks |
 | Blocked Dates | List, add, remove and clear expired blocks |
 | Scout Nights | Scout-only reads, series reads, create, confirm/cancel, edit future occurrences, extend, reopen and administrator-only deletion |
+| External recurring series | Typed list/detail, exceptions and occurrence reads; idempotent approval, pause/resume, extension, future/all cancellation, legacy adoption, billing preview/configuration, invoice and audit history |
+| Consolidated invoices | Typed list/detail/item/transaction reads; redacted bearer/hash fields; exact-minor-unit idempotent offline payment writes; online/offline invoice-level payment actions |
 | Change Requests | List, approve and reject with the existing notification behaviour |
 | Audit Log | Per-booking and searchable global audit history without stored IP addresses or numeric user IDs |
 | Analytics and exports | Existing analytics view plus CSV, Xero, Sage and QuickBooks-compatible accounting exports |
@@ -26,7 +28,7 @@ privileged admin AJAX hook is not represented in the closed REST action map.
 | OSM Integration | Redacted administrator-only settings read, save, connection test and section discovery |
 | Home Assistant | Existing feeds and notification classes are unchanged; confirmed creation runs the existing status transition and the existing test webhook remains administrator-only |
 
-## Review findings addressed in 3.20.0
+## Review findings addressed through 3.21.0
 
 - Normal booking creation was absent even though administrators can use the
   public booking form. A typed REST route and `create_booking` MCP tool now
@@ -55,8 +57,11 @@ and are intentionally outside this MCP.
 - Booking creation requires an idempotency key. Retrying the same intended call
   returns the existing booking/series instead of creating a duplicate.
 - `notify_hirer` defaults to false. Email is sent only when explicitly enabled.
+- All typed booking/series status and financial writes require a stable
+  idempotency key and current status/version precondition.
 - Confirmed creation uses the existing status method, preserving Home Assistant
   notifications and the free one-off booking auto-paid rule.
-- Stored modification tokens, access codes, GitHub tokens, Home Assistant
-  webhook URLs, OSM client IDs and OSM client secrets are not returned.
+- Stored modification tokens, invoice bearer/payment-token hashes, financial
+  idempotency hashes, access codes, GitHub tokens, Home Assistant webhook URLs,
+  OSM client IDs and OSM client secrets are not returned.
 - Export tools write only to an explicit local `.csv` path.

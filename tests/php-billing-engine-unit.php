@@ -48,6 +48,16 @@ billing_same( 2, $periods[0]['occurrence_count'], 'Monthly preview lists covered
 billing_same( '2025-12-04', $periods[0]['issue_on'], 'Lead date is calculated from the period start.' );
 billing_same( '2025-12-18', $periods[0]['due_on'], 'Payment terms are calculated without passing the service period start.' );
 
+$normal_months = array(
+    booking( 'MBS-M1', '2026-03-02', '10.00' ), booking( 'MBS-M2', '2026-03-09', '10.00' ),
+    booking( 'MBS-M3', '2026-03-16', '10.00' ), booking( 'MBS-M4', '2026-03-23', '10.00' ), booking( 'MBS-M5', '2026-03-30', '10.00' ),
+    booking( 'MBS-A1', '2026-04-06', '10.00' ), booking( 'MBS-A2', '2026-04-13', '10.00' ),
+    booking( 'MBS-A3', '2026-04-20', '10.00' ), booking( 'MBS-A4', '2026-04-27', '10.00' ),
+);
+$normal_periods = MBS_Billing_Engine::build_periods( $base, $normal_months );
+billing_same( 5, $normal_periods[0]['occurrence_count'], 'A five-week calendar month produces five invoice lines.' );
+billing_same( 4, $normal_periods[1]['occurrence_count'], 'A four-week calendar month produces four invoice lines.' );
+
 $upfront = clone $base;
 $upfront->billing_mode = 'upfront';
 $periods = MBS_Billing_Engine::build_periods( $upfront, $bookings );

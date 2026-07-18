@@ -16,10 +16,31 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 - Adds first-class recurring series, immutable consolidated invoice and credit
   documents, invoice items, payment transactions and booking allocations.
+- New external recurring requests default to monthly invoicing in advance,
+  no deposit, and £0 due when the request is submitted. Offline invoicing is
+  a payment method (BACS/PO), not a billing frequency.
+- Adds a Recurring Series admin screen with approval, pause/resume, extension,
+  explicit legacy adoption, billing preview, invoices, payments and audit.
+- Groups recurring occurrences in the hirer portal. "Actually Paid" now uses
+  completed payments/refunds rather than confirmed-but-unpaid booking value.
+- Adds one customer-branded request/approval/invoice/reminder/receipt/change
+  communication per series or invoice; occurrence reminders are suppressed.
+- Adds typed REST/MCP series and invoice tools. Every financial/status write
+  requires capability checks, idempotency and optimistic concurrency; email
+  remains opt-in for MCP calls.
+- Registers existing `series_id` groups as `legacy_per_occurrence` with
+  `metadata_incomplete=true`; prior terms, skipped dates and billing intent are
+  never inferred, and paid legacy occurrences are never invoiced again.
 - Stores all new financial values as integer minor units and rejects floats at
   the financial-write boundary.
 - Makes issued financial lines immutable; voids, credits, payments and refunds
   are retained as additive, idempotent ledger records.
+- Prevents billed occurrences being silently rewritten: cancel-and-replace is
+  required so the original invoice receives an immutable credit first. Past
+  paid occurrences are preserved when an administrator cancels a series.
+- Accounting exports and financial analytics combine invoice-ledger data with
+  only unallocated legacy bookings, preventing double counting. GDPR and
+  uninstall handling cover every added table.
 
 ---
 
@@ -81,7 +102,7 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 - Interactive availability calendar with blocked date indicators
 - Booking form with real-time cost calculation (tier-aware)
 - Multi-day and full-day booking support
-- Recurring weekly bookings (up to 52 weeks)
+- Recurring weekly bookings (up to one calendar year inclusive, maximum 53 dates)
 - Conflict detection prevents double bookings (including parent/child space bundling)
 - Configurable minimum notice period
 - Custom form fields (admin-configurable)

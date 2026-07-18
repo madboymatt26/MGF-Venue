@@ -761,6 +761,22 @@ jQuery(function ($) {
         }).fail(function () { alert('Network error — please try again.'); $button.prop('disabled', false).text('Record payment'); });
     });
 
+    $(document).on('submit', '.nms-extend-external-series', function (event) {
+        event.preventDefault();
+        var $form = $(this);
+        var date = $form.find('[name="repeat_until"]').val();
+        if (!confirm('Extend this weekly series to ' + date + '? Conflicts will be skipped and the customer will receive one series update.')) return;
+        var $button = $form.find('button').prop('disabled', true).text('Extending…');
+        $.post(MBS_Admin.ajax_url, {
+            action: 'mbs_extend_external_series', nonce: MBS_Admin.nonce,
+            series_ref: $form.find('[name="series_ref"]').val(), repeat_until: date,
+            expected_version: $form.find('[name="expected_version"]').val()
+        }, function (res) {
+            if (res.success) window.location.reload();
+            else { alert('Error: ' + (res.data || 'Unknown error')); $button.prop('disabled', false).text('Extend series'); }
+        }).fail(function () { alert('Network error — please try again.'); $button.prop('disabled', false).text('Extend series'); });
+    });
+
     // ── Save admin notes ───────────────────────────────────────────────────────
     $(document).on('click', '#nms-save-notes', function () {
         var $btn = $(this);

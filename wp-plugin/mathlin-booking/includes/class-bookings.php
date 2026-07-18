@@ -1653,6 +1653,12 @@ f) On detection of a fire, the Hirer must break a glass and assist evacuation of
         $audit_table = $wpdb->prefix . 'mathlin_audit_log';
         $queue_table = $wpdb->prefix . 'mathlin_email_queue';
         $mod_table   = $wpdb->prefix . 'mathlin_mod_requests';
+        $series_table = $wpdb->prefix . MBS_SERIES_TABLE;
+        $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
+        $transaction_table = $wpdb->prefix . MBS_PAYMENT_TRANSACTION_TABLE;
+        $booking_refs = $wpdb->get_col( $wpdb->prepare( "SELECT ref FROM {$table} WHERE email = %s", $email ) );
+        $series_refs = $wpdb->get_col( $wpdb->prepare( "SELECT series_ref FROM {$series_table} WHERE contact_email = %s", $email ) );
+        $invoice_rows = $wpdb->get_results( $wpdb->prepare( "SELECT id, invoice_ref FROM {$invoice_table} WHERE contact_email = %s", $email ) );
 
         // Anonymise PII in bookings but preserve financial data (amount, dates, space)
         $affected = $wpdb->query( $wpdb->prepare(
@@ -1669,13 +1675,24 @@ f) On detection of a fire, the Hirer must break a glass and assist evacuation of
             $email
         ) );
 
-        // Anonymise IP addresses in audit log for this person's bookings
-        $wpdb->query( $wpdb->prepare(
-            "UPDATE {$audit_table} SET ip_address = '0.0.0.0', user_name = 'Anonymised'
-             WHERE ref IN (SELECT ref FROM {$table} WHERE email LIKE 'erased-%@anonymised.invalid')
-             AND user_name != 'System'",
+        $series_affected = $wpdb->query( $wpdb->prepare(
+            "UPDATE {$series_table} SET contact_name = 'Anonymised', contact_email = CONCAT('erased-series-', id, '@anonymised.invalid'),
+             contact_phone = '', contact_address = '', contact_organisation = '', notes = '' WHERE contact_email = %s",
             $email
         ) );
+        $invoice_affected = $wpdb->query( $wpdb->prepare(
+            "UPDATE {$invoice_table} SET contact_name = 'Anonymised', contact_email = CONCAT('erased-invoice-', id, '@anonymised.invalid'),
+             contact_address = '', contact_organisation = '' WHERE contact_email = %s",
+            $email
+        ) );
+        foreach ( $invoice_rows as $invoice_row ) {
+            $wpdb->update( $transaction_table, array( 'metadata_json' => wp_json_encode( array( 'gdpr_erased' => true ) ) ), array( 'invoice_id' => (int) $invoice_row->id ) );
+        }
+
+        // Anonymise IP addresses in audit log for this person's bookings
+        foreach ( array_merge( $booking_refs, $series_refs, wp_list_pluck( $invoice_rows, 'invoice_ref' ) ) as $audit_ref ) {
+            $wpdb->query( $wpdb->prepare( "UPDATE {$audit_table} SET ip_address = '0.0.0.0', user_name = 'Anonymised' WHERE ref = %s AND user_name != 'System'", $audit_ref ) );
+        }
 
         // Delete any queued emails containing this person's data
         $wpdb->query( $wpdb->prepare(
@@ -1684,18 +1701,16 @@ f) On detection of a fire, the Hirer must break a glass and assist evacuation of
         ) );
 
         // Anonymise modification request notes
-        $wpdb->query( $wpdb->prepare(
-            "UPDATE {$mod_table} SET notes = '', admin_response = ''
-             WHERE booking_ref IN (SELECT ref FROM {$table} WHERE email LIKE 'erased-%@anonymised.invalid')"
-        ) );
+        foreach ( $booking_refs as $booking_ref ) $wpdb->update( $mod_table, array( 'notes' => '', 'admin_response' => '' ), array( 'booking_ref' => $booking_ref ) );
 
-        $items_removed = $affected > 0;
+        $total_affected = max( 0, (int) $affected ) + max( 0, (int) $series_affected ) + max( 0, (int) $invoice_affected );
+        $items_removed = $total_affected > 0;
 
         return array(
             'items_removed'  => $items_removed,
             'items_retained' => $items_removed, // Financial records retained but anonymised
             'messages'       => $items_removed
-                ? array( sprintf( '%d booking record(s) anonymised. Financial totals preserved for audit.', $affected ) )
+                ? array( sprintf( '%d booking, series or invoice record(s) anonymised. Financial totals preserved for audit.', $total_affected ) )
                 : array(),
             'done'           => true,
         );
@@ -1734,6 +1749,35 @@ f) On detection of a fire, the Hirer must break a glass and assist evacuation of
                     array( 'name' => 'Created',      'value' => $b->created_at ),
                 ),
             );
+        }
+
+        $series_table = $wpdb->prefix . MBS_SERIES_TABLE;
+        $series_rows = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$series_table} WHERE contact_email = %s LIMIT 100", $email ) );
+        foreach ( $series_rows as $series ) {
+            $export_items[] = array(
+                'group_id' => 'mathlin-booking-series', 'group_label' => 'Recurring Venue Booking Series', 'item_id' => 'series-' . $series->id,
+                'data' => array(
+                    array( 'name' => 'Series reference', 'value' => $series->series_ref ), array( 'name' => 'Name', 'value' => $series->contact_name ),
+                    array( 'name' => 'Email', 'value' => $series->contact_email ), array( 'name' => 'Organisation', 'value' => $series->contact_organisation ),
+                    array( 'name' => 'Space', 'value' => $series->space ), array( 'name' => 'Start date', 'value' => $series->start_date ),
+                    array( 'name' => 'Repeat until', 'value' => $series->repeat_until ), array( 'name' => 'Status', 'value' => $series->status ),
+                    array( 'name' => 'Billing mode', 'value' => $series->billing_mode ), array( 'name' => 'Terms accepted', 'value' => $series->terms_accepted_at ?: 'Not recorded' ),
+                ),
+            );
+        }
+        $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
+        $transaction_table = $wpdb->prefix . MBS_PAYMENT_TRANSACTION_TABLE;
+        $invoice_rows = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$invoice_table} WHERE contact_email = %s LIMIT 100", $email ) );
+        foreach ( $invoice_rows as $invoice ) {
+            $data = array(
+                array( 'name' => 'Invoice reference', 'value' => $invoice->invoice_ref ), array( 'name' => 'Series reference', 'value' => $invoice->series_ref ),
+                array( 'name' => 'Status', 'value' => $invoice->status ), array( 'name' => 'Period', 'value' => $invoice->period_start . ' to ' . $invoice->period_end ),
+                array( 'name' => 'Total', 'value' => MBS_Money::format( (int) $invoice->total_minor, $invoice->currency ) ),
+                array( 'name' => 'Paid', 'value' => MBS_Money::format( (int) $invoice->paid_minor, $invoice->currency ) ),
+            );
+            $transactions = $wpdb->get_results( $wpdb->prepare( "SELECT transaction_ref, transaction_type, status, amount_minor, currency, occurred_at FROM {$transaction_table} WHERE invoice_id = %d", (int) $invoice->id ) );
+            foreach ( $transactions as $transaction ) $data[] = array( 'name' => 'Payment transaction', 'value' => $transaction->transaction_ref . ' · ' . $transaction->transaction_type . ' · ' . MBS_Money::format( (int) $transaction->amount_minor, $transaction->currency ) . ' · ' . $transaction->occurred_at );
+            $export_items[] = array( 'group_id' => 'mathlin-invoices', 'group_label' => 'Venue Invoices and Payments', 'item_id' => 'invoice-' . $invoice->id, 'data' => $data );
         }
 
         return array(

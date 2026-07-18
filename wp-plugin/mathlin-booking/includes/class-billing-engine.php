@@ -29,6 +29,9 @@ class MBS_Billing_Engine {
     public static function configure_series( $series_ref, $configuration, $expected_version ) {
         global $wpdb;
         $table = $wpdb->prefix . MBS_SERIES_TABLE;
+        $current = MBS_Series::get( $series_ref );
+        if ( ! $current ) return new WP_Error( 'series_not_found', 'Recurring series not found.' );
+        if ( (int) $current->version !== (int) $expected_version ) return new WP_Error( 'series_precondition_failed', 'The recurring series changed since it was loaded.' );
         $mode = sanitize_key( $configuration['billing_mode'] ?? '' );
         $treatment = sanitize_key( $configuration['billing_treatment'] ?? '' );
         $payment_method = sanitize_key( $configuration['payment_method'] ?? 'online' );
@@ -44,6 +47,9 @@ class MBS_Billing_Engine {
         }
         if ( $deposit_policy !== 'none' ) {
             return new WP_Error( 'unsupported_deposit_policy', 'Consolidated recurring series currently support no deposit only.' );
+        }
+        if ( ! empty( $current->metadata_incomplete ) && $current->billing_treatment === 'legacy_per_occurrence' && $treatment === 'invoice_managed' && empty( $configuration['adopt_legacy'] ) ) {
+            return new WP_Error( 'legacy_adoption_confirmation_required', 'Preview the legacy series and explicitly confirm adoption before enabling consolidated invoices.' );
         }
         $lead_days = max( 0, min( 365, (int) ( $configuration['invoice_lead_days'] ?? 28 ) ) );
         $terms_days = max( 0, min( 365, (int) ( $configuration['payment_terms_days'] ?? 14 ) ) );
@@ -311,7 +317,7 @@ class MBS_Billing_Engine {
              INNER JOIN {$invoice_table} i ON i.id = a.invoice_id
              INNER JOIN {$item_table} ii ON ii.invoice_id = a.invoice_id AND ii.booking_ref = a.booking_ref
              WHERE a.status = 'active' AND b.status = 'cancelled'
-             AND i.document_type = 'invoice' AND i.status IN ('issued','part_paid','paid')
+             AND i.document_type = 'invoice' AND i.status IN ('issued','part_paid','paid','overdue')
              GROUP BY a.invoice_id, a.booking_ref, i.invoice_ref"
         );
         $results = array();
@@ -335,12 +341,19 @@ class MBS_Billing_Engine {
     private static function billable_occurrences( $series_ref ) {
         global $wpdb;
         $table = $wpdb->prefix . MBS_TABLE;
-        return $wpdb->get_results( $wpdb->prepare(
+        $bookings = $wpdb->get_results( $wpdb->prepare(
             "SELECT * FROM {$table}
              WHERE series_id = %s AND status IN ('confirmed','deposit_paid','paid')
              ORDER BY booking_date ASC, id ASC",
             sanitize_text_field( $series_ref )
         ) );
+        $series = MBS_Series::get( $series_ref );
+        if ( $series && ! empty( $series->metadata_incomplete ) ) {
+            $bookings = array_values( array_filter( $bookings, static function ( $booking ) {
+                return $booking->status === 'confirmed' && (float) $booking->amount_paid <= 0.0 && (float) $booking->deposit_paid <= 0.0;
+            } ) );
+        }
+        return $bookings;
     }
 
     private static function real_local_date( $value ) {

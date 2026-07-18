@@ -238,7 +238,7 @@ $script:Tools = @(
                 space = @{ type = 'string' }
                 booking_date = @{ type = 'string'; description = 'Start date in YYYY-MM-DD format.' }
                 booking_date_end = @{ type = 'string'; description = 'Optional inclusive end date in YYYY-MM-DD format.' }
-                repeat_until = @{ type = 'string'; description = 'Optional weekly recurrence end date in YYYY-MM-DD format, up to 52 weeks. Cannot be combined with a multi-day booking_date_end.' }
+                repeat_until = @{ type = 'string'; description = 'Optional weekly recurrence end date in YYYY-MM-DD format, up to one calendar year inclusive and 53 dates. Cannot be combined with a multi-day booking_date_end.' }
                 start_time = @{ type = 'string'; description = 'Required for timed bookings, HH:MM.' }
                 end_time = @{ type = 'string'; description = 'Required for timed bookings, HH:MM.' }
                 all_day = @{ type = 'boolean'; default = $false }
@@ -312,10 +312,11 @@ $script:Tools = @(
                 ref = @{ type = 'string' }
                 status = @{ type = 'string'; enum = @('pending', 'confirmed', 'cancelled') }
                 expected_status = @{ type = 'string'; enum = @('pending', 'confirmed', 'deposit_paid', 'paid', 'cancelled', 'archived') }
+                idempotency_key = @{ type = 'string'; minLength = 8; maxLength = 128 }
                 notify_hirer = @{ type = 'boolean'; default = $false }
                 reason = @{ type = 'string'; description = 'Cancellation reason included only when notifying the hirer.' }
             }
-            required = @('ref', 'status', 'expected_status')
+            required = @('ref', 'status', 'expected_status', 'idempotency_key')
             additionalProperties = $false
         }
         annotations = @{ readOnlyHint = $false; destructiveHint = $true; idempotentHint = $true; openWorldHint = $true }
@@ -334,6 +335,99 @@ $script:Tools = @(
             additionalProperties = $false
         }
         annotations = @{ readOnlyHint = $false; destructiveHint = $false; idempotentHint = $true; openWorldHint = $true }
+    },
+    @{
+        name = 'list_series'
+        title = 'List recurring booking series'
+        description = 'List first-class and registered legacy recurring series with safe billing metadata.'
+        inputSchema = @{
+            type = 'object'; properties = @{
+                status = @{ type = 'string'; enum = @('pending', 'confirmed', 'paused', 'cancelled_future', 'cancelled') }
+                search = @{ type = 'string' }
+                limit = @{ type = 'integer'; minimum = 1; maximum = 500; default = 100 }
+            }; additionalProperties = $false
+        }
+        annotations = @{ readOnlyHint = $true; destructiveHint = $false; idempotentHint = $true; openWorldHint = $true }
+    },
+    @{
+        name = 'get_series'
+        title = 'Get recurring series'
+        description = 'Read a recurring series, occurrences, exceptions, invoice preview, invoices and audit history. Payment tokens and internal hashes are excluded.'
+        inputSchema = @{ type = 'object'; properties = @{ series_ref = @{ type = 'string' } }; required = @('series_ref'); additionalProperties = $false }
+        annotations = @{ readOnlyHint = $true; destructiveHint = $false; idempotentHint = $true; openWorldHint = $true }
+    },
+    @{
+        name = 'approve_series'
+        title = 'Approve recurring series'
+        description = 'Idempotently approve a pending recurring series. Read it first and pass status/version. notify_hirer defaults to false.'
+        inputSchema = @{
+            type = 'object'; properties = @{
+                series_ref = @{ type = 'string' }; expected_status = @{ type = 'string'; enum = @('pending', 'confirmed') }
+                expected_version = @{ type = 'integer'; minimum = 1 }; idempotency_key = @{ type = 'string'; minLength = 8; maxLength = 128 }
+                notify_hirer = @{ type = 'boolean'; default = $false }
+            }; required = @('series_ref', 'expected_status', 'expected_version', 'idempotency_key'); additionalProperties = $false
+        }
+        annotations = @{ readOnlyHint = $false; destructiveHint = $true; idempotentHint = $true; openWorldHint = $true }
+    },
+    @{
+        name = 'configure_series_billing'
+        title = 'Configure recurring series billing'
+        description = 'Set monthly, termly, upfront, legacy-per-occurrence or no billing. Legacy adoption requires adopt_legacy=true after preview. Customer email is opt-in.'
+        inputSchema = @{
+            type = 'object'; properties = @{
+                series_ref = @{ type = 'string' }; expected_version = @{ type = 'integer'; minimum = 1 }
+                idempotency_key = @{ type = 'string'; minLength = 8; maxLength = 128 }
+                billing_mode = @{ type = 'string'; enum = @('monthly', 'termly', 'legacy_per_occurrence', 'upfront', 'none') }
+                billing_treatment = @{ type = 'string'; enum = @('manual_consolidated', 'invoice_managed', 'legacy_per_occurrence', 'none') }
+                payment_method = @{ type = 'string'; enum = @('online', 'offline_bacs', 'none') }
+                invoice_lead_days = @{ type = 'integer'; minimum = 0; maximum = 365; default = 28 }
+                payment_terms_days = @{ type = 'integer'; minimum = 0; maximum = 365; default = 14 }
+                billing_schedule = @{ type = 'object'; description = 'For termly mode: {terms:[{key,label,start,end}]}.'; additionalProperties = $true }
+                adopt_legacy = @{ type = 'boolean'; default = $false }; notify_hirer = @{ type = 'boolean'; default = $false }
+            }; required = @('series_ref', 'expected_version', 'idempotency_key', 'billing_mode', 'billing_treatment', 'payment_method'); additionalProperties = $false
+        }
+        annotations = @{ readOnlyHint = $false; destructiveHint = $true; idempotentHint = $true; openWorldHint = $true }
+    },
+    @{
+        name = 'update_series_state'
+        title = 'Pause, resume or cancel recurring series'
+        description = 'Change series state with optimistic concurrency and a stable idempotency key. Cancellation may be future-only or entire-series; email is opt-in.'
+        inputSchema = @{
+            type = 'object'; properties = @{
+                series_ref = @{ type = 'string' }; operation = @{ type = 'string'; enum = @('pause', 'resume', 'cancel', 'extend') }
+                scope = @{ type = 'string'; enum = @('future', 'all'); default = 'future' }; expected_status = @{ type = 'string' }
+                repeat_until = @{ type = 'string'; description = 'Required for extend; within one calendar year of the original start.' }
+                expected_version = @{ type = 'integer'; minimum = 1 }; idempotency_key = @{ type = 'string'; minLength = 8; maxLength = 128 }
+                notify_hirer = @{ type = 'boolean'; default = $false }
+            }; required = @('series_ref', 'operation', 'expected_status', 'expected_version', 'idempotency_key'); additionalProperties = $false
+        }
+        annotations = @{ readOnlyHint = $false; destructiveHint = $true; idempotentHint = $true; openWorldHint = $true }
+    },
+    @{
+        name = 'list_invoices'
+        title = 'List consolidated invoices'
+        description = 'List safe invoice summaries without payment tokens or idempotency hashes.'
+        inputSchema = @{ type = 'object'; properties = @{ status = @{ type = 'string' }; series_ref = @{ type = 'string' }; limit = @{ type = 'integer'; minimum = 1; maximum = 500; default = 100 } }; additionalProperties = $false }
+        annotations = @{ readOnlyHint = $true; destructiveHint = $false; idempotentHint = $true; openWorldHint = $true }
+    },
+    @{
+        name = 'get_invoice'
+        title = 'Get consolidated invoice'
+        description = 'Read an invoice with line items and safe payment transaction history. Bearer tokens and internal hashes are excluded.'
+        inputSchema = @{ type = 'object'; properties = @{ invoice_ref = @{ type = 'string' } }; required = @('invoice_ref'); additionalProperties = $false }
+        annotations = @{ readOnlyHint = $true; destructiveHint = $false; idempotentHint = $true; openWorldHint = $true }
+    },
+    @{
+        name = 'record_invoice_payment'
+        title = 'Record offline invoice payment'
+        description = 'Record a capability-protected partial or full offline payment using exact minor units, expected invoice version and an idempotency key.'
+        inputSchema = @{
+            type = 'object'; properties = @{
+                invoice_ref = @{ type = 'string' }; amount_minor = @{ type = 'string'; pattern = '^[0-9]+$' }
+                expected_version = @{ type = 'integer'; minimum = 1 }; idempotency_key = @{ type = 'string'; minLength = 8; maxLength = 128 }; note = @{ type = 'string' }
+            }; required = @('invoice_ref', 'amount_minor', 'expected_version', 'idempotency_key'); additionalProperties = $false
+        }
+        annotations = @{ readOnlyHint = $false; destructiveHint = $true; idempotentHint = $true; openWorldHint = $true }
     },
     @{
         name = 'get_admin_resource'
@@ -368,7 +462,9 @@ $script:Tools = @(
                         'undo_deposit', 'restore_booking', 'resend_access', 'send_feedback_request',
                         'create_scout_recurring', 'save_settings', 'test_ha', 'check_update',
                         'archive_past', 'add_blocked', 'delete_blocked', 'clear_expired_blocks',
-                        'update_series_status', 'cancel_scout_series', 'edit_scout_series',
+                        'update_series_status', 'resend_series_confirmation', 'record_invoice_manual_payment',
+                        'configure_series_billing', 'pause_series', 'catch_up_series_billing', 'extend_external_series',
+                        'cancel_scout_series', 'edit_scout_series',
                         'extend_scout_series', 'reopen_scout_series', 'delete_scout_series',
                         'save_admin_notes', 'chase_payment', 'save_email_settings',
                         'save_custom_fields', 'edit_booking', 'approve_request', 'reject_request',
@@ -443,6 +539,7 @@ function Invoke-MgfVenueTool {
             $body = @{
                 status = Get-PropertyValue $Arguments 'status' ''
                 expected_status = Get-PropertyValue $Arguments 'expected_status' ''
+                idempotency_key = Get-PropertyValue $Arguments 'idempotency_key' ''
                 notify_hirer = [bool](Get-PropertyValue $Arguments 'notify_hirer' $false)
                 reason = Get-PropertyValue $Arguments 'reason' ''
             }
@@ -452,6 +549,44 @@ function Invoke-MgfVenueTool {
             $ref = [Uri]::EscapeDataString(([string](Get-PropertyValue $Arguments 'ref' '')).ToUpperInvariant())
             $body = @{ notes = Get-PropertyValue $Arguments 'notes' '' }
             return Invoke-VenueApi -Method POST -Path "/admin/bookings/${ref}/notes" -Body $body
+        }
+        'list_series' {
+            $queryValues = @{}
+            foreach ($key in @('status', 'search', 'limit')) { $value = Get-PropertyValue $Arguments $key $null; if ($null -ne $value) { $queryValues[$key] = $value } }
+            $query = ConvertTo-QueryString $queryValues
+            $path = '/admin/series'; if ($query) { $path += "?${query}" }
+            return Invoke-VenueApi -Method GET -Path $path
+        }
+        'get_series' {
+            $seriesRef = [Uri]::EscapeDataString(([string](Get-PropertyValue $Arguments 'series_ref' '')).ToUpperInvariant())
+            return Invoke-VenueApi -Method GET -Path "/admin/series/${seriesRef}"
+        }
+        'approve_series' {
+            $seriesRef = [Uri]::EscapeDataString(([string](Get-PropertyValue $Arguments 'series_ref' '')).ToUpperInvariant())
+            return Invoke-VenueApi -Method POST -Path "/admin/series/${seriesRef}/approve" -Body $Arguments
+        }
+        'configure_series_billing' {
+            $seriesRef = [Uri]::EscapeDataString(([string](Get-PropertyValue $Arguments 'series_ref' '')).ToUpperInvariant())
+            return Invoke-VenueApi -Method POST -Path "/admin/series/${seriesRef}/billing" -Body $Arguments
+        }
+        'update_series_state' {
+            $seriesRef = [Uri]::EscapeDataString(([string](Get-PropertyValue $Arguments 'series_ref' '')).ToUpperInvariant())
+            return Invoke-VenueApi -Method POST -Path "/admin/series/${seriesRef}/state" -Body $Arguments
+        }
+        'list_invoices' {
+            $queryValues = @{}
+            foreach ($key in @('status', 'series_ref', 'limit')) { $value = Get-PropertyValue $Arguments $key $null; if ($null -ne $value) { $queryValues[$key] = $value } }
+            $query = ConvertTo-QueryString $queryValues
+            $path = '/admin/invoices'; if ($query) { $path += "?${query}" }
+            return Invoke-VenueApi -Method GET -Path $path
+        }
+        'get_invoice' {
+            $invoiceRef = [Uri]::EscapeDataString(([string](Get-PropertyValue $Arguments 'invoice_ref' '')).ToUpperInvariant())
+            return Invoke-VenueApi -Method GET -Path "/admin/invoices/${invoiceRef}"
+        }
+        'record_invoice_payment' {
+            $invoiceRef = [Uri]::EscapeDataString(([string](Get-PropertyValue $Arguments 'invoice_ref' '')).ToUpperInvariant())
+            return Invoke-VenueApi -Method POST -Path "/admin/invoices/${invoiceRef}/payments" -Body $Arguments
         }
         'get_admin_resource' {
             $resource = [string](Get-PropertyValue $Arguments 'resource' '')
