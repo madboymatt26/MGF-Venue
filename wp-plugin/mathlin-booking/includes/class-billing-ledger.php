@@ -307,6 +307,37 @@ class MBS_Billing_Ledger {
         return (int) $invoice->total_minor - (int) $invoice->paid_minor - (int) $invoice->credited_minor;
     }
 
+    public static function get_items( $invoice_id ) {
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_INVOICE_ITEM_TABLE;
+        return $wpdb->get_results( $wpdb->prepare(
+            "SELECT * FROM {$table} WHERE invoice_id = %d ORDER BY service_date ASC, id ASC",
+            (int) $invoice_id
+        ) );
+    }
+
+    public static function has_booking_item( $invoice_id, $booking_ref ) {
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_INVOICE_ITEM_TABLE;
+        return (bool) $wpdb->get_var( $wpdb->prepare(
+            "SELECT id FROM {$table} WHERE invoice_id = %d AND booking_ref = %s LIMIT 1",
+            (int) $invoice_id,
+            sanitize_text_field( $booking_ref )
+        ) );
+    }
+
+    public static function release_booking_allocation( $invoice_id, $booking_ref ) {
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE;
+        $now = current_time( 'mysql' );
+        return $wpdb->query( $wpdb->prepare(
+            "UPDATE {$table}
+             SET status = 'released', active_booking_ref = NULL, released_at = %s, updated_at = %s
+             WHERE invoice_id = %d AND active_booking_ref = %s AND status = 'active'",
+            $now, $now, (int) $invoice_id, sanitize_text_field( $booking_ref )
+        ) );
+    }
+
     private static function rollback_error( $code, $message ) {
         global $wpdb;
         $wpdb->query( 'ROLLBACK' );

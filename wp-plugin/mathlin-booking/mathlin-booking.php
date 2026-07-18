@@ -12,6 +12,7 @@
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 define( 'MBS_VERSION',    '3.21.0' );
+define( 'MBS_DB_VERSION', '3.21.0-schema-2' );
 define( 'MBS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MBS_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'MBS_TABLE',      'mathlin_bookings' );
@@ -27,6 +28,7 @@ require_once MBS_PLUGIN_DIR . 'includes/class-recurrence.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-series.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-money.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-billing-ledger.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-billing-engine.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-bookings.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-email.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-invoice.php';
@@ -63,6 +65,7 @@ register_deactivation_hook( __FILE__, array( 'MBS_Access_Details', 'deactivate' 
 register_deactivation_hook( __FILE__, array( 'MBS_Feedback', 'deactivate' ) );
 register_deactivation_hook( __FILE__, array( 'MBS_Auto_Archive', 'deactivate' ) );
 register_deactivation_hook( __FILE__, array( 'MBS_Payment_Chaser', 'deactivate' ) );
+register_deactivation_hook( __FILE__, array( 'MBS_Billing_Engine', 'deactivate' ) );
 register_deactivation_hook( __FILE__, array( 'MBS_Email_Queue', 'deactivate' ) );
 register_deactivation_hook( __FILE__, array( 'MBS_Hirer_Portal', 'deactivate' ) );
 
@@ -91,7 +94,7 @@ add_action( 'plugins_loaded', 'mbs_init' );
 
 function mbs_init() {
     // Run DB migration if version has changed
-    if ( get_option( 'mbs_db_version' ) !== MBS_VERSION ) {
+    if ( get_option( 'mbs_db_version' ) !== MBS_DB_VERSION ) {
         MBS_Database::create_tables();
     }
 
@@ -107,6 +110,7 @@ function mbs_init() {
     $woo_payment  = new MBS_Woo_Payment();
     $auto_archive   = new MBS_Auto_Archive();
     $payment_chaser = new MBS_Payment_Chaser();
+    $billing_engine = new MBS_Billing_Engine();
     $email_queue    = new MBS_Email_Queue();
     $modification   = new MBS_Modification();
     $hirer_portal   = new MBS_Hirer_Portal();
@@ -127,6 +131,7 @@ function mbs_init() {
     $woo_payment->init();
     $auto_archive->init();
     $payment_chaser->init();
+    $billing_engine->init();
     $email_queue->init();
     $modification->init();
     $hirer_portal->init();

@@ -94,6 +94,9 @@ class MBS_Database {
             billing_treatment     VARCHAR(30)  NOT NULL DEFAULT 'manual_consolidated',
             payment_method        VARCHAR(30)  NOT NULL DEFAULT 'online',
             automatic_reminders   TINYINT(1)   NOT NULL DEFAULT 1,
+            invoice_lead_days     SMALLINT UNSIGNED NOT NULL DEFAULT 28,
+            payment_terms_days    SMALLINT UNSIGNED NOT NULL DEFAULT 14,
+            billing_schedule_json LONGTEXT     DEFAULT NULL,
             terms_hash            CHAR(64)     DEFAULT NULL,
             terms_accepted_at     DATETIME     DEFAULT NULL,
             confirmation_sent_at  DATETIME     DEFAULT NULL,
@@ -289,7 +292,7 @@ class MBS_Database {
         ) {$charset};";
         dbDelta( $sql5 );
 
-        update_option( 'mbs_db_version', MBS_VERSION );
+        update_option( 'mbs_db_version', MBS_DB_VERSION );
     }
 
     /**
