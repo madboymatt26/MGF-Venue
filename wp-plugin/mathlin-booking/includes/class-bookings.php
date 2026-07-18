@@ -841,6 +841,7 @@ class MBS_Bookings {
     public static function generate_series_id() {
         global $wpdb;
         $table = $wpdb->prefix . MBS_TABLE;
+        $series_table = $wpdb->prefix . MBS_SERIES_TABLE;
 
         do {
             try {
@@ -853,6 +854,12 @@ class MBS_Bookings {
                 "SELECT id FROM {$table} WHERE series_id = %s LIMIT 1",
                 $series_id
             ) );
+            if ( ! $exists ) {
+                $exists = $wpdb->get_var( $wpdb->prepare(
+                    "SELECT id FROM {$series_table} WHERE series_ref = %s LIMIT 1",
+                    $series_id
+                ) );
+            }
         } while ( $exists );
 
         return $series_id;
@@ -996,6 +1003,26 @@ class MBS_Bookings {
             );
         }
 
+        $series = MBS_Series::create_from_request( $series_id, $data, $repeat_until, $occurrences, $refs );
+        if ( is_wp_error( $series ) ) {
+            // Compensate for the independently committed occurrence inserts so
+            // a failed first-class series record cannot leave orphaned rows.
+            global $wpdb;
+            $table = $wpdb->prefix . MBS_TABLE;
+            foreach ( $refs as $created_ref ) {
+                $wpdb->delete( $table, array( 'ref' => $created_ref ), array( '%s' ) );
+            }
+            return new WP_Error(
+                'series_metadata_failed',
+                'The recurring request could not be completed and its new occurrences were removed. Please try again.',
+                array(
+                    'cause'       => $series->get_error_code(),
+                    'series_id'   => $series_id,
+                    'occurrences' => $occurrences,
+                )
+            );
+        }
+
         $skipped = array_values( array_map(
             static function ( $occurrence ) { return $occurrence['date']; },
             array_filter( $occurrences, static function ( $occurrence ) {
@@ -1010,6 +1037,7 @@ class MBS_Bookings {
             'skipped'    => $skipped,
             'total_weeks' => count( $dates ),
             'occurrences' => $occurrences,
+            'series'      => $series,
         );
     }
 

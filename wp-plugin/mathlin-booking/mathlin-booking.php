@@ -15,10 +15,12 @@ define( 'MBS_VERSION',    '3.20.2' );
 define( 'MBS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MBS_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'MBS_TABLE',      'mathlin_bookings' );
+define( 'MBS_SERIES_TABLE', 'mathlin_booking_series' );
 
 // ── Load includes ──────────────────────────────────────────────────────────────
 require_once MBS_PLUGIN_DIR . 'includes/class-database.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-recurrence.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-series.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-bookings.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-email.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-invoice.php';

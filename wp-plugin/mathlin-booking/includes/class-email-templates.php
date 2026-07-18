@@ -87,9 +87,9 @@ class MBS_Email_Templates {
                 'body'    => "Hi {name},\n\nYour booking has been updated. Here are the current details:\n\nSpace: {space}\nDate: {date}\nTime: {time}\nAmount: {amount}\n\nIf you have any questions, contact us at {admin_email}.",
             ),
             'recurring_summary' => array(
-                'label'   => 'Recurring Booking Summary (to booker)',
-                'subject' => 'Recurring Booking Submitted – {ref}',
-                'body'    => "Hi {name},\n\nYour recurring booking request has been submitted.\n\nSpace: {space}\nTime: {time}\n\nEach booking is pending confirmation. We will review and confirm them shortly.\n\nIf you have any questions, contact us at {admin_email} or call {phone}.",
+                'label'   => 'Recurring Request Receipt (to booker)',
+                'subject' => 'Recurring Request Received – {ref}',
+                'body'    => "Hi {name},\n\nThanks — we’ve received your recurring request for {space}. The available dates included in your request are listed below.\n\nNothing is due at submission. This estimate is not an invoice and we will contact you after reviewing the request.",
             ),
             'modification_approved' => array(
                 'label'   => 'Change Request Approved (to booker)',

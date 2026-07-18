@@ -53,6 +53,61 @@ class MBS_Database {
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
         dbDelta( $sql );
 
+        // First-class recurring-series records. Occurrence bookings retain
+        // their legacy series_id column for compatibility; no foreign keys are
+        // used because WordPress table prefixes and dbDelta do not manage them
+        // reliably across all supported hosts.
+        $series_table = $wpdb->prefix . MBS_SERIES_TABLE;
+        $series_sql = "CREATE TABLE {$series_table} (
+            id                    BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            series_ref            VARCHAR(20)  NOT NULL,
+            status                VARCHAR(20)  NOT NULL DEFAULT 'pending',
+            version               BIGINT(20) UNSIGNED NOT NULL DEFAULT 1,
+            contact_name          VARCHAR(100) NOT NULL,
+            contact_organisation  VARCHAR(100) DEFAULT '',
+            contact_email         VARCHAR(150) NOT NULL,
+            contact_phone         VARCHAR(30)  DEFAULT '',
+            contact_address       TEXT         DEFAULT '',
+            space                 VARCHAR(60)  NOT NULL,
+            kitchen               TINYINT(1)   NOT NULL DEFAULT 0,
+            all_day               TINYINT(1)   NOT NULL DEFAULT 0,
+            scout_use             TINYINT(1)   NOT NULL DEFAULT 0,
+            pricing_tier          VARCHAR(30)  NOT NULL DEFAULT 'standard',
+            start_time            TIME         DEFAULT NULL,
+            end_time              TIME         DEFAULT NULL,
+            attendees             SMALLINT     NOT NULL DEFAULT 1,
+            purpose               VARCHAR(255) NOT NULL,
+            notes                 TEXT         DEFAULT '',
+            start_date            DATE         NOT NULL,
+            repeat_until          DATE         NOT NULL,
+            recurrence_rule       VARCHAR(100) NOT NULL DEFAULT 'FREQ=WEEKLY;INTERVAL=1',
+            schedule_json         LONGTEXT     DEFAULT NULL,
+            price_per_booking     DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+            estimated_total       DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+            requested_count       SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            accepted_count        SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            conflict_count        SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            blocked_count         SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            error_count           SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            exceptions_json       LONGTEXT     DEFAULT NULL,
+            billing_mode          VARCHAR(30)  NOT NULL DEFAULT 'monthly',
+            billing_treatment     VARCHAR(30)  NOT NULL DEFAULT 'manual_consolidated',
+            payment_method        VARCHAR(30)  NOT NULL DEFAULT 'online',
+            automatic_reminders   TINYINT(1)   NOT NULL DEFAULT 1,
+            terms_hash            CHAR(64)     DEFAULT NULL,
+            terms_accepted_at     DATETIME     DEFAULT NULL,
+            confirmation_sent_at  DATETIME     DEFAULT NULL,
+            created_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY series_ref (series_ref),
+            KEY idx_series_status (status),
+            KEY idx_series_email (contact_email),
+            KEY idx_series_dates (start_date, repeat_until),
+            KEY idx_series_billing (billing_treatment, billing_mode)
+        ) {$charset};";
+        dbDelta( $series_sql );
+
         // Blocked dates table
         $blocked_table = $wpdb->prefix . 'mathlin_blocked_dates';
         $sql2 = "CREATE TABLE IF NOT EXISTS {$blocked_table} (

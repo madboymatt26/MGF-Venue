@@ -44,6 +44,21 @@ class MBS_Email {
         }
     }
 
+    /** Send one administrator notification for a recurring request. */
+    public static function notify_admin_series( $series, $occurrences ) {
+        $subject = '[New Recurring Request] ' . $series->series_ref . ' – ' . $series->contact_name;
+        $body  = self::header();
+        $body .= '<h2 style="color:#7413DC;">New Recurring Booking Request</h2>';
+        $body .= '<p>One recurring request is awaiting review. Individual occurrence notifications have been suppressed.</p>';
+        $body .= self::series_request_table( $series );
+        $body .= self::series_dates_html( $occurrences, true );
+        $body .= '<p style="margin-top:24px;"><a href="' . admin_url( 'admin.php?page=mathlin-booking&search=' . rawurlencode( $series->series_ref ) ) . '" style="background:#7413DC;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;">View Recurring Request</a></p>';
+        $body .= self::footer();
+        foreach ( self::notification_emails() as $email ) {
+            self::send( $email, $subject, $body );
+        }
+    }
+
     public static function notify_booker( $booking ) {
         $tpl     = MBS_Email_Templates::get_template( 'booking_received' );
         $subject = MBS_Email_Templates::replace_placeholders( $tpl['subject'], $booking );
@@ -240,61 +255,90 @@ class MBS_Email {
         self::send( $booking->email, $subject, $body );
     }
 
-    /**
-     * Send a summary email for a recurring booking series.
-     */
-    public static function notify_recurring_summary( $series_id, $refs, $skipped, $name, $email, $space, $time_str ) {
+    /** Send one consolidated request receipt for a recurring series. */
+    public static function notify_recurring_summary( $series, $occurrences ) {
         $admin_email = self::admin_email();
         $org         = MBS_Email_Templates::get_org_settings();
-
-        $subject = 'Recurring Booking Submitted – ' . $series_id;
+        $template    = MBS_Email_Templates::get_template( 'recurring_summary' );
+        $placeholder_data = array(
+            'name'         => $series->contact_name,
+            'organisation' => $series->contact_organisation,
+            'ref'          => $series->series_ref,
+            'space'        => $series->space,
+            'booking_date' => $series->start_date,
+            'start_time'   => $series->start_time,
+            'end_time'     => $series->end_time,
+            'all_day'      => $series->all_day,
+            'attendees'    => $series->attendees,
+            'purpose'      => $series->purpose,
+            'amount'       => $series->estimated_total,
+        );
+        $subject = MBS_Email_Templates::replace_placeholders( $template['subject'], $placeholder_data );
+        $intro   = MBS_Email_Templates::replace_placeholders( $template['body'], $placeholder_data );
 
         $body  = self::header();
-        $body .= '<h2 style="color:#7413DC;">Recurring Booking Submitted</h2>';
-        $body .= '<p>Hi ' . esc_html( $name ) . ',</p>';
-        $body .= '<p>Your recurring booking request has been submitted. Here is a summary:</p>';
-
-        $body .= '<table style="width:100%;border-collapse:collapse;margin:16px 0;">';
-        $body .= '<tr><td style="padding:8px 12px;background:#f5f0ff;font-weight:600;width:35%;border-bottom:1px solid #e0d0f0;">Series Reference</td><td style="padding:8px 12px;border-bottom:1px solid #e0d0f0;">' . esc_html( $series_id ) . '</td></tr>';
-        $body .= '<tr><td style="padding:8px 12px;background:#f5f0ff;font-weight:600;border-bottom:1px solid #e0d0f0;">Space</td><td style="padding:8px 12px;border-bottom:1px solid #e0d0f0;">' . esc_html( $space ) . '</td></tr>';
-        $body .= '<tr><td style="padding:8px 12px;background:#f5f0ff;font-weight:600;border-bottom:1px solid #e0d0f0;">Time</td><td style="padding:8px 12px;border-bottom:1px solid #e0d0f0;">' . esc_html( $time_str ) . '</td></tr>';
-        $body .= '<tr><td style="padding:8px 12px;background:#f5f0ff;font-weight:600;border-bottom:1px solid #e0d0f0;">Bookings Created</td><td style="padding:8px 12px;border-bottom:1px solid #e0d0f0;"><strong>' . count( $refs ) . '</strong></td></tr>';
-
-        // QA-005: Calculate and show total cost for the series
-        $total_series_cost = 0;
-        foreach ( $refs as $r ) {
-            $b = MBS_Bookings::get( $r );
-            if ( $b ) $total_series_cost += (float) $b->amount;
-        }
-        $body .= '<tr><td style="padding:8px 12px;background:#f5f0ff;font-weight:600;border-bottom:1px solid #e0d0f0;">Total Cost</td><td style="padding:8px 12px;border-bottom:1px solid #e0d0f0;font-weight:bold;">&pound;' . number_format( $total_series_cost, 2 ) . '</td></tr>';
-
-        $body .= '</table>';
-
-        $body .= '<h3 style="color:#7413DC;margin-top:24px;">Booked Dates</h3>';
-        $body .= '<ul style="margin:8px 0;padding-left:20px;">';
-        foreach ( $refs as $ref ) {
-            $booking = MBS_Bookings::get( $ref );
-            if ( $booking ) {
-                $body .= '<li style="margin-bottom:4px;">' . esc_html( date( 'l j F Y', strtotime( $booking->booking_date ) ) ) . ' &mdash; <code>' . esc_html( $ref ) . '</code></li>';
-            }
-        }
-        $body .= '</ul>';
-
-        if ( ! empty( $skipped ) ) {
-            $body .= '<h3 style="color:#f39c12;margin-top:16px;">Skipped Dates</h3>';
-            $body .= '<p style="font-size:0.85rem;color:#6b7280;">These dates were skipped due to conflicts or blocked dates:</p>';
-            $body .= '<ul style="margin:8px 0;padding-left:20px;color:#856404;">';
-            foreach ( $skipped as $skip_date ) {
-                $body .= '<li style="margin-bottom:4px;">' . esc_html( date( 'l j F Y', strtotime( $skip_date ) ) ) . '</li>';
-            }
-            $body .= '</ul>';
-        }
-
-        $body .= '<p style="margin-top:16px;">Each booking is pending confirmation. We will review and confirm them shortly.</p>';
+        $body .= '<h2 style="color:#7413DC;">We’ve received your recurring request</h2>';
+        $body .= nl2br( esc_html( $intro ) );
+        $body .= self::series_request_table( $series );
+        $body .= self::series_dates_html( $occurrences, false );
+        $body .= '<p style="margin-top:16px;">This is a request receipt, not an invoice. Nothing is due at submission. We will review the available dates and contact you about approval and billing.</p>';
         $body .= '<p>If you have any questions, contact us at <a href="mailto:' . esc_attr( $admin_email ) . '">' . esc_html( $admin_email ) . '</a> or call ' . esc_html( $org['phone'] ) . '.</p>';
         $body .= self::footer();
 
-        self::send( $email, $subject, $body );
+        self::send( $series->contact_email, $subject, $body );
+    }
+
+    private static function series_request_table( $series ) {
+        $time = ! empty( $series->all_day )
+            ? 'All day'
+            : substr( (string) $series->start_time, 0, 5 ) . ' – ' . substr( (string) $series->end_time, 0, 5 );
+        $rows = array(
+            'Series reference'            => $series->series_ref,
+            'Space'                       => $series->space,
+            'Weekly time'                 => $time,
+            'Requested dates'             => (int) $series->requested_count,
+            'Available dates submitted'   => (int) $series->accepted_count,
+            'Price per booking'           => '&pound;' . number_format( (float) $series->price_per_booking, 2 ),
+            'Estimated full series value' => '&pound;' . number_format( (float) $series->estimated_total, 2 ),
+            'Amount due at submission'    => '&pound;0.00',
+        );
+        $html = '<table style="width:100%;border-collapse:collapse;margin:16px 0;">';
+        foreach ( $rows as $label => $value ) {
+            $html .= '<tr><td style="padding:8px 12px;background:#f5f0ff;font-weight:600;width:42%;border-bottom:1px solid #e0d0f0;">' . esc_html( $label ) . '</td><td style="padding:8px 12px;border-bottom:1px solid #e0d0f0;">' . wp_kses_post( $value ) . '</td></tr>';
+        }
+        return $html . '</table>';
+    }
+
+    private static function series_dates_html( $occurrences, $for_admin ) {
+        $accepted = array();
+        $unavailable = array();
+        foreach ( $occurrences as $occurrence ) {
+            if ( ( $occurrence['status'] ?? '' ) === 'accepted' ) {
+                $accepted[] = $occurrence;
+            } else {
+                $unavailable[] = $occurrence;
+            }
+        }
+
+        $html = '<h3 style="color:#7413DC;margin-top:24px;">Dates included in the request</h3><ul style="margin:8px 0;padding-left:20px;">';
+        foreach ( $accepted as $occurrence ) {
+            $html .= '<li style="margin-bottom:4px;">' . esc_html( wp_date( 'l j F Y', strtotime( $occurrence['date'] ) ) );
+            if ( $for_admin && ! empty( $occurrence['ref'] ) ) {
+                $html .= ' &mdash; <code>' . esc_html( $occurrence['ref'] ) . '</code>';
+            }
+            $html .= '</li>';
+        }
+        $html .= '</ul>';
+
+        if ( $unavailable ) {
+            $html .= '<h3 style="color:#b45309;margin-top:16px;">Dates not included</h3><p style="font-size:13px;color:#6b7280;">These dates were unavailable and were omitted from the request.</p><ul style="margin:8px 0;padding-left:20px;color:#856404;">';
+            foreach ( $unavailable as $occurrence ) {
+                $reason = ucfirst( sanitize_key( $occurrence['status'] ?? 'unavailable' ) );
+                $html .= '<li style="margin-bottom:4px;">' . esc_html( wp_date( 'l j F Y', strtotime( $occurrence['date'] ) ) ) . ' &mdash; ' . esc_html( $reason ) . '</li>';
+            }
+            $html .= '</ul>';
+        }
+        return $html;
     }
 
     /**

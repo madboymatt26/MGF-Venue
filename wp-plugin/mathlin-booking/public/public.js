@@ -314,7 +314,7 @@ jQuery(function ($) {
 
         // Show deposit info if applicable
         var depositSettings = NMS.deposit_settings || {};
-        if (depositSettings.enabled && !isScoutUse && grandTotal > 0 && dateFrom) {
+        if (!isRecurring && depositSettings.enabled && !isScoutUse && grandTotal > 0 && dateFrom) {
             var daysUntil = (new Date(dateFrom + 'T00:00:00') - new Date()) / 86400000;
             if (daysUntil > (depositSettings.balance_days || 7)) {
                 var depositAmt = Math.round(grandTotal * (depositSettings.percentage || 25) / 100 * 100) / 100;
@@ -326,14 +326,21 @@ jQuery(function ($) {
             $('#nms-cost-deposit-row').hide();
         }
 
-        // Show recurring breakdown
-        if (isRecurring && numWeeks > 1) {
-            $('#nms-cost-recurring-row').show().find('span').first().text(numWeeks + ' weekly bookings × £' + total2dp(singleTotal));
-            $('#nms-cost-recurring-row').find('span').last().text('£' + total2dp(grandTotal));
-            $('#nms-cost-total').text('£' + total2dp(grandTotal));
+        // Recurring requests show an estimate, never an annual deposit or an
+        // amount payable at submission. Server-side availability can omit
+        // dates before the request is recorded.
+        if (isRecurring) {
+            $('.nms-recurring-cost-row').show();
+            $('#nms-cost-one-off-total-row').hide();
+            $('#nms-cost-recurring-unit').text('£' + total2dp(singleTotal));
+            $('#nms-cost-recurring-count').text(numWeeks);
+            $('#nms-cost-recurring-estimate').text('£' + total2dp(grandTotal));
+            $('#nms-cost-recurring-due').text('£0.00');
+            $('#nms-cost-note').text('* Estimate only. Unavailable dates will be omitted, and nothing is due when you submit the request.');
         } else {
-            $('#nms-cost-recurring-row').hide();
-            $('#nms-cost-total').text('£' + total2dp(singleTotal));
+            $('.nms-recurring-cost-row').hide();
+            $('#nms-cost-one-off-total-row').show().find('span').last().text('£' + total2dp(singleTotal));
+            $('#nms-cost-note').text('* Final invoice issued upon confirmation by our booking team.');
         }
 
         // Toggle time fields based on all-day selection
