@@ -26,6 +26,7 @@ class MBS_Admin {
         add_action( 'wp_ajax_mbs_clear_expired_blocks', array( $this, 'ajax_clear_expired_blocks' ) );
         add_action( 'wp_ajax_mbs_update_series_status', array( $this, 'ajax_update_series_status' ) );
         add_action( 'wp_ajax_mbs_resend_series_confirmation', array( $this, 'ajax_resend_series_confirmation' ) );
+        add_action( 'wp_ajax_mbs_record_invoice_manual_payment', array( $this, 'ajax_record_invoice_manual_payment' ) );
         add_action( 'wp_ajax_mbs_cancel_scout_series', array( $this, 'ajax_cancel_scout_series' ) );
         add_action( 'wp_ajax_mbs_edit_scout_series', array( $this, 'ajax_edit_scout_series' ) );
         add_action( 'wp_ajax_mbs_extend_scout_series', array( $this, 'ajax_extend_scout_series' ) );
@@ -929,6 +930,32 @@ class MBS_Admin {
             wp_send_json_error( $result->get_error_message() );
         }
         wp_send_json_success( $result );
+    }
+
+    public function ajax_record_invoice_manual_payment() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to record invoice payments.', 403 );
+        $invoice_ref = sanitize_text_field( $_POST['invoice_ref'] ?? '' );
+        $amount_minor = sanitize_text_field( $_POST['amount_minor'] ?? '' );
+        $idempotency_key = sanitize_text_field( $_POST['idempotency_key'] ?? '' );
+        $expected_version = absint( $_POST['expected_version'] ?? 0 );
+        if ( ! $invoice_ref || $amount_minor === '' || ! $idempotency_key || $expected_version < 1 ) {
+            wp_send_json_error( 'Invoice reference, amount in minor units, idempotency key and expected version are required.' );
+        }
+        $result = MBS_Invoice_Payment::record_manual_payment(
+            $invoice_ref, $amount_minor, $idempotency_key, $expected_version,
+            sanitize_text_field( $_POST['note'] ?? '' )
+        );
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( $result->get_error_message(), $result->get_error_code() === 'invoice_precondition_failed' ? 409 : 400 );
+        }
+        wp_send_json_success( array(
+            'invoice_ref' => $result['invoice']->invoice_ref,
+            'status' => $result['invoice']->status,
+            'version' => (int) $result['invoice']->version,
+            'balance_minor' => MBS_Billing_Ledger::balance_minor( $result['invoice'] ),
+            'idempotent_replay' => ! empty( $result['idempotent_replay'] ),
+        ) );
     }
 
     /**

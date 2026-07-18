@@ -137,6 +137,8 @@ class MBS_Database {
             paid_minor            BIGINT(20)   NOT NULL DEFAULT 0,
             credited_minor        BIGINT(20)   NOT NULL DEFAULT 0,
             idempotency_key       VARCHAR(64)  NOT NULL,
+            payment_token_hash    CHAR(64)     DEFAULT NULL,
+            payment_token_created_at DATETIME  DEFAULT NULL,
             issued_at             DATETIME     DEFAULT NULL,
             due_at                DATETIME     DEFAULT NULL,
             voided_at             DATETIME     DEFAULT NULL,

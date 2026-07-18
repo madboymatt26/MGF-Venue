@@ -22,6 +22,7 @@ class MBS_Billing_Engine {
         if ( is_wp_error( $result ) ) {
             error_log( '[MGF Venue] Consolidated billing catch-up failed: ' . $result->get_error_message() );
         }
+        MBS_Invoice_Payment::send_due_reminders();
     }
 
     /** Configure a first-class series with optimistic concurrency. */

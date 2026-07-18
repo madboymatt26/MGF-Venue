@@ -12,7 +12,7 @@
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 define( 'MBS_VERSION',    '3.21.0' );
-define( 'MBS_DB_VERSION', '3.21.0-schema-2' );
+define( 'MBS_DB_VERSION', '3.21.0-schema-3' );
 define( 'MBS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MBS_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'MBS_TABLE',      'mathlin_bookings' );
@@ -29,6 +29,7 @@ require_once MBS_PLUGIN_DIR . 'includes/class-series.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-money.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-billing-ledger.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-billing-engine.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-invoice-payment.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-bookings.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-email.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-invoice.php';

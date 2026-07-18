@@ -311,6 +311,40 @@ class MBS_Email {
         return self::send( $series->contact_email, $subject, $body );
     }
 
+    /** Send the sole automatic reminder for a consolidated invoice. */
+    public static function notify_invoice_reminder( $invoice, $series, $items ) {
+        $balance = MBS_Billing_Ledger::balance_minor( $invoice );
+        $subject = 'Invoice Reminder – ' . $invoice->invoice_ref;
+        $body  = self::header();
+        $body .= '<h2 style="color:#7413DC;">Invoice reminder</h2>';
+        $body .= '<p>Hi ' . esc_html( $invoice->contact_name ) . ',</p>';
+        $body .= '<p>This is the single automatic reminder for consolidated invoice <strong>' . esc_html( $invoice->invoice_ref ) . '</strong>.</p>';
+        $body .= '<table style="width:100%;border-collapse:collapse;margin:16px 0;">';
+        $body .= '<tr><td style="padding:8px;background:#f5f0ff;font-weight:600;">Invoice</td><td style="padding:8px;">' . esc_html( $invoice->invoice_ref ) . '</td></tr>';
+        $body .= '<tr><td style="padding:8px;background:#f5f0ff;font-weight:600;">Period</td><td style="padding:8px;">' . esc_html( wp_date( 'j M Y', strtotime( $invoice->period_start ) ) . ' – ' . wp_date( 'j M Y', strtotime( $invoice->period_end ) ) ) . '</td></tr>';
+        $body .= '<tr><td style="padding:8px;background:#f5f0ff;font-weight:600;">Balance outstanding</td><td style="padding:8px;font-weight:700;">' . esc_html( MBS_Money::format( $balance, $invoice->currency ) ) . '</td></tr>';
+        $body .= '</table>';
+
+        $offline = $series && $series->payment_method === 'offline_bacs';
+        if ( $offline ) {
+            $bank = MBS_Bookings::get_bank_details();
+            $body .= '<div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:6px;padding:16px;margin:16px 0;">';
+            $body .= '<strong>Payment by BACS / Purchase Order</strong><br>';
+            if ( ! empty( $bank['account_name'] ) ) $body .= 'Account name: ' . esc_html( $bank['account_name'] ) . '<br>';
+            if ( ! empty( $bank['sort_code'] ) ) $body .= 'Sort code: ' . esc_html( $bank['sort_code'] ) . '<br>';
+            if ( ! empty( $bank['account_number'] ) ) $body .= 'Account number: ' . esc_html( $bank['account_number'] ) . '<br>';
+            $body .= 'Reference: <strong>' . esc_html( $invoice->invoice_ref ) . '</strong></div>';
+        } else {
+            $pay_url = MBS_Invoice_Payment::generate_payment_url( $invoice );
+            if ( $pay_url ) {
+                $body .= '<p style="text-align:center;margin:24px 0;"><a href="' . esc_url( $pay_url ) . '" style="background:#2ecc71;color:#fff;padding:14px 32px;border-radius:6px;text-decoration:none;font-weight:bold;">Pay invoice ' . esc_html( MBS_Money::format( $balance, $invoice->currency ) ) . '</a></p>';
+            }
+        }
+        $body .= '<p>If payment is already in progress, please disregard this reminder. For any query, reply to this email.</p>';
+        $body .= self::footer();
+        return self::send( $invoice->contact_email, $subject, $body );
+    }
+
     private static function series_request_table( $series ) {
         $time = ! empty( $series->all_day )
             ? 'All day'

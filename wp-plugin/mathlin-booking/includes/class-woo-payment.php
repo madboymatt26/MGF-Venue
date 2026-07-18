@@ -137,6 +137,10 @@ class MBS_Woo_Payment {
      * Hooked into template_redirect.
      */
     public static function handle_payment_redirect() {
+        if ( isset( $_GET['mbs_invoice_pay'] ) && $_GET['mbs_invoice_pay'] === '1' ) {
+            self::handle_invoice_payment_redirect();
+            return;
+        }
         if ( ! isset( $_GET['mbs_pay'] ) || $_GET['mbs_pay'] !== '1' ) return;
         if ( ! self::is_available() ) return;
 
@@ -205,6 +209,39 @@ class MBS_Woo_Payment {
         exit;
     }
 
+    /** Add one consolidated invoice balance to checkout. */
+    private static function handle_invoice_payment_redirect() {
+        if ( ! self::is_available() ) return;
+        $invoice_ref = sanitize_text_field( $_GET['invoice_ref'] ?? '' );
+        $token = sanitize_text_field( $_GET['invoice_token'] ?? '' );
+        $invoice = MBS_Billing_Ledger::get_invoice( $invoice_ref );
+        if ( ! $invoice || ! MBS_Invoice_Payment::verify_token( $invoice, $token ) ) {
+            wp_die( 'Invalid invoice payment link. Please contact us for assistance.' );
+        }
+        $series = $invoice->series_ref ? MBS_Series::get( $invoice->series_ref ) : null;
+        if ( $series && $series->payment_method === 'offline_bacs' ) {
+            wp_die( 'This invoice is configured for BACS / Purchase Order payment.' );
+        }
+        $balance_minor = MBS_Billing_Ledger::balance_minor( $invoice );
+        if ( ! in_array( $invoice->status, array( 'issued', 'part_paid' ), true ) || $balance_minor <= 0 ) {
+            wp_die( 'This invoice is not available for payment. It may already be settled or void.' );
+        }
+        $decimal = MBS_Money::decimal( $balance_minor );
+        if ( is_wp_error( $decimal ) ) wp_die( 'The invoice balance could not be prepared for checkout.' );
+
+        WC()->cart->empty_cart();
+        $product_id = self::get_payment_product_id();
+        add_filter( 'woocommerce_product_get_price', function( $price, $product ) use ( $decimal, $product_id ) {
+            return $product->get_id() == $product_id ? $decimal : $price;
+        }, 10, 2 );
+        WC()->cart->add_to_cart( $product_id, 1, 0, array(), array(
+            'mbs_invoice_ref' => $invoice->invoice_ref,
+            'mbs_invoice_amount_minor' => $balance_minor,
+        ) );
+        wp_redirect( wc_get_checkout_url() );
+        exit;
+    }
+
     /**
      * Display booking ref in cart/checkout.
      */
@@ -214,6 +251,9 @@ class MBS_Woo_Payment {
                 'key'   => 'Booking Reference',
                 'value' => $cart_item['mbs_booking_ref'],
             );
+        }
+        if ( isset( $cart_item['mbs_invoice_ref'] ) ) {
+            $item_data[] = array( 'key' => 'Invoice Reference', 'value' => $cart_item['mbs_invoice_ref'] );
         }
         return $item_data;
     }
@@ -225,7 +265,18 @@ class MBS_Woo_Payment {
         if ( is_admin() && ! defined( 'DOING_AJAX' ) ) return;
 
         foreach ( $cart->get_cart() as $cart_item ) {
-            if ( isset( $cart_item['mbs_booking_ref'] ) ) {
+            if ( isset( $cart_item['mbs_invoice_ref'] ) ) {
+                $invoice = MBS_Billing_Ledger::get_invoice( $cart_item['mbs_invoice_ref'] );
+                if ( $invoice ) {
+                    $balance_minor = MBS_Billing_Ledger::balance_minor( $invoice );
+                    $decimal = MBS_Money::decimal( $balance_minor );
+                    if ( ! is_wp_error( $decimal ) && $balance_minor > 0 && in_array( $invoice->status, array( 'issued', 'part_paid' ), true ) ) {
+                        $cart_item['data']->set_price( $decimal );
+                    } else {
+                        $cart_item['data']->set_price( '0.00' );
+                    }
+                }
+            } elseif ( isset( $cart_item['mbs_booking_ref'] ) ) {
                 // SEC-004: Always read price from database, not cart session
                 $booking = MBS_Bookings::get( $cart_item['mbs_booking_ref'] );
                 if ( $booking ) {
@@ -257,6 +308,9 @@ class MBS_Woo_Payment {
         if ( isset( $values['mbs_booking_ref'] ) ) {
             $item->add_meta_data( '_mbs_booking_ref', $values['mbs_booking_ref'], true );
         }
+        if ( isset( $values['mbs_invoice_ref'] ) ) {
+            $item->add_meta_data( '_mbs_invoice_ref', $values['mbs_invoice_ref'], true );
+        }
     }
 
     /**
@@ -266,6 +320,29 @@ class MBS_Woo_Payment {
     public function on_order_completed( $order_id ) {
         $order = wc_get_order( $order_id );
         if ( ! $order ) return;
+
+        // Consolidated invoice orders use their own idempotent ledger path and
+        // never fall through to legacy per-booking payment processing.
+        $invoice_items_found = false;
+        $invoice_processed = false;
+        foreach ( $order->get_items() as $item ) {
+            $invoice_ref = $item->get_meta( '_mbs_invoice_ref' );
+            if ( ! $invoice_ref ) continue;
+            $invoice_items_found = true;
+            $payment = MBS_Invoice_Payment::record_gateway_payment( $invoice_ref, $order->get_total(), $order_id );
+            if ( is_wp_error( $payment ) ) {
+                $order->add_order_note( '⚠️ Consolidated invoice payment could not be recorded: ' . $payment->get_error_message() );
+                continue;
+            }
+            $order->update_meta_data( '_mbs_invoice_ref', $invoice_ref );
+            $order->add_order_note( sprintf( 'MGF Venue invoice %s payment recorded in the consolidated ledger.', $invoice_ref ) );
+            $invoice_processed = true;
+        }
+        if ( $invoice_items_found ) {
+            if ( $invoice_processed ) $order->update_meta_data( '_mbs_invoice_payment_processed', 'yes' );
+            $order->save();
+            return;
+        }
 
         // Guard: skip if we've already processed this order
         if ( $order->get_meta( '_mbs_payment_processed' ) === 'yes' ) return;
@@ -361,6 +438,27 @@ class MBS_Woo_Payment {
         $order = wc_get_order( $order_id );
         if ( ! $order ) return;
 
+        $invoice_refs = array();
+        foreach ( $order->get_items() as $item ) {
+            $invoice_ref = $item->get_meta( '_mbs_invoice_ref' );
+            if ( $invoice_ref ) $invoice_refs[ $invoice_ref ] = true;
+        }
+        if ( $invoice_refs ) {
+            foreach ( $order->get_refunds() as $refund ) {
+                $amount = ltrim( (string) $refund->get_amount(), '-' );
+                foreach ( array_keys( $invoice_refs ) as $invoice_ref ) {
+                    $result = MBS_Invoice_Payment::record_gateway_refund( $invoice_ref, $amount, $order_id, $refund->get_id() );
+                    if ( is_wp_error( $result ) ) {
+                        $order->add_order_note( '⚠️ Consolidated invoice refund could not be recorded: ' . $result->get_error_message() );
+                    } else {
+                        $order->add_order_note( sprintf( 'Refund #%d recorded against consolidated invoice %s.', $refund->get_id(), $invoice_ref ) );
+                    }
+                }
+            }
+            $order->save();
+            return;
+        }
+
         foreach ( $order->get_items() as $item ) {
             $ref = $item->get_meta( '_mbs_booking_ref' );
             if ( ! $ref ) continue;
@@ -392,6 +490,14 @@ class MBS_Woo_Payment {
         if ( ! $order ) return;
 
         foreach ( $order->get_items() as $item ) {
+            $invoice_ref = $item->get_meta( '_mbs_invoice_ref' );
+            if ( $invoice_ref ) {
+                echo '<div style="background:#d1fae5;border:1px solid #2ecc71;border-radius:8px;padding:16px 20px;margin:16px 0;">';
+                echo '<h3 style="color:#065f46;margin:0 0 8px;">✅ Invoice Payment Received</h3>';
+                echo '<p style="margin:0;">Your payment for consolidated invoice <strong>' . esc_html( $invoice_ref ) . '</strong> has been received. Thank you!</p>';
+                echo '</div>';
+                continue;
+            }
             $ref = $item->get_meta( '_mbs_booking_ref' );
             if ( $ref ) {
                 $booking = MBS_Bookings::get( $ref );

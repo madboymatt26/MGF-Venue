@@ -865,6 +865,7 @@ class MBS_Rest_API {
             'clear_expired_blocks'  => array( 'MBS_Admin', 'ajax_clear_expired_blocks' ),
             'update_series_status'  => array( 'MBS_Admin', 'ajax_update_series_status' ),
             'resend_series_confirmation' => array( 'MBS_Admin', 'ajax_resend_series_confirmation' ),
+            'record_invoice_manual_payment' => array( 'MBS_Admin', 'ajax_record_invoice_manual_payment' ),
             'cancel_scout_series'   => array( 'MBS_Admin', 'ajax_cancel_scout_series' ),
             'edit_scout_series'     => array( 'MBS_Admin', 'ajax_edit_scout_series' ),
             'extend_scout_series'   => array( 'MBS_Admin', 'ajax_extend_scout_series' ),

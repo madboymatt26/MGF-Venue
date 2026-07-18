@@ -41,6 +41,15 @@ class MBS_Money {
         return $sign . $symbol . intdiv( $absolute, 100 ) . '.' . str_pad( (string) ( $absolute % 100 ), 2, '0', STR_PAD_LEFT );
     }
 
+    /** Decimal string for gateway APIs; still never a float. */
+    public static function decimal( $minor ) {
+        $validated = self::minor( $minor );
+        if ( is_wp_error( $validated ) ) return $validated;
+        $sign = $validated < 0 ? '-' : '';
+        $absolute = abs( $validated );
+        return $sign . intdiv( $absolute, 100 ) . '.' . str_pad( (string) ( $absolute % 100 ), 2, '0', STR_PAD_LEFT );
+    }
+
     public static function line_total( $unit_minor, $quantity_milli ) {
         $unit = self::minor( $unit_minor );
         $quantity = self::minor( $quantity_milli );

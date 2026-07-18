@@ -1,7 +1,7 @@
 <?php
 define( 'ABSPATH', __DIR__ . '/fixtures/wordpress/' );
 define( 'MBS_VERSION', '3.21.0-test' );
-define( 'MBS_DB_VERSION', '3.21.0-schema-2-test' );
+define( 'MBS_DB_VERSION', '3.21.0-schema-3-test' );
 define( 'MBS_TABLE', 'mathlin_bookings' );
 define( 'MBS_SERIES_TABLE', 'mathlin_booking_series' );
 define( 'MBS_INVOICE_TABLE', 'mathlin_invoices' );

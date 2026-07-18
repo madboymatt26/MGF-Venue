@@ -233,7 +233,12 @@ class MBS_Billing_Ledger {
             'currency' => $original->currency, 'subtotal_minor' => -$amount, 'total_minor' => -$amount,
             'idempotency_key' => $key, 'issued_at' => $now, 'created_at' => $now, 'updated_at' => $now,
         ) );
-        if ( $inserted === false ) return self::rollback_error( 'credit_note_create_failed', 'Could not create the credit note.' );
+        if ( $inserted === false ) {
+            $wpdb->query( 'ROLLBACK' );
+            $existing = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$invoice_table} WHERE idempotency_key = %s", $key ) );
+            if ( $existing ) return array( 'credit_note' => $existing, 'created' => false, 'idempotent_replay' => true );
+            return new WP_Error( 'credit_note_create_failed', 'Could not create the credit note.' );
+        }
         $credit_id = (int) $wpdb->insert_id;
         $item_inserted = $wpdb->insert( $item_table, array(
             'item_ref' => self::generate_reference( 'ITEM', $item_table, 'item_ref' ), 'invoice_id' => $credit_id,
@@ -267,12 +272,19 @@ class MBS_Billing_Ledger {
         $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
         $transaction_table = $wpdb->prefix . MBS_PAYMENT_TRANSACTION_TABLE;
         $existing = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$transaction_table} WHERE idempotency_key = %s", $key ) );
-        if ( $existing ) return array( 'transaction' => $existing, 'created' => false, 'idempotent_replay' => true );
+        if ( $existing ) {
+            $existing_invoice = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$invoice_table} WHERE id = %d", (int) $existing->invoice_id ) );
+            return array( 'transaction' => $existing, 'invoice' => $existing_invoice, 'created' => false, 'idempotent_replay' => true );
+        }
 
         $wpdb->query( 'START TRANSACTION' );
         $invoice = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$invoice_table} WHERE invoice_ref = %s FOR UPDATE", sanitize_text_field( $invoice_ref ) ) );
         if ( ! $invoice ) return self::rollback_error( 'invoice_not_found', 'Invoice not found.' );
         if ( $invoice->document_type !== 'invoice' || in_array( $invoice->status, array( 'draft', 'void' ), true ) ) return self::rollback_error( 'invoice_not_payable', 'This invoice cannot accept a payment transaction.' );
+        if ( isset( $data['expected_version'] ) && (int) $data['expected_version'] !== (int) $invoice->version ) return self::rollback_error( 'invoice_precondition_failed', 'The invoice changed since it was loaded.' );
+        $current_balance = self::balance_minor( $invoice );
+        if ( $type === 'payment' && $amount > $current_balance ) return self::rollback_error( 'payment_exceeds_balance', 'Payment exceeds the current invoice balance.' );
+        if ( $type === 'refund' && $amount > (int) $invoice->paid_minor ) return self::rollback_error( 'refund_exceeds_paid', 'Refund exceeds payments recorded against this invoice.' );
         $transaction_ref = self::generate_reference( 'TXN', $transaction_table, 'transaction_ref' );
         $now = current_time( 'mysql' );
         $inserted = $wpdb->insert( $transaction_table, array(
@@ -285,7 +297,15 @@ class MBS_Billing_Ledger {
             'occurred_at' => ! empty( $data['occurred_at'] ) ? sanitize_text_field( $data['occurred_at'] ) : $now,
             'created_at' => $now, 'updated_at' => $now,
         ) );
-        if ( $inserted === false ) return self::rollback_error( 'transaction_create_failed', 'Could not record the payment transaction.' );
+        if ( $inserted === false ) {
+            $wpdb->query( 'ROLLBACK' );
+            $existing = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$transaction_table} WHERE idempotency_key = %s", $key ) );
+            if ( $existing ) {
+                $existing_invoice = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$invoice_table} WHERE id = %d", (int) $existing->invoice_id ) );
+                return array( 'transaction' => $existing, 'invoice' => $existing_invoice, 'created' => false, 'idempotent_replay' => true );
+            }
+            return new WP_Error( 'transaction_create_failed', 'Could not record the payment transaction.' );
+        }
         $transaction_id = (int) $wpdb->insert_id;
         if ( $status === 'completed' ) {
             $paid = $type === 'payment'

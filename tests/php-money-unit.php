@@ -28,5 +28,6 @@ same_money( 1851, MBS_Money::line_total( 1234, 1500 ), 'Quantity multiplication 
 same_money( -1851, MBS_Money::line_total( -1234, 1500 ), 'Negative adjustment rounding is symmetric.' );
 same_money( '£12.34', MBS_Money::format( 1234 ), 'GBP minor units format correctly.' );
 same_money( '-£0.05', MBS_Money::format( -5 ), 'Negative GBP minor units format correctly.' );
+same_money( '12.34', MBS_Money::decimal( 1234 ), 'Gateway decimal remains an exact string.' );
 
 echo "OK: {$checks} exact-money assertions passed.\n";

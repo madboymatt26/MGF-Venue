@@ -28,7 +28,7 @@ has_source( $admin, 'expected_status', 'Admin approval supplies expected status.
 has_source( $admin, 'expected_version', 'Admin approval supplies expected version.' );
 
 $email_start = strpos( $email, 'public static function notify_series_confirmed' );
-$email_end = strpos( $email, 'private static function series_request_table', $email_start );
+$email_end = strpos( $email, 'public static function notify_invoice_reminder', $email_start );
 $approval_email = substr( $email, $email_start, $email_end - $email_start );
 if ( preg_match( '/generate_invoice|generate_payment_url|pay_url|Pay Now/i', $approval_email ) ) {
     fwrite( STDERR, "FAIL: Consolidated approval email must not create or advertise occurrence invoices/payment links.\n" );
