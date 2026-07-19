@@ -29,8 +29,11 @@ class MBS_Woo_Payment {
         add_action( 'woocommerce_order_status_completed',  array( $this, 'on_order_completed' ) );
         add_action( 'woocommerce_order_status_processing', array( $this, 'on_order_completed' ) );
         add_action( 'woocommerce_payment_complete',        array( $this, 'on_order_completed' ) );
-        add_action( 'woocommerce_order_status_refunded',   array( $this, 'on_order_refunded' ) );
-        add_action( 'woocommerce_order_fully_refunded',    array( $this, 'on_order_refunded' ) );
+        add_action( 'woocommerce_order_refunded',          array( $this, 'on_order_refunded' ), 10, 2 );
+        add_action( 'woocommerce_order_status_failed',     array( 'MBS_Invoice_Reservation', 'release_order' ) );
+        add_action( 'woocommerce_order_status_cancelled',  array( 'MBS_Invoice_Reservation', 'release_order' ) );
+        add_action( 'mbs_release_invoice_reservation',      array( 'MBS_Invoice_Reservation', 'release_expired' ), 10, 2 );
+        add_action( 'woocommerce_after_checkout_validation', array( $this, 'validate_invoice_checkout' ), 10, 2 );
         add_action( 'woocommerce_thankyou',                array( $this, 'thankyou_message' ) );
 
         // REST endpoint for generating payment links
@@ -223,9 +226,14 @@ class MBS_Woo_Payment {
             wp_die( 'This invoice is configured for BACS / Purchase Order payment.' );
         }
         $balance_minor = MBS_Billing_Ledger::balance_minor( $invoice );
-        if ( ! in_array( $invoice->status, array( 'issued', 'part_paid' ), true ) || $balance_minor <= 0 ) {
+        if ( ! MBS_Invoice_Payment::is_payable( $invoice ) ) {
             wp_die( 'This invoice is not available for payment. It may already be settled or void.' );
         }
+        $session_key = 'mbs_invoice_reservation_' . substr( hash( 'sha256', $invoice->invoice_ref ), 0, 16 );
+        $existing_reservation = WC()->session ? (string) WC()->session->get( $session_key, '' ) : '';
+        $reservation = MBS_Invoice_Reservation::acquire( $invoice, $existing_reservation );
+        if ( is_wp_error( $reservation ) ) wp_die( esc_html( $reservation->get_error_message() ) );
+        if ( WC()->session ) WC()->session->set( $session_key, $reservation['reservation_ref'] );
         $decimal = MBS_Money::decimal( $balance_minor );
         if ( is_wp_error( $decimal ) ) wp_die( 'The invoice balance could not be prepared for checkout.' );
 
@@ -237,6 +245,7 @@ class MBS_Woo_Payment {
         WC()->cart->add_to_cart( $product_id, 1, 0, array(), array(
             'mbs_invoice_ref' => $invoice->invoice_ref,
             'mbs_invoice_amount_minor' => $balance_minor,
+            'mbs_invoice_reservation_ref' => $reservation['reservation_ref'],
         ) );
         wp_redirect( wc_get_checkout_url() );
         exit;
@@ -264,16 +273,18 @@ class MBS_Woo_Payment {
     public static function set_cart_item_price( $cart ) {
         if ( is_admin() && ! defined( 'DOING_AJAX' ) ) return;
 
-        foreach ( $cart->get_cart() as $cart_item ) {
+        foreach ( $cart->get_cart() as $cart_item_key => $cart_item ) {
             if ( isset( $cart_item['mbs_invoice_ref'] ) ) {
                 $invoice = MBS_Billing_Ledger::get_invoice( $cart_item['mbs_invoice_ref'] );
                 if ( $invoice ) {
                     $balance_minor = MBS_Billing_Ledger::balance_minor( $invoice );
                     $decimal = MBS_Money::decimal( $balance_minor );
-                    if ( ! is_wp_error( $decimal ) && $balance_minor > 0 && in_array( $invoice->status, array( 'issued', 'part_paid' ), true ) ) {
+                    $reserved = MBS_Invoice_Reservation::validate( $invoice->invoice_ref, $cart_item['mbs_invoice_reservation_ref'] ?? '', $balance_minor );
+                    if ( ! is_wp_error( $decimal ) && MBS_Invoice_Payment::is_payable( $invoice ) && $reserved ) {
                         $cart_item['data']->set_price( $decimal );
                     } else {
-                        $cart_item['data']->set_price( '0.00' );
+                        $cart->remove_cart_item( $cart_item_key );
+                        if ( function_exists( 'wc_add_notice' ) ) wc_add_notice( 'This invoice checkout expired or its balance changed. Please open the payment link again.', 'error' );
                     }
                 }
             } elseif ( isset( $cart_item['mbs_booking_ref'] ) ) {
@@ -310,6 +321,25 @@ class MBS_Woo_Payment {
         }
         if ( isset( $values['mbs_invoice_ref'] ) ) {
             $item->add_meta_data( '_mbs_invoice_ref', $values['mbs_invoice_ref'], true );
+            $item->add_meta_data( '_mbs_invoice_reservation_ref', $values['mbs_invoice_reservation_ref'] ?? '', true );
+            $item->add_meta_data( '_mbs_invoice_amount_minor', (int) ( $values['mbs_invoice_amount_minor'] ?? 0 ), true );
+            $order->update_meta_data( '_mbs_invoice_ref', $values['mbs_invoice_ref'] );
+            $order->update_meta_data( '_mbs_invoice_reservation_ref', $values['mbs_invoice_reservation_ref'] ?? '' );
+            $bound = MBS_Invoice_Reservation::bind_order( $values['mbs_invoice_ref'], $values['mbs_invoice_reservation_ref'] ?? '', $order->get_id() );
+            if ( is_wp_error( $bound ) ) throw new Exception( $bound->get_error_message() );
+        }
+    }
+
+    /** Reject stale, mismatched or second-session invoice carts before order creation. */
+    public function validate_invoice_checkout( $data, $errors ) {
+        if ( ! WC()->cart ) return;
+        foreach ( WC()->cart->get_cart() as $cart_item ) {
+            if ( empty( $cart_item['mbs_invoice_ref'] ) ) continue;
+            $invoice = MBS_Billing_Ledger::get_invoice( $cart_item['mbs_invoice_ref'] );
+            $balance = $invoice ? MBS_Billing_Ledger::balance_minor( $invoice ) : 0;
+            if ( ! MBS_Invoice_Payment::is_payable( $invoice ) || ! MBS_Invoice_Reservation::validate( $cart_item['mbs_invoice_ref'], $cart_item['mbs_invoice_reservation_ref'] ?? '', $balance ) ) {
+                $errors->add( 'mbs_invoice_reservation_invalid', 'This invoice is no longer reserved for this checkout. Please open its payment link again.' );
+            }
         }
     }
 
@@ -329,12 +359,21 @@ class MBS_Woo_Payment {
             $invoice_ref = $item->get_meta( '_mbs_invoice_ref' );
             if ( ! $invoice_ref ) continue;
             $invoice_items_found = true;
-            $payment = MBS_Invoice_Payment::record_gateway_payment( $invoice_ref, $order->get_total(), $order_id );
+            $reservation_ref = (string) $item->get_meta( '_mbs_invoice_reservation_ref' );
+            $payment = MBS_Invoice_Payment::record_gateway_payment( $invoice_ref, $order->get_total(), $order_id, $reservation_ref );
             if ( is_wp_error( $payment ) ) {
+                if ( $reservation_ref ) MBS_Invoice_Reservation::reconciliation_required( $invoice_ref, $reservation_ref, $order_id, $payment->get_error_message() );
+                $order->update_meta_data( '_mbs_invoice_reconciliation_required', 'yes' );
+                $order->update_meta_data( '_mbs_invoice_reconciliation_error', $payment->get_error_message() );
+                $order->add_order_note( 'CRITICAL: A captured payment requires reconciliation or a safe gateway refund.' );
+                MBS_Audit_Log::log( $invoice_ref, 'payment_reconciliation_required', 'WooCommerce Order #' . $order_id . ' was captured but ledger recording failed: ' . $payment->get_error_message(), 0 );
                 $order->add_order_note( '⚠️ Consolidated invoice payment could not be recorded: ' . $payment->get_error_message() );
                 continue;
             }
+            if ( $reservation_ref ) MBS_Invoice_Reservation::complete( $invoice_ref, $reservation_ref, $order_id );
             $order->update_meta_data( '_mbs_invoice_ref', $invoice_ref );
+            $order->delete_meta_data( '_mbs_invoice_reconciliation_required' );
+            $order->delete_meta_data( '_mbs_invoice_reconciliation_error' );
             $order->add_order_note( sprintf( 'MGF Venue invoice %s payment recorded in the consolidated ledger.', $invoice_ref ) );
             $invoice_processed = true;
         }
@@ -434,7 +473,7 @@ class MBS_Woo_Payment {
      * When a WooCommerce order is refunded, revert the booking status to confirmed.
      * SEC-FIX-001: Handles the case where admin processes a refund directly in WooCommerce.
      */
-    public function on_order_refunded( $order_id ) {
+    public function on_order_refunded( $order_id, $refund_id = 0 ) {
         $order = wc_get_order( $order_id );
         if ( ! $order ) return;
 
@@ -444,10 +483,14 @@ class MBS_Woo_Payment {
             if ( $invoice_ref ) $invoice_refs[ $invoice_ref ] = true;
         }
         if ( $invoice_refs ) {
-            foreach ( $order->get_refunds() as $refund ) {
+            $refunds = $refund_id ? array( wc_get_order( $refund_id ) ) : $order->get_refunds();
+            foreach ( array_filter( $refunds ) as $refund ) {
                 $amount = ltrim( (string) $refund->get_amount(), '-' );
+                $requested_allocations = $refund->get_meta( '_mbs_invoice_refund_allocations', true );
+                if ( is_string( $requested_allocations ) ) $requested_allocations = json_decode( $requested_allocations, true );
+                if ( ! is_array( $requested_allocations ) ) $requested_allocations = array();
                 foreach ( array_keys( $invoice_refs ) as $invoice_ref ) {
-                    $result = MBS_Invoice_Payment::record_gateway_refund( $invoice_ref, $amount, $order_id, $refund->get_id() );
+                    $result = MBS_Invoice_Payment::record_gateway_refund( $invoice_ref, $amount, $order_id, $refund->get_id(), $requested_allocations );
                     if ( is_wp_error( $result ) ) {
                         $order->add_order_note( '⚠️ Consolidated invoice refund could not be recorded: ' . $result->get_error_message() );
                     } else {

@@ -4,10 +4,16 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 /** Invoice-specific payment tokens, settlement and reminder orchestration. */
 class MBS_Invoice_Payment {
 
+    /** The single authoritative rule used by links, reminders, portal and checkout. */
+    public static function is_payable( $invoice ) {
+        return $invoice && $invoice->document_type === 'invoice'
+            && in_array( $invoice->status, array( 'issued', 'part_paid', 'overdue' ), true )
+            && MBS_Billing_Ledger::balance_minor( $invoice ) > 0;
+    }
+
     public static function generate_payment_url( $invoice ) {
         if ( ! MBS_Woo_Payment::is_available() ) return '';
-        if ( ! in_array( $invoice->status, array( 'issued', 'part_paid', 'overdue' ), true ) ) return '';
-        if ( MBS_Billing_Ledger::balance_minor( $invoice ) <= 0 ) return '';
+        if ( ! self::is_payable( $invoice ) ) return '';
         $series = ! empty( $invoice->series_ref ) ? MBS_Series::get( $invoice->series_ref ) : null;
         if ( $series && $series->payment_method === 'offline_bacs' ) return '';
 
@@ -44,14 +50,14 @@ class MBS_Invoice_Payment {
         return $token;
     }
 
-    public static function record_gateway_payment( $invoice_ref, $amount_decimal, $order_id ) {
+    public static function record_gateway_payment( $invoice_ref, $amount_decimal, $order_id, $reservation_ref = '' ) {
         $minor = self::gateway_decimal_to_minor( $amount_decimal );
         if ( is_wp_error( $minor ) ) return $minor;
         $result = MBS_Billing_Ledger::record_transaction( $invoice_ref, array(
             'provider' => 'woocommerce', 'provider_transaction_id' => (string) $order_id,
             'transaction_type' => 'payment', 'status' => 'completed', 'amount_minor' => $minor,
             'idempotency_key' => 'woo-order:' . $order_id . ':invoice:' . $invoice_ref . ':payment',
-            'metadata' => array( 'woocommerce_order_id' => (int) $order_id ),
+            'metadata' => array( 'woocommerce_order_id' => (int) $order_id, 'reservation_ref' => sanitize_text_field( $reservation_ref ) ),
         ) );
         if ( ! is_wp_error( $result ) && MBS_Billing_Ledger::balance_minor( $result['invoice'] ) <= 0 ) {
             self::mark_covered_occurrences_paid( $result['invoice'] );
@@ -60,17 +66,21 @@ class MBS_Invoice_Payment {
         return $result;
     }
 
-    public static function record_gateway_refund( $invoice_ref, $amount_decimal, $order_id, $refund_id ) {
+    public static function record_gateway_refund( $invoice_ref, $amount_decimal, $order_id, $refund_id, $requested_allocations = array() ) {
         $minor = self::gateway_decimal_to_minor( $amount_decimal );
         if ( is_wp_error( $minor ) ) return $minor;
+        $invoice = MBS_Billing_Ledger::get_invoice( $invoice_ref );
+        if ( ! $invoice ) return new WP_Error( 'invoice_not_found', 'Invoice not found.' );
+        $allocations = self::refund_allocations( $invoice, $minor, $requested_allocations );
+        if ( is_wp_error( $allocations ) ) return $allocations;
         $result = MBS_Billing_Ledger::record_transaction( $invoice_ref, array(
             'provider' => 'woocommerce', 'provider_transaction_id' => 'refund-' . $refund_id,
             'transaction_type' => 'refund', 'status' => 'completed', 'amount_minor' => $minor,
             'idempotency_key' => 'woo-refund:' . $refund_id . ':invoice:' . $invoice_ref,
-            'metadata' => array( 'woocommerce_order_id' => (int) $order_id, 'woocommerce_refund_id' => (int) $refund_id ),
+            'metadata' => array( 'woocommerce_order_id' => (int) $order_id, 'woocommerce_refund_id' => (int) $refund_id, 'booking_allocations' => $allocations ),
         ) );
-        if ( ! is_wp_error( $result ) && MBS_Billing_Ledger::balance_minor( $result['invoice'] ) > 0 ) {
-            self::reopen_covered_occurrences( $result['invoice'] );
+        if ( ! is_wp_error( $result ) && ! empty( $result['created'] ) ) {
+            self::apply_refund_allocations( $result['invoice'], $allocations );
         }
         return $result;
     }
@@ -126,7 +136,7 @@ class MBS_Invoice_Payment {
             $wpdb->query( 'ROLLBACK' );
             return new WP_Error( 'invoice_not_found', 'Invoice not found.' );
         }
-        if ( ! in_array( $invoice->status, array( 'issued', 'part_paid', 'overdue' ), true ) || MBS_Billing_Ledger::balance_minor( $invoice ) <= 0 ) {
+        if ( ! self::is_payable( $invoice ) ) {
             $wpdb->query( 'ROLLBACK' );
             return array( 'sent' => false, 'no_op' => true, 'reason' => 'not_outstanding' );
         }
@@ -200,24 +210,63 @@ class MBS_Invoice_Payment {
         return true;
     }
 
-    private static function reopen_covered_occurrences( $invoice ) {
+    /** Allocate a Woo refund to invoice items, latest service date first unless explicitly supplied. */
+    private static function refund_allocations( $invoice, $amount_minor, $requested ) {
+        global $wpdb;
+        $remaining = (int) $amount_minor;
+        $result = array();
+        if ( is_array( $requested ) && $requested ) {
+            foreach ( $requested as $booking_ref => $value ) {
+                $minor = MBS_Money::minor( $value );
+                if ( is_wp_error( $minor ) || $minor <= 0 || $minor > $remaining ) return new WP_Error( 'invalid_refund_allocation', 'Refund allocations must be positive minor units and equal the refund.' );
+                $result[ sanitize_text_field( $booking_ref ) ] = $minor;
+                $remaining -= $minor;
+            }
+            if ( $remaining !== 0 ) return new WP_Error( 'invalid_refund_allocation_total', 'Refund allocations must equal the refund amount.' );
+            return $result;
+        }
+        $allocation_table = $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE;
+        $item_table = $wpdb->prefix . MBS_INVOICE_ITEM_TABLE;
+        $rows = $wpdb->get_results( $wpdb->prepare(
+            "SELECT a.booking_ref, a.allocated_minor FROM {$allocation_table} a
+             LEFT JOIN {$item_table} ii ON ii.invoice_id = a.invoice_id AND ii.booking_ref = a.booking_ref
+             WHERE a.invoice_id = %d AND a.status = 'active'
+             ORDER BY ii.service_date DESC, a.id DESC",
+            (int) $invoice->id
+        ) );
+        foreach ( $rows as $row ) {
+            if ( $remaining <= 0 ) break;
+            $allocated = min( $remaining, max( 0, (int) $row->allocated_minor ) );
+            if ( $allocated > 0 ) $result[ $row->booking_ref ] = $allocated;
+            $remaining -= $allocated;
+        }
+        if ( $remaining > 0 ) return new WP_Error( 'refund_allocation_failed', 'The refund could not be allocated to invoice items.' );
+        return $result;
+    }
+
+    /** Reopen only occurrences whose own invoice allocation was refunded. */
+    private static function apply_refund_allocations( $invoice, $allocations ) {
         global $wpdb;
         $allocation_table = $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE;
         $booking_table = $wpdb->prefix . MBS_TABLE;
         $wpdb->query( 'START TRANSACTION' );
-        $bookings = $wpdb->get_results( $wpdb->prepare(
-            "SELECT b.* FROM {$allocation_table} a INNER JOIN {$booking_table} b ON b.ref = a.booking_ref
-             WHERE a.invoice_id = %d AND a.status = 'active' AND b.status = 'paid' FOR UPDATE",
-            (int) $invoice->id
-        ) );
         $reopened_refs = array();
-        foreach ( $bookings as $booking ) {
-            $wpdb->update( $booking_table, array( 'status' => 'confirmed', 'amount_paid' => 0, 'access_sent' => 0 ), array( 'ref' => $booking->ref ) );
-            $reopened_refs[] = $booking->ref;
+        foreach ( array_keys( $allocations ) as $booking_ref ) {
+            $allocation = $wpdb->get_var( $wpdb->prepare(
+                "SELECT id FROM {$allocation_table} WHERE invoice_id = %d AND booking_ref = %s AND status = 'active' FOR UPDATE",
+                (int) $invoice->id, sanitize_text_field( $booking_ref )
+            ) );
+            if ( ! $allocation ) { $wpdb->query( 'ROLLBACK' ); return false; }
+            $updated = $wpdb->query( $wpdb->prepare(
+                "UPDATE {$booking_table} SET status = 'confirmed', amount_paid = 0, access_sent = 0 WHERE ref = %s AND status = 'paid'",
+                sanitize_text_field( $booking_ref )
+            ) );
+            if ( $updated === false ) { $wpdb->query( 'ROLLBACK' ); return false; }
+            if ( $updated ) $reopened_refs[] = sanitize_text_field( $booking_ref );
         }
         $wpdb->query( 'COMMIT' );
         foreach ( $reopened_refs as $ref ) {
-            MBS_Audit_Log::log( $ref, 'status_changed', 'Reverted to Confirmed after refund against consolidated invoice ' . $invoice->invoice_ref . '; access flag reset.', 0 );
+            MBS_Audit_Log::log( $ref, 'status_changed', 'This occurrence was reopened after its allocation on consolidated invoice ' . $invoice->invoice_ref . ' was refunded; unaffected occurrences remain settled.', 0 );
         }
         return true;
     }

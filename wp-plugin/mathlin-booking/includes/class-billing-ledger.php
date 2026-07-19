@@ -45,9 +45,12 @@ class MBS_Billing_Ledger {
         $table = $wpdb->prefix . MBS_INVOICE_TABLE;
         $key = self::idempotency_hash( $idempotency_key );
         if ( is_wp_error( $key ) ) return $key;
+        $request_hash = self::request_hash( 'create_invoice', $data );
 
         $existing = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$table} WHERE idempotency_key = %s", $key ) );
         if ( $existing ) {
+            $conflict = self::idempotency_conflict( $existing, $request_hash );
+            if ( $conflict ) return $conflict;
             return array( 'invoice' => $existing, 'created' => false, 'idempotent_replay' => true );
         }
 
@@ -68,6 +71,7 @@ class MBS_Billing_Ledger {
             'period_end'           => ! empty( $data['period_end'] ) ? sanitize_text_field( $data['period_end'] ) : null,
             'currency'             => self::currency( $data['currency'] ?? 'GBP' ),
             'idempotency_key'      => $key,
+            'idempotency_request_hash' => $request_hash,
             'due_at'               => ! empty( $data['due_at'] ) ? sanitize_text_field( $data['due_at'] ) : null,
             'created_at'           => $now,
             'updated_at'           => $now,
@@ -79,6 +83,8 @@ class MBS_Billing_Ledger {
             // A concurrent request may have won the idempotency race.
             $existing = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$table} WHERE idempotency_key = %s", $key ) );
             if ( $existing ) {
+                $conflict = self::idempotency_conflict( $existing, $request_hash );
+                if ( $conflict ) return $conflict;
                 return array( 'invoice' => $existing, 'created' => false, 'idempotent_replay' => true );
             }
             return new WP_Error( 'invoice_create_failed', 'Could not create the draft invoice.' );
@@ -231,16 +237,21 @@ class MBS_Billing_Ledger {
         if ( $amount <= 0 ) return new WP_Error( 'invalid_credit_amount', 'Credit amount must be greater than zero minor units.' );
         $key = self::idempotency_hash( $idempotency_key );
         if ( is_wp_error( $key ) ) return $key;
+        $request_hash = self::request_hash( 'create_credit_note', array( 'invoice_ref' => $invoice_ref, 'amount_minor' => $amount, 'reason' => sanitize_text_field( $reason ) ) );
         $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
         $item_table = $wpdb->prefix . MBS_INVOICE_ITEM_TABLE;
 
         $existing = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$invoice_table} WHERE idempotency_key = %s", $key ) );
-        if ( $existing ) return array( 'credit_note' => $existing, 'created' => false, 'idempotent_replay' => true );
+        if ( $existing ) {
+            $conflict = self::idempotency_conflict( $existing, $request_hash );
+            if ( $conflict ) return $conflict;
+            return array( 'credit_note' => $existing, 'created' => false, 'idempotent_replay' => true );
+        }
 
         $wpdb->query( 'START TRANSACTION' );
         $original = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$invoice_table} WHERE invoice_ref = %s FOR UPDATE", sanitize_text_field( $invoice_ref ) ) );
         if ( ! $original ) return self::rollback_error( 'invoice_not_found', 'Invoice not found.' );
-        if ( $original->document_type !== 'invoice' || ! in_array( $original->status, array( 'issued', 'part_paid', 'paid', 'credited' ), true ) ) return self::rollback_error( 'invoice_not_creditable', 'This invoice cannot receive a credit note.' );
+        if ( $original->document_type !== 'invoice' || ! in_array( $original->status, array( 'issued', 'part_paid', 'paid', 'credited', 'overdue' ), true ) ) return self::rollback_error( 'invoice_not_creditable', 'This invoice cannot receive a credit note.' );
         if ( $amount > ( (int) $original->total_minor - (int) $original->credited_minor ) ) return self::rollback_error( 'credit_exceeds_invoice', 'Credit would exceed the uncredited invoice total.' );
 
         $credit_ref = self::generate_reference( 'CN', $invoice_table );
@@ -252,12 +263,17 @@ class MBS_Billing_Ledger {
             'contact_email' => $original->contact_email, 'contact_address' => $original->contact_address,
             'billing_mode' => $original->billing_mode, 'period_start' => $original->period_start, 'period_end' => $original->period_end,
             'currency' => $original->currency, 'subtotal_minor' => -$amount, 'total_minor' => -$amount,
-            'idempotency_key' => $key, 'issued_at' => $now, 'created_at' => $now, 'updated_at' => $now,
+            'idempotency_key' => $key, 'idempotency_request_hash' => $request_hash,
+            'issued_at' => $now, 'created_at' => $now, 'updated_at' => $now,
         ) );
         if ( $inserted === false ) {
             $wpdb->query( 'ROLLBACK' );
             $existing = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$invoice_table} WHERE idempotency_key = %s", $key ) );
-            if ( $existing ) return array( 'credit_note' => $existing, 'created' => false, 'idempotent_replay' => true );
+            if ( $existing ) {
+                $conflict = self::idempotency_conflict( $existing, $request_hash );
+                if ( $conflict ) return $conflict;
+                return array( 'credit_note' => $existing, 'created' => false, 'idempotent_replay' => true );
+            }
             return new WP_Error( 'credit_note_create_failed', 'Could not create the credit note.' );
         }
         $credit_id = (int) $wpdb->insert_id;
@@ -290,10 +306,19 @@ class MBS_Billing_Ledger {
         if ( ! in_array( $status, array( 'pending', 'completed', 'failed' ), true ) ) return new WP_Error( 'invalid_transaction_status', 'Invalid transaction status.' );
         $key = self::idempotency_hash( $data['idempotency_key'] ?? '' );
         if ( is_wp_error( $key ) ) return $key;
+        $request_hash = self::request_hash( 'record_transaction', array(
+            'invoice_ref' => sanitize_text_field( $invoice_ref ), 'amount_minor' => $amount,
+            'transaction_type' => $type, 'status' => $status,
+            'provider' => sanitize_key( $data['provider'] ?? 'manual' ),
+            'provider_transaction_id' => ! empty( $data['provider_transaction_id'] ) ? sanitize_text_field( $data['provider_transaction_id'] ) : null,
+            'metadata' => $data['metadata'] ?? array(),
+        ) );
         $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
         $transaction_table = $wpdb->prefix . MBS_PAYMENT_TRANSACTION_TABLE;
         $existing = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$transaction_table} WHERE idempotency_key = %s", $key ) );
         if ( $existing ) {
+            $conflict = self::idempotency_conflict( $existing, $request_hash );
+            if ( $conflict ) return $conflict;
             $existing_invoice = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$invoice_table} WHERE id = %d", (int) $existing->invoice_id ) );
             return array( 'transaction' => $existing, 'invoice' => $existing_invoice, 'created' => false, 'idempotent_replay' => true );
         }
@@ -314,6 +339,7 @@ class MBS_Billing_Ledger {
             'provider_transaction_id' => ! empty( $data['provider_transaction_id'] ) ? sanitize_text_field( $data['provider_transaction_id'] ) : null,
             'transaction_type' => $type, 'status' => $status, 'amount_minor' => $amount,
             'currency' => $invoice->currency, 'idempotency_key' => $key,
+            'idempotency_request_hash' => $request_hash,
             'metadata_json' => wp_json_encode( $data['metadata'] ?? array() ),
             'occurred_at' => ! empty( $data['occurred_at'] ) ? sanitize_text_field( $data['occurred_at'] ) : $now,
             'created_at' => $now, 'updated_at' => $now,
@@ -322,6 +348,8 @@ class MBS_Billing_Ledger {
             $wpdb->query( 'ROLLBACK' );
             $existing = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$transaction_table} WHERE idempotency_key = %s", $key ) );
             if ( $existing ) {
+                $conflict = self::idempotency_conflict( $existing, $request_hash );
+                if ( $conflict ) return $conflict;
                 $existing_invoice = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$invoice_table} WHERE id = %d", (int) $existing->invoice_id ) );
                 return array( 'transaction' => $existing, 'invoice' => $existing_invoice, 'created' => false, 'idempotent_replay' => true );
             }
@@ -390,6 +418,25 @@ class MBS_Billing_Ledger {
         $key = trim( (string) $key );
         if ( $key === '' ) return new WP_Error( 'idempotency_required', 'An idempotency key is required for this financial write.' );
         return hash( 'sha256', $key );
+    }
+
+    private static function idempotency_conflict( $record, $request_hash ) {
+        if ( empty( $record->idempotency_request_hash ) || ! hash_equals( (string) $record->idempotency_request_hash, (string) $request_hash ) ) {
+            return new WP_Error( 'idempotency_conflict', 'This idempotency key was already used for a different target or payload.', array( 'status' => 409 ) );
+        }
+        return null;
+    }
+
+    private static function request_hash( $operation, $payload ) {
+        $payload = self::canonicalise( $payload );
+        return hash( 'sha256', $operation . '|' . wp_json_encode( $payload ) );
+    }
+
+    private static function canonicalise( $value ) {
+        if ( ! is_array( $value ) ) return $value;
+        if ( array_keys( $value ) !== range( 0, count( $value ) - 1 ) ) ksort( $value, SORT_STRING );
+        foreach ( $value as $key => $item ) $value[ $key ] = self::canonicalise( $item );
+        return $value;
     }
 
     private static function currency( $currency ) {
