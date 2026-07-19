@@ -61,8 +61,9 @@ class MBS_Series {
                 'payment_method' => $is_scout ? 'none' : ( MBS_Bookings::tier_is_offline( $tier ) ? 'offline_bacs' : 'online' ),
                 'automatic_reminders' => $is_scout ? 0 : 1, 'invoice_lead_days' => 28, 'payment_terms_days' => 14,
                 'billing_schedule_json' => wp_json_encode( array() ), 'terms_hash' => null, 'terms_accepted_at' => null,
-                'confirmation_sent_at' => null, 'metadata_incomplete' => 1, 'adopted_at' => $now,
-                'adopted_by' => 0, 'created_at' => $first->created_at ?: $now, 'updated_at' => $now,
+                'confirmation_sent_at' => null, 'metadata_incomplete' => 1, 'adopted_at' => null,
+                'adopted_by' => null, 'adoption_state' => 'eligible', 'adoption_version' => null,
+                'created_at' => $first->created_at ?: $now, 'updated_at' => $now,
             ) );
             if ( $inserted === false ) return new WP_Error( 'legacy_series_registration_failed', 'Could not register legacy series ' . $series_ref . '.' );
             MBS_Audit_Log::log( $series_ref, 'legacy_series_registered', 'Registered existing occurrence group as legacy per-occurrence billing. Missing terms, skipped dates and prior billing intent were not inferred.', 0 );

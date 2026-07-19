@@ -56,15 +56,25 @@ class MBS_Billing_Engine {
         $schedule = $configuration['billing_schedule'] ?? array();
         if ( ! is_array( $schedule ) ) return new WP_Error( 'invalid_billing_schedule', 'Billing schedule must be structured data.' );
 
+        $adopting = ! empty( $current->metadata_incomplete ) && $current->billing_treatment === 'legacy_per_occurrence'
+            && $treatment === 'invoice_managed' && ! empty( $configuration['adopt_legacy'] );
         $updated = $wpdb->query( $wpdb->prepare(
             "UPDATE {$table}
              SET billing_mode = %s, billing_treatment = %s, invoice_lead_days = %d,
                  payment_terms_days = %d, billing_schedule_json = %s,
                  payment_method = %s, deposit_policy = %s,
+                 metadata_incomplete = CASE WHEN %d = 1 THEN 0 ELSE metadata_incomplete END,
+                 adopted_at = CASE WHEN %d = 1 THEN %s ELSE adopted_at END,
+                 adopted_by = CASE WHEN %d = 1 THEN %d ELSE adopted_by END,
+                 adoption_state = CASE WHEN %d = 1 THEN 'completed' ELSE adoption_state END,
+                 adoption_version = CASE WHEN %d = 1 THEN %s ELSE adoption_version END,
                  version = version + 1, updated_at = %s
              WHERE series_ref = %s AND version = %d",
             $mode, $treatment, $lead_days, $terms_days, wp_json_encode( $schedule ),
             $payment_method, $deposit_policy,
+            $adopting ? 1 : 0, $adopting ? 1 : 0, current_time( 'mysql' ),
+            $adopting ? 1 : 0, get_current_user_id(), $adopting ? 1 : 0,
+            $adopting ? 1 : 0, MBS_DB_VERSION,
             current_time( 'mysql' ), sanitize_text_field( $series_ref ), (int) $expected_version
         ) );
         if ( $updated !== 1 ) return new WP_Error( 'series_precondition_failed', 'The recurring series changed since it was loaded.' );
@@ -211,27 +221,32 @@ class MBS_Billing_Engine {
         $as_of_date = DateTimeImmutable::createFromFormat( '!Y-m-d', (string) $as_of, wp_timezone() );
         if ( ! $as_of_date || $as_of_date->format( 'Y-m-d' ) !== $as_of ) return new WP_Error( 'invalid_as_of_date', 'Catch-up date must be a real YYYY-MM-DD date.' );
         $series_table = $wpdb->prefix . MBS_SERIES_TABLE;
-        $series_rows = $wpdb->get_results(
-            "SELECT * FROM {$series_table}
-             WHERE status = 'confirmed' AND billing_treatment = 'invoice_managed'
-             AND billing_mode IN ('monthly','termly','legacy_per_occurrence','upfront')
-             ORDER BY start_date ASC LIMIT 100"
-        );
         $results = array();
-        foreach ( $series_rows as $series ) {
-            $preview = self::preview( $series->series_ref );
-            if ( is_wp_error( $preview ) ) {
-                $results[] = array( 'series_ref' => $series->series_ref, 'status' => 'error', 'message' => $preview->get_error_message() );
-                continue;
+        $cursor = 0;
+        do {
+            $series_rows = $wpdb->get_results( $wpdb->prepare(
+                "SELECT * FROM {$series_table}
+                 WHERE id > %d AND status = 'confirmed' AND billing_treatment = 'invoice_managed'
+                 AND billing_mode IN ('monthly','termly','legacy_per_occurrence','upfront')
+                 ORDER BY id ASC LIMIT 100",
+                $cursor
+            ) );
+            foreach ( $series_rows as $series ) {
+                $cursor = max( $cursor, (int) $series->id );
+                $preview = self::preview( $series->series_ref );
+                if ( is_wp_error( $preview ) ) {
+                    $results[] = array( 'series_ref' => $series->series_ref, 'status' => 'error', 'message' => $preview->get_error_message() );
+                    continue;
+                }
+                foreach ( $preview['periods'] as $period ) {
+                    if ( $period['issue_on'] > $as_of ) continue;
+                    $generated = self::generate_period_invoice( $series, $period );
+                    $results[] = is_wp_error( $generated )
+                        ? array( 'series_ref' => $series->series_ref, 'period_key' => $period['period_key'], 'status' => 'error', 'message' => $generated->get_error_message() )
+                        : $generated;
+                }
             }
-            foreach ( $preview['periods'] as $period ) {
-                if ( $period['issue_on'] > $as_of ) continue;
-                $generated = self::generate_period_invoice( $series, $period );
-                $results[] = is_wp_error( $generated )
-                    ? array( 'series_ref' => $series->series_ref, 'period_key' => $period['period_key'], 'status' => 'error', 'message' => $generated->get_error_message() )
-                    : $generated;
-            }
-        }
+        } while ( count( $series_rows ) === 100 );
         $credits = self::reconcile_cancelled_occurrences();
         return array( 'as_of' => $as_of, 'periods' => $results, 'credits' => is_wp_error( $credits ) ? array( 'error' => $credits->get_error_message() ) : $credits );
     }
@@ -247,12 +262,37 @@ class MBS_Billing_Engine {
         ), $period_key );
         if ( is_wp_error( $created ) ) return $created;
         $invoice = $created['invoice'];
+        $items = $period['items'];
+        $supplemental = false;
         if ( $invoice->status !== 'draft' ) {
-            self::send_invoice_if_needed( $invoice, $series );
-            return array( 'series_ref' => $series->series_ref, 'period_key' => $period['period_key'], 'status' => 'existing', 'invoice_ref' => $invoice->invoice_ref );
+            $items = array_values( array_filter( $items, static function ( $item ) {
+                return ! MBS_Billing_Ledger::get_active_booking_allocation( $item['booking_ref'] );
+            } ) );
+            if ( ! $items ) {
+                self::send_invoice_if_needed( $invoice, $series );
+                return array( 'series_ref' => $series->series_ref, 'period_key' => $period['period_key'], 'status' => 'existing', 'invoice_ref' => $invoice->invoice_ref );
+            }
+            $refs = array_column( $items, 'booking_ref' ); sort( $refs, SORT_STRING );
+            $supplement_key = $period_key . ':supplement:' . substr( hash( 'sha256', implode( '|', $refs ) ), 0, 16 );
+            $supplement = MBS_Billing_Ledger::create_draft_invoice( array(
+                'parent_invoice_id' => (int) $invoice->id,
+                'series_ref' => $series->series_ref, 'contact_name' => $series->contact_name,
+                'contact_organisation' => $series->contact_organisation, 'contact_email' => $series->contact_email,
+                'contact_address' => $series->contact_address, 'billing_mode' => $series->billing_mode,
+                'period_start' => $period['period_start'], 'period_end' => $period['period_end'],
+                'currency' => 'GBP', 'due_at' => $period['due_on'] . ' 23:59:59',
+            ), $supplement_key );
+            if ( is_wp_error( $supplement ) ) return $supplement;
+            $invoice = $supplement['invoice'];
+            $created = $supplement;
+            $supplemental = true;
+            if ( $invoice->status !== 'draft' ) {
+                self::send_invoice_if_needed( $invoice, $series );
+                return array( 'series_ref' => $series->series_ref, 'period_key' => $period['period_key'], 'status' => 'existing_supplement', 'invoice_ref' => $invoice->invoice_ref );
+            }
         }
 
-        foreach ( $period['items'] as $item ) {
+        foreach ( $items as $item ) {
             if ( MBS_Billing_Ledger::has_booking_item( $invoice->id, $item['booking_ref'] ) ) continue;
             $booking = MBS_Bookings::get( $item['booking_ref'] );
             if ( ! $booking || in_array( $booking->status, array( 'cancelled', 'archived' ), true ) ) continue;
@@ -279,8 +319,9 @@ class MBS_Billing_Engine {
         self::send_invoice_if_needed( $issued['invoice'], $series );
         return array(
             'series_ref' => $series->series_ref, 'period_key' => $period['period_key'],
-            'status' => $created['created'] ? 'created' : 'resumed', 'invoice_ref' => $invoice->invoice_ref,
-            'occurrence_count' => $period['occurrence_count'], 'total_minor' => $period['total_minor'],
+            'status' => $supplemental ? ( $created['created'] ? 'supplement_created' : 'supplement_resumed' ) : ( $created['created'] ? 'created' : 'resumed' ),
+            'invoice_ref' => $invoice->invoice_ref,
+            'occurrence_count' => count( $items ), 'total_minor' => array_sum( array_column( $items, 'amount_minor' ) ),
         );
     }
 

@@ -104,6 +104,8 @@ class MBS_Database {
             metadata_incomplete   TINYINT(1)   NOT NULL DEFAULT 0,
             adopted_at            DATETIME     DEFAULT NULL,
             adopted_by            BIGINT(20) UNSIGNED DEFAULT NULL,
+            adoption_state        VARCHAR(20)  NOT NULL DEFAULT 'not_required',
+            adoption_version      VARCHAR(40)  DEFAULT NULL,
             created_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             PRIMARY KEY (id),

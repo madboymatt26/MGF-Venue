@@ -59,6 +59,7 @@ class MBS_Billing_Ledger {
         $insert = array(
             'invoice_ref'          => $invoice_ref,
             'document_type'        => 'invoice',
+            'parent_invoice_id'    => ! empty( $data['parent_invoice_id'] ) ? (int) $data['parent_invoice_id'] : null,
             'series_ref'           => ! empty( $data['series_ref'] ) ? sanitize_text_field( $data['series_ref'] ) : null,
             'status'               => 'draft',
             'version'              => 1,

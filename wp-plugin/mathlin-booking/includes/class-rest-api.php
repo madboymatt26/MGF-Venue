@@ -396,12 +396,28 @@ class MBS_Rest_API {
         return current_user_can( 'manage_options' ) || current_user_can( 'mbs_manage_bookings' );
     }
 
-    private function integration_idempotency_transient( $scope, $key ) {
+    private function integration_idempotency_transient( $scope, $key, $payload = array() ) {
         $key = sanitize_text_field( $key );
         if ( strlen( $key ) < 8 || strlen( $key ) > 128 ) {
             return new WP_Error( 'invalid_idempotency_key', 'idempotency_key must be between 8 and 128 characters.', array( 'status' => 400 ) );
         }
+        if ( is_array( $payload ) ) unset( $payload['idempotency_key'] );
+        $payload = self::canonical_idempotency_payload( $payload );
+        $request_hash = hash( 'sha256', sanitize_key( $scope ) . '|' . wp_json_encode( $payload ) );
+        $registry_key = 'mbs_api_idem_' . substr( hash( 'sha256', get_current_user_id() . ':' . $key ), 0, 40 );
+        $registered = get_transient( $registry_key );
+        if ( $registered && ! hash_equals( (string) $registered, $request_hash ) ) {
+            return new WP_Error( 'idempotency_conflict', 'This idempotency key was already used for a different operation, target or payload.', array( 'status' => 409 ) );
+        }
+        if ( ! $registered ) set_transient( $registry_key, $request_hash, DAY_IN_SECONDS );
         return 'mbs_api_' . substr( hash( 'sha256', get_current_user_id() . ':' . sanitize_key( $scope ) . ':' . $key ), 0, 40 );
+    }
+
+    private static function canonical_idempotency_payload( $value ) {
+        if ( ! is_array( $value ) ) return $value;
+        if ( array_keys( $value ) !== range( 0, count( $value ) - 1 ) ) ksort( $value, SORT_STRING );
+        foreach ( $value as $key => $item ) $value[ $key ] = self::canonical_idempotency_payload( $item );
+        return $value;
     }
 
     /**
@@ -413,11 +429,8 @@ class MBS_Rest_API {
      */
     public function create_admin_booking( WP_REST_Request $request ) {
         $idempotency_key = sanitize_text_field( $request->get_param( 'idempotency_key' ) ?? '' );
-        if ( strlen( $idempotency_key ) < 8 || strlen( $idempotency_key ) > 128 ) {
-            return new WP_Error( 'invalid_idempotency_key', 'idempotency_key must be between 8 and 128 characters.', array( 'status' => 400 ) );
-        }
-
-        $transient_key = 'mbs_admin_create_' . substr( hash( 'sha256', get_current_user_id() . ':' . $idempotency_key ), 0, 40 );
+        $transient_key = $this->integration_idempotency_transient( 'admin_create', $idempotency_key, $request->get_params() );
+        if ( is_wp_error( $transient_key ) ) return $transient_key;
         $existing_ref  = get_transient( $transient_key );
         if ( $existing_ref ) {
             if ( strpos( $existing_ref, 'SER-' ) === 0 ) {
@@ -767,7 +780,7 @@ class MBS_Rest_API {
      * Idempotently change a booking status, optionally sending the normal hirer email.
      */
     public function update_admin_status( WP_REST_Request $request ) {
-        $transient_key = $this->integration_idempotency_transient( 'booking_status', $request->get_param( 'idempotency_key' ) );
+        $transient_key = $this->integration_idempotency_transient( 'booking_status', $request->get_param( 'idempotency_key' ), $request->get_params() );
         if ( is_wp_error( $transient_key ) ) return $transient_key;
         $replay = get_transient( $transient_key );
         if ( is_array( $replay ) ) {
@@ -1034,7 +1047,7 @@ class MBS_Rest_API {
     }
 
     public function approve_admin_series( WP_REST_Request $request ) {
-        $key = $this->integration_idempotency_transient( 'series_approve', $request->get_param( 'idempotency_key' ) );
+        $key = $this->integration_idempotency_transient( 'series_approve', $request->get_param( 'idempotency_key' ), $request->get_params() );
         if ( is_wp_error( $key ) ) return $key;
         $replay = get_transient( $key );
         if ( is_array( $replay ) ) { $replay['idempotent_replay'] = true; return rest_ensure_response( $replay ); }
@@ -1052,7 +1065,7 @@ class MBS_Rest_API {
     }
 
     public function configure_admin_series( WP_REST_Request $request ) {
-        $key = $this->integration_idempotency_transient( 'series_billing', $request->get_param( 'idempotency_key' ) );
+        $key = $this->integration_idempotency_transient( 'series_billing', $request->get_param( 'idempotency_key' ), $request->get_params() );
         if ( is_wp_error( $key ) ) return $key;
         $replay = get_transient( $key );
         if ( is_array( $replay ) ) { $replay['idempotent_replay'] = true; return rest_ensure_response( $replay ); }
@@ -1077,7 +1090,7 @@ class MBS_Rest_API {
     }
 
     public function update_admin_series_state( WP_REST_Request $request ) {
-        $key = $this->integration_idempotency_transient( 'series_state', $request->get_param( 'idempotency_key' ) );
+        $key = $this->integration_idempotency_transient( 'series_state', $request->get_param( 'idempotency_key' ), $request->get_params() );
         if ( is_wp_error( $key ) ) return $key;
         $replay = get_transient( $key );
         if ( is_array( $replay ) ) { $replay['idempotent_replay'] = true; return rest_ensure_response( $replay ); }
@@ -1258,6 +1271,7 @@ class MBS_Rest_API {
             'start_date', 'repeat_until', 'recurrence_rule', 'price_per_booking', 'estimated_total', 'requested_count', 'accepted_count',
             'conflict_count', 'blocked_count', 'error_count', 'billing_mode', 'billing_treatment', 'deposit_policy', 'payment_method',
             'automatic_reminders', 'invoice_lead_days', 'payment_terms_days', 'confirmation_sent_at', 'metadata_incomplete', 'adopted_at',
+            'adopted_by', 'adoption_state', 'adoption_version',
             'created_at', 'updated_at',
         );
         $safe = array_intersect_key( $source, array_flip( $fields ) );
