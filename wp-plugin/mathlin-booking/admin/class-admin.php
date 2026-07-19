@@ -255,14 +255,15 @@ class MBS_Admin {
 
         $current = MBS_Bookings::get( $ref );
         if ( ! $current ) wp_send_json_error( 'Booking not found.' );
-        if ( $status === 'confirmed' && ! empty( $current->series_id ) && MBS_Series::get( $current->series_id ) ) {
-            wp_send_json_error( 'Approve this occurrence through its recurring-series screen so only one confirmation is sent.', 409 );
+        if ( ! empty( $current->series_id ) && MBS_Series::get( $current->series_id ) ) {
+            wp_send_json_error( 'Change first-class recurring occurrences through the versioned series screen.', 409 );
         }
         if ( in_array( $status, array( 'paid', 'deposit_paid' ), true ) && self::invoice_manages_occurrence( $current ) ) {
             wp_send_json_error( 'Record payment against the consolidated invoice, not an individual occurrence.', 409 );
         }
 
         $result = MBS_Bookings::update_status( $ref, $status );
+        if ( $result === false ) wp_send_json_error( 'This booking cannot be changed because it has financial history.', 409 );
 
         if ( $status === 'confirmed' ) {
             $booking = MBS_Bookings::get( $ref );
@@ -392,6 +393,7 @@ class MBS_Admin {
         $status = sanitize_text_field( $_POST['status'] ?? 'confirmed' );
         $booking = MBS_Bookings::get( $ref );
         if ( ! $booking ) wp_send_json_error( 'Booking not found.' );
+        if ( MBS_Bookings::has_financial_history( $ref ) ) wp_send_json_error( 'A booking with financial history cannot be restored directly. Use credit and replacement records.', 409 );
         if ( self::invoice_manages_occurrence( $booking ) && in_array( $status, array( 'deposit_paid', 'paid' ), true ) ) {
             wp_send_json_error( 'Restore consolidated-series payment state through the invoice ledger.', 409 );
         }
@@ -1514,7 +1516,9 @@ class MBS_Admin {
         if ( ! $id ) wp_send_json_error( 'Invalid request ID.' );
 
         $result = MBS_Modification::approve( $id );
-        if ( $result ) {
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( $result->get_error_message(), 409 );
+        } elseif ( $result ) {
             wp_send_json_success( array( 'approved' => true ) );
         } else {
             wp_send_json_error( 'Could not approve this request.' );
@@ -1575,7 +1579,7 @@ class MBS_Admin {
                 continue;
             }
 
-            MBS_Bookings::update_status( $ref, $action );
+            if ( MBS_Bookings::update_status( $ref, $action ) === false ) { $skipped++; continue; }
 
             // Send appropriate emails
             if ( $action === 'confirmed' ) {

@@ -305,34 +305,45 @@ class MBS_Billing_Engine {
     /** Credit cancelled occurrences that were already frozen onto issued bills. */
     public static function reconcile_cancelled_occurrences() {
         global $wpdb;
-        $allocation_table = $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE;
         $booking_table = $wpdb->prefix . MBS_TABLE;
+        $refs = $wpdb->get_col( "SELECT ref FROM {$booking_table} WHERE status = 'cancelled'" );
+        if ( ! $refs ) return array();
+        return self::reconcile_occurrences( $refs, true );
+    }
+
+    /** Credit and release specific occurrence allocations; may join an outer transaction. */
+    public static function reconcile_occurrences( $booking_refs, $manage_transaction = true ) {
+        global $wpdb;
+        $booking_refs = array_values( array_unique( array_filter( array_map( 'sanitize_text_field', (array) $booking_refs ) ) ) );
+        if ( ! $booking_refs ) return array();
+        $allocation_table = $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE;
         $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
         $item_table = $wpdb->prefix . MBS_INVOICE_ITEM_TABLE;
-        $rows = $wpdb->get_results(
-            "SELECT a.invoice_id, a.booking_ref, i.invoice_ref,
-                    COALESCE(SUM(ii.line_total_minor), 0) AS amount_minor
+        $placeholders = implode( ',', array_fill( 0, count( $booking_refs ), '%s' ) );
+        $rows = $wpdb->get_results( $wpdb->prepare(
+            "SELECT a.invoice_id, a.booking_ref, i.invoice_ref, COALESCE(SUM(ii.line_total_minor), 0) AS amount_minor
              FROM {$allocation_table} a
-             INNER JOIN {$booking_table} b ON b.ref = a.booking_ref
              INNER JOIN {$invoice_table} i ON i.id = a.invoice_id
              INNER JOIN {$item_table} ii ON ii.invoice_id = a.invoice_id AND ii.booking_ref = a.booking_ref
-             WHERE a.status = 'active' AND b.status = 'cancelled'
+             WHERE a.status = 'active' AND a.booking_ref IN ({$placeholders})
              AND i.document_type = 'invoice' AND i.status IN ('issued','part_paid','paid','overdue')
-             GROUP BY a.invoice_id, a.booking_ref, i.invoice_ref"
-        );
+             GROUP BY a.invoice_id, a.booking_ref, i.invoice_ref",
+            $booking_refs
+        ) );
         $results = array();
         foreach ( $rows as $row ) {
             $amount = (int) $row->amount_minor;
             if ( $amount <= 0 ) continue;
             $credit = MBS_Billing_Ledger::create_credit_note(
                 $row->invoice_ref, $amount, 'Cancelled booking ' . $row->booking_ref,
-                'cancelled-booking:' . $row->invoice_ref . ':' . $row->booking_ref
+                'cancelled-booking:' . $row->invoice_ref . ':' . $row->booking_ref,
+                $manage_transaction
             );
             if ( is_wp_error( $credit ) ) {
-                $results[] = array( 'booking_ref' => $row->booking_ref, 'status' => 'error', 'message' => $credit->get_error_message() );
-                continue;
+                return $credit;
             }
-            MBS_Billing_Ledger::release_booking_allocation( $row->invoice_id, $row->booking_ref );
+            $released = MBS_Billing_Ledger::release_booking_allocation( $row->invoice_id, $row->booking_ref );
+            if ( $released === false ) return new WP_Error( 'allocation_release_failed', 'Could not release the credited booking allocation.' );
             $results[] = array( 'booking_ref' => $row->booking_ref, 'status' => $credit['created'] ? 'credited' : 'existing', 'credit_ref' => $credit['credit_note']->invoice_ref );
         }
         return $results;

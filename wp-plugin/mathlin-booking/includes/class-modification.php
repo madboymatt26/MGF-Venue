@@ -110,6 +110,9 @@ class MBS_Modification {
 
         $booking = MBS_Bookings::get( $request->booking_ref );
         if ( ! $booking ) return false;
+        if ( MBS_Bookings::has_financial_history( $request->booking_ref ) ) {
+            return new WP_Error( 'billed_occurrence_immutable', 'This request cannot be applied because the occurrence has financial history. Use the credit-and-replace workflow.' );
+        }
 
         if ( $request->request_type === 'cancel' ) {
             // Approve cancellation

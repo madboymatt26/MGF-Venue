@@ -377,6 +377,10 @@ class MBS_Rest_API {
     public function update_status( WP_REST_Request $request ) {
         $ref    = strtoupper( sanitize_text_field( $request->get_param('ref') ) );
         $status = sanitize_text_field( $request->get_param('status') );
+        $booking = MBS_Bookings::get( $ref );
+        if ( $booking && ! empty( $booking->series_id ) && MBS_Series::get( $booking->series_id ) ) {
+            return new WP_Error( 'series_operation_required', 'Change first-class recurring occurrences through the versioned series endpoint.', array( 'status' => 409 ) );
+        }
         $result = MBS_Bookings::update_status( $ref, $status );
         if ( $result === false ) {
             return new WP_Error( 'update_failed', 'Could not update status', array( 'status' => 500 ) );
@@ -799,8 +803,8 @@ class MBS_Rest_API {
         }
 
         $series = ! empty( $booking->series_id ) ? MBS_Series::get( $booking->series_id ) : null;
-        if ( $series && $status === 'confirmed' ) {
-            return new WP_Error( 'series_approval_required', 'Approve first-class recurring occurrences through the series endpoint.', array( 'status' => 409 ) );
+        if ( $series ) {
+            return new WP_Error( 'series_operation_required', 'Change first-class recurring occurrences through the versioned series endpoint.', array( 'status' => 409 ) );
         }
 
         $allowed_transitions = array(

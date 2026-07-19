@@ -230,7 +230,7 @@ class MBS_Billing_Ledger {
     }
 
     /** Create an immutable issued credit note linked to an original invoice. */
-    public static function create_credit_note( $invoice_ref, $amount_minor, $reason, $idempotency_key ) {
+    public static function create_credit_note( $invoice_ref, $amount_minor, $reason, $idempotency_key, $manage_transaction = true ) {
         global $wpdb;
         $amount = MBS_Money::minor( $amount_minor );
         if ( is_wp_error( $amount ) ) return $amount;
@@ -248,11 +248,11 @@ class MBS_Billing_Ledger {
             return array( 'credit_note' => $existing, 'created' => false, 'idempotent_replay' => true );
         }
 
-        $wpdb->query( 'START TRANSACTION' );
+        if ( $manage_transaction ) $wpdb->query( 'START TRANSACTION' );
         $original = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$invoice_table} WHERE invoice_ref = %s FOR UPDATE", sanitize_text_field( $invoice_ref ) ) );
-        if ( ! $original ) return self::rollback_error( 'invoice_not_found', 'Invoice not found.' );
-        if ( $original->document_type !== 'invoice' || ! in_array( $original->status, array( 'issued', 'part_paid', 'paid', 'credited', 'overdue' ), true ) ) return self::rollback_error( 'invoice_not_creditable', 'This invoice cannot receive a credit note.' );
-        if ( $amount > ( (int) $original->total_minor - (int) $original->credited_minor ) ) return self::rollback_error( 'credit_exceeds_invoice', 'Credit would exceed the uncredited invoice total.' );
+        if ( ! $original ) return self::transaction_error( 'invoice_not_found', 'Invoice not found.', $manage_transaction );
+        if ( $original->document_type !== 'invoice' || ! in_array( $original->status, array( 'issued', 'part_paid', 'paid', 'credited', 'overdue' ), true ) ) return self::transaction_error( 'invoice_not_creditable', 'This invoice cannot receive a credit note.', $manage_transaction );
+        if ( $amount > ( (int) $original->total_minor - (int) $original->credited_minor ) ) return self::transaction_error( 'credit_exceeds_invoice', 'Credit would exceed the uncredited invoice total.', $manage_transaction );
 
         $credit_ref = self::generate_reference( 'CN', $invoice_table );
         $now = current_time( 'mysql' );
@@ -267,7 +267,7 @@ class MBS_Billing_Ledger {
             'issued_at' => $now, 'created_at' => $now, 'updated_at' => $now,
         ) );
         if ( $inserted === false ) {
-            $wpdb->query( 'ROLLBACK' );
+            if ( $manage_transaction ) $wpdb->query( 'ROLLBACK' );
             $existing = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$invoice_table} WHERE idempotency_key = %s", $key ) );
             if ( $existing ) {
                 $conflict = self::idempotency_conflict( $existing, $request_hash );
@@ -283,14 +283,14 @@ class MBS_Billing_Ledger {
             'unit_amount_minor' => -$amount, 'line_total_minor' => -$amount,
             'pricing_snapshot_json' => wp_json_encode( array( 'source_invoice_ref' => $original->invoice_ref ) ), 'created_at' => $now,
         ) );
-        if ( $item_inserted === false ) return self::rollback_error( 'credit_item_create_failed', 'Could not create the credit-note item.' );
+        if ( $item_inserted === false ) return self::transaction_error( 'credit_item_create_failed', 'Could not create the credit-note item.', $manage_transaction );
         $new_credited = (int) $original->credited_minor + $amount;
         $new_status = $new_credited >= (int) $original->total_minor ? 'credited' : $original->status;
         $wpdb->query( $wpdb->prepare(
             "UPDATE {$invoice_table} SET credited_minor = %d, status = %s, version = version + 1, updated_at = %s WHERE id = %d",
             $new_credited, $new_status, $now, (int) $original->id
         ) );
-        $wpdb->query( 'COMMIT' );
+        if ( $manage_transaction ) $wpdb->query( 'COMMIT' );
         return array( 'credit_note' => self::get_invoice( $credit_ref ), 'created' => true, 'idempotent_replay' => false );
     }
 
@@ -418,6 +418,12 @@ class MBS_Billing_Ledger {
         $key = trim( (string) $key );
         if ( $key === '' ) return new WP_Error( 'idempotency_required', 'An idempotency key is required for this financial write.' );
         return hash( 'sha256', $key );
+    }
+
+    private static function transaction_error( $code, $message, $manage_transaction ) {
+        global $wpdb;
+        if ( $manage_transaction ) $wpdb->query( 'ROLLBACK' );
+        return new WP_Error( $code, $message );
     }
 
     private static function idempotency_conflict( $record, $request_hash ) {

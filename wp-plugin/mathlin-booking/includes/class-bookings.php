@@ -413,7 +413,7 @@ class MBS_Bookings {
      *                                     manager to override Scout use and
      *                                     set an explicit non-negative amount.
      */
-    public static function create( $data, $trusted_admin_context = false ) {
+    public static function create( $data, $trusted_admin_context = false, $manage_transaction = true ) {
         global $wpdb;
         $table = $wpdb->prefix . MBS_TABLE;
 
@@ -511,7 +511,7 @@ class MBS_Bookings {
         }
 
         // SEC-001: Use transaction with row locking to prevent race condition double bookings
-        $wpdb->query( 'START TRANSACTION' );
+        if ( $manage_transaction ) $wpdb->query( 'START TRANSACTION' );
 
         $space_val = sanitize_text_field( $data['space'] );
         $spaces_to_lock = array_unique( array_merge( array( $space_val ), self::get_related_spaces( $space_val ) ) );
@@ -537,7 +537,7 @@ class MBS_Bookings {
 
             $blocked = MBS_Blocked_Dates::is_blocked( $check_date, $space_val );
             if ( $blocked ) {
-                $wpdb->query( 'ROLLBACK' );
+                if ( $manage_transaction ) $wpdb->query( 'ROLLBACK' );
                 return new WP_Error( 'blocked_date', 'The venue is blocked on ' . $check_date . ( $blocked->reason ? ': ' . $blocked->reason : '.' ) );
             }
 
@@ -549,18 +549,18 @@ class MBS_Bookings {
                 $all_day
             );
             if ( ! empty( $tx_conflicts ) ) {
-                $wpdb->query( 'ROLLBACK' );
+                if ( $manage_transaction ) $wpdb->query( 'ROLLBACK' );
                 return new WP_Error( 'conflict', self::format_conflict_message( $tx_conflicts ) );
             }
         }
 
         $result = $wpdb->insert( $table, $insert );
         if ( $result === false ) {
-            $wpdb->query( 'ROLLBACK' );
+            if ( $manage_transaction ) $wpdb->query( 'ROLLBACK' );
             return new WP_Error( 'db_error', 'Could not save booking.' );
         }
 
-        $wpdb->query( 'COMMIT' );
+        if ( $manage_transaction ) $wpdb->query( 'COMMIT' );
 
         // Audit log
         MBS_Audit_Log::log( $ref, 'created', 'Booking created by ' . sanitize_text_field( $data['name'] ) . ' for ' . sanitize_text_field( $data['space'] ) . ' on ' . sanitize_text_field( $data['booking_date'] ), 0 );
@@ -685,6 +685,8 @@ class MBS_Bookings {
         $table   = $wpdb->prefix . MBS_TABLE;
         $allowed = array( 'pending', 'confirmed', 'cancelled', 'archived', 'paid', 'deposit_paid' );
         if ( ! in_array( $status, $allowed ) ) return false;
+        $current = self::get( $ref );
+        if ( $current && $current->status !== $status && self::has_financial_history( $ref ) ) return false;
 
         $result = $wpdb->update(
             $table,
@@ -735,8 +737,25 @@ class MBS_Bookings {
     public static function delete( $ref ) {
         global $wpdb;
         $table = $wpdb->prefix . MBS_TABLE;
+        if ( self::has_financial_history( $ref ) ) return false;
         MBS_Audit_Log::log( $ref, 'deleted', 'Booking permanently deleted' );
         return $wpdb->delete( $table, array( 'ref' => $ref ), array( '%s' ) );
+    }
+
+    /** Any invoice item/allocation/transaction makes the occurrence an immutable financial record. */
+    public static function has_financial_history( $ref ) {
+        global $wpdb;
+        $allocation = $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE;
+        $items = $wpdb->prefix . MBS_INVOICE_ITEM_TABLE;
+        $transactions = $wpdb->prefix . MBS_PAYMENT_TRANSACTION_TABLE;
+        $exists = $wpdb->get_var( $wpdb->prepare(
+            "SELECT 1 FROM {$allocation} a
+             LEFT JOIN {$transactions} t ON t.invoice_id = a.invoice_id
+             WHERE a.booking_ref = %s
+             UNION SELECT 1 FROM {$items} ii WHERE ii.booking_ref = %s LIMIT 1",
+            sanitize_text_field( $ref ), sanitize_text_field( $ref )
+        ) );
+        return (bool) $exists;
     }
 
     // ── Conflict Detection ─────────────────────────────────────────────────────
@@ -876,6 +895,7 @@ class MBS_Bookings {
      * @return array  Array of created booking refs, or WP_Error
      */
     public static function create_recurring( $data, $repeat_until, $trusted_admin_context = false ) {
+        global $wpdb;
         $dates = MBS_Recurrence::weekly_dates( $data, $repeat_until );
         if ( is_wp_error( $dates ) ) {
             return $dates;
@@ -884,6 +904,7 @@ class MBS_Bookings {
         $series_id  = self::generate_series_id();
         $refs       = array();
         $occurrences = array();
+        $wpdb->query( 'START TRANSACTION' );
 
         foreach ( $dates as $date_str ) {
 
@@ -922,7 +943,7 @@ class MBS_Bookings {
             $booking_data['booking_date'] = $date_str;
             $booking_data['booking_date_end'] = $date_str;
 
-            $result = self::create( $booking_data, $trusted_admin_context );
+            $result = self::create( $booking_data, $trusted_admin_context, false );
 
             if ( is_wp_error( $result ) ) {
                 // A conflict or blocked date can appear between the pre-check
@@ -943,6 +964,7 @@ class MBS_Bookings {
                     'status'  => 'error',
                     'message' => $result->get_error_message(),
                 );
+                $wpdb->query( 'ROLLBACK' );
                 return new WP_Error(
                     'recurrence_create_failed',
                     'The recurring request stopped because a booking could not be saved. No later dates were attempted.',
@@ -954,7 +976,6 @@ class MBS_Bookings {
             }
 
             // Link to series
-            global $wpdb;
             $table = $wpdb->prefix . MBS_TABLE;
             $linked = $wpdb->update(
                 $table,
@@ -968,8 +989,7 @@ class MBS_Bookings {
                 $result['ref']
             ) );
             if ( $linked === false || $verified_series !== $series_id ) {
-                // Do not leave the just-created occurrence silently orphaned.
-                $wpdb->delete( $table, array( 'ref' => $result['ref'] ), array( '%s' ) );
+                $wpdb->query( 'ROLLBACK' );
                 $occurrences[] = array(
                     'date'    => $date_str,
                     'status'  => 'error',
@@ -994,6 +1014,7 @@ class MBS_Bookings {
         }
 
         if ( empty( $refs ) ) {
+            $wpdb->query( 'ROLLBACK' );
             return new WP_Error(
                 'no_bookings',
                 'Could not create any bookings. All dates had conflicts or were blocked.',
@@ -1006,13 +1027,7 @@ class MBS_Bookings {
 
         $series = MBS_Series::create_from_request( $series_id, $data, $repeat_until, $occurrences, $refs );
         if ( is_wp_error( $series ) ) {
-            // Compensate for the independently committed occurrence inserts so
-            // a failed first-class series record cannot leave orphaned rows.
-            global $wpdb;
-            $table = $wpdb->prefix . MBS_TABLE;
-            foreach ( $refs as $created_ref ) {
-                $wpdb->delete( $table, array( 'ref' => $created_ref ), array( '%s' ) );
-            }
+            $wpdb->query( 'ROLLBACK' );
             return new WP_Error(
                 'series_metadata_failed',
                 'The recurring request could not be completed and its new occurrences were removed. Please try again.',
@@ -1023,6 +1038,7 @@ class MBS_Bookings {
                 )
             );
         }
+        $wpdb->query( 'COMMIT' );
 
         $skipped = array_values( array_map(
             static function ( $occurrence ) { return $occurrence['date']; },
@@ -1181,6 +1197,9 @@ class MBS_Bookings {
         $skipped = array();
 
         foreach ( $bookings as $b ) {
+            if ( self::has_financial_history( $b->ref ) ) {
+                return new WP_Error( 'billed_occurrence_immutable', 'A billed occurrence cannot be edited. Credit and replace it instead.' );
+            }
             $space   = $new_space !== null ? $new_space : $b->space;
             $start   = $new_start !== null ? $new_start : $b->start_time;
             $end     = $new_end   !== null ? $new_end   : $b->end_time;
@@ -1440,6 +1459,12 @@ class MBS_Bookings {
         $table = $wpdb->prefix . MBS_TABLE;
         $today = wp_date( 'Y-m-d' );
         $future_only = ( $scope === 'future' );
+        $history_ref = $wpdb->get_var( $wpdb->prepare(
+            "SELECT b.ref FROM {$table} b INNER JOIN {$wpdb->prefix}" . MBS_INVOICE_ITEM_TABLE . " ii ON ii.booking_ref = b.ref
+             WHERE b.series_id = %s" . ( $future_only ? " AND b.booking_date >= %s" : '' ) . " LIMIT 1",
+            $future_only ? array( $series_id, $today ) : array( $series_id )
+        ) );
+        if ( $history_ref ) return false;
 
         // Notify HA to clear any active (confirmed) future bookings first —
         // these have live calendar entries / automations regardless of scope.

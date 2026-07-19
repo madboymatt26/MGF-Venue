@@ -513,6 +513,11 @@ class MBS_Series {
         $update_sql = "UPDATE {$booking_table} SET status = 'cancelled', access_sent = 0 WHERE series_id = %s AND {$eligible_sql}";
         $params = array( $series_ref, $today );
         $affected = $wpdb->get_results( $wpdb->prepare( $select_sql, $params ) );
+        $reconciled = MBS_Billing_Engine::reconcile_occurrences( wp_list_pluck( $affected, 'ref' ), false );
+        if ( is_wp_error( $reconciled ) ) {
+            $wpdb->query( 'ROLLBACK' );
+            return new WP_Error( 'series_financial_reconciliation_failed', 'The series was not cancelled because its invoice reconciliation failed: ' . $reconciled->get_error_message() );
+        }
         $cancelled = $wpdb->query( $wpdb->prepare( $update_sql, $params ) );
         if ( $cancelled === false ) {
             $wpdb->query( 'ROLLBACK' );
@@ -536,7 +541,6 @@ class MBS_Series {
             }
         }
         MBS_Audit_Log::log( $series_ref, 'series_cancelled', 'Cancelled ' . (int) $cancelled . ' ' . $scope . ' occurrence(s).' );
-        MBS_Billing_Engine::reconcile_cancelled_occurrences();
         $fresh = self::get( $series_ref );
         if ( $notify_hirer ) MBS_Email::notify_series_cancelled( $fresh, self::active_occurrences( $series_ref ) );
         return array(
