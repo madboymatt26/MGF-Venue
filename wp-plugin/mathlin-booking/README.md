@@ -103,6 +103,12 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 - Booking form with real-time cost calculation (tier-aware)
 - Multi-day and full-day booking support
 - Recurring weekly bookings (up to one calendar year inclusive, maximum 53 dates)
+- Recurring billing safety: one expiring Woo checkout reservation per invoice balance; captured-but-unrecorded payments remain visibly flagged for reconciliation.
+- Issued, part-paid, and overdue positive-balance invoices share one payable rule. Partial refunds use the canonical Woo refund hook and affect only their allocated occurrences.
+- Series creation and cancellation/credit reconciliation are transactional; financially documented occurrences require credit-and-replace rather than direct edit or deletion.
+- Late additions to an issued period receive a linked deterministic supplemental invoice, and catch-up keyset-paginates every eligible series beyond 100.
+- Financial reporting separately defines invoiced, gross collected, outstanding, credited/refunded, and net collected. Idempotency keys are bound to operation, target, and payload.
+- Schema 6 upgrades use an expiring lock, staged health state, and explicit table/column/index verification before advancing the version marker.
 - Conflict detection prevents double bookings (including parent/child space bundling)
 - Configurable minimum notice period
 - Custom form fields (admin-configurable)

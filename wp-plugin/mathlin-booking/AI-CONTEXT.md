@@ -546,6 +546,16 @@ File: `includes/class-woo-ux.php`
 
 ## Recurring-Series and Consolidated-Billing Contracts (v3.21.0)
 
+### Remediated invariants (schema 6)
+
+- An invoice has at most one active Woo checkout claim for its outstanding balance. Claims bind to order IDs, expire/release safely, and remain in a visible reconciliation state when an external capture cannot be written internally.
+- Payability is centralized for issued, part-paid, and overdue positive balances. Refunds use `woocommerce_order_refunded`, carry deterministic booking allocations, and do not reopen unaffected settled occurrences.
+- Recurring creation and cancellation plus required credits share database transactions. Email, Home Assistant, and other irreversible work follows commit.
+- Booking-domain mutation and deletion reject any occurrence with invoice items, allocations, or transactions. Closed-period additions use linked supplemental invoices.
+- Catch-up uses starvation-free keyset pagination. Financial and REST idempotency keys conflict on a different canonical operation, target, or payload.
+- Legacy registration means eligible, not adopted. Explicit adoption records timestamp, administrator, schema version/state, and clears incomplete metadata.
+- Migration state is running, failed, or complete; verification failure retains the prior version and produces an administrator notice.
+
 - Occurrence rows remain authoritative for availability, calendar, Home
   Assistant, heating/access control and occurrence-level changes.
 - `MBS_Series` is authoritative for recurring approval, schedule metadata,

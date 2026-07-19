@@ -428,7 +428,10 @@ class MBS_Billing_Ledger {
     }
 
     private static function idempotency_conflict( $record, $request_hash ) {
-        if ( empty( $record->idempotency_request_hash ) || ! hash_equals( (string) $record->idempotency_request_hash, (string) $request_hash ) ) {
+        // Records created before schema 6 have no request hash. Preserve their
+        // historical replay behaviour; every new write is payload-bound.
+        if ( empty( $record->idempotency_request_hash ) ) return null;
+        if ( ! hash_equals( (string) $record->idempotency_request_hash, (string) $request_hash ) ) {
             return new WP_Error( 'idempotency_conflict', 'This idempotency key was already used for a different target or payload.', array( 'status' => 409 ) );
         }
         return null;
