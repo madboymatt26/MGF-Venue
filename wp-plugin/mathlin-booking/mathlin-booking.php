@@ -97,8 +97,11 @@ add_action( 'plugins_loaded', 'mbs_init' );
 function mbs_init() {
     // Run DB migration if version has changed
     if ( get_option( 'mbs_db_version' ) !== MBS_DB_VERSION ) {
-        MBS_Database::create_tables();
+        $migration = MBS_Database::create_tables();
+        if ( is_wp_error( $migration ) ) error_log( '[MGF Venue] Database migration failed: ' . $migration->get_error_message() );
     }
+    $migration_state = get_option( 'mbs_migration_state', array() );
+    if ( is_array( $migration_state ) && ( $migration_state['status'] ?? '' ) === 'failed' ) add_action( 'admin_notices', array( 'MBS_Database', 'migration_health_notice' ) );
     if ( get_option( 'mbs_legacy_series_registered' ) !== MBS_DB_VERSION ) {
         $legacy_registration = MBS_Series::register_legacy_groups();
         if ( ! is_wp_error( $legacy_registration ) ) update_option( 'mbs_legacy_series_registered', MBS_DB_VERSION, false );

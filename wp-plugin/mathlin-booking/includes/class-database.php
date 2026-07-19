@@ -5,6 +5,9 @@ class MBS_Database {
 
     public static function create_tables() {
         global $wpdb;
+        $lock = self::acquire_migration_lock();
+        if ( is_wp_error( $lock ) ) return $lock;
+        update_option( 'mbs_migration_state', array( 'status' => 'running', 'target' => MBS_DB_VERSION, 'started_at' => current_time( 'mysql' ) ), false );
 
         $table   = $wpdb->prefix . MBS_TABLE;
         $charset = $wpdb->get_charset_collate();
@@ -304,7 +307,69 @@ class MBS_Database {
         ) {$charset};";
         dbDelta( $sql5 );
 
+        $verified = self::verify_schema();
+        if ( is_wp_error( $verified ) ) {
+            update_option( 'mbs_migration_state', array(
+                'status' => 'failed', 'target' => MBS_DB_VERSION, 'failed_at' => current_time( 'mysql' ),
+                'message' => $verified->get_error_message(),
+            ), false );
+            self::release_migration_lock( $lock );
+            add_action( 'admin_notices', array( __CLASS__, 'migration_health_notice' ) );
+            return $verified;
+        }
         update_option( 'mbs_db_version', MBS_DB_VERSION );
+        update_option( 'mbs_migration_state', array( 'status' => 'complete', 'target' => MBS_DB_VERSION, 'completed_at' => current_time( 'mysql' ) ), false );
+        self::release_migration_lock( $lock );
+        return true;
+    }
+
+    private static function acquire_migration_lock() {
+        $token = wp_generate_password( 32, false, false );
+        $value = array( 'token' => $token, 'expires_at' => time() + 300 );
+        if ( add_option( 'mbs_migration_lock', $value, '', false ) ) return $token;
+        $existing = get_option( 'mbs_migration_lock', array() );
+        if ( is_array( $existing ) && (int) ( $existing['expires_at'] ?? 0 ) < time() ) {
+            delete_option( 'mbs_migration_lock' );
+            if ( add_option( 'mbs_migration_lock', $value, '', false ) ) return $token;
+        }
+        return new WP_Error( 'migration_locked', 'Another MGF Venue database migration is already running.' );
+    }
+
+    private static function release_migration_lock( $token ) {
+        $existing = get_option( 'mbs_migration_lock', array() );
+        if ( is_array( $existing ) && hash_equals( (string) ( $existing['token'] ?? '' ), (string) $token ) ) delete_option( 'mbs_migration_lock' );
+    }
+
+    private static function verify_schema() {
+        global $wpdb;
+        $requirements = array(
+            $wpdb->prefix . MBS_TABLE => array( 'columns' => array( 'ref', 'status', 'series_id', 'pricing_tier' ), 'indexes' => array( 'PRIMARY', 'idx_ref' ) ),
+            $wpdb->prefix . MBS_SERIES_TABLE => array( 'columns' => array( 'series_ref', 'version', 'adoption_state', 'adoption_version' ), 'indexes' => array( 'PRIMARY', 'series_ref', 'idx_series_billing' ) ),
+            $wpdb->prefix . MBS_INVOICE_TABLE => array( 'columns' => array( 'invoice_ref', 'idempotency_request_hash', 'paid_minor', 'credited_minor' ), 'indexes' => array( 'PRIMARY', 'invoice_ref', 'invoice_idempotency' ) ),
+            $wpdb->prefix . MBS_INVOICE_ITEM_TABLE => array( 'columns' => array( 'item_ref', 'invoice_id', 'booking_ref', 'line_total_minor' ), 'indexes' => array( 'PRIMARY', 'item_ref', 'idx_item_booking' ) ),
+            $wpdb->prefix . MBS_PAYMENT_TRANSACTION_TABLE => array( 'columns' => array( 'transaction_ref', 'invoice_id', 'idempotency_request_hash' ), 'indexes' => array( 'PRIMARY', 'transaction_idempotency', 'provider_transaction' ) ),
+            $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE => array( 'columns' => array( 'invoice_id', 'booking_ref', 'active_booking_ref' ), 'indexes' => array( 'PRIMARY', 'active_booking' ) ),
+            $wpdb->prefix . 'mathlin_blocked_dates' => array( 'columns' => array( 'date_from', 'date_to' ), 'indexes' => array( 'PRIMARY' ) ),
+            $wpdb->prefix . 'mathlin_audit_log' => array( 'columns' => array( 'ref', 'action' ), 'indexes' => array( 'PRIMARY' ) ),
+            $wpdb->prefix . 'mathlin_email_queue' => array( 'columns' => array( 'to_email', 'status' ), 'indexes' => array( 'PRIMARY' ) ),
+            $wpdb->prefix . 'mathlin_mod_requests' => array( 'columns' => array( 'booking_ref', 'status' ), 'indexes' => array( 'PRIMARY' ) ),
+        );
+        $missing = array();
+        foreach ( $requirements as $table => $required ) {
+            if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) ) !== $table ) { $missing[] = 'table ' . $table; continue; }
+            $columns = $wpdb->get_col( "SHOW COLUMNS FROM `{$table}`", 0 );
+            foreach ( $required['columns'] as $column ) if ( ! in_array( $column, $columns, true ) ) $missing[] = $table . '.' . $column;
+            $index_rows = $wpdb->get_results( "SHOW INDEX FROM `{$table}`" );
+            $indexes = array_values( array_unique( array_map( static function ( $row ) { return (string) $row->Key_name; }, (array) $index_rows ) ) );
+            foreach ( $required['indexes'] as $index ) if ( ! in_array( $index, $indexes, true ) ) $missing[] = $table . ' index ' . $index;
+        }
+        return $missing ? new WP_Error( 'migration_verification_failed', 'Database migration is incomplete: ' . implode( ', ', $missing ) ) : true;
+    }
+
+    public static function migration_health_notice() {
+        $state = get_option( 'mbs_migration_state', array() );
+        if ( ! is_array( $state ) || ( $state['status'] ?? '' ) !== 'failed' ) return;
+        echo '<div class="notice notice-error"><p><strong>MGF Venue database upgrade failed.</strong> ' . esc_html( $state['message'] ?? 'Required schema objects are missing.' ) . ' The version marker was not advanced; correct the database problem and retry activation.</p></div>';
     }
 
     /**
