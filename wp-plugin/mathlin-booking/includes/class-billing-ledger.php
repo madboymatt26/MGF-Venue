@@ -107,7 +107,7 @@ class MBS_Billing_Ledger {
         $line_total = MBS_Money::line_total( $unit_minor, $quantity_milli );
         if ( is_wp_error( $line_total ) ) return $line_total;
 
-        $wpdb->query( 'START TRANSACTION' );
+        if ( $wpdb->query( 'START TRANSACTION' ) === false ) return new WP_Error( 'transaction_start_failed', 'Could not start the invoice-item transaction.' );
         $invoice = $wpdb->get_row( $wpdb->prepare(
             "SELECT * FROM {$invoice_table} WHERE invoice_ref = %s FOR UPDATE",
             sanitize_text_field( $invoice_ref )
@@ -155,10 +155,11 @@ class MBS_Billing_Ledger {
             ) );
             if ( $allocated === false ) return self::rollback_error( 'booking_allocation_failed', 'Could not reserve the booking for this invoice.' );
         } elseif ( $booking_ref ) {
-            $wpdb->query( $wpdb->prepare(
+            $allocation_updated = $wpdb->query( $wpdb->prepare(
                 "UPDATE {$allocation_table} SET allocated_minor = allocated_minor + %d, updated_at = %s WHERE id = %d",
                 $line_total, current_time( 'mysql' ), (int) $allocation->id
             ) );
+            if ( $allocation_updated !== 1 ) return self::rollback_error( 'booking_allocation_update_failed', 'Could not update the booking allocation.' );
         }
 
         $version_updated = $wpdb->query( $wpdb->prepare(
@@ -166,7 +167,7 @@ class MBS_Billing_Ledger {
             current_time( 'mysql' ), (int) $invoice->id, (int) $expected_version
         ) );
         if ( $version_updated !== 1 ) return self::rollback_error( 'invoice_concurrent_update', 'The invoice was updated by another request.' );
-        $wpdb->query( 'COMMIT' );
+        if ( $wpdb->query( 'COMMIT' ) === false ) return self::rollback_error( 'transaction_commit_failed', 'Could not commit the invoice-item transaction.' );
         return array( 'item_ref' => $item_ref, 'line_total_minor' => $line_total, 'invoice' => self::get_invoice( $invoice_ref ) );
     }
 
@@ -175,7 +176,7 @@ class MBS_Billing_Ledger {
         global $wpdb;
         $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
         $item_table = $wpdb->prefix . MBS_INVOICE_ITEM_TABLE;
-        $wpdb->query( 'START TRANSACTION' );
+        if ( $wpdb->query( 'START TRANSACTION' ) === false ) return new WP_Error( 'transaction_start_failed', 'Could not start the invoice-issue transaction.' );
         $invoice = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$invoice_table} WHERE invoice_ref = %s FOR UPDATE", sanitize_text_field( $invoice_ref ) ) );
         if ( ! $invoice ) return self::rollback_error( 'invoice_not_found', 'Invoice not found.' );
         if ( $invoice->status !== 'draft' ) {
@@ -197,7 +198,7 @@ class MBS_Billing_Ledger {
             $subtotal, $subtotal, $issued_at, $issued_at, (int) $invoice->id, (int) $expected_version
         ) );
         if ( $updated !== 1 ) return self::rollback_error( 'invoice_concurrent_update', 'The invoice was updated by another request.' );
-        $wpdb->query( 'COMMIT' );
+        if ( $wpdb->query( 'COMMIT' ) === false ) return self::rollback_error( 'transaction_commit_failed', 'Could not commit invoice issue.' );
         return array( 'invoice' => self::get_invoice( $invoice_ref ), 'issued' => true, 'no_op' => false );
     }
 
@@ -206,7 +207,7 @@ class MBS_Billing_Ledger {
         global $wpdb;
         $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
         $allocation_table = $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE;
-        $wpdb->query( 'START TRANSACTION' );
+        if ( $wpdb->query( 'START TRANSACTION' ) === false ) return new WP_Error( 'transaction_start_failed', 'Could not start the invoice-void transaction.' );
         $invoice = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$invoice_table} WHERE invoice_ref = %s FOR UPDATE", sanitize_text_field( $invoice_ref ) ) );
         if ( ! $invoice ) return self::rollback_error( 'invoice_not_found', 'Invoice not found.' );
         if ( $invoice->status === 'void' ) {
@@ -222,11 +223,12 @@ class MBS_Billing_Ledger {
             $now, sanitize_text_field( $reason ), $now, (int) $invoice->id, (int) $expected_version
         ) );
         if ( $updated !== 1 ) return self::rollback_error( 'invoice_concurrent_update', 'The invoice was updated by another request.' );
-        $wpdb->query( $wpdb->prepare(
+        $released = $wpdb->query( $wpdb->prepare(
             "UPDATE {$allocation_table} SET status = 'released', active_booking_ref = NULL, released_at = %s, updated_at = %s WHERE invoice_id = %d AND status = 'active'",
             $now, $now, (int) $invoice->id
         ) );
-        $wpdb->query( 'COMMIT' );
+        if ( $released === false ) return self::rollback_error( 'booking_allocation_release_failed', 'Could not release invoice allocations.' );
+        if ( $wpdb->query( 'COMMIT' ) === false ) return self::rollback_error( 'transaction_commit_failed', 'Could not commit invoice voiding.' );
         return array( 'invoice' => self::get_invoice( $invoice_ref ), 'voided' => true, 'no_op' => false );
     }
 
@@ -249,7 +251,7 @@ class MBS_Billing_Ledger {
             return array( 'credit_note' => $existing, 'created' => false, 'idempotent_replay' => true );
         }
 
-        if ( $manage_transaction ) $wpdb->query( 'START TRANSACTION' );
+        if ( $manage_transaction && $wpdb->query( 'START TRANSACTION' ) === false ) return new WP_Error( 'transaction_start_failed', 'Could not start the credit-note transaction.' );
         $original = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$invoice_table} WHERE invoice_ref = %s FOR UPDATE", sanitize_text_field( $invoice_ref ) ) );
         if ( ! $original ) return self::transaction_error( 'invoice_not_found', 'Invoice not found.', $manage_transaction );
         if ( $original->document_type !== 'invoice' || ! in_array( $original->status, array( 'issued', 'part_paid', 'paid', 'credited', 'overdue' ), true ) ) return self::transaction_error( 'invoice_not_creditable', 'This invoice cannot receive a credit note.', $manage_transaction );
@@ -287,16 +289,17 @@ class MBS_Billing_Ledger {
         if ( $item_inserted === false ) return self::transaction_error( 'credit_item_create_failed', 'Could not create the credit-note item.', $manage_transaction );
         $new_credited = (int) $original->credited_minor + $amount;
         $new_status = $new_credited >= (int) $original->total_minor ? 'credited' : $original->status;
-        $wpdb->query( $wpdb->prepare(
+        $original_updated = $wpdb->query( $wpdb->prepare(
             "UPDATE {$invoice_table} SET credited_minor = %d, status = %s, version = version + 1, updated_at = %s WHERE id = %d",
             $new_credited, $new_status, $now, (int) $original->id
         ) );
-        if ( $manage_transaction ) $wpdb->query( 'COMMIT' );
+        if ( $original_updated !== 1 ) return self::transaction_error( 'credit_parent_update_failed', 'Could not update the credited invoice.', $manage_transaction );
+        if ( $manage_transaction && $wpdb->query( 'COMMIT' ) === false ) return self::transaction_error( 'transaction_commit_failed', 'Could not commit the credit note.', true );
         return array( 'credit_note' => self::get_invoice( $credit_ref ), 'created' => true, 'idempotent_replay' => false );
     }
 
     /** Record an idempotent payment/refund transaction and update settlement. */
-    public static function record_transaction( $invoice_ref, $data ) {
+    public static function record_transaction( $invoice_ref, $data, $manage_transaction = true ) {
         global $wpdb;
         $amount = MBS_Money::minor( $data['amount_minor'] ?? null );
         if ( is_wp_error( $amount ) ) return $amount;
@@ -312,6 +315,7 @@ class MBS_Billing_Ledger {
             'transaction_type' => $type, 'status' => $status,
             'provider' => sanitize_key( $data['provider'] ?? 'manual' ),
             'provider_transaction_id' => ! empty( $data['provider_transaction_id'] ) ? sanitize_text_field( $data['provider_transaction_id'] ) : null,
+            'parent_transaction_id' => ! empty( $data['parent_transaction_id'] ) ? (int) $data['parent_transaction_id'] : null,
             'metadata' => $data['metadata'] ?? array(),
         ) );
         $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
@@ -324,14 +328,25 @@ class MBS_Billing_Ledger {
             return array( 'transaction' => $existing, 'invoice' => $existing_invoice, 'created' => false, 'idempotent_replay' => true );
         }
 
-        $wpdb->query( 'START TRANSACTION' );
+        if ( $manage_transaction && $wpdb->query( 'START TRANSACTION' ) === false ) return new WP_Error( 'transaction_start_failed', 'Could not start the financial transaction.' );
         $invoice = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$invoice_table} WHERE invoice_ref = %s FOR UPDATE", sanitize_text_field( $invoice_ref ) ) );
-        if ( ! $invoice ) return self::rollback_error( 'invoice_not_found', 'Invoice not found.' );
-        if ( $invoice->document_type !== 'invoice' || in_array( $invoice->status, array( 'draft', 'void' ), true ) ) return self::rollback_error( 'invoice_not_payable', 'This invoice cannot accept a payment transaction.' );
-        if ( isset( $data['expected_version'] ) && (int) $data['expected_version'] !== (int) $invoice->version ) return self::rollback_error( 'invoice_precondition_failed', 'The invoice changed since it was loaded.' );
+        if ( ! $invoice ) return self::transaction_error( 'invoice_not_found', 'Invoice not found.', $manage_transaction );
+        if ( $invoice->document_type !== 'invoice' || in_array( $invoice->status, array( 'draft', 'void' ), true ) ) return self::transaction_error( 'invoice_not_payable', 'This invoice cannot accept a payment transaction.', $manage_transaction );
+        if ( isset( $data['expected_version'] ) && (int) $data['expected_version'] !== (int) $invoice->version ) return self::transaction_error( 'invoice_precondition_failed', 'The invoice changed since it was loaded.', $manage_transaction );
         $current_balance = self::balance_minor( $invoice );
-        if ( $type === 'payment' && $amount > $current_balance ) return self::rollback_error( 'payment_exceeds_balance', 'Payment exceeds the current invoice balance.' );
-        if ( $type === 'refund' && $amount > (int) $invoice->paid_minor ) return self::rollback_error( 'refund_exceeds_paid', 'Refund exceeds payments recorded against this invoice.' );
+        if ( $type === 'payment' && $amount > $current_balance ) return self::transaction_error( 'payment_exceeds_balance', 'Payment exceeds the current invoice balance.', $manage_transaction );
+        if ( $type === 'refund' && $amount > (int) $invoice->paid_minor ) return self::transaction_error( 'refund_exceeds_paid', 'Refund exceeds payments recorded against this invoice.', $manage_transaction );
+        $parent = null;
+        if ( $type === 'refund' ) {
+            $parent_id = (int) ( $data['parent_transaction_id'] ?? 0 );
+            if ( $parent_id < 1 ) return self::transaction_error( 'refund_parent_required', 'A refund must identify the payment transaction it reverses.', $manage_transaction );
+            $parent = $wpdb->get_row( $wpdb->prepare(
+                "SELECT * FROM {$transaction_table} WHERE id = %d AND invoice_id = %d AND transaction_type = 'payment' AND status = 'completed' FOR UPDATE",
+                $parent_id, (int) $invoice->id
+            ) );
+            if ( ! $parent ) return self::transaction_error( 'refund_parent_missing', 'The payment transaction for this refund was not found.', $manage_transaction );
+            if ( $amount > ( (int) $parent->amount_minor - (int) $parent->refunded_minor ) ) return self::transaction_error( 'refund_exceeds_payment', 'Refund exceeds the unrefunded amount of its payment.', $manage_transaction );
+        }
         $transaction_ref = self::generate_reference( 'TXN', $transaction_table, 'transaction_ref' );
         $now = current_time( 'mysql' );
         $inserted = $wpdb->insert( $transaction_table, array(
@@ -339,6 +354,7 @@ class MBS_Billing_Ledger {
             'provider' => sanitize_key( $data['provider'] ?? 'manual' ),
             'provider_transaction_id' => ! empty( $data['provider_transaction_id'] ) ? sanitize_text_field( $data['provider_transaction_id'] ) : null,
             'transaction_type' => $type, 'status' => $status, 'amount_minor' => $amount,
+            'parent_transaction_id' => $parent ? (int) $parent->id : null,
             'currency' => $invoice->currency, 'idempotency_key' => $key,
             'idempotency_request_hash' => $request_hash,
             'metadata_json' => wp_json_encode( $data['metadata'] ?? array() ),
@@ -346,7 +362,7 @@ class MBS_Billing_Ledger {
             'created_at' => $now, 'updated_at' => $now,
         ) );
         if ( $inserted === false ) {
-            $wpdb->query( 'ROLLBACK' );
+            if ( $manage_transaction ) $wpdb->query( 'ROLLBACK' );
             $existing = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$transaction_table} WHERE idempotency_key = %s", $key ) );
             if ( $existing ) {
                 $conflict = self::idempotency_conflict( $existing, $request_hash );
@@ -358,18 +374,27 @@ class MBS_Billing_Ledger {
         }
         $transaction_id = (int) $wpdb->insert_id;
         if ( $status === 'completed' ) {
+            if ( $type === 'refund' ) {
+                $parent_updated = $wpdb->query( $wpdb->prepare(
+                    "UPDATE {$transaction_table} SET refunded_minor = refunded_minor + %d, updated_at = %s
+                     WHERE id = %d AND refunded_minor + %d <= amount_minor",
+                    $amount, $now, (int) $parent->id, $amount
+                ) );
+                if ( $parent_updated !== 1 ) return self::transaction_error( 'refund_parent_update_failed', 'Could not update cumulative payment refunds.', $manage_transaction );
+            }
             $paid = $type === 'payment'
                 ? (int) $invoice->paid_minor + $amount
                 : max( 0, (int) $invoice->paid_minor - $amount );
             $covered = $paid + (int) $invoice->credited_minor;
             $is_overdue = ! empty( $invoice->due_at ) && $invoice->due_at < $now;
             $invoice_status = $covered >= (int) $invoice->total_minor ? 'paid' : ( $is_overdue ? 'overdue' : ( $paid > 0 ? 'part_paid' : 'issued' ) );
-            $wpdb->query( $wpdb->prepare(
+            $invoice_updated = $wpdb->query( $wpdb->prepare(
                 "UPDATE {$invoice_table} SET paid_minor = %d, status = %s, version = version + 1, updated_at = %s WHERE id = %d",
                 $paid, $invoice_status, $now, (int) $invoice->id
             ) );
+            if ( $invoice_updated !== 1 ) return self::transaction_error( 'invoice_settlement_update_failed', 'Could not update invoice settlement.', $manage_transaction );
         }
-        $wpdb->query( 'COMMIT' );
+        if ( $manage_transaction && $wpdb->query( 'COMMIT' ) === false ) return self::transaction_error( 'transaction_commit_failed', 'Could not commit the financial transaction.', true );
         $transaction = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$transaction_table} WHERE id = %d", $transaction_id ) );
         return array( 'transaction' => $transaction, 'invoice' => self::get_invoice( $invoice_ref ), 'created' => true, 'idempotent_replay' => false );
     }
@@ -428,9 +453,15 @@ class MBS_Billing_Ledger {
     }
 
     private static function idempotency_conflict( $record, $request_hash ) {
-        // Records created before schema 6 have no request hash. Preserve their
-        // historical replay behaviour; every new write is payload-bound.
-        if ( empty( $record->idempotency_request_hash ) ) return null;
+        // A pre-schema-6 record cannot prove that a replay has the same target
+        // and payload. Fail closed instead of treating the key as a wildcard.
+        if ( empty( $record->idempotency_request_hash ) ) {
+            return new WP_Error(
+                'legacy_idempotency_unverifiable',
+                'This idempotency key belongs to a legacy financial record whose original payload cannot be verified. Use a new key after reviewing the existing record.',
+                array( 'status' => 409 )
+            );
+        }
         if ( ! hash_equals( (string) $record->idempotency_request_hash, (string) $request_hash ) ) {
             return new WP_Error( 'idempotency_conflict', 'This idempotency key was already used for a different target or payload.', array( 'status' => 409 ) );
         }

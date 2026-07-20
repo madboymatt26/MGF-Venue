@@ -16,6 +16,11 @@ foreach ( $tables as $table_name ) {
     $wpdb->query( "DROP TABLE IF EXISTS {$table}" );
 }
 delete_option( 'mbs_db_version' );
+delete_option( 'mbs_migration_state' );
+delete_option( 'mbs_migration_lock' );
+wp_clear_scheduled_hook( 'mbs_release_invoice_reservation' );
+$wpdb->query( "DELETE FROM {$wpdb->options} WHERE option_name LIKE 'mbs_invoice_reservation_%'" );
+$wpdb->query( 'DROP TABLE IF EXISTS ' . $wpdb->prefix . 'mathlin_payment_reservations' );
 delete_option( 'mbs_legacy_series_registered' );
 delete_option( 'mbs_ha_webhook_url' );
 delete_option( 'mbs_min_notice_days' );

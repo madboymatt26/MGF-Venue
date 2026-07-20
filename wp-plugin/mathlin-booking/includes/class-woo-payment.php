@@ -360,7 +360,20 @@ class MBS_Woo_Payment {
             if ( ! $invoice_ref ) continue;
             $invoice_items_found = true;
             $reservation_ref = (string) $item->get_meta( '_mbs_invoice_reservation_ref' );
-            $payment = MBS_Invoice_Payment::record_gateway_payment( $invoice_ref, $order->get_total(), $order_id, $reservation_ref );
+            $claimed_minor = (int) $item->get_meta( '_mbs_invoice_amount_minor' );
+            if ( ! $reservation_ref || $claimed_minor < 1 || ! MBS_Invoice_Reservation::validate( $invoice_ref, $reservation_ref, $claimed_minor, $order_id ) ) {
+                $order->update_meta_data( '_mbs_invoice_reconciliation_required', 'yes' );
+                $order->update_meta_data( '_mbs_invoice_reconciliation_error', 'The captured order does not own the authoritative invoice reservation.' );
+                $order->add_order_note( 'CRITICAL: Captured invoice payment failed reservation ownership validation; do not retry capture. Reconcile or refund this order.' );
+                MBS_Audit_Log::log( $invoice_ref, 'payment_reconciliation_required', 'WooCommerce Order #' . $order_id . ' failed reservation ownership validation.', 0 );
+                continue;
+            }
+            // Integration gateways may inject a deterministic pre-ledger
+            // failure; production integrations should normally leave this null.
+            $payment = apply_filters( 'mbs_invoice_gateway_payment_preflight', null, $invoice_ref, $order_id, $reservation_ref );
+            if ( ! is_wp_error( $payment ) ) {
+                $payment = MBS_Invoice_Payment::record_gateway_payment( $invoice_ref, $order->get_total(), $order_id, $reservation_ref );
+            }
             if ( is_wp_error( $payment ) ) {
                 if ( $reservation_ref ) MBS_Invoice_Reservation::reconciliation_required( $invoice_ref, $reservation_ref, $order_id, $payment->get_error_message() );
                 $order->update_meta_data( '_mbs_invoice_reconciliation_required', 'yes' );
@@ -370,7 +383,20 @@ class MBS_Woo_Payment {
                 $order->add_order_note( '⚠️ Consolidated invoice payment could not be recorded: ' . $payment->get_error_message() );
                 continue;
             }
-            if ( $reservation_ref ) MBS_Invoice_Reservation::complete( $invoice_ref, $reservation_ref, $order_id );
+            $completed = MBS_Invoice_Reservation::complete( $invoice_ref, $reservation_ref, $order_id );
+            if ( ! $completed ) {
+                $current_claim = MBS_Invoice_Reservation::get( $invoice_ref );
+                $already_completed = $current_claim && $current_claim->status === 'captured'
+                    && (int) $current_claim->order_id === (int) $order_id
+                    && hash_equals( $current_claim->reservation_ref, $reservation_ref );
+                if ( ! $already_completed ) {
+                    $order->update_meta_data( '_mbs_invoice_reconciliation_required', 'yes' );
+                    $order->update_meta_data( '_mbs_invoice_reconciliation_error', 'Ledger payment exists but the reservation could not enter captured state.' );
+                    $order->add_order_note( 'CRITICAL: Ledger payment exists, but reservation finalisation requires administrator reconciliation.' );
+                    MBS_Audit_Log::log( $invoice_ref, 'payment_reconciliation_required', 'Order #' . $order_id . ' ledger payment exists but reservation finalisation failed.', 0 );
+                    continue;
+                }
+            }
             $order->update_meta_data( '_mbs_invoice_ref', $invoice_ref );
             $order->delete_meta_data( '_mbs_invoice_reconciliation_required' );
             $order->delete_meta_data( '_mbs_invoice_reconciliation_error' );
@@ -378,7 +404,14 @@ class MBS_Woo_Payment {
             $invoice_processed = true;
         }
         if ( $invoice_items_found ) {
-            if ( $invoice_processed ) $order->update_meta_data( '_mbs_invoice_payment_processed', 'yes' );
+            if ( $invoice_processed ) {
+                $order->update_meta_data( '_mbs_invoice_payment_processed', 'yes' );
+                $pending_refunds = (array) $order->get_meta( '_mbs_pending_invoice_refunds', true );
+                $order->delete_meta_data( '_mbs_pending_invoice_refunds' );
+                $order->save();
+                foreach ( array_unique( array_map( 'absint', $pending_refunds ) ) as $pending_refund_id ) if ( $pending_refund_id ) $this->on_order_refunded( $order_id, $pending_refund_id );
+                return;
+            }
             $order->save();
             return;
         }
@@ -492,6 +525,11 @@ class MBS_Woo_Payment {
                 foreach ( array_keys( $invoice_refs ) as $invoice_ref ) {
                     $result = MBS_Invoice_Payment::record_gateway_refund( $invoice_ref, $amount, $order_id, $refund->get_id(), $requested_allocations );
                     if ( is_wp_error( $result ) ) {
+                        if ( in_array( $result->get_error_code(), array( 'refund_exceeds_paid', 'refund_payment_not_recorded', 'invoice_not_found' ), true ) ) {
+                            $pending = (array) $order->get_meta( '_mbs_pending_invoice_refunds', true );
+                            $pending[] = (int) $refund->get_id();
+                            $order->update_meta_data( '_mbs_pending_invoice_refunds', array_values( array_unique( $pending ) ) );
+                        }
                         $order->add_order_note( '⚠️ Consolidated invoice refund could not be recorded: ' . $result->get_error_message() );
                     } else {
                         $order->add_order_note( sprintf( 'Refund #%d recorded against consolidated invoice %s.', $refund->get_id(), $invoice_ref ) );

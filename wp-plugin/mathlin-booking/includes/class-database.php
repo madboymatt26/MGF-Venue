@@ -8,6 +8,7 @@ class MBS_Database {
         $lock = self::acquire_migration_lock();
         if ( is_wp_error( $lock ) ) return $lock;
         update_option( 'mbs_migration_state', array( 'status' => 'running', 'target' => MBS_DB_VERSION, 'started_at' => current_time( 'mysql' ) ), false );
+        try {
 
         $table   = $wpdb->prefix . MBS_TABLE;
         $charset = $wpdb->get_charset_collate();
@@ -40,6 +41,7 @@ class MBS_Database {
             chase_count     SMALLINT     NOT NULL DEFAULT 0,
             last_chased     DATETIME     DEFAULT NULL,
             series_id       VARCHAR(20)  DEFAULT NULL,
+            legacy_billing_excluded TINYINT(1) NOT NULL DEFAULT 0,
             admin_notes     TEXT         DEFAULT '',
             custom_fields   TEXT         DEFAULT '',
             modification_token VARCHAR(64) DEFAULT NULL,
@@ -200,6 +202,8 @@ class MBS_Database {
             transaction_type        VARCHAR(20) NOT NULL DEFAULT 'payment',
             status                  VARCHAR(20) NOT NULL DEFAULT 'pending',
             amount_minor            BIGINT(20) UNSIGNED NOT NULL,
+            parent_transaction_id   BIGINT(20) UNSIGNED DEFAULT NULL,
+            refunded_minor          BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
             currency                CHAR(3)     NOT NULL DEFAULT 'GBP',
             idempotency_key         VARCHAR(100) NOT NULL,
             idempotency_request_hash CHAR(64)    DEFAULT NULL,
@@ -213,7 +217,8 @@ class MBS_Database {
             UNIQUE KEY transaction_idempotency (idempotency_key),
             UNIQUE KEY provider_transaction (provider, provider_transaction_id),
             KEY idx_transaction_invoice (invoice_id, status),
-            KEY idx_transaction_occurred (occurred_at)
+            KEY idx_transaction_occurred (occurred_at),
+            KEY idx_transaction_parent (parent_transaction_id)
         ) {$charset};";
         dbDelta( $transaction_sql );
 
@@ -224,6 +229,7 @@ class MBS_Database {
             booking_ref           VARCHAR(20) NOT NULL,
             active_booking_ref    VARCHAR(20) DEFAULT NULL,
             allocated_minor       BIGINT(20)  NOT NULL DEFAULT 0,
+            refunded_minor        BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
             status                VARCHAR(20) NOT NULL DEFAULT 'active',
             released_at           DATETIME    DEFAULT NULL,
             created_at            DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -234,6 +240,28 @@ class MBS_Database {
             KEY idx_allocation_booking (booking_ref)
         ) {$charset};";
         dbDelta( $allocation_sql );
+
+        $reservation_table = $wpdb->prefix . MBS_PAYMENT_RESERVATION_TABLE;
+        $reservation_sql = "CREATE TABLE {$reservation_table} (
+            id                 BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            reservation_ref    VARCHAR(40) NOT NULL,
+            invoice_id         BIGINT(20) UNSIGNED NOT NULL,
+            invoice_ref        VARCHAR(30) NOT NULL,
+            order_id           BIGINT(20) UNSIGNED DEFAULT NULL,
+            amount_minor       BIGINT(20) UNSIGNED NOT NULL,
+            status             VARCHAR(30) NOT NULL DEFAULT 'active',
+            version            BIGINT(20) UNSIGNED NOT NULL DEFAULT 1,
+            expires_at         DATETIME DEFAULT NULL,
+            last_error         TEXT DEFAULT '',
+            created_at         DATETIME NOT NULL,
+            updated_at         DATETIME NOT NULL,
+            PRIMARY KEY (id),
+            UNIQUE KEY reservation_ref (reservation_ref),
+            UNIQUE KEY invoice_owner (invoice_id),
+            UNIQUE KEY order_owner (order_id),
+            KEY idx_reservation_status (status, expires_at)
+        ) ENGINE=InnoDB {$charset};";
+        dbDelta( $reservation_sql );
 
         // Blocked dates table
         $blocked_table = $wpdb->prefix . 'mathlin_blocked_dates';
@@ -307,52 +335,84 @@ class MBS_Database {
         ) {$charset};";
         dbDelta( $sql5 );
 
-        $verified = self::verify_schema();
+        $engines = self::ensure_transactional_engines();
+        $verified = is_wp_error( $engines ) ? $engines : self::verify_schema();
         if ( is_wp_error( $verified ) ) {
             update_option( 'mbs_migration_state', array(
                 'status' => 'failed', 'target' => MBS_DB_VERSION, 'failed_at' => current_time( 'mysql' ),
                 'message' => $verified->get_error_message(),
             ), false );
-            self::release_migration_lock( $lock );
             add_action( 'admin_notices', array( __CLASS__, 'migration_health_notice' ) );
             return $verified;
         }
         update_option( 'mbs_db_version', MBS_DB_VERSION );
         update_option( 'mbs_migration_state', array( 'status' => 'complete', 'target' => MBS_DB_VERSION, 'completed_at' => current_time( 'mysql' ) ), false );
-        self::release_migration_lock( $lock );
         return true;
+        } finally {
+            self::release_migration_lock( $lock );
+        }
     }
 
     private static function acquire_migration_lock() {
-        $token = wp_generate_password( 32, false, false );
-        $value = array( 'token' => $token, 'expires_at' => time() + 300 );
-        if ( add_option( 'mbs_migration_lock', $value, '', false ) ) return $token;
-        $existing = get_option( 'mbs_migration_lock', array() );
-        if ( is_array( $existing ) && (int) ( $existing['expires_at'] ?? 0 ) < time() ) {
-            delete_option( 'mbs_migration_lock' );
-            if ( add_option( 'mbs_migration_lock', $value, '', false ) ) return $token;
+        global $wpdb;
+        $token = 'mbs_migration_' . substr( hash( 'sha256', ( defined('DB_NAME') ? DB_NAME : 'wordpress' ) . ':' . $wpdb->prefix ), 0, 32 );
+        if ( (int) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, 0)', $token ) ) === 1 ) {
+            update_option( 'mbs_migration_lock', array( 'owner' => $token, 'connection' => (int)$wpdb->get_var('SELECT CONNECTION_ID()'), 'acquired_at' => current_time('mysql') ), false );
+            return $token;
         }
         return new WP_Error( 'migration_locked', 'Another MGF Venue database migration is already running.' );
     }
 
     private static function release_migration_lock( $token ) {
-        $existing = get_option( 'mbs_migration_lock', array() );
-        if ( is_array( $existing ) && hash_equals( (string) ( $existing['token'] ?? '' ), (string) $token ) ) delete_option( 'mbs_migration_lock' );
+        global $wpdb;
+        // Remove the diagnostic while the advisory lock is still held. A
+        // successor cannot acquire/set its own diagnostic until RELEASE_LOCK.
+        delete_option( 'mbs_migration_lock' );
+        $wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $token ) );
+    }
+
+    private static function ensure_transactional_engines() {
+        global $wpdb;
+        $tables = array( $wpdb->prefix.MBS_TABLE, $wpdb->prefix.MBS_SERIES_TABLE, $wpdb->prefix.MBS_INVOICE_TABLE, $wpdb->prefix.MBS_INVOICE_ITEM_TABLE, $wpdb->prefix.MBS_PAYMENT_TRANSACTION_TABLE, $wpdb->prefix.MBS_BILLING_ALLOCATION_TABLE, $wpdb->prefix.MBS_PAYMENT_RESERVATION_TABLE );
+        foreach($tables as $table){$row=$wpdb->get_row($wpdb->prepare('SHOW TABLE STATUS LIKE %s',$table));if($row&&!empty($row->Engine)&&strtolower($row->Engine)!=='innodb'){if($wpdb->query("ALTER TABLE `{$table}` ENGINE=InnoDB")===false)return new WP_Error('transactional_engine_required',"{$table} is not transactional and could not be converted to InnoDB. Restore a backup, correct database permissions/capacity, and retry.");}}
+        return true;
     }
 
     private static function verify_schema() {
         global $wpdb;
         $requirements = array(
-            $wpdb->prefix . MBS_TABLE => array( 'columns' => array( 'ref', 'status', 'series_id', 'pricing_tier' ), 'indexes' => array( 'PRIMARY', 'idx_ref' ) ),
-            $wpdb->prefix . MBS_SERIES_TABLE => array( 'columns' => array( 'series_ref', 'version', 'adoption_state', 'adoption_version' ), 'indexes' => array( 'PRIMARY', 'series_ref', 'idx_series_billing' ) ),
-            $wpdb->prefix . MBS_INVOICE_TABLE => array( 'columns' => array( 'invoice_ref', 'idempotency_request_hash', 'paid_minor', 'credited_minor' ), 'indexes' => array( 'PRIMARY', 'invoice_ref', 'invoice_idempotency' ) ),
-            $wpdb->prefix . MBS_INVOICE_ITEM_TABLE => array( 'columns' => array( 'item_ref', 'invoice_id', 'booking_ref', 'line_total_minor' ), 'indexes' => array( 'PRIMARY', 'item_ref', 'idx_item_booking' ) ),
-            $wpdb->prefix . MBS_PAYMENT_TRANSACTION_TABLE => array( 'columns' => array( 'transaction_ref', 'invoice_id', 'idempotency_request_hash' ), 'indexes' => array( 'PRIMARY', 'transaction_idempotency', 'provider_transaction' ) ),
-            $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE => array( 'columns' => array( 'invoice_id', 'booking_ref', 'active_booking_ref' ), 'indexes' => array( 'PRIMARY', 'active_booking' ) ),
-            $wpdb->prefix . 'mathlin_blocked_dates' => array( 'columns' => array( 'date_from', 'date_to' ), 'indexes' => array( 'PRIMARY' ) ),
-            $wpdb->prefix . 'mathlin_audit_log' => array( 'columns' => array( 'ref', 'action' ), 'indexes' => array( 'PRIMARY' ) ),
-            $wpdb->prefix . 'mathlin_email_queue' => array( 'columns' => array( 'to_email', 'status' ), 'indexes' => array( 'PRIMARY' ) ),
-            $wpdb->prefix . 'mathlin_mod_requests' => array( 'columns' => array( 'booking_ref', 'status' ), 'indexes' => array( 'PRIMARY' ) ),
+            $wpdb->prefix . MBS_TABLE => array(
+                'columns' => array( 'id','ref','status','name','organisation','email','phone','address','space','kitchen','booking_date','booking_date_end','all_day','scout_use','pricing_tier','start_time','end_time','attendees','purpose','notes','amount','deposit_paid','amount_paid','invoice_number','ha_notified','reminder_sent','access_sent','feedback_sent','chase_count','last_chased','series_id','legacy_billing_excluded','admin_notes','custom_fields','modification_token','is_public','user_id','created_at','updated_at' ),
+                'indexes' => array( 'PRIMARY','idx_date','idx_status','idx_ref','idx_series','idx_email','idx_chase' ),
+            ),
+            $wpdb->prefix . MBS_SERIES_TABLE => array(
+                'columns' => array( 'id','series_ref','status','version','contact_name','contact_organisation','contact_email','contact_phone','contact_address','space','kitchen','all_day','scout_use','pricing_tier','start_time','end_time','attendees','purpose','notes','start_date','repeat_until','recurrence_rule','schedule_json','price_per_booking','estimated_total','requested_count','accepted_count','conflict_count','blocked_count','error_count','exceptions_json','billing_mode','billing_treatment','deposit_policy','payment_method','automatic_reminders','invoice_lead_days','payment_terms_days','billing_schedule_json','terms_hash','terms_accepted_at','confirmation_sent_at','metadata_incomplete','adopted_at','adopted_by','adoption_state','adoption_version','created_at','updated_at' ),
+                'indexes' => array( 'PRIMARY','series_ref','idx_series_status','idx_series_email','idx_series_dates','idx_series_billing' ),
+            ),
+            $wpdb->prefix . MBS_INVOICE_TABLE => array(
+                'columns' => array( 'id','invoice_ref','document_type','parent_invoice_id','series_ref','status','version','contact_name','contact_organisation','contact_email','contact_address','billing_mode','period_start','period_end','currency','subtotal_minor','tax_minor','total_minor','paid_minor','credited_minor','idempotency_key','idempotency_request_hash','payment_token_hash','payment_token_created_at','issued_at','issued_email_sent_at','due_at','voided_at','void_reason','reminder_count','last_reminded_at','created_at','updated_at' ),
+                'indexes' => array( 'PRIMARY','invoice_ref','invoice_idempotency','idx_invoice_series','idx_invoice_status_due','idx_invoice_period','idx_invoice_parent' ),
+            ),
+            $wpdb->prefix . MBS_INVOICE_ITEM_TABLE => array(
+                'columns' => array( 'id','item_ref','invoice_id','item_type','booking_ref','service_date','description','quantity_milli','unit_amount_minor','line_total_minor','pricing_snapshot_json','created_at' ),
+                'indexes' => array( 'PRIMARY','item_ref','idx_item_invoice','idx_item_booking','idx_item_service_date' ),
+            ),
+            $wpdb->prefix . MBS_PAYMENT_TRANSACTION_TABLE => array(
+                'columns' => array( 'id','transaction_ref','invoice_id','provider','provider_transaction_id','transaction_type','status','amount_minor','parent_transaction_id','refunded_minor','currency','idempotency_key','idempotency_request_hash','metadata_json','occurred_at','receipt_sent_at','created_at','updated_at' ),
+                'indexes' => array( 'PRIMARY','transaction_ref','transaction_idempotency','provider_transaction','idx_transaction_invoice','idx_transaction_occurred','idx_transaction_parent' ),
+            ),
+            $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE => array(
+                'columns' => array( 'id','invoice_id','booking_ref','active_booking_ref','allocated_minor','refunded_minor','status','released_at','created_at','updated_at' ),
+                'indexes' => array( 'PRIMARY','active_booking','idx_allocation_invoice','idx_allocation_booking' ),
+            ),
+            $wpdb->prefix . MBS_PAYMENT_RESERVATION_TABLE => array(
+                'columns' => array( 'id','reservation_ref','invoice_id','invoice_ref','order_id','amount_minor','status','version','expires_at','last_error','created_at','updated_at' ),
+                'indexes' => array( 'PRIMARY','reservation_ref','invoice_owner','order_owner','idx_reservation_status' ),
+            ),
+            $wpdb->prefix . 'mathlin_blocked_dates' => array( 'columns' => array( 'id','date_from','date_to','space','reason','created_at' ), 'indexes' => array( 'PRIMARY','idx_dates' ) ),
+            $wpdb->prefix . 'mathlin_audit_log' => array( 'columns' => array( 'id','ref','action','details','user_id','user_name','ip_address','created_at' ), 'indexes' => array( 'PRIMARY','idx_ref','idx_action','idx_date' ) ),
+            $wpdb->prefix . 'mathlin_email_queue' => array( 'columns' => array( 'id','to_email','subject','body','headers','attachments','attempts','status','next_retry','created_at' ), 'indexes' => array( 'PRIMARY','idx_status' ) ),
+            $wpdb->prefix . 'mathlin_mod_requests' => array( 'columns' => array( 'id','booking_ref','request_type','status','requested_data','notes','admin_response','resolved_at','resolved_by','created_at' ), 'indexes' => array( 'PRIMARY','idx_ref','idx_status' ) ),
         );
         $missing = array();
         foreach ( $requirements as $table => $required ) {
@@ -404,8 +464,9 @@ class MBS_Database {
         $col = $wpdb->get_results( "SHOW COLUMNS FROM {$table} LIKE 'series_id'" );
         if ( empty( $col ) ) {
             $wpdb->query( "ALTER TABLE {$table} ADD COLUMN series_id VARCHAR(20) DEFAULT NULL AFTER ha_notified" );
-            $wpdb->query( "ALTER TABLE {$table} ADD KEY idx_series (series_id)" );
         }
+        $indexes = $wpdb->get_results( "SHOW INDEX FROM {$table} WHERE Key_name = 'idx_series'" );
+        if ( empty( $indexes ) ) $wpdb->query( "ALTER TABLE {$table} ADD KEY idx_series (series_id)" );
 
         // Add admin_notes column if missing
         $col = $wpdb->get_results( "SHOW COLUMNS FROM {$table} LIKE 'admin_notes'" );

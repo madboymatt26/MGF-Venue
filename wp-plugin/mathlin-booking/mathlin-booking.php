@@ -12,7 +12,7 @@
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 define( 'MBS_VERSION',    '3.21.0' );
-define( 'MBS_DB_VERSION', '3.21.0-schema-6' );
+define( 'MBS_DB_VERSION', '3.21.0-schema-7' );
 define( 'MBS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MBS_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'MBS_TABLE',      'mathlin_bookings' );
@@ -21,6 +21,7 @@ define( 'MBS_INVOICE_TABLE', 'mathlin_invoices' );
 define( 'MBS_INVOICE_ITEM_TABLE', 'mathlin_invoice_items' );
 define( 'MBS_PAYMENT_TRANSACTION_TABLE', 'mathlin_payment_transactions' );
 define( 'MBS_BILLING_ALLOCATION_TABLE', 'mathlin_billing_allocations' );
+define( 'MBS_PAYMENT_RESERVATION_TABLE', 'mathlin_payment_reservations' );
 
 // ── Load includes ──────────────────────────────────────────────────────────────
 require_once MBS_PLUGIN_DIR . 'includes/class-database.php';

@@ -43,6 +43,7 @@ class MBS_Series {
                 'source' => 'legacy_registration',
             );
             $now = current_time( 'mysql' );
+            if ( $wpdb->query( 'START TRANSACTION' ) === false ) return new WP_Error( 'transaction_start_failed', 'Could not start legacy-series registration.' );
             $inserted = $wpdb->insert( $series_table, array(
                 'series_ref' => sanitize_text_field( $series_ref ), 'status' => $status, 'version' => 1,
                 'contact_name' => sanitize_text_field( $first->name ), 'contact_organisation' => sanitize_text_field( $first->organisation ),
@@ -65,7 +66,14 @@ class MBS_Series {
                 'adopted_by' => null, 'adoption_state' => 'eligible', 'adoption_version' => null,
                 'created_at' => $first->created_at ?: $now, 'updated_at' => $now,
             ) );
-            if ( $inserted === false ) return new WP_Error( 'legacy_series_registration_failed', 'Could not register legacy series ' . $series_ref . '.' );
+            if ( $inserted === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'legacy_series_registration_failed', 'Could not register legacy series ' . $series_ref . '.' ); }
+            $excluded = $wpdb->query( $wpdb->prepare(
+                "UPDATE {$booking_table} SET legacy_billing_excluded = 1
+                 WHERE series_id = %s AND (status IN ('paid','deposit_paid','cancelled','archived') OR amount_paid > 0 OR deposit_paid > 0)",
+                $series_ref
+            ) );
+            if ( $excluded === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'legacy_billing_baseline_failed', 'Could not preserve the historical billing baseline for ' . $series_ref . '.' ); }
+            if ( $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'transaction_commit_failed', 'Could not commit legacy-series registration.' ); }
             MBS_Audit_Log::log( $series_ref, 'legacy_series_registered', 'Registered existing occurrence group as legacy per-occurrence billing. Missing terms, skipped dates and prior billing intent were not inferred.', 0 );
             $registered++;
         }
@@ -279,7 +287,7 @@ class MBS_Series {
         $dates = MBS_Recurrence::weekly_dates( array( 'booking_date' => $seed->start_date, 'booking_date_end' => $seed->start_date ), $new_repeat_until );
         if ( is_wp_error( $dates ) ) return $dates;
 
-        $wpdb->query( 'START TRANSACTION' );
+        if ( $wpdb->query( 'START TRANSACTION' ) === false ) return new WP_Error( 'transaction_start_failed', 'Could not start the series-extension transaction.' );
         $series = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$series_table} WHERE series_ref = %s FOR UPDATE", $series_ref ) );
         if ( ! $series ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'series_not_found', 'Recurring series not found.' ); }
         if ( (int) $series->version !== (int) $expected_version ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'series_precondition_failed', 'The recurring series changed since it was loaded.' ); }
@@ -323,7 +331,7 @@ class MBS_Series {
             $new_repeat_until, count( $new_dates ), count( $created ), $new_conflicts, $new_blocked, wp_json_encode( $exceptions ), current_time( 'mysql' ), $series_ref, (int) $expected_version
         ) );
         if ( $updated !== 1 ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'series_precondition_failed', 'The recurring series changed during extension; no extension was saved.' ); }
-        $wpdb->query( 'COMMIT' );
+        if ( $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'transaction_commit_failed', 'Could not commit the series extension.' ); }
         foreach ( $created as $ref ) {
             $booking = MBS_Bookings::get( $ref );
             if ( $booking && $status === 'confirmed' ) { MBS_HomeAssistant::notify( $booking ); $wpdb->update( $booking_table, array( 'ha_notified' => 1 ), array( 'ref' => $ref ) ); }
@@ -360,7 +368,7 @@ class MBS_Series {
         $booking_table = $wpdb->prefix . MBS_TABLE;
         $series_ref    = sanitize_text_field( $series_ref );
 
-        $wpdb->query( 'START TRANSACTION' );
+        if ( $wpdb->query( 'START TRANSACTION' ) === false ) return new WP_Error( 'transaction_start_failed', 'Could not start the series-approval transaction.' );
         $series = $wpdb->get_row( $wpdb->prepare(
             "SELECT * FROM {$series_table} WHERE series_ref = %s FOR UPDATE",
             $series_ref
@@ -415,7 +423,7 @@ class MBS_Series {
             $wpdb->query( 'ROLLBACK' );
             return new WP_Error( 'series_concurrent_update', 'The recurring series was updated by another request. Refresh and try again.' );
         }
-        $wpdb->query( 'COMMIT' );
+        if ( $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'transaction_commit_failed', 'Could not commit series approval.' ); }
 
         foreach ( $affected as $booking ) {
             $booking->status = 'confirmed';
@@ -484,7 +492,7 @@ class MBS_Series {
         $series_ref = sanitize_text_field( $series_ref );
         $scope = $scope === 'future' ? 'future' : 'all';
 
-        $wpdb->query( 'START TRANSACTION' );
+        if ( $wpdb->query( 'START TRANSACTION' ) === false ) return new WP_Error( 'transaction_start_failed', 'Could not start the series-cancellation transaction.' );
         $series = $wpdb->get_row( $wpdb->prepare(
             "SELECT * FROM {$series_table} WHERE series_ref = %s FOR UPDATE",
             $series_ref
@@ -534,7 +542,7 @@ class MBS_Series {
             $wpdb->query( 'ROLLBACK' );
             return new WP_Error( 'series_concurrent_update', 'The recurring series was updated by another request. Refresh and try again.' );
         }
-        $wpdb->query( 'COMMIT' );
+        if ( $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'transaction_commit_failed', 'Could not commit series cancellation.' ); }
 
         foreach ( $affected as $booking ) {
             if ( ! empty( $booking->ha_notified ) ) {

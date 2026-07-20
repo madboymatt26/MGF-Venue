@@ -395,7 +395,7 @@ class MBS_Billing_Engine {
         $table = $wpdb->prefix . MBS_TABLE;
         $bookings = $wpdb->get_results( $wpdb->prepare(
             "SELECT * FROM {$table}
-             WHERE series_id = %s AND status IN ('confirmed','deposit_paid','paid')
+             WHERE series_id = %s AND status IN ('confirmed','deposit_paid','paid') AND legacy_billing_excluded = 0
              ORDER BY booking_date ASC, id ASC",
             sanitize_text_field( $series_ref )
         ) );
