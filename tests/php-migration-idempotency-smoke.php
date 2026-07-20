@@ -1,13 +1,14 @@
 <?php
 define( 'ABSPATH', __DIR__ . '/fixtures/wordpress/' );
 define( 'MBS_VERSION', '3.21.0-test' );
-define( 'MBS_DB_VERSION', '3.21.0-schema-6-test' );
+define( 'MBS_DB_VERSION', '3.21.0-schema-7-test' );
 define( 'MBS_TABLE', 'mathlin_bookings' );
 define( 'MBS_SERIES_TABLE', 'mathlin_booking_series' );
 define( 'MBS_INVOICE_TABLE', 'mathlin_invoices' );
 define( 'MBS_INVOICE_ITEM_TABLE', 'mathlin_invoice_items' );
 define( 'MBS_PAYMENT_TRANSACTION_TABLE', 'mathlin_payment_transactions' );
 define( 'MBS_BILLING_ALLOCATION_TABLE', 'mathlin_billing_allocations' );
+define( 'MBS_PAYMENT_RESERVATION_TABLE', 'mathlin_payment_reservations' );
 
 $mbs_test_dbdelta_calls = array();
 $mbs_test_created_tables = array();
@@ -15,18 +16,18 @@ $mbs_test_table_sql = array();
 $mbs_test_options = array( 'mbs_woo_product_renamed' => true );
 $mbs_test_missing_column = '';
 
-class WP_Error { public function __construct( private $code, private $message ) {} public function get_error_message(){ return $this->message; } }
+class WP_Error { private $code; private $message; public function __construct( $code, $message ) { $this->code=$code; $this->message=$message; } public function get_error_message(){ return $this->message; } }
 function is_wp_error( $value ) { return $value instanceof WP_Error; }
 
 class MBS_Test_WPDB {
     public $prefix = 'wp_';
     public function get_charset_collate() { return 'DEFAULT CHARACTER SET utf8mb4'; }
-    public function get_row( $sql ) { return (object) array( 'Type' => 'varchar(20)' ); }
+    public function get_row( $sql ) { if ( stripos( $sql, 'SHOW TABLE STATUS' ) !== false ) return (object) array( 'Engine' => 'InnoDB' ); return (object) array( 'Type' => 'varchar(20)' ); }
     public function prepare( $sql, ...$args ) { if ( count( $args ) === 1 && is_array( $args[0] ) ) $args = $args[0]; foreach ( $args as $arg ) $sql = preg_replace( '/%[sd]/', is_int( $arg ) ? (string) $arg : "'" . $arg . "'", $sql, 1 ); return $sql; }
-    public function get_var( $sql ) { global $mbs_test_created_tables; if ( preg_match( "/SHOW TABLES LIKE '?([^']+)'?/i", $sql, $m ) ) return ! empty( $mbs_test_created_tables[$m[1]] ) ? $m[1] : null; return null; }
+    public function get_var( $sql ) { global $mbs_test_created_tables; if ( stripos($sql,'GET_LOCK')!==false || stripos($sql,'RELEASE_LOCK')!==false ) return 1; if ( stripos($sql,'CONNECTION_ID')!==false ) return 77; if ( preg_match( "/SHOW TABLES LIKE '?([^']+)'?/i", $sql, $m ) ) return ! empty( $mbs_test_created_tables[$m[1]] ) ? $m[1] : null; return null; }
     public function get_col( $sql ) { global $mbs_test_table_sql, $mbs_test_missing_column; preg_match( '/FROM `([^`]+)`/', $sql, $m ); $ddl=$mbs_test_table_sql[$m[1]]??''; preg_match_all( '/^\s*([a-z_][a-z0-9_]*)\s+(?:BIGINT|VARCHAR|CHAR|TEXT|LONGTEXT|DATE|DATETIME|TIME|TINYINT|SMALLINT|DECIMAL)/mi',$ddl,$cols); return array_values(array_filter($cols[1],fn($c)=>$c!==$mbs_test_missing_column)); }
-    public function get_results( $sql ) { global $mbs_test_table_sql; if(preg_match("/SHOW COLUMNS FROM ([^ ]+) LIKE '([^']+)'/i",$sql,$m)){return preg_match('/^\\s*'.preg_quote($m[2],'/').'\\s+/mi',$mbs_test_table_sql[trim($m[1],'`')]??'')?array((object)array('present'=>true)):array();} if ( preg_match( '/SHOW INDEX FROM `([^`]+)`/', $sql, $m ) ) { $ddl=$mbs_test_table_sql[$m[1]]??''; preg_match_all('/(?:PRIMARY KEY|(?:UNIQUE )?KEY)\s*(?:([a-z_][a-z0-9_]*)\s*)?\(/i',$ddl,$keys); return array_map(fn($k)=>(object)array('Key_name'=>$k?:'PRIMARY'),$keys[1]); } return array( (object) array( 'present' => true ) ); }
-    public function query( $sql ) { global $mbs_test_table_sql; if(preg_match('/ALTER TABLE\s+([^\s]+)\s+ADD COLUMN\s+([a-z_][a-z0-9_]*)\s+([^;]+)/i',$sql,$m)){$mbs_test_table_sql[trim($m[1],'`')] .= "\n{$m[2]} {$m[3]}";} return true; }
+    public function get_results( $sql ) { global $mbs_test_table_sql; if(preg_match("/SHOW COLUMNS FROM ([^ ]+) LIKE '([^']+)'/i",$sql,$m)){return preg_match('/^\\s*'.preg_quote($m[2],'/').'\\s+/mi',$mbs_test_table_sql[trim($m[1],'`')]??'')?array((object)array('present'=>true)):array();} if(preg_match("/SHOW INDEX FROM ([^ ]+) WHERE Key_name = '([^']+)'/i",$sql,$m)){return preg_match('/(?:UNIQUE )?KEY\\s+'.preg_quote($m[2],'/').'\\s*\\(/i',$mbs_test_table_sql[trim($m[1],'`')]??'')?array((object)array('Key_name'=>$m[2])):array();} if ( preg_match( '/SHOW INDEX FROM `([^`]+)`/', $sql, $m ) ) { $ddl=$mbs_test_table_sql[$m[1]]??''; preg_match_all('/(?:PRIMARY KEY|(?:UNIQUE )?KEY)\s*(?:([a-z_][a-z0-9_]*)\s*)?\(/i',$ddl,$keys); return array_map(fn($k)=>(object)array('Key_name'=>$k?:'PRIMARY'),$keys[1]); } return array( (object) array( 'present' => true ) ); }
+    public function query( $sql ) { global $mbs_test_table_sql; if(preg_match('/ALTER TABLE\s+([^\s]+)\s+ADD COLUMN\s+([a-z_][a-z0-9_]*)\s+([^;]+)/i',$sql,$m)){$mbs_test_table_sql[trim($m[1],'`')] .= "\n{$m[2]} {$m[3]}";} if(preg_match('/ALTER TABLE\s+([^\s]+)\s+ADD KEY\s+([a-z_][a-z0-9_]*)\s*\(([^)]+)\)/i',$sql,$m)){$mbs_test_table_sql[trim($m[1],'`')] .= "\nKEY {$m[2]} ({$m[3]})";} return true; }
 }
 $wpdb = new MBS_Test_WPDB();
 
@@ -47,7 +48,7 @@ if ( $first !== true || $second !== true || get_option('mbs_db_version') !== MBS
 $required = array(
     'wp_mathlin_bookings', 'wp_mathlin_booking_series', 'wp_mathlin_invoices',
     'wp_mathlin_invoice_items', 'wp_mathlin_payment_transactions',
-    'wp_mathlin_billing_allocations', 'wp_mathlin_blocked_dates',
+    'wp_mathlin_billing_allocations', 'wp_mathlin_payment_reservations', 'wp_mathlin_blocked_dates',
     'wp_mathlin_audit_log', 'wp_mathlin_email_queue', 'wp_mathlin_mod_requests',
 );
 foreach ( $required as $table ) {
@@ -67,4 +68,4 @@ if ( ! is_wp_error($failed) || get_option('mbs_db_version') !== 'old' || get_opt
 $mbs_test_missing_column = '';
 $retried = MBS_Database::create_tables();
 if ( $retried !== true || get_option('mbs_db_version') !== MBS_DB_VERSION ) { fwrite(STDERR,"FAIL: failed migration was not retryable.\n"); exit(1); }
-echo 'OK: 14 migration assertions passed (repeated execution, 10 tables, failure retention and retry).'."\n";
+echo 'OK: 15 migration assertions passed (advisory locking, repeated execution, 11 tables, InnoDB verification, failure retention and retry).'."\n";

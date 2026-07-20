@@ -34,7 +34,7 @@ compat_has( $series, 'MBS_HomeAssistant::notify( $booking )', 'Confirmed extende
 compat_has( $series, "booking_date >= %s AND status IN ('deposit_paid','paid')", 'Series-wide cancellation preserves historical paid occurrence statuses.' );
 compat_has( $billing, "i.status IN ('issued','part_paid','paid','overdue')", 'Cancellation reconciliation credits overdue as well as current invoices.' );
 compat_has( $ledger, "array( 'issued', 'part_paid', 'overdue' )", 'Unpaid overdue invoices remain explicitly voidable.' );
-compat_has( $admin, 'get_active_booking_allocation', 'Billing-relevant occurrence edits cannot overwrite an active invoice allocation.' );
+compat_has( $admin, 'has_financial_history', 'Billing-relevant occurrence edits cannot overwrite any occurrence with financial history.' );
 compat_has( $admin, 'issued invoice details cannot be overwritten', 'Blocked amendments give administrators a safe credit-and-replace workflow.' );
 
 foreach ( array( '/admin/series', '/approve', '/billing', '/state', '/admin/invoices', '/payments' ) as $route ) compat_has( $rest, $route, "REST API exposes typed {$route} coverage." );
@@ -52,9 +52,12 @@ compat_has( $analytics, '$invoice_collected_minor', 'Financial analytics include
 compat_has( $accounting, 'normalise_records', 'Accounting export normalises both domains.' );
 compat_has( $accounting, 'SELECT DISTINCT booking_ref', 'Accounting export excludes every historically allocated booking.' );
 compat_has( $accounting, 'line_total_minor', 'Accounting export uses immutable invoice lines.' );
+compat_has( $accounting, "'SC' : 'SI'", 'Sage exports distinguish sales credits from sales invoices.' );
+compat_has( $accounting, "'Credit Memo' : 'Invoice'", 'QuickBooks exports distinguish credit memos from invoices.' );
 
 foreach ( array( 'MBS_SERIES_TABLE', 'MBS_INVOICE_TABLE', 'MBS_PAYMENT_TRANSACTION_TABLE' ) as $constant ) compat_has( $bookings, $constant, "GDPR handling covers {$constant}." );
 compat_has( $bookings, "'gdpr_erased' => true", 'Payment metadata is erased without deleting the financial ledger.' );
 foreach ( array( 'mathlin_booking_series', 'mathlin_invoices', 'mathlin_invoice_items', 'mathlin_payment_transactions', 'mathlin_billing_allocations' ) as $table ) compat_has( $uninstall, $table, "Uninstall removes {$table}." );
+compat_has( $uninstall, 'mathlin_payment_reservations', 'Uninstall removes the durable checkout-reservation table.' );
 
 echo "OK: {$checks} compatibility, REST/MCP, reporting and privacy assertions passed.\n";

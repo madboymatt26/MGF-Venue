@@ -27,6 +27,7 @@ WordPress plugin using custom database tables (not custom post types). No extern
 | `wp_mathlin_invoices` | Immutable consolidated invoice/credit documents; money is integer minor units |
 | `wp_mathlin_invoice_items` | Immutable invoice charge/credit lines and occurrence snapshots |
 | `wp_mathlin_payment_transactions` | Idempotent payment/refund ledger |
+| `wp_mathlin_payment_reservations` | Versioned invoice/order checkout ownership and reconciliation state |
 | `wp_mathlin_billing_allocations` | Canonical active/historic occurrence-to-invoice allocation |
 
 ### WordPress Options (wp_options)
@@ -546,15 +547,15 @@ File: `includes/class-woo-ux.php`
 
 ## Recurring-Series and Consolidated-Billing Contracts (v3.21.0)
 
-### Remediated invariants (schema 6)
+### Remediated invariants (schema 7)
 
-- An invoice has at most one active Woo checkout claim for its outstanding balance. Claims bind to order IDs, expire/release safely, and remain in a visible reconciliation state when an external capture cannot be written internally.
-- Payability is centralized for issued, part-paid, and overdue positive balances. Refunds use `woocommerce_order_refunded`, carry deterministic booking allocations, and do not reopen unaffected settled occurrences.
+- An invoice has exactly one versioned reservation row and at most one authoritative Woo order owner for its outstanding balance. Only unbound active claims expire; bound/captured/reconciliation claims cannot be replaced. Every mutation checks token, invoice, order, state and version.
+- Payability is centralized for issued, part-paid, and overdue positive balances. Refunds use `woocommerce_order_refunded`, link to the original payment, carry cumulative deterministic booking allocations, and do not reopen unaffected settled occurrences.
 - Recurring creation and cancellation plus required credits share database transactions. Email, Home Assistant, and other irreversible work follows commit.
 - Booking-domain mutation and deletion reject any occurrence with invoice items, allocations, or transactions. Closed-period additions use linked supplemental invoices.
 - Catch-up uses starvation-free keyset pagination. Financial and REST idempotency keys conflict on a different canonical operation, target, or payload.
-- Legacy registration means eligible, not adopted. Explicit adoption records timestamp, administrator, schema version/state, and clears incomplete metadata.
-- Migration state is running, failed, or complete; verification failure retains the prior version and produces an administrator notice.
+- Legacy registration means eligible, not adopted. Registration atomically establishes a permanent occurrence-level billing exclusion for paid, deposit-paid, cancelled and archived history. Explicit adoption records timestamp, administrator and schema version/state without clearing that baseline.
+- Migration state is running, failed, or complete. A connection-owned database advisory lock serializes workers; every runtime table/column/index and transactional engine is verified. Failure retains the prior version and produces an administrator notice.
 
 - Occurrence rows remain authoritative for availability, calendar, Home
   Assistant, heating/access control and occurrence-level changes.
@@ -572,12 +573,24 @@ File: `includes/class-woo-ux.php`
   `MBS_Money`, `MBS_Billing_Ledger` or invoice-payment methods.
 - Issued invoice/item data is immutable. Use void, credit and additive payment
   or refund transactions; never delete issued documents or rewrite history.
-- A billing-relevant edit is rejected while the occurrence has an active
-  invoice allocation. Cancel it through the recurring-series service (which
-  creates an immutable credit and releases the allocation), then create the
-  corrected replacement. Series-wide cancellation preserves past paid rows.
+- A billing-relevant edit or hard delete is rejected whenever the occurrence
+  has invoice items, allocations or transactions, including released/credited
+  history. Cancel it through the recurring-series service (which creates an
+  immutable credit), then create an explicit corrected replacement.
 - `mathlin_billing_allocations.active_booking_ref` is the canonical uniqueness
   guard preventing an occurrence from being actively charged twice.
+- `mathlin_payment_reservations.invoice_owner` and `order_owner` are the SQL
+  uniqueness guards for checkout ownership. External gateways must still
+  provide provider-side idempotent capture; chargebacks are visible only when
+  the gateway maps them to WooCommerce refunds/hooks.
+- Financial reporting bases: legacy billed/collected values use occurrence
+  service date because legacy rows lack invoice/payment timestamps; first-class
+  invoices/credits use issue date; payments/refunds use transaction date;
+  outstanding is a current all-date debtor balance. UI labels must preserve
+  those distinctions.
+- The Docker integration harness is authoritative for real MariaDB/Woo/process
+  behavior and the PHP 7.4/8.0/8.2 matrix. Local fake-database and source tests
+  are not substitutes; do not claim the harness passed unless it was run.
 - Online and offline payments operate at invoice level. Only occurrences on a
   fully settled invoice become `paid` for access gating; uninvoiced future
   occurrences stay `confirmed`.

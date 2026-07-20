@@ -1,7 +1,7 @@
 # MGF Venue admin parity
 
 Version 3.21.0 was audited against every MGF Venue WordPress admin menu page,
-all 42 privileged `wp_ajax_mbs_*` hooks, the public booking form operations and
+all 43 privileged `wp_ajax_mbs_*` hooks, the public booking form operations and
 the MCP tool schemas. The static parity smoke test now fails whenever a future
 privileged admin AJAX hook is not represented in the closed REST action map.
 

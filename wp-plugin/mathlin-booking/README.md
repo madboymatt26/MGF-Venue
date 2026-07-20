@@ -41,6 +41,42 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 - Accounting exports and financial analytics combine invoice-ledger data with
   only unallocated legacy bookings, preventing double counting. GDPR and
   uninstall handling cover every added table.
+- Schema 7 replaces dynamic option claims with a versioned InnoDB payment-
+  reservation table. Invoice and order ownership are unique, transitions use
+  conditional compare-and-swap updates, bound claims do not expire, callbacks
+  re-prove ownership, and reconciliation requires evidence of the ledger
+  payment or a full WooCommerce refund. Administrators can safely retry ledger
+  recording or confirm a verified refund.
+- Legacy registration atomically marks every already-paid, deposit-paid,
+  cancelled or archived occurrence as permanently excluded from consolidated
+  billing. Adoption never clears that occurrence-level baseline.
+- Woo refunds link to their original payment and maintain cumulative refunded
+  minor units on both payment and occurrence allocations. Ledger, allocation,
+  occurrence and invoice changes commit together; refund-before-payment is
+  retained for retry after the payment callback.
+- Compatibility Scout mutations reject first-class/non-Scout series and
+  financially documented rows. Migration uses a database advisory lock,
+  verifies all runtime schema objects and InnoDB engines, and retains the old
+  schema marker on failure.
+- Accounting CSVs distinguish invoice/credit types and signs. Analytics labels
+  legacy service-date, invoice issue-date, transaction-date and current-balance
+  bases explicitly instead of presenting them as one unexplained FY basis.
+
+### Verification boundary for schema 7
+
+The repository includes `tests/integration/docker-compose.yml` with pinned
+WordPress, WooCommerce and MariaDB, separate-process reservation workers, a
+deterministic no-money gateway, real Woo object/hook scenarios, and PHP
+7.4/8.0/8.2 jobs. These container tests must pass before staging. They were not
+executed on the remediation workstation because Docker and WP-CLI were not
+available. Local PHP tests use mocks/fake databases and do not prove real
+MariaDB concurrency, accounting-package import, provider-side idempotency or
+gateway chargeback webhooks.
+
+Duplicate capture prevention is bounded by the plugin's checkout ownership
+protocol. A production gateway must also provide idempotent capture semantics
+for repeated provider requests/callbacks; the plugin cannot guarantee behavior
+inside an arbitrary external payment provider.
 
 ---
 
@@ -103,12 +139,12 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 - Booking form with real-time cost calculation (tier-aware)
 - Multi-day and full-day booking support
 - Recurring weekly bookings (up to one calendar year inclusive, maximum 53 dates)
-- Recurring billing safety: one expiring Woo checkout reservation per invoice balance; captured-but-unrecorded payments remain visibly flagged for reconciliation.
+- Recurring billing safety: one durable, versioned Woo order owner per invoice balance; captured-but-unrecorded payments remain visibly flagged with evidence-based administrator reconciliation.
 - Issued, part-paid, and overdue positive-balance invoices share one payable rule. Partial refunds use the canonical Woo refund hook and affect only their allocated occurrences.
 - Series creation and cancellation/credit reconciliation are transactional; financially documented occurrences require credit-and-replace rather than direct edit or deletion.
 - Late additions to an issued period receive a linked deterministic supplemental invoice, and catch-up keyset-paginates every eligible series beyond 100.
 - Financial reporting separately defines invoiced, gross collected, outstanding, credited/refunded, and net collected. Idempotency keys are bound to operation, target, and payload.
-- Schema 6 upgrades use an expiring lock, staged health state, and explicit table/column/index verification before advancing the version marker.
+- Schema 7 upgrades use a connection-owned database advisory lock, staged health state, full runtime table/column/index verification and InnoDB enforcement before advancing the version marker.
 - Conflict detection prevents double bookings (including parent/child space bundling)
 - Configurable minimum notice period
 - Custom form fields (admin-configurable)
