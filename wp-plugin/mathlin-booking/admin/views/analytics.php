@@ -74,6 +74,10 @@ $unpaid_count   = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$
 $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
 $transaction_table = $wpdb->prefix . MBS_PAYMENT_TRANSACTION_TABLE;
 $allocation_table = $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE;
+// Financial reporting bases are intentionally explicit. Legacy rows have no
+// invoice/payment timestamps, so their billed and collected values use service
+// date (booking_date). First-class invoices use issue date; payments/refunds
+// use transaction date. Outstanding is a current balance across all dates.
 $legacy_billed = (float) $wpdb->get_var( $wpdb->prepare(
     "SELECT COALESCE(SUM(b.amount), 0) FROM {$table} b
      WHERE b.status IN ('confirmed','deposit_paid','paid') AND b.scout_use = 0
@@ -323,12 +327,12 @@ foreach ( $by_tier as $t ) {
 }
 
 // Defined ledger-backed metrics; outstanding is a current balance, not invoiced minus cash by issue year.
-$fin_labels = array( 'Invoiced', 'Net collected', 'Outstanding' );
+$fin_labels = array( 'Invoiced in FY', 'Net cash in FY', 'Outstanding now' );
 $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), round( $outstanding_total, 2 ) );
 ?>
 <div class="wrap mbs-admin">
     <h1><?php echo MBS_Admin::brand_mark(); ?>MGF Venue – Analytics</h1>
-    <p class="nms-muted">Financial Year: <?php echo esc_html( $fy_label ); ?></p>
+    <p class="nms-muted">Financial Year: <?php echo esc_html( $fy_label ); ?>. Legacy values use booking/service date; consolidated invoices use issue date; payments and refunds use transaction date. Outstanding is the current balance across all dates.</p>
 
     <!-- Summary cards -->
     <div class="nms-stats-row" style="margin-bottom:2rem;">
@@ -338,7 +342,7 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
         </div>
         <div class="nms-stat-card nms-stat-revenue">
             <div class="nms-stat-val">&pound;<?php echo number_format( $revenue_fy, 0 ); ?></div>
-            <div class="nms-stat-label">Invoiced This FY
+            <div class="nms-stat-label">Invoiced This FY (service/issue date)
                 <?php if ( $yoy_pct !== null ) : ?>
                     <span style="color:<?php echo $yoy_pct >= 0 ? '#2ecc71' : '#e74c3c'; ?>;font-weight:700;">
                         <?php echo $yoy_pct >= 0 ? '▲' : '▼'; ?> <?php echo esc_html( abs( $yoy_pct ) ); ?>%
@@ -348,7 +352,7 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
         </div>
         <div class="nms-stat-card">
             <div class="nms-stat-val">&pound;<?php echo number_format( $revenue_prev, 0 ); ?></div>
-            <div class="nms-stat-label">Invoiced Last FY</div>
+            <div class="nms-stat-label">Invoiced Last FY (service/issue date)</div>
         </div>
         <div class="nms-stat-card">
             <div class="nms-stat-val">&pound;<?php echo number_format( $avg_value, 0 ); ?></div>
@@ -365,7 +369,7 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
     <div class="nms-stats-row" style="margin-bottom:2rem;">
         <div class="nms-stat-card nms-stat-revenue">
             <div class="nms-stat-val">&pound;<?php echo number_format( $collected_fy, 0 ); ?></div>
-            <div class="nms-stat-label">Collected This FY (gross payments)</div>
+            <div class="nms-stat-label">Collected This FY (legacy service date / ledger transaction date)</div>
         </div>
         <div class="nms-stat-card nms-stat-pending">
             <div class="nms-stat-val">&pound;<?php echo number_format( $outstanding_total, 0 ); ?></div>
@@ -373,11 +377,11 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
         </div>
         <div class="nms-stat-card">
             <div class="nms-stat-val">&pound;<?php echo number_format( $credited_refunded_fy, 0 ); ?></div>
-            <div class="nms-stat-label">Credited / Refunded This FY</div>
+            <div class="nms-stat-label">Credited / Refunded This FY (issue / transaction date)</div>
         </div>
         <div class="nms-stat-card nms-stat-revenue">
             <div class="nms-stat-val">&pound;<?php echo number_format( $net_collected_fy, 0 ); ?></div>
-            <div class="nms-stat-label">Net Collected This FY (<?php echo esc_html( $collection_rate ); ?>%)</div>
+            <div class="nms-stat-label">Net Cash This FY (<?php echo esc_html( $collection_rate ); ?>%; date bases above)</div>
         </div>
         <div class="nms-stat-card">
             <div class="nms-stat-val">&pound;<?php echo number_format( $deposits_held, 0 ); ?></div>
@@ -452,9 +456,9 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
             </div>
         </div>
 
-        <!-- Invoiced vs Net Collected vs Outstanding -->
+        <!-- Measures with explicitly different date bases -->
         <div class="nms-card">
-            <div class="nms-card-header"><h2>💷 Invoiced vs Net Collected (FY)</h2></div>
+            <div class="nms-card-header"><h2>💷 Financial Measures (see date-basis note)</h2></div>
             <div style="padding:1.5rem;">
                 <canvas id="mbs-chart-financial" height="250"></canvas>
             </div>
@@ -693,7 +697,7 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
         options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
     });
 
-    // Billed vs Collected vs Outstanding
+    // Financial measures: issue/service FY, transaction/service FY, and current balance.
     new Chart(document.getElementById('mbs-chart-financial'), {
         type: 'bar',
         data: {

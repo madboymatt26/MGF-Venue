@@ -952,6 +952,7 @@ class MBS_Rest_API {
             'update_series_status'  => array( 'MBS_Admin', 'ajax_update_series_status' ),
             'resend_series_confirmation' => array( 'MBS_Admin', 'ajax_resend_series_confirmation' ),
             'record_invoice_manual_payment' => array( 'MBS_Admin', 'ajax_record_invoice_manual_payment' ),
+            'resolve_invoice_reconciliation' => array( 'MBS_Admin', 'ajax_resolve_invoice_reconciliation' ),
             'configure_series_billing' => array( 'MBS_Admin', 'ajax_configure_series_billing' ),
             'pause_series'          => array( 'MBS_Admin', 'ajax_pause_series' ),
             'catch_up_series_billing' => array( 'MBS_Admin', 'ajax_catch_up_series_billing' ),
@@ -991,7 +992,7 @@ class MBS_Rest_API {
             ) );
         } else {
             $admin_only_actions = array(
-                'delete_booking', 'save_settings', 'test_ha', 'check_update',
+                'delete_booking', 'resolve_invoice_reconciliation', 'save_settings', 'test_ha', 'check_update',
                 'delete_scout_series', 'save_email_settings', 'save_custom_fields',
                 'save_osm_settings', 'test_osm_connection', 'osm_get_sections',
                 'export_csv', 'export_accounting',

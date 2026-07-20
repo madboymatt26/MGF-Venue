@@ -511,7 +511,7 @@ class MBS_Bookings {
         }
 
         // SEC-001: Use transaction with row locking to prevent race condition double bookings
-        if ( $manage_transaction ) $wpdb->query( 'START TRANSACTION' );
+        if ( $manage_transaction && $wpdb->query( 'START TRANSACTION' ) === false ) return new WP_Error( 'transaction_start_failed', 'Could not start booking creation.' );
 
         $space_val = sanitize_text_field( $data['space'] );
         $spaces_to_lock = array_unique( array_merge( array( $space_val ), self::get_related_spaces( $space_val ) ) );
@@ -560,7 +560,7 @@ class MBS_Bookings {
             return new WP_Error( 'db_error', 'Could not save booking.' );
         }
 
-        if ( $manage_transaction ) $wpdb->query( 'COMMIT' );
+        if ( $manage_transaction && $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'transaction_commit_failed', 'Could not commit booking creation.' ); }
 
         // Audit log
         MBS_Audit_Log::log( $ref, 'created', 'Booking created by ' . sanitize_text_field( $data['name'] ) . ' for ' . sanitize_text_field( $data['space'] ) . ' on ' . sanitize_text_field( $data['booking_date'] ), 0 );
@@ -758,6 +758,22 @@ class MBS_Bookings {
         return (bool) $exists;
     }
 
+    /** Compatibility series actions are only for genuinely legacy Scout rows. */
+    public static function is_legacy_scout_series( $series_id ) {
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_TABLE;
+        $series = MBS_Series::get( sanitize_text_field( $series_id ) );
+        if ( $series ) {
+            $registered_legacy_scout = ! empty( $series->metadata_incomplete ) && ! empty( $series->scout_use ) && $series->billing_treatment === 'none';
+            if ( ! $registered_legacy_scout ) return false;
+        }
+        $counts = $wpdb->get_row( $wpdb->prepare(
+            "SELECT COUNT(*) AS total, SUM(CASE WHEN scout_use = 0 THEN 1 ELSE 0 END) AS non_scout FROM {$table} WHERE series_id = %s",
+            sanitize_text_field( $series_id )
+        ) );
+        return $counts && (int) $counts->total > 0 && (int) $counts->non_scout === 0;
+    }
+
     // ── Conflict Detection ─────────────────────────────────────────────────────
 
     /**
@@ -904,7 +920,7 @@ class MBS_Bookings {
         $series_id  = self::generate_series_id();
         $refs       = array();
         $occurrences = array();
-        $wpdb->query( 'START TRANSACTION' );
+        if ( $wpdb->query( 'START TRANSACTION' ) === false ) return new WP_Error( 'transaction_start_failed', 'Could not start recurring booking creation.' );
 
         foreach ( $dates as $date_str ) {
 
@@ -1038,7 +1054,7 @@ class MBS_Bookings {
                 )
             );
         }
-        $wpdb->query( 'COMMIT' );
+        if ( $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'transaction_commit_failed', 'Could not commit recurring booking creation.' ); }
 
         $skipped = array_values( array_map(
             static function ( $occurrence ) { return $occurrence['date']; },
@@ -1075,6 +1091,10 @@ class MBS_Bookings {
      */
     public static function update_series_status( $series_id, $status ) {
         global $wpdb;
+        $registered = MBS_Series::get( sanitize_text_field( $series_id ) );
+        if ( $registered && ( empty( $registered->metadata_incomplete ) || $registered->billing_treatment !== 'legacy_per_occurrence' ) ) {
+            return new WP_Error( 'canonical_series_required', 'This first-class series must use the versioned series service.' );
+        }
         $table   = $wpdb->prefix . MBS_TABLE;
         $allowed = array( 'pending', 'confirmed', 'deposit_paid', 'cancelled', 'archived', 'paid' );
         if ( ! in_array( $status, $allowed ) ) return false;
@@ -1118,6 +1138,7 @@ class MBS_Bookings {
      */
     public static function cancel_series_future( $series_id ) {
         global $wpdb;
+        if ( ! self::is_legacy_scout_series( $series_id ) ) return new WP_Error( 'canonical_series_required', 'This action is limited to legacy Scout series; use the versioned series cancellation service.' );
         $table = $wpdb->prefix . MBS_TABLE;
         $today = wp_date( 'Y-m-d' );
 
@@ -1168,6 +1189,7 @@ class MBS_Bookings {
      */
     public static function update_series_future( $series_id, $fields ) {
         global $wpdb;
+        if ( ! self::is_legacy_scout_series( $series_id ) ) return new WP_Error( 'canonical_series_required', 'This action is limited to legacy Scout series; use the versioned series service.' );
         $table = $wpdb->prefix . MBS_TABLE;
         $today = wp_date( 'Y-m-d' );
 
@@ -1277,6 +1299,7 @@ class MBS_Bookings {
      */
     public static function extend_series( $series_id, $new_end ) {
         global $wpdb;
+        if ( ! self::is_legacy_scout_series( $series_id ) ) return new WP_Error( 'canonical_series_required', 'This action is limited to legacy Scout series; use the versioned series extension service.' );
         $table = $wpdb->prefix . MBS_TABLE;
 
         $bookings = self::get_series( $series_id );
@@ -1313,7 +1336,9 @@ class MBS_Bookings {
             $date_str = wp_date( 'Y-m-d', $d );
 
             // Transaction + row lock: prevent a TOCTOU race with a public booking.
-            $wpdb->query( 'START TRANSACTION' );
+            if ( $wpdb->query( 'START TRANSACTION' ) === false ) {
+                return new WP_Error( 'transaction_start_failed', 'Could not start the series-extension transaction.' );
+            }
             $wpdb->query( $wpdb->prepare(
                 "SELECT id FROM {$table} WHERE space = %s AND booking_date = %s AND status NOT IN ('cancelled','archived') FOR UPDATE",
                 $template->space, $date_str
@@ -1340,7 +1365,7 @@ class MBS_Bookings {
             );
 
             $ref = self::generate_ref();
-            $wpdb->insert( $table, array(
+            $inserted = $wpdb->insert( $table, array(
                 'ref'              => $ref,
                 'status'           => $template->status,
                 'name'             => $template->name,
@@ -1365,7 +1390,19 @@ class MBS_Bookings {
                 'series_id'        => $series_id,
                 'modification_token' => wp_generate_password( 32, false ),
             ) );
-            $wpdb->query( 'COMMIT' );
+            if ( $inserted === false ) {
+                $wpdb->query( 'ROLLBACK' );
+                return new WP_Error( 'series_extension_failed', 'Could not create an extended occurrence; no further occurrences were saved.' );
+            }
+            $linked = $wpdb->get_var( $wpdb->prepare( "SELECT series_id FROM {$table} WHERE ref = %s", $ref ) );
+            if ( $linked !== $series_id ) {
+                $wpdb->query( 'ROLLBACK' );
+                return new WP_Error( 'series_extension_link_failed', 'Could not verify the extended occurrence belongs to this series.' );
+            }
+            if ( $wpdb->query( 'COMMIT' ) === false ) {
+                $wpdb->query( 'ROLLBACK' );
+                return new WP_Error( 'transaction_commit_failed', 'Could not commit the series extension.' );
+            }
 
             // Keep Home Assistant in step for confirmed occurrences.
             if ( $template->status === 'confirmed' ) {
@@ -1405,6 +1442,7 @@ class MBS_Bookings {
      */
     public static function reopen_series_future( $series_id ) {
         global $wpdb;
+        if ( ! self::is_legacy_scout_series( $series_id ) ) return new WP_Error( 'canonical_series_required', 'This action is limited to legacy Scout series.' );
         $table = $wpdb->prefix . MBS_TABLE;
         $today = wp_date( 'Y-m-d' );
 
@@ -1414,6 +1452,9 @@ class MBS_Bookings {
             $series_id,
             $today
         ) );
+        foreach ( $affected as $booking ) {
+            if ( self::has_financial_history( $booking->ref ) ) return new WP_Error( 'financial_replacement_required', 'A credited or refunded occurrence cannot be reopened through the legacy action; create an explicit replacement occurrence.' );
+        }
 
         $result = $wpdb->query( $wpdb->prepare(
             "UPDATE {$table} SET status = 'confirmed'
@@ -1456,6 +1497,7 @@ class MBS_Bookings {
      */
     public static function delete_series( $series_id, $scope = 'all' ) {
         global $wpdb;
+        if ( ! self::is_legacy_scout_series( $series_id ) ) return new WP_Error( 'canonical_series_required', 'This action is limited to legacy Scout series.' );
         $table = $wpdb->prefix . MBS_TABLE;
         $today = wp_date( 'Y-m-d' );
         $future_only = ( $scope === 'future' );

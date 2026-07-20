@@ -27,6 +27,7 @@ class MBS_Admin {
         add_action( 'wp_ajax_mbs_update_series_status', array( $this, 'ajax_update_series_status' ) );
         add_action( 'wp_ajax_mbs_resend_series_confirmation', array( $this, 'ajax_resend_series_confirmation' ) );
         add_action( 'wp_ajax_mbs_record_invoice_manual_payment', array( $this, 'ajax_record_invoice_manual_payment' ) );
+        add_action( 'wp_ajax_mbs_resolve_invoice_reconciliation', array( $this, 'ajax_resolve_invoice_reconciliation' ) );
         add_action( 'wp_ajax_mbs_configure_series_billing', array( $this, 'ajax_configure_series_billing' ) );
         add_action( 'wp_ajax_mbs_pause_series', array( $this, 'ajax_pause_series' ) );
         add_action( 'wp_ajax_mbs_catch_up_series_billing', array( $this, 'ajax_catch_up_series_billing' ) );
@@ -503,7 +504,7 @@ class MBS_Admin {
 
             // M-1: Wrap conflict check + insert in a transaction with row locking to
             // prevent a TOCTOU race where a public booking lands between check and insert.
-            $wpdb->query( 'START TRANSACTION' );
+            if ( $wpdb->query( 'START TRANSACTION' ) === false ) wp_send_json_error( 'Could not start recurring booking creation.', 500 );
             $wpdb->query( $wpdb->prepare(
                 "SELECT id FROM {$table} WHERE space = %s AND booking_date = %s AND status NOT IN ('cancelled','archived') FOR UPDATE",
                 $space, $date_str
@@ -549,7 +550,7 @@ class MBS_Admin {
                 'series_id'        => $series_id,
                 'modification_token' => wp_generate_password( 32, false ),
             ) );
-            $wpdb->query( 'COMMIT' );
+            if ( $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); wp_send_json_error( 'Could not commit recurring booking creation.', 500 ); }
             $created++;
         }
 
@@ -998,6 +999,41 @@ class MBS_Admin {
         ) );
     }
 
+    /** Resolve a captured-payment exception only after an administrator verifies the ledger or refund. */
+    public function ajax_resolve_invoice_reconciliation() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'Only an administrator can resolve payment reconciliation.', 403 );
+
+        $invoice_ref = sanitize_text_field( $_POST['invoice_ref'] ?? '' );
+        $reservation_ref = sanitize_text_field( $_POST['reservation_ref'] ?? '' );
+        $order_id = absint( $_POST['order_id'] ?? 0 );
+        $resolution = sanitize_key( $_POST['resolution'] ?? '' );
+        if ( ! $invoice_ref || ! $reservation_ref || ! $order_id ) wp_send_json_error( 'Invoice, reservation and order are required.', 400 );
+
+        $requested_resolution = $resolution;
+        if ( $resolution === 'record_payment' ) {
+            $order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
+            if ( ! $order ) wp_send_json_error( 'The WooCommerce order no longer exists.', 400 );
+            $recorded = MBS_Invoice_Payment::record_gateway_payment( $invoice_ref, $order->get_total(), $order_id, $reservation_ref );
+            if ( is_wp_error( $recorded ) ) wp_send_json_error( $recorded->get_error_message(), 409 );
+            $resolution = 'ledger_recorded';
+        }
+
+        $resolved = MBS_Invoice_Reservation::resolve( $invoice_ref, $reservation_ref, $order_id, $resolution );
+        if ( is_wp_error( $resolved ) ) wp_send_json_error( $resolved->get_error_message(), 400 );
+        if ( ! $resolved ) wp_send_json_error( 'The reconciliation state changed; refresh and verify it again.', 409 );
+
+        $order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
+        if ( $order ) {
+            $order->delete_meta_data( '_mbs_invoice_reconciliation_required' );
+            $order->update_meta_data( '_mbs_invoice_reconciliation_resolution', $resolution );
+            $order->save();
+            $order->add_order_note( 'Invoice payment reconciliation resolved by administrator: ' . $resolution . '.' );
+        }
+        MBS_Audit_Log::log( $invoice_ref, 'payment_reconciliation_resolved', 'Order #' . $order_id . ' resolved as ' . $resolution . ' by administrator.' );
+        wp_send_json_success( array( 'invoice_ref' => $invoice_ref, 'order_id' => $order_id, 'status' => $requested_resolution ) );
+    }
+
     public function ajax_configure_series_billing() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
         if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to change series billing.', 403 );
@@ -1075,7 +1111,9 @@ class MBS_Admin {
         if ( ! $series_id ) wp_send_json_error( 'No series ID provided.' );
 
         $cancelled = MBS_Bookings::cancel_series_future( $series_id );
-        if ( $cancelled === false ) {
+        if ( is_wp_error( $cancelled ) ) {
+            wp_send_json_error( $cancelled->get_error_message(), 409 );
+        } elseif ( $cancelled === false ) {
             wp_send_json_error( 'Database error cancelling the series.' );
         }
 
@@ -1171,7 +1209,9 @@ class MBS_Admin {
         if ( ! $series_id ) wp_send_json_error( 'No series ID provided.' );
 
         $reopened = MBS_Bookings::reopen_series_future( $series_id );
-        if ( $reopened === false ) {
+        if ( is_wp_error( $reopened ) ) {
+            wp_send_json_error( $reopened->get_error_message(), 409 );
+        } elseif ( $reopened === false ) {
             wp_send_json_error( 'Database error reopening the series.' );
         }
 
@@ -1199,7 +1239,9 @@ class MBS_Admin {
         $scope = ( ( $_POST['scope'] ?? 'all' ) === 'future' ) ? 'future' : 'all';
 
         $deleted = MBS_Bookings::delete_series( $series_id, $scope );
-        if ( $deleted === false ) {
+        if ( is_wp_error( $deleted ) ) {
+            wp_send_json_error( $deleted->get_error_message(), 409 );
+        } elseif ( $deleted === false ) {
             wp_send_json_error( 'Database error deleting the series.' );
         }
 
@@ -1345,8 +1387,7 @@ class MBS_Admin {
             $scout_use !== (bool) $booking->scout_use ||
             abs( $old_amount - $new_amount ) > 0.009;
         if ( $billing_fields_changed ) {
-            $allocation = MBS_Billing_Ledger::get_active_booking_allocation( $ref );
-            if ( $allocation ) {
+        if ( MBS_Bookings::has_financial_history( $ref ) ) {
                 wp_send_json_error(
                     sprintf(
                         'This occurrence is already included on invoice %s. Cancel it through the recurring-series controls so the invoice is credited, then add a replacement occurrence; issued invoice details cannot be overwritten.',

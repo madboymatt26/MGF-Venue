@@ -9,6 +9,10 @@ if ( ! defined( 'ABSPATH' ) ) exit;
  */
 class MBS_Accounting_Export {
 
+    private static function write_csv( $output, $fields ) {
+        fputcsv( $output, $fields, ',', '"', '\\' );
+    }
+
     public function init() {
         add_action( 'wp_ajax_mbs_export_accounting', array( $this, 'handle_export' ) );
     }
@@ -77,6 +81,7 @@ class MBS_Accounting_Export {
                 'total_decimal' => number_format( (float) $booking->amount, 2, '.', '' ),
                 'description' => $booking->space . ' hire – ' . wp_date( 'j M Y', strtotime( $booking->booking_date ) ),
                 'booking_ref' => $booking->ref, 'purpose' => $booking->purpose,
+                'document_type' => 'invoice',
             );
         }
 
@@ -96,6 +101,7 @@ class MBS_Accounting_Export {
                 'due_date' => $row->due_at ?: $row->issued_at, 'total_decimal' => MBS_Money::decimal( (int) $row->line_total_minor ),
                 'description' => $row->description, 'booking_ref' => $row->booking_ref ?: $row->item_ref,
                 'purpose' => $row->document_type === 'credit_note' ? 'Credit note' : 'Venue hire',
+                'document_type' => $row->document_type,
             );
         }
         return $records;
@@ -106,19 +112,23 @@ class MBS_Accounting_Export {
      */
     private static function export_xero( $output, $records ) {
 
-        fputcsv( $output, array(
+        self::write_csv( $output, array(
             '*ContactName', 'EmailAddress', '*InvoiceNumber', '*InvoiceDate',
             '*DueDate', 'Total', 'Description', 'Quantity', 'UnitAmount',
             'AccountCode', '*Currency', 'TaxType',
         ) );
 
         foreach ( $records as $record ) {
-            fputcsv( $output, array(
+            // Xero's invoice-shaped CSV represents a credit as a negative line.
+            $amount = $record->document_type === 'credit_note'
+                ? '-' . ltrim( $record->total_decimal, '-' )
+                : ltrim( $record->total_decimal, '-' );
+            self::write_csv( $output, array(
                 $record->contact_name, $record->email, $record->invoice_number,
                 date( 'd/m/Y', strtotime( $record->invoice_date ) ), date( 'd/m/Y', strtotime( $record->due_date ) ),
-                $record->total_decimal, $record->description,
+                $amount, $record->description,
                 1,
-                $record->total_decimal,
+                $amount,
                 '200', // Sales account code
                 'GBP',
                 'No VAT',
@@ -131,20 +141,21 @@ class MBS_Accounting_Export {
      */
     private static function export_sage( $output, $records ) {
 
-        fputcsv( $output, array(
+        self::write_csv( $output, array(
             'Type', 'Account Reference', 'Nominal A/C Ref', 'Date',
             'Reference', 'Details', 'Net Amount', 'Tax Code', 'Tax Amount',
         ) );
 
         foreach ( $records as $record ) {
-            fputcsv( $output, array(
-                'SI', // Sales Invoice
+            $is_credit = $record->document_type === 'credit_note';
+            self::write_csv( $output, array(
+                $is_credit ? 'SC' : 'SI', // Sales Credit / Sales Invoice
                 $record->invoice_number,
                 '4000', // Sales nominal code
                 date( 'd/m/Y', strtotime( $record->invoice_date ) ),
                 $record->booking_ref,
                 $record->description,
-                $record->total_decimal,
+                ltrim( $record->total_decimal, '-' ),
                 'T0', // Zero-rated (charity)
                 '0.00',
             ) );
@@ -156,14 +167,16 @@ class MBS_Accounting_Export {
      */
     private static function export_quickbooks( $output, $records ) {
 
-        fputcsv( $output, array(
-            'InvoiceNo', 'Customer', 'InvoiceDate', 'DueDate',
+        self::write_csv( $output, array(
+            'TransactionType', 'InvoiceNo', 'Customer', 'InvoiceDate', 'DueDate',
             'Item', 'ItemDescription', 'ItemQuantity', 'ItemRate',
             'ItemAmount', 'Memo',
         ) );
 
         foreach ( $records as $record ) {
-            fputcsv( $output, array(
+            $is_credit = $record->document_type === 'credit_note';
+            self::write_csv( $output, array(
+                $is_credit ? 'Credit Memo' : 'Invoice',
                 $record->invoice_number,
                 $record->contact_name,
                 date( 'm/d/Y', strtotime( $record->invoice_date ) ),
@@ -171,8 +184,8 @@ class MBS_Accounting_Export {
                 'Venue Hire',
                 $record->description,
                 1,
-                $record->total_decimal,
-                $record->total_decimal,
+                ltrim( $record->total_decimal, '-' ),
+                ltrim( $record->total_decimal, '-' ),
                 $record->purpose,
             ) );
         }
