@@ -49,6 +49,7 @@ function mbs_it_order( $invoice ) {
     if ( is_wp_error( $order ) ) throw new RuntimeException( $order->get_error_message() );
     $order->set_billing_email( 'financial@example.invalid' );
     $order->set_payment_method( 'mbs_test' );
+    $order->set_currency( $invoice->currency );
     $order->save();
     $minor = (int) $claim['amount_minor'];
     $decimal = MBS_Money::decimal( $minor );
