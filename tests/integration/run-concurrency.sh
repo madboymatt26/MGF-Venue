@@ -26,20 +26,25 @@ run_race() {
   if { [ "$code_a" -eq 0 ] && [ "$code_b" -eq 0 ]; } || { [ "$code_a" -ne 0 ] && [ "$code_b" -ne 0 ]; }; then
     echo "Expected exactly one successful worker; got A=$code_a B=$code_b" >&2
     cat "$log_a" "$log_b" >&2
-    exit 1
+    return 1
   fi
   $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/assert-reservation.php "$invoice_ref" "$order_a" "$order_b" --allow-root
   echo "OK: synchronised ${mode:-different-session} race produced one winner and one loser."
 }
 
-run_race INT-RES-DIFFERENT different different 1001 1002
-run_race INT-RES-SAME shared same 2001 2002
+audit_failed=0
+$compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/audit-regressions.php --allow-root || audit_failed=1
+$compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/audit-migration-regressions.php --allow-root || audit_failed=1
+run_race INT-RES-DIFFERENT different different 1001 1002 || audit_failed=1
+run_race INT-RES-SAME shared same 2001 2002 || audit_failed=1
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/reservation-state-machine.php --allow-root
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/woocommerce-callbacks.php --allow-root
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/financial-flows.php --allow-root
-$compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/audit-regressions.php --allow-root
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/legacy-adoption.php --allow-root
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/mutation-matrix.php --allow-root
-$compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/audit-migration-regressions.php --allow-root
 sh tests/integration/run-migrations.sh
 sh tests/integration/run-catch-up.sh
+if [ "$audit_failed" -ne 0 ]; then
+  echo "One or more adversarial regression scenarios failed." >&2
+  exit 1
+fi

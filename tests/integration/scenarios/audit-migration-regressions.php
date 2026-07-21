@@ -1,7 +1,11 @@
 <?php
 global $wpdb;
 
-function mbs_audit_migration_assert($condition,$message){if(!$condition)throw new RuntimeException($message);}
+$mbs_audit_migration_failures=array();
+function mbs_audit_migration_assert($condition,$message){
+    global $mbs_audit_migration_failures;
+    if(!$condition){$mbs_audit_migration_failures[]=$message;fwrite(STDERR,"AUDIT MIGRATION REGRESSION: {$message}\n");}
+}
 
 $booking_table=$wpdb->prefix.MBS_TABLE;
 $series_table=$wpdb->prefix.MBS_SERIES_TABLE;
@@ -61,4 +65,5 @@ mbs_audit_migration_assert(get_option('mbs_db_version')!=='3.21.0-schema-7-malfo
 $wpdb->query("ALTER TABLE {$reservation_table} DROP INDEX invoice_owner, ADD UNIQUE KEY invoice_owner (invoice_id)");
 $restored=MBS_Database::create_tables();
 if(is_wp_error($restored))throw new RuntimeException('Could not restore schema after semantic verification: '.$restored->get_error_message());
+if($mbs_audit_migration_failures)throw new RuntimeException(count($mbs_audit_migration_failures)." adversarial migration regression(s) failed:\n- ".implode("\n- ",$mbs_audit_migration_failures));
 echo "OK: registered legacy upgrade backfill and semantic schema verification passed.\n";
