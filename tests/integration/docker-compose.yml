@@ -27,6 +27,8 @@ services:
       WORDPRESS_DB_PASSWORD: wordpress-test-only
       WORDPRESS_DB_NAME: wordpress
       WORDPRESS_DEBUG: "1"
+      WORDPRESS_CONFIG_EXTRA: |
+        define( 'WP_ENVIRONMENT_TYPE', 'local' );
     ports:
       - "8088:80"
     volumes:
