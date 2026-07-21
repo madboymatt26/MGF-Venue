@@ -10,6 +10,9 @@ $lines=$messages|ForEach-Object{$_|ConvertTo-Json -Depth 20 -Compress}
 $responses=@($lines|& pwsh -NoLogo -NoProfile -File $server|ForEach-Object{$_|ConvertFrom-Json})
 $mutation=$responses|Where-Object{$_.id -eq 2}
 $read=$responses|Where-Object{$_.id -eq 3}
-if($null -eq $mutation -or $mutation.result.isError -ne $true){throw 'MCP compatibility mutation did not fail closed.'}
+if($null -eq $mutation -or $mutation.result.isError -ne $true){
+    $detail=$mutation|ConvertTo-Json -Depth 20 -Compress
+    throw "MCP compatibility mutation did not fail closed (response=${detail})."
+}
 if($null -eq $read -or $read.result.isError -ne $false -or $read.result.structuredContent.series.status -ne 'confirmed'){throw 'MCP compatibility attempt changed the first-class series.'}
 Write-Output 'MCP_LIVE_MUTATION_OK: authenticated MCP->REST->admin compatibility action failed closed and preserved the series.'
