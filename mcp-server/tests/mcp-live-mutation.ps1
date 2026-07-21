@@ -14,5 +14,8 @@ if($null -eq $mutation -or $mutation.result.isError -ne $true){
     $detail=$mutation|ConvertTo-Json -Depth 20 -Compress
     throw "MCP compatibility mutation did not fail closed (response=${detail})."
 }
-if($null -eq $read -or $read.result.isError -ne $false -or $read.result.structuredContent.series.status -ne 'confirmed'){throw 'MCP compatibility attempt changed the first-class series.'}
+if($null -eq $read -or $read.result.isError -ne $false -or $read.result.structuredContent.series.status -ne 'confirmed'){
+    $detail=$read|ConvertTo-Json -Depth 20 -Compress
+    throw "MCP compatibility attempt changed the first-class series (response=${detail})."
+}
 Write-Output 'MCP_LIVE_MUTATION_OK: authenticated MCP->REST->admin compatibility action failed closed and preserved the series.'
