@@ -9,7 +9,11 @@ $created='2026-01-01 00:00:00';
 $service=wp_date('Y-m-d',strtotime('+30 days'));
 
 function mbs_catchup_seed($series_ref,$booking_ref,$mode='monthly'){
-    global $wpdb,$series_table,$booking_table,$created,$service;
+    global $wpdb;
+    $series_table=$wpdb->prefix.MBS_SERIES_TABLE;
+    $booking_table=$wpdb->prefix.MBS_TABLE;
+    $created='2026-01-01 00:00:00';
+    $service=wp_date('Y-m-d',strtotime('+30 days'));
     $series_ok=$wpdb->insert($series_table,array(
         'series_ref'=>$series_ref,'status'=>'confirmed','version'=>1,'contact_name'=>'Catch-up Integration','contact_email'=>'catchup@example.invalid',
         'space'=>'Hall','attendees'=>1,'purpose'=>'Catch-up integration','start_date'=>$service,'repeat_until'=>$service,
