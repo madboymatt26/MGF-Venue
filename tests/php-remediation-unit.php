@@ -28,6 +28,7 @@ function add_option( $key, $value ) { global $mbs_test_options; if(isset($mbs_te
 function update_option( $key, $value ) { global $mbs_test_options; $mbs_test_options[$key]=$value;return true; }
 function delete_option( $key ) { global $mbs_test_options; unset($mbs_test_options[$key]);return true; }
 function wp_schedule_single_event() { return true; }
+function apply_filters( $hook, $value ) { return $value; }
 
 class MBS_Invoice_Payment {
     public static function is_payable( $invoice ) { return in_array( $invoice->status, array( 'issued', 'part_paid', 'overdue' ), true ) && $invoice->balance > 0; }

@@ -97,7 +97,8 @@ class MBS_Invoice_Reservation {
 	    private static function transition($invoice_ref,$reservation_ref,$order_id,$from,$to,$error){global $wpdb;$table=self::table();$r=self::get($invoice_ref);if(!$r||!hash_equals($r->reservation_ref,(string)$reservation_ref)||(int)$r->order_id!==(int)$order_id||!in_array($r->status,$from,true))return false;$states="'".implode("','",array_map('esc_sql',$from))."'";return $wpdb->query($wpdb->prepare("UPDATE {$table} SET status=%s,version=version+1,last_error=%s,updated_at=%s WHERE invoice_ref=%s AND reservation_ref=%s AND order_id=%d AND version=%d AND status IN ({$states})",$to,sanitize_text_field($error),self::utc_now(),$invoice_ref,$reservation_ref,(int)$order_id,(int)$r->version))===1;}
     private static function table(){global $wpdb;return $wpdb->prefix.MBS_PAYMENT_RESERVATION_TABLE;}
 	    private static function schedule_expiry($invoice_ref,$reservation_ref){if(function_exists('wp_schedule_single_event'))wp_schedule_single_event(time()+self::TTL,'mbs_release_invoice_reservation',array($invoice_ref,$reservation_ref));}
-	    private static function utc_now(){return gmdate('Y-m-d H:i:s');}
-	    private static function utc_after($seconds){return gmdate('Y-m-d H:i:s',time()+(int)$seconds);}
+	    private static function utc_timestamp(){return (int)apply_filters('mbs_invoice_reservation_utc_timestamp',time());}
+	    private static function utc_now(){return gmdate('Y-m-d H:i:s',self::utc_timestamp());}
+	    private static function utc_after($seconds){return gmdate('Y-m-d H:i:s',self::utc_timestamp()+(int)$seconds);}
     private static function reference(){try{return 'RSV-'.strtoupper(bin2hex(random_bytes(12)));}catch(Exception $e){return 'RSV-'.strtoupper(wp_generate_password(24,false,false));}}
 }

@@ -32,6 +32,25 @@ run_race() {
   echo "OK: synchronised ${mode:-different-session} race produced one winner and one loser."
 }
 
+run_guard_mutation_control() {
+  invoice_ref='INT-RES-GUARD-CONTROL'
+  $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/seed-reservation.php "$invoice_ref" different --allow-root
+  $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/reservation-guard-toggle.php disable "$invoice_ref" --allow-root
+  ( set +e; $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/reservation-unsafe-worker.php "$invoice_ref" 9001 --allow-root >tests/integration/.worker-guard-a 2>&1; echo "$?" >tests/integration/.exit-guard-a ) &
+  pid_a=$!
+  ( set +e; $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/reservation-unsafe-worker.php "$invoice_ref" 9002 --allow-root >tests/integration/.worker-guard-b 2>&1; echo "$?" >tests/integration/.exit-guard-b ) &
+  pid_b=$!
+  wait "$pid_a"; wait "$pid_b"
+  code_a=$(cat tests/integration/.exit-guard-a); code_b=$(cat tests/integration/.exit-guard-b)
+  detected=0
+  if [ "$code_a" -eq 0 ] && [ "$code_b" -eq 0 ]; then
+    if ! $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/assert-reservation.php "$invoice_ref" 9001 9002 --allow-root; then detected=1; fi
+  fi
+  $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/reservation-guard-toggle.php restore "$invoice_ref" --allow-root
+  if [ "$detected" -ne 1 ]; then echo "Concurrency mutation control did not detect bypassed CAS/uniqueness protection (A=$code_a B=$code_b)." >&2; return 1; fi
+  echo "OK: guard-removal mutation produced two winners and the concurrency assertion failed closed."
+}
+
 if $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/audit-assertions-self-test.php fail --allow-root; then
   echo "Controlled false assertion unexpectedly returned success." >&2
   exit 1
@@ -42,8 +61,11 @@ $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/aud
 audit_failed=0
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/audit-regressions.php --allow-root || audit_failed=1
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/audit-migration-regressions.php --allow-root || audit_failed=1
-run_race INT-RES-DIFFERENT different different 1001 1002 || audit_failed=1
-run_race INT-RES-SAME shared same 2001 2002 || audit_failed=1
+for iteration in 1 2 3; do
+  run_race "INT-RES-DIFFERENT-${iteration}" different "different-${iteration}" "$((1000+iteration*10+1))" "$((1000+iteration*10+2))" || audit_failed=1
+  run_race "INT-RES-SAME-${iteration}" shared "same-${iteration}" "$((2000+iteration*10+1))" "$((2000+iteration*10+2))" || audit_failed=1
+done
+run_guard_mutation_control || audit_failed=1
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/reservation-state-machine.php --allow-root
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/woocommerce-callbacks.php --allow-root
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/financial-flows.php --allow-root

@@ -12,7 +12,7 @@
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 define( 'MBS_VERSION',    '3.21.0' );
-define( 'MBS_DB_VERSION', '3.21.0-schema-8' );
+define( 'MBS_DB_VERSION', '3.21.0-schema-9' );
 define( 'MBS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MBS_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'MBS_TABLE',      'mathlin_bookings' );
@@ -22,6 +22,7 @@ define( 'MBS_INVOICE_ITEM_TABLE', 'mathlin_invoice_items' );
 define( 'MBS_PAYMENT_TRANSACTION_TABLE', 'mathlin_payment_transactions' );
 define( 'MBS_BILLING_ALLOCATION_TABLE', 'mathlin_billing_allocations' );
 define( 'MBS_PAYMENT_RESERVATION_TABLE', 'mathlin_payment_reservations' );
+define( 'MBS_OSM_OUTBOX_TABLE', 'mathlin_osm_outbox' );
 
 // ── Load includes ──────────────────────────────────────────────────────────────
 require_once MBS_PLUGIN_DIR . 'includes/class-database.php';
@@ -103,7 +104,7 @@ function mbs_init() {
     }
     $migration_state = get_option( 'mbs_migration_state', array() );
     if ( is_array( $migration_state ) && ( $migration_state['status'] ?? '' ) === 'failed' ) add_action( 'admin_notices', array( 'MBS_Database', 'migration_health_notice' ) );
-    if ( get_option( 'mbs_legacy_series_registered' ) !== MBS_DB_VERSION ) {
+    if ( MBS_Database::migration_is_current() && get_option( 'mbs_legacy_series_registered' ) !== MBS_DB_VERSION ) {
         $legacy_registration = MBS_Series::register_legacy_groups();
         if ( ! is_wp_error( $legacy_registration ) ) update_option( 'mbs_legacy_series_registered', MBS_DB_VERSION, false );
     }

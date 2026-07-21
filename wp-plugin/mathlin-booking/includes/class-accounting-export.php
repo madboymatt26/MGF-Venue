@@ -81,14 +81,14 @@ class MBS_Accounting_Export {
                 'total_decimal' => number_format( (float) $booking->amount, 2, '.', '' ),
                 'description' => $booking->space . ' hire – ' . wp_date( 'j M Y', strtotime( $booking->booking_date ) ),
                 'booking_ref' => $booking->ref, 'purpose' => $booking->purpose,
-                'document_type' => 'invoice',
+                'document_type' => 'invoice', 'currency' => 'GBP',
             );
         }
 
         $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
         $item_table = $wpdb->prefix . MBS_INVOICE_ITEM_TABLE;
         $where = array( "i.status NOT IN ('draft','void')" ); $params = array();
-	        $date_basis='COALESCE(it.service_date,DATE(i.issued_at),DATE(i.created_at))';
+	        $date_basis="CASE WHEN i.document_type='credit_note' THEN COALESCE(DATE(i.issued_at),DATE(i.created_at)) ELSE COALESCE(it.service_date,DATE(i.issued_at),DATE(i.created_at)) END";
 	        if ( $date_from ) { $where[] = $date_basis.' >= %s'; $params[] = $date_from; }
 	        if ( $date_to ) { $where[] = $date_basis.' <= %s'; $params[] = $date_to; }
 	        $sql = "SELECT i.*, it.item_ref, it.booking_ref, it.description, it.line_total_minor, it.service_date, {$date_basis} AS accounting_date
@@ -102,7 +102,7 @@ class MBS_Accounting_Export {
                 'due_date' => $row->due_at ?: $row->issued_at, 'total_decimal' => MBS_Money::decimal( (int) $row->line_total_minor ),
                 'description' => $row->description, 'booking_ref' => $row->booking_ref ?: $row->item_ref,
                 'purpose' => $row->document_type === 'credit_note' ? 'Credit note' : 'Venue hire',
-                'document_type' => $row->document_type,
+                'document_type' => $row->document_type, 'currency' => strtoupper( (string)$row->currency ),
             );
         }
         return $records;
@@ -131,7 +131,7 @@ class MBS_Accounting_Export {
                 1,
                 $amount,
                 '200', // Sales account code
-                'GBP',
+                isset( $record->currency ) && $record->currency ? $record->currency : 'GBP',
                 'No VAT',
             ) );
         }

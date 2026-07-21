@@ -30,15 +30,19 @@ class MBS_Database {
             booking_date_end DATE         DEFAULT NULL,
             all_day         TINYINT(1)   NOT NULL DEFAULT 0,
             scout_use       TINYINT(1)   NOT NULL DEFAULT 0,
+            pricing_tier    VARCHAR(30)  NOT NULL DEFAULT 'standard',
             start_time      TIME         DEFAULT NULL,
             end_time        TIME         DEFAULT NULL,
             attendees       SMALLINT     NOT NULL DEFAULT 1,
             purpose         VARCHAR(255) NOT NULL,
             notes           TEXT         DEFAULT '',
             amount          DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+            deposit_paid    DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+            amount_paid     DECIMAL(8,2) NOT NULL DEFAULT 0.00,
             invoice_number  VARCHAR(30)  DEFAULT '',
             ha_notified     TINYINT(1)   NOT NULL DEFAULT 0,
             reminder_sent   TINYINT(1)   NOT NULL DEFAULT 0,
+            access_sent     TINYINT(1)   NOT NULL DEFAULT 0,
             feedback_sent   TINYINT(1)   NOT NULL DEFAULT 0,
             chase_count     SMALLINT     NOT NULL DEFAULT 0,
             last_chased     DATETIME     DEFAULT NULL,
@@ -54,7 +58,10 @@ class MBS_Database {
             PRIMARY KEY (id),
             KEY idx_date   (booking_date),
             KEY idx_status (status),
-            KEY idx_ref    (ref)
+            KEY idx_ref    (ref),
+            KEY idx_series (series_id),
+            KEY idx_email  (email),
+            KEY idx_chase  (status, created_at, chase_count)
         ) {$charset};";
 
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -269,6 +276,37 @@ class MBS_Database {
         ) ENGINE=InnoDB {$charset};";
         dbDelta( $reservation_sql );
 
+        // Durable OSM reversal delivery. Rows are inserted in the same
+        // transaction as the corresponding refund ledger mutation.
+        $osm_outbox_table = $wpdb->prefix . MBS_OSM_OUTBOX_TABLE;
+        $osm_outbox_sql = "CREATE TABLE {$osm_outbox_table} (
+            id                    BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            event_ref             VARCHAR(100) NOT NULL,
+            booking_ref           VARCHAR(20) NOT NULL,
+            invoice_ref           VARCHAR(30) NOT NULL,
+            order_id              BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+            refund_id             BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+            amount_minor          BIGINT(20) UNSIGNED NOT NULL,
+            reversal_kind         VARCHAR(20) NOT NULL,
+            payload_json          LONGTEXT NOT NULL,
+            status                VARCHAR(30) NOT NULL DEFAULT 'pending',
+            attempts              SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            next_attempt_at       DATETIME DEFAULT NULL,
+            last_error            TEXT DEFAULT '',
+            response_code         SMALLINT UNSIGNED DEFAULT NULL,
+            created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            delivered_at          DATETIME DEFAULT NULL,
+            resolved_at           DATETIME DEFAULT NULL,
+            resolved_by           BIGINT(20) UNSIGNED DEFAULT NULL,
+            PRIMARY KEY (id),
+            UNIQUE KEY event_ref (event_ref),
+            KEY idx_osm_delivery (status, next_attempt_at),
+            KEY idx_osm_booking (booking_ref),
+            KEY idx_osm_refund (refund_id)
+        ) ENGINE=InnoDB {$charset};";
+        dbDelta( $osm_outbox_sql );
+
         // Blocked dates table
         $blocked_table = $wpdb->prefix . 'mathlin_blocked_dates';
         $sql2 = "CREATE TABLE IF NOT EXISTS {$blocked_table} (
@@ -283,8 +321,10 @@ class MBS_Database {
         ) {$charset};";
         dbDelta( $sql2 );
 
-        // Run migrations for existing installs
-        self::maybe_run_migrations();
+        // Run migrations for existing installs. A migration result is a hard
+        // gate: no success-only finalisation or version marker follows errors.
+        $migrated = self::maybe_run_migrations();
+        if ( $migrated !== true ) return self::fail_migration( $migrated, 'Database migration operations failed.' );
 
         // Audit log table
         $audit_table = $wpdb->prefix . 'mathlin_audit_log';
@@ -341,15 +381,25 @@ class MBS_Database {
         ) {$charset};";
         dbDelta( $sql5 );
 
+        $schema_sql = array(
+            $table => $sql,
+            $series_table => $series_sql,
+            $invoice_table => $invoice_sql,
+            $item_table => $item_sql,
+            $transaction_table => $transaction_sql,
+            $allocation_table => $allocation_sql,
+            $reservation_table => $reservation_sql,
+            $osm_outbox_table => $osm_outbox_sql,
+            $blocked_table => $sql2,
+            $audit_table => $sql3,
+            $queue_table => $sql4,
+            $mod_table => $sql5,
+        );
         $engines = self::ensure_transactional_engines();
-        $verified = is_wp_error( $engines ) ? $engines : self::verify_schema();
+        $verified = is_wp_error( $engines ) ? $engines : self::verify_schema( $schema_sql );
+        if ( ! is_wp_error( $verified ) ) $verified = self::verify_legacy_financial_backfill();
         if ( is_wp_error( $verified ) ) {
-            update_option( 'mbs_migration_state', array(
-                'status' => 'failed', 'target' => MBS_DB_VERSION, 'failed_at' => current_time( 'mysql' ),
-                'message' => $verified->get_error_message(),
-            ), false );
-            add_action( 'admin_notices', array( __CLASS__, 'migration_health_notice' ) );
-            return $verified;
+            return self::fail_migration( $verified, 'Database post-migration verification failed.' );
         }
         update_option( 'mbs_db_version', MBS_DB_VERSION );
         update_option( 'mbs_migration_state', array( 'status' => 'complete', 'target' => MBS_DB_VERSION, 'completed_at' => current_time( 'mysql' ) ), false );
@@ -379,12 +429,108 @@ class MBS_Database {
 
     private static function ensure_transactional_engines() {
         global $wpdb;
-        $tables = array( $wpdb->prefix.MBS_TABLE, $wpdb->prefix.MBS_SERIES_TABLE, $wpdb->prefix.MBS_INVOICE_TABLE, $wpdb->prefix.MBS_INVOICE_ITEM_TABLE, $wpdb->prefix.MBS_PAYMENT_TRANSACTION_TABLE, $wpdb->prefix.MBS_BILLING_ALLOCATION_TABLE, $wpdb->prefix.MBS_PAYMENT_RESERVATION_TABLE );
+        $tables = array(
+            $wpdb->prefix.MBS_TABLE, $wpdb->prefix.MBS_SERIES_TABLE, $wpdb->prefix.MBS_INVOICE_TABLE,
+            $wpdb->prefix.MBS_INVOICE_ITEM_TABLE, $wpdb->prefix.MBS_PAYMENT_TRANSACTION_TABLE,
+            $wpdb->prefix.MBS_BILLING_ALLOCATION_TABLE, $wpdb->prefix.MBS_PAYMENT_RESERVATION_TABLE,
+            $wpdb->prefix.MBS_OSM_OUTBOX_TABLE, $wpdb->prefix.'mathlin_blocked_dates',
+            $wpdb->prefix.'mathlin_audit_log', $wpdb->prefix.'mathlin_email_queue',
+            $wpdb->prefix.'mathlin_mod_requests',
+        );
         foreach($tables as $table){$row=$wpdb->get_row($wpdb->prepare('SHOW TABLE STATUS LIKE %s',$table));if($row&&!empty($row->Engine)&&strtolower($row->Engine)!=='innodb'){if($wpdb->query("ALTER TABLE `{$table}` ENGINE=InnoDB")===false)return new WP_Error('transactional_engine_required',"{$table} is not transactional and could not be converted to InnoDB. Restore a backup, correct database permissions/capacity, and retry.");}}
         return true;
     }
 
-    private static function verify_schema() {
+    private static function fail_migration( $error, $fallback_message ) {
+        if ( ! is_wp_error( $error ) ) $error = new WP_Error( 'migration_operation_failed', $fallback_message );
+        update_option( 'mbs_migration_state', array(
+            'status' => 'failed',
+            'target' => MBS_DB_VERSION,
+            'failed_at' => current_time( 'mysql' ),
+            'code' => $error->get_error_code(),
+            'message' => $error->get_error_message(),
+        ), false );
+        add_action( 'admin_notices', array( __CLASS__, 'migration_health_notice' ) );
+        return $error;
+    }
+
+    /**
+     * Compare every expected column and index against a clean table created
+     * from the canonical SQL on the same MariaDB connection. This avoids a
+     * hand-maintained name-only allow-list and includes lengths, precision,
+     * signedness, null/default/auto-increment, collation, key roles, index
+     * uniqueness/order/prefix lengths, and primary keys.
+     */
+    private static function verify_schema( $schema_sql ) {
+        global $wpdb;
+        $problems = array();
+        foreach ( $schema_sql as $table => $sql ) {
+            if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) ) !== $table ) {
+                $problems[] = 'missing table ' . $table;
+                continue;
+            }
+            $status = $wpdb->get_row( $wpdb->prepare( 'SHOW TABLE STATUS LIKE %s', $table ) );
+            if ( ! $status || strtolower( (string) $status->Engine ) !== 'innodb' ) $problems[] = $table . ' engine';
+            if ( ! empty( $wpdb->collate ) && $status && strtolower( (string) $status->Collation ) !== strtolower( (string) $wpdb->collate ) ) {
+                $problems[] = $table . ' table collation';
+            }
+
+            $temporary = $wpdb->prefix . 'mbs_expect_' . substr( hash( 'sha256', $table ), 0, 12 );
+            $pattern = '/^CREATE TABLE(?: IF NOT EXISTS)?\s+`?' . preg_quote( $table, '/' ) . '`?/i';
+            $expected_sql = preg_replace( $pattern, 'CREATE TEMPORARY TABLE `' . $temporary . '`', trim( $sql ), 1, $replaced );
+            if ( $replaced !== 1 || $wpdb->query( 'DROP TEMPORARY TABLE IF EXISTS `' . $temporary . '`' ) === false || $wpdb->query( $expected_sql ) === false ) {
+                $problems[] = $table . ' expected-schema manifest could not be materialised';
+                continue;
+            }
+
+            $expected_columns = $wpdb->get_results( 'SHOW FULL COLUMNS FROM `' . $temporary . '`' );
+            $actual_columns = $wpdb->get_results( 'SHOW FULL COLUMNS FROM `' . $table . '`' );
+            $actual_by_name = array();
+            foreach ( (array) $actual_columns as $column ) $actual_by_name[(string)$column->Field] = $column;
+            foreach ( (array) $expected_columns as $expected ) {
+                $name = (string) $expected->Field;
+                if ( ! isset( $actual_by_name[$name] ) ) { $problems[] = $table . '.' . $name . ' missing'; continue; }
+                $actual = $actual_by_name[$name];
+                foreach ( array( 'Type','Collation','Null','Key','Default','Extra' ) as $property ) {
+                    $expected_value = $expected->$property === null ? null : strtolower( (string) $expected->$property );
+                    $actual_value = $actual->$property === null ? null : strtolower( (string) $actual->$property );
+                    if ( $expected_value !== $actual_value ) {
+                        $problems[] = $table . '.' . $name . ' ' . strtolower( $property );
+                    }
+                }
+            }
+
+            $expected_indexes = self::normalise_indexes( $wpdb->get_results( 'SHOW INDEX FROM `' . $temporary . '`' ) );
+            $actual_indexes = self::normalise_indexes( $wpdb->get_results( 'SHOW INDEX FROM `' . $table . '`' ) );
+            foreach ( $expected_indexes as $name => $expected_index ) {
+                if ( ! isset( $actual_indexes[$name] ) || $actual_indexes[$name] !== $expected_index ) {
+                    $problems[] = $table . ' index ' . $name;
+                }
+            }
+            $wpdb->query( 'DROP TEMPORARY TABLE IF EXISTS `' . $temporary . '`' );
+        }
+        return $problems ? new WP_Error( 'migration_verification_failed', 'Database migration is incomplete: ' . implode( ', ', array_unique( $problems ) ) ) : true;
+    }
+
+    private static function normalise_indexes( $rows ) {
+        $indexes = array();
+        foreach ( (array) $rows as $row ) {
+            $name = (string) $row->Key_name;
+            $sequence = (int) $row->Seq_in_index;
+            $indexes[$name][$sequence] = array(
+                'non_unique' => (int) $row->Non_unique,
+                'column' => (string) $row->Column_name,
+                'prefix' => $row->Sub_part === null ? null : (int) $row->Sub_part,
+                'index_type' => strtolower( (string) $row->Index_type ),
+            );
+        }
+        foreach ( $indexes as &$index ) ksort( $index );
+        unset( $index );
+        ksort( $indexes );
+        return $indexes;
+    }
+
+    private static function verify_schema_legacy() {
         global $wpdb;
         $requirements = array(
             $wpdb->prefix . MBS_TABLE => array(
@@ -486,6 +632,90 @@ class MBS_Database {
         echo '<div class="notice notice-error"><p><strong>MGF Venue database upgrade failed.</strong> ' . esc_html( $state['message'] ?? 'Required schema objects are missing.' ) . ' The version marker was not advanced; correct the database problem and retry activation.</p></div>';
     }
 
+    public static function migration_is_current() {
+        $state = get_option( 'mbs_migration_state', array() );
+        return get_option( 'mbs_db_version' ) === MBS_DB_VERSION
+            && is_array( $state )
+            && ( $state['status'] ?? '' ) === 'complete'
+            && ( $state['target'] ?? '' ) === MBS_DB_VERSION;
+    }
+
+    private static function table_exists( $table ) {
+        global $wpdb;
+        return $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) ) === $table;
+    }
+
+    /** Build the one canonical historical-finance predicate used by migration and adoption. */
+    private static function historical_financial_predicate( $booking_alias ) {
+        global $wpdb;
+        $clauses = array(
+            "{$booking_alias}.status IN ('paid','deposit_paid','cancelled','archived')",
+            "{$booking_alias}.amount_paid > 0",
+            "{$booking_alias}.deposit_paid > 0",
+            "COALESCE({$booking_alias}.invoice_number,'') <> ''",
+        );
+        $item_table = $wpdb->prefix . MBS_INVOICE_ITEM_TABLE;
+        $allocation_table = $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE;
+        $transaction_table = $wpdb->prefix . MBS_PAYMENT_TRANSACTION_TABLE;
+        $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
+        if ( self::table_exists( $item_table ) ) {
+            $clauses[] = "EXISTS (SELECT 1 FROM {$item_table} hi WHERE hi.booking_ref={$booking_alias}.ref)";
+        }
+        if ( self::table_exists( $allocation_table ) ) {
+            $clauses[] = "EXISTS (SELECT 1 FROM {$allocation_table} ha WHERE ha.booking_ref={$booking_alias}.ref)";
+        }
+        if ( self::table_exists( $transaction_table ) && self::table_exists( $item_table ) ) {
+            $clauses[] = "EXISTS (SELECT 1 FROM {$transaction_table} ht INNER JOIN {$item_table} hti ON hti.invoice_id=ht.invoice_id WHERE hti.booking_ref={$booking_alias}.ref)";
+        }
+        if ( self::table_exists( $invoice_table ) && self::table_exists( $item_table ) ) {
+            $clauses[] = "EXISTS (SELECT 1 FROM {$invoice_table} hc INNER JOIN {$item_table} hci ON (hci.invoice_id=hc.id OR hci.invoice_id=hc.parent_invoice_id) WHERE hc.document_type='credit_note' AND hci.booking_ref={$booking_alias}.ref)";
+        }
+        return '(' . implode( ' OR ', $clauses ) . ')';
+    }
+
+    public static function backfill_legacy_financial_history( $series_ref = '' ) {
+        global $wpdb;
+        $booking_table = $wpdb->prefix . MBS_TABLE;
+        $series_table = $wpdb->prefix . MBS_SERIES_TABLE;
+        if ( ! self::table_exists( $booking_table ) || ! self::table_exists( $series_table ) ) {
+            return new WP_Error( 'legacy_billing_tables_missing', 'Legacy financial history cannot be verified because its source tables are missing.' );
+        }
+        $predicate = self::historical_financial_predicate( 'b' );
+        $series_where = $series_ref !== '' ? $wpdb->prepare( ' AND b.series_id=%s', $series_ref ) : '';
+        $query = "UPDATE {$booking_table} b INNER JOIN {$series_table} s ON s.series_ref=b.series_id
+                  SET b.legacy_billing_excluded=1
+                  WHERE b.legacy_billing_excluded=0 AND {$predicate}{$series_where}";
+        if ( $wpdb->query( $query ) === false ) {
+            return new WP_Error( 'legacy_billing_backfill_failed', 'Could not preserve historical recurring billing during upgrade: ' . $wpdb->last_error );
+        }
+        return self::verify_legacy_financial_backfill( $series_ref );
+    }
+
+    public static function verify_legacy_financial_backfill( $series_ref = '' ) {
+        global $wpdb;
+        $booking_table = $wpdb->prefix . MBS_TABLE;
+        $series_table = $wpdb->prefix . MBS_SERIES_TABLE;
+        if ( ! self::table_exists( $booking_table ) || ! self::table_exists( $series_table ) ) {
+            return new WP_Error( 'legacy_billing_tables_missing', 'Legacy financial history cannot be verified because its source tables are missing.' );
+        }
+        $predicate = self::historical_financial_predicate( 'b' );
+        $series_where = $series_ref !== '' ? $wpdb->prepare( ' AND b.series_id=%s', $series_ref ) : '';
+        $query = "SELECT COUNT(*) FROM {$booking_table} b INNER JOIN {$series_table} s ON s.series_ref=b.series_id
+                  WHERE b.legacy_billing_excluded=0 AND {$predicate}{$series_where}";
+        $unsafe = $wpdb->get_var( $query );
+        if ( $unsafe === null ) {
+            return new WP_Error( 'legacy_billing_backfill_verification_failed', 'Could not verify historical recurring billing exclusions' . ( $wpdb->last_error ? ': ' . $wpdb->last_error : '.' ) );
+        }
+        return (int) $unsafe === 0 ? true : new WP_Error( 'legacy_billing_backfill_incomplete', 'Historical recurring billing exclusions remain incomplete.' );
+    }
+
+    private static function migration_query( $query, $step ) {
+        global $wpdb;
+        return $wpdb->query( $query ) === false
+            ? new WP_Error( 'migration_query_failed', $step . ' failed: ' . $wpdb->last_error )
+            : true;
+    }
+
     /**
      * Run database migrations for existing installs.
      */
@@ -514,113 +744,113 @@ class MBS_Database {
         // Migrate ENUM status column to VARCHAR if needed
         $col_info = $wpdb->get_row( "SHOW COLUMNS FROM {$table} WHERE Field = 'status'" );
         if ( $col_info && strpos( strtolower( $col_info->Type ), 'enum' ) !== false ) {
-            $wpdb->query( "ALTER TABLE {$table} MODIFY COLUMN status VARCHAR(20) NOT NULL DEFAULT 'pending'" );
+            $result=self::migration_query("ALTER TABLE {$table} MODIFY COLUMN status VARCHAR(20) NOT NULL DEFAULT 'pending'",'Booking status schema correction');if(is_wp_error($result))return $result;
         }
 
         // Fix any bookings with empty status (from failed ENUM writes)
-        $wpdb->query( "UPDATE {$table} SET status = 'pending' WHERE status = '' OR status IS NULL" );
+        $result=self::migration_query("UPDATE {$table} SET status = 'pending' WHERE status = '' OR status IS NULL",'Empty booking status repair');if(is_wp_error($result))return $result;
 
         // Add booking_date_end column if missing
         $col = $wpdb->get_results( "SHOW COLUMNS FROM {$table} LIKE 'booking_date_end'" );
         if ( empty( $col ) ) {
-            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN booking_date_end DATE DEFAULT NULL AFTER booking_date" );
+            $result=self::migration_query("ALTER TABLE {$table} ADD COLUMN booking_date_end DATE DEFAULT NULL AFTER booking_date",'booking_date_end addition');if(is_wp_error($result))return $result;
         }
 
         // Add all_day column if missing
         $col = $wpdb->get_results( "SHOW COLUMNS FROM {$table} LIKE 'all_day'" );
         if ( empty( $col ) ) {
-            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN all_day TINYINT(1) NOT NULL DEFAULT 0 AFTER booking_date_end" );
+            $result=self::migration_query("ALTER TABLE {$table} ADD COLUMN all_day TINYINT(1) NOT NULL DEFAULT 0 AFTER booking_date_end",'all_day addition');if(is_wp_error($result))return $result;
         }
 
         // Add recurring columns if missing
         $col = $wpdb->get_results( "SHOW COLUMNS FROM {$table} LIKE 'series_id'" );
         if ( empty( $col ) ) {
-            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN series_id VARCHAR(20) DEFAULT NULL AFTER ha_notified" );
+            $result=self::migration_query("ALTER TABLE {$table} ADD COLUMN series_id VARCHAR(20) DEFAULT NULL AFTER ha_notified",'series_id addition');if(is_wp_error($result))return $result;
         }
         $indexes = $wpdb->get_results( "SHOW INDEX FROM {$table} WHERE Key_name = 'idx_series'" );
-        if ( empty( $indexes ) ) $wpdb->query( "ALTER TABLE {$table} ADD KEY idx_series (series_id)" );
+        if ( empty( $indexes ) ) {$result=self::migration_query("ALTER TABLE {$table} ADD KEY idx_series (series_id)",'series index addition');if(is_wp_error($result))return $result;}
 
         // Add admin_notes column if missing
         $col = $wpdb->get_results( "SHOW COLUMNS FROM {$table} LIKE 'admin_notes'" );
         if ( empty( $col ) ) {
-            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN admin_notes TEXT DEFAULT '' AFTER notes" );
+            $result=self::migration_query("ALTER TABLE {$table} ADD COLUMN admin_notes TEXT DEFAULT '' AFTER notes",'admin_notes addition');if(is_wp_error($result))return $result;
         }
 
         // Add reminder_sent column if missing
         $col = $wpdb->get_results( "SHOW COLUMNS FROM {$table} LIKE 'reminder_sent'" );
         if ( empty( $col ) ) {
-            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN reminder_sent TINYINT(1) NOT NULL DEFAULT 0 AFTER ha_notified" );
+            $result=self::migration_query("ALTER TABLE {$table} ADD COLUMN reminder_sent TINYINT(1) NOT NULL DEFAULT 0 AFTER ha_notified",'reminder_sent addition');if(is_wp_error($result))return $result;
         }
 
         // Add payment chase columns if missing
         $col = $wpdb->get_results( "SHOW COLUMNS FROM {$table} LIKE 'chase_count'" );
         if ( empty( $col ) ) {
-            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN chase_count SMALLINT NOT NULL DEFAULT 0 AFTER reminder_sent" );
-            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN last_chased DATETIME DEFAULT NULL AFTER chase_count" );
+            $result=self::migration_query("ALTER TABLE {$table} ADD COLUMN chase_count SMALLINT NOT NULL DEFAULT 0 AFTER reminder_sent",'chase_count addition');if(is_wp_error($result))return $result;
+            $result=self::migration_query("ALTER TABLE {$table} ADD COLUMN last_chased DATETIME DEFAULT NULL AFTER chase_count",'last_chased addition');if(is_wp_error($result))return $result;
         }
 
         // Add custom_fields column if missing
         $col = $wpdb->get_results( "SHOW COLUMNS FROM {$table} LIKE 'custom_fields'" );
         if ( empty( $col ) ) {
-            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN custom_fields TEXT DEFAULT '' AFTER admin_notes" );
+            $result=self::migration_query("ALTER TABLE {$table} ADD COLUMN custom_fields TEXT DEFAULT '' AFTER admin_notes",'custom_fields addition');if(is_wp_error($result))return $result;
         }
 
         // Add modification_token column if missing
         $col = $wpdb->get_results( "SHOW COLUMNS FROM {$table} LIKE 'modification_token'" );
         if ( empty( $col ) ) {
-            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN modification_token VARCHAR(64) DEFAULT NULL AFTER custom_fields" );
+            $result=self::migration_query("ALTER TABLE {$table} ADD COLUMN modification_token VARCHAR(64) DEFAULT NULL AFTER custom_fields",'modification_token addition');if(is_wp_error($result))return $result;
         }
 
         // Add is_public column if missing (public vs private events)
         $col = $wpdb->get_results( "SHOW COLUMNS FROM {$table} LIKE 'is_public'" );
         if ( empty( $col ) ) {
-            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN is_public TINYINT(1) NOT NULL DEFAULT 0 AFTER modification_token" );
+            $result=self::migration_query("ALTER TABLE {$table} ADD COLUMN is_public TINYINT(1) NOT NULL DEFAULT 0 AFTER modification_token",'is_public addition');if(is_wp_error($result))return $result;
         }
 
         // Add scout_use column if missing
         $col = $wpdb->get_results( "SHOW COLUMNS FROM {$table} LIKE 'scout_use'" );
         if ( empty( $col ) ) {
-            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN scout_use TINYINT(1) NOT NULL DEFAULT 0 AFTER all_day" );
+            $result=self::migration_query("ALTER TABLE {$table} ADD COLUMN scout_use TINYINT(1) NOT NULL DEFAULT 0 AFTER all_day",'scout_use addition');if(is_wp_error($result))return $result;
         }
 
         // Add user_id column if missing (hirer portal)
         $col = $wpdb->get_results( "SHOW COLUMNS FROM {$table} LIKE 'user_id'" );
         if ( empty( $col ) ) {
-            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN user_id BIGINT(20) DEFAULT NULL AFTER is_public" );
+            $result=self::migration_query("ALTER TABLE {$table} ADD COLUMN user_id BIGINT(20) DEFAULT NULL AFTER is_public",'user_id addition');if(is_wp_error($result))return $result;
         }
 
         // SEC-FIX-007: Add index on email column for hirer portal performance
         $indexes = $wpdb->get_results( "SHOW INDEX FROM {$table} WHERE Key_name = 'idx_email'" );
         if ( empty( $indexes ) ) {
-            $wpdb->query( "ALTER TABLE {$table} ADD KEY idx_email (email)" );
+            $result=self::migration_query("ALTER TABLE {$table} ADD KEY idx_email (email)",'email index addition');if(is_wp_error($result))return $result;
         }
 
         // SEC-FIX-009: Add composite index for payment chaser query performance
         $indexes = $wpdb->get_results( "SHOW INDEX FROM {$table} WHERE Key_name = 'idx_chase'" );
         if ( empty( $indexes ) ) {
-            $wpdb->query( "ALTER TABLE {$table} ADD KEY idx_chase (status, created_at, chase_count)" );
+            $result=self::migration_query("ALTER TABLE {$table} ADD KEY idx_chase (status, created_at, chase_count)",'chase index addition');if(is_wp_error($result))return $result;
         }
 
         // v3.0.0: Add deposit_paid column to track deposit amount paid
         $col = $wpdb->get_results( "SHOW COLUMNS FROM {$table} LIKE 'deposit_paid'" );
         if ( empty( $col ) ) {
-            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN deposit_paid DECIMAL(8,2) NOT NULL DEFAULT 0.00 AFTER amount" );
+            $result=self::migration_query("ALTER TABLE {$table} ADD COLUMN deposit_paid DECIMAL(8,2) NOT NULL DEFAULT 0.00 AFTER amount",'deposit_paid addition');if(is_wp_error($result))return $result;
         }
 
         // v3.2.0: Add amount_paid column to track total payments received
         $col = $wpdb->get_results( "SHOW COLUMNS FROM {$table} LIKE 'amount_paid'" );
         if ( empty( $col ) ) {
-            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN amount_paid DECIMAL(8,2) NOT NULL DEFAULT 0.00 AFTER deposit_paid" );
+            $result=self::migration_query("ALTER TABLE {$table} ADD COLUMN amount_paid DECIMAL(8,2) NOT NULL DEFAULT 0.00 AFTER deposit_paid",'amount_paid addition');if(is_wp_error($result))return $result;
             // Migrate existing data: if status is 'paid', amount_paid = amount
             // If status is 'deposit_paid', amount_paid = deposit_paid
-            $wpdb->query( "UPDATE {$table} SET amount_paid = amount WHERE status = 'paid'" );
-            $wpdb->query( "UPDATE {$table} SET amount_paid = deposit_paid WHERE status = 'deposit_paid' AND deposit_paid > 0" );
+            $result=self::migration_query("UPDATE {$table} SET amount_paid = amount WHERE status = 'paid'",'paid amount backfill');if(is_wp_error($result))return $result;
+            $result=self::migration_query("UPDATE {$table} SET amount_paid = deposit_paid WHERE status = 'deposit_paid' AND deposit_paid > 0",'deposit amount backfill');if(is_wp_error($result))return $result;
         }
 
         // v3.0.0: Add pricing_tier column to track which tier was applied
         $col = $wpdb->get_results( "SHOW COLUMNS FROM {$table} LIKE 'pricing_tier'" );
         if ( empty( $col ) ) {
-            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN pricing_tier VARCHAR(30) NOT NULL DEFAULT 'standard' AFTER scout_use" );
+            $result=self::migration_query("ALTER TABLE {$table} ADD COLUMN pricing_tier VARCHAR(30) NOT NULL DEFAULT 'standard' AFTER scout_use",'pricing_tier addition');if(is_wp_error($result))return $result;
         }
 
         // v3.0.8: Migrate booking_confirmed email template to remove hardcoded "14 days" text
@@ -634,18 +864,18 @@ class MBS_Database {
         }
 
         // v3.2.9: Fix empty string booking_date_end values — set to booking_date
-        $wpdb->query( "UPDATE {$table} SET booking_date_end = booking_date WHERE booking_date_end = '' OR booking_date_end = '0000-00-00'" );
+        $result=self::migration_query("UPDATE {$table} SET booking_date_end = booking_date WHERE booking_date_end = '' OR booking_date_end = '0000-00-00'",'booking date range repair');if(is_wp_error($result))return $result;
 
         // v3.4.0: Add access_sent column
         $col = $wpdb->get_results( "SHOW COLUMNS FROM {$table} LIKE 'access_sent'" );
         if ( empty( $col ) ) {
-            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN access_sent TINYINT(1) NOT NULL DEFAULT 0 AFTER reminder_sent" );
+            $result=self::migration_query("ALTER TABLE {$table} ADD COLUMN access_sent TINYINT(1) NOT NULL DEFAULT 0 AFTER reminder_sent",'access_sent addition');if(is_wp_error($result))return $result;
         }
 
         // v3.13.0: Add feedback_sent column (post-booking feedback & review module)
         $col = $wpdb->get_results( "SHOW COLUMNS FROM {$table} LIKE 'feedback_sent'" );
         if ( empty( $col ) ) {
-            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN feedback_sent TINYINT(1) NOT NULL DEFAULT 0 AFTER reminder_sent" );
+            $result=self::migration_query("ALTER TABLE {$table} ADD COLUMN feedback_sent TINYINT(1) NOT NULL DEFAULT 0 AFTER reminder_sent",'feedback_sent addition');if(is_wp_error($result))return $result;
         }
 
         // v3.17.2: Rename the WooCommerce payment product to the generic name.
@@ -665,18 +895,9 @@ class MBS_Database {
 	        }
 
 	        // Run only after every historical payment column above is present.
-	        $series_table = $wpdb->prefix . MBS_SERIES_TABLE;
-	        $backfilled = $wpdb->query(
-	            "UPDATE {$table} b INNER JOIN {$series_table} s ON s.series_ref=b.series_id
-	             SET b.legacy_billing_excluded=1
-	             WHERE b.legacy_billing_excluded=0 AND (b.status IN ('paid','deposit_paid','cancelled','archived') OR b.amount_paid>0 OR b.deposit_paid>0)"
-	        );
-	        if ( $backfilled === false ) return new WP_Error( 'legacy_billing_backfill_failed', 'Could not preserve historical recurring billing during upgrade.' );
-	        $unsafe = (int)$wpdb->get_var(
-	            "SELECT COUNT(*) FROM {$table} b INNER JOIN {$series_table} s ON s.series_ref=b.series_id
-	             WHERE b.legacy_billing_excluded=0 AND (b.status IN ('paid','deposit_paid','cancelled','archived') OR b.amount_paid>0 OR b.deposit_paid>0)"
-	        );
-	        if ( $unsafe !== 0 ) return new WP_Error( 'legacy_billing_backfill_incomplete', 'Historical recurring billing exclusions remain incomplete.' );
+	        $backfilled = self::backfill_legacy_financial_history();
+	        if ( is_wp_error( $backfilled ) ) return $backfilled;
+	        return true;
 	    }
 
     public static function on_deactivate() {

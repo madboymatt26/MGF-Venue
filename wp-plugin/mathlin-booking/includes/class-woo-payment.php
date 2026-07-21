@@ -34,6 +34,9 @@ class MBS_Woo_Payment {
         add_action( 'woocommerce_order_status_cancelled',  array( 'MBS_Invoice_Reservation', 'release_order' ) );
         add_action( 'mbs_release_invoice_reservation',      array( 'MBS_Invoice_Reservation', 'release_expired' ), 10, 2 );
         add_action( 'woocommerce_after_checkout_validation', array( $this, 'validate_invoice_checkout' ), 10, 2 );
+        add_action( 'woocommerce_checkout_order_created', array( __CLASS__, 'lock_invoice_order' ) );
+        add_action( 'woocommerce_before_order_object_save', array( __CLASS__, 'guard_locked_invoice_order' ) );
+        add_action( 'woocommerce_before_order_item_object_save', array( __CLASS__, 'guard_locked_invoice_item' ) );
         add_action( 'woocommerce_thankyou',                array( $this, 'thankyou_message' ) );
 
         // REST endpoint for generating payment links
@@ -333,14 +336,89 @@ class MBS_Woo_Payment {
     /** Reject stale, mismatched or second-session invoice carts before order creation. */
     public function validate_invoice_checkout( $data, $errors ) {
         if ( ! WC()->cart ) return;
+        $invoice_items = 0;
         foreach ( WC()->cart->get_cart() as $cart_item ) {
             if ( empty( $cart_item['mbs_invoice_ref'] ) ) continue;
+            $invoice_items++;
             $invoice = MBS_Billing_Ledger::get_invoice( $cart_item['mbs_invoice_ref'] );
             $balance = $invoice ? MBS_Billing_Ledger::balance_minor( $invoice ) : 0;
-            if ( ! MBS_Invoice_Payment::is_payable( $invoice ) || ! MBS_Invoice_Reservation::validate( $cart_item['mbs_invoice_ref'], $cart_item['mbs_invoice_reservation_ref'] ?? '', $balance ) ) {
+            $reserved = (int) ( $cart_item['mbs_invoice_amount_minor'] ?? 0 );
+            $cart_total = MBS_Money::from_decimal_string( (string) WC()->cart->get_total( 'edit' ) );
+            $currency = function_exists( 'get_woocommerce_currency' ) ? strtoupper( (string) get_woocommerce_currency() ) : '';
+            $has_adjustments = count( WC()->cart->get_cart() ) !== 1 || ! empty( WC()->cart->get_applied_coupons() ) || ! empty( WC()->cart->get_fees() );
+            if ( ! MBS_Invoice_Payment::is_payable( $invoice )
+                || $reserved !== $balance
+                || is_wp_error( $cart_total )
+                || (int) $cart_total !== $reserved
+                || $has_adjustments
+                || ! $invoice
+                || $currency !== strtoupper( (string) $invoice->currency )
+                || ! MBS_Invoice_Reservation::validate( $cart_item['mbs_invoice_ref'], $cart_item['mbs_invoice_reservation_ref'] ?? '', $reserved ) ) {
                 $errors->add( 'mbs_invoice_reservation_invalid', 'This invoice is no longer reserved for this checkout. Please open its payment link again.' );
             }
         }
+        if ( $invoice_items > 0 && $invoice_items !== 1 ) {
+            $errors->add( 'mbs_invoice_cart_invalid', 'Invoice checkout must contain exactly one unadjusted invoice payment.' );
+        }
+    }
+
+    private static function validate_captured_invoice_order( $order, $item, $invoice, $reservation_ref, $claimed_minor ) {
+        if ( ! $invoice || ! $reservation_ref || $claimed_minor < 1 ) return false;
+        $order_id = (int) $order->get_id();
+        $reservation = MBS_Invoice_Reservation::get( $invoice->invoice_ref );
+        if ( ! $reservation
+            || (int) $reservation->amount_minor !== (int) $claimed_minor
+            || (int) $reservation->balance_version !== (int) $invoice->version
+            || MBS_Billing_Ledger::balance_minor( $invoice ) !== (int) $claimed_minor
+            || ! MBS_Invoice_Reservation::validate( $invoice->invoice_ref, $reservation_ref, $claimed_minor, $order_id ) ) return false;
+        $actual_minor = MBS_Money::from_decimal_string( (string) $order->get_total() );
+        $line_total = MBS_Money::from_decimal_string( (string) $item->get_total() );
+        $line_subtotal = MBS_Money::from_decimal_string( (string) $item->get_subtotal() );
+        if ( is_wp_error( $actual_minor ) || is_wp_error( $line_total ) || is_wp_error( $line_subtotal ) ) return false;
+        $invoice_item_count = 0;
+        foreach ( $order->get_items() as $candidate ) if ( $candidate->get_meta( '_mbs_invoice_ref' ) ) $invoice_item_count++;
+        return (int) $actual_minor === (int) $claimed_minor
+            && (int) $line_total === (int) $claimed_minor
+            && (int) $line_subtotal === (int) $claimed_minor
+            && count( $order->get_items() ) === 1
+            && $invoice_item_count === 1
+            && count( $order->get_items( 'coupon' ) ) === 0
+            && count( $order->get_fees() ) === 0
+            && strtoupper( (string) $order->get_currency() ) === strtoupper( (string) $invoice->currency );
+    }
+
+    public static function lock_invoice_order( $order ) {
+        if ( ! $order instanceof WC_Order ) return;
+        foreach ( $order->get_items() as $item ) {
+            if ( $item->get_meta('_mbs_invoice_ref') ) {
+                $order->update_meta_data('_mbs_invoice_order_locked','yes');
+                $order->save_meta_data();
+                return;
+            }
+        }
+    }
+
+    private static function immutable_order_exception() {
+        $message='Consolidated invoice orders have an exact reserved value and cannot be adjusted, discounted, supplemented, or changed to another currency.';
+        if(class_exists('WC_Data_Exception'))throw new WC_Data_Exception('mbs_invoice_order_immutable',$message);
+        throw new Exception($message);
+    }
+
+    public static function guard_locked_invoice_order( $order ) {
+        if ( ! $order instanceof WC_Order || $order->get_meta('_mbs_invoice_order_locked')!=='yes' ) return;
+        $invoice_items=array_values(array_filter($order->get_items(),static function($item){return(bool)$item->get_meta('_mbs_invoice_ref');}));
+        if(count($invoice_items)!==1||count($order->get_items())!==1||count($order->get_items('coupon'))!==0||count($order->get_fees())!==0)self::immutable_order_exception();
+        $item=$invoice_items[0];$invoice=MBS_Billing_Ledger::get_invoice((string)$item->get_meta('_mbs_invoice_ref'));$expected=(int)$item->get_meta('_mbs_invoice_amount_minor');
+        $order_total=MBS_Money::from_decimal_string((string)$order->get_total());$line_total=MBS_Money::from_decimal_string((string)$item->get_total());$line_subtotal=MBS_Money::from_decimal_string((string)$item->get_subtotal());
+        if(!$invoice||is_wp_error($order_total)||is_wp_error($line_total)||is_wp_error($line_subtotal)||(int)$order_total!==$expected||(int)$line_total!==$expected||(int)$line_subtotal!==$expected||strtoupper((string)$order->get_currency())!==strtoupper((string)$invoice->currency))self::immutable_order_exception();
+    }
+
+    public static function guard_locked_invoice_item( $item ) {
+        if ( ! method_exists($item,'get_order_id') || !(int)$item->get_order_id() ) return;
+        $order=wc_get_order($item->get_order_id());if(!$order||$order->get_meta('_mbs_invoice_order_locked')!=='yes')return;
+        if(!method_exists($item,'get_type')||$item->get_type()!=='line_item'||!$item->get_meta('_mbs_invoice_ref'))self::immutable_order_exception();
+        $expected=(int)$item->get_meta('_mbs_invoice_amount_minor');$total=MBS_Money::from_decimal_string((string)$item->get_total());$subtotal=MBS_Money::from_decimal_string((string)$item->get_subtotal());
+        if(is_wp_error($total)||is_wp_error($subtotal)||(int)$total!==$expected||(int)$subtotal!==$expected||(int)$item->get_quantity()!==1)self::immutable_order_exception();
     }
 
     /**
@@ -361,25 +439,15 @@ class MBS_Woo_Payment {
             $invoice_items_found = true;
             $reservation_ref = (string) $item->get_meta( '_mbs_invoice_reservation_ref' );
             $claimed_minor = (int) $item->get_meta( '_mbs_invoice_amount_minor' );
-	            if ( ! $reservation_ref || $claimed_minor < 1 || ! MBS_Invoice_Reservation::validate( $invoice_ref, $reservation_ref, $claimed_minor, $order_id ) ) {
-                $order->update_meta_data( '_mbs_invoice_reconciliation_required', 'yes' );
-                $order->update_meta_data( '_mbs_invoice_reconciliation_error', 'The captured order does not own the authoritative invoice reservation.' );
-                $order->add_order_note( 'CRITICAL: Captured invoice payment failed reservation ownership validation; do not retry capture. Reconcile or refund this order.' );
-                MBS_Audit_Log::log( $invoice_ref, 'payment_reconciliation_required', 'WooCommerce Order #' . $order_id . ' failed reservation ownership validation.', 0 );
-	                continue;
-	            }
 	            $invoice=MBS_Billing_Ledger::get_invoice($invoice_ref);
-	            $actual_minor=MBS_Money::from_decimal_string((string)$order->get_total());
-	            $order_currency=(string)$order->get_currency();
-	            if($order_currency===''&&function_exists('get_woocommerce_currency'))$order_currency=(string)get_woocommerce_currency();
-	            if(is_wp_error($actual_minor)||$actual_minor<1||$actual_minor>$claimed_minor||!$invoice||strtoupper($order_currency)!==strtoupper((string)$invoice->currency)){
-	                MBS_Invoice_Reservation::reconciliation_required($invoice_ref,$reservation_ref,$order_id,'Captured order total or currency is incompatible with its reserved invoice balance.');
-	                $order->update_meta_data('_mbs_invoice_reconciliation_required','yes');
-	                $order->update_meta_data('_mbs_invoice_reconciliation_error','Captured order total or currency is incompatible with its reserved invoice balance.');
-	                $order->add_order_note('CRITICAL: Captured invoice order total/currency exceeds or differs from the safe ledger boundary; reconcile or refund this order.');
+	            if ( ! self::validate_captured_invoice_order( $order, $item, $invoice, $reservation_ref, $claimed_minor ) ) {
+	                if ( $reservation_ref ) MBS_Invoice_Reservation::reconciliation_required( $invoice_ref, $reservation_ref, $order_id, 'Captured order value, structure, currency, or balance generation differs from its reservation.' );
+                $order->update_meta_data( '_mbs_invoice_reconciliation_required', 'yes' );
+	                $order->update_meta_data( '_mbs_invoice_reconciliation_error', 'Captured order value, structure, currency, or balance generation differs from its reservation.' );
+	                $order->add_order_note( 'CRITICAL: Captured invoice order differs from its exact reservation; do not treat it as payment. Reconcile or refund this order.' );
+	                MBS_Audit_Log::log( $invoice_ref, 'payment_reconciliation_required', 'WooCommerce Order #' . $order_id . ' failed exact reservation validation.', 0 );
 	                continue;
 	            }
-	            if($actual_minor!==$claimed_minor)$order->add_order_note(sprintf('Partial invoice payment recorded: %s captured against a %s reserved balance; the remainder requires a new checkout.',MBS_Money::format($actual_minor),MBS_Money::format($claimed_minor)));
             // Integration gateways may inject a deterministic pre-ledger
             // failure; production integrations should normally leave this null.
             $payment = apply_filters( 'mbs_invoice_gateway_payment_preflight', null, $invoice_ref, $order_id, $reservation_ref );
@@ -543,7 +611,7 @@ class MBS_Woo_Payment {
                             $order->update_meta_data( '_mbs_pending_invoice_refunds', array_values( array_unique( $pending ) ) );
                         }
                         $order->add_order_note( '⚠️ Consolidated invoice refund could not be recorded: ' . $result->get_error_message() );
-	                    } else {
+	                    } elseif ( ! empty( $result['created'] ) ) {
 	                        MBS_Invoice_Reservation::refunded($invoice_ref,$order_id);
 	                        $order->add_order_note( sprintf( 'Refund #%d recorded against consolidated invoice %s.', $refund->get_id(), $invoice_ref ) );
                     }

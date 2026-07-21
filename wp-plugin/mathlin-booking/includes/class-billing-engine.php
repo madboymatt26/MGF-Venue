@@ -59,19 +59,13 @@ class MBS_Billing_Engine {
 	        $adopting = ! empty( $current->metadata_incomplete ) && $current->billing_treatment === 'legacy_per_occurrence'
 	            && $treatment === 'invoice_managed' && ! empty( $configuration['adopt_legacy'] );
 	        if($adopting){
-	            $booking_table=$wpdb->prefix.MBS_TABLE;
-	            $preserved=$wpdb->query($wpdb->prepare(
-	                "UPDATE {$booking_table} SET legacy_billing_excluded=1 WHERE series_id=%s
-	                 AND (status IN ('paid','deposit_paid','cancelled','archived') OR amount_paid>0 OR deposit_paid>0)",
-	                sanitize_text_field($series_ref)
-	            ));
-	            if($preserved===false)return new WP_Error('legacy_billing_backfill_failed','Could not preserve the legacy billing baseline; adoption was not applied.');
-	            $unsafe=(int)$wpdb->get_var($wpdb->prepare(
-	                "SELECT COUNT(*) FROM {$booking_table} WHERE series_id=%s AND legacy_billing_excluded=0
-	                 AND (status IN ('paid','deposit_paid','cancelled','archived') OR amount_paid>0 OR deposit_paid>0)",
-	                sanitize_text_field($series_ref)
-	            ));
-	            if($unsafe!==0)return new WP_Error('legacy_billing_backfill_incomplete','Historical occurrences remain unsafe to adopt.');
+	            if ( ! MBS_Database::migration_is_current() ) {
+	                return new WP_Error( 'legacy_adoption_migration_incomplete', 'The database migration and historical financial backfill must complete before legacy adoption.' );
+	            }
+	            $preserved = MBS_Database::backfill_legacy_financial_history( $current->series_ref );
+	            if ( is_wp_error( $preserved ) ) return $preserved;
+	            $verified = MBS_Database::verify_legacy_financial_backfill( $current->series_ref );
+	            if ( is_wp_error( $verified ) ) return $verified;
 	        }
 	        $updated = $wpdb->query( $wpdb->prepare(
             "UPDATE {$table}

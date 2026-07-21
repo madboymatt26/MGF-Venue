@@ -94,7 +94,7 @@ class MBS_Modification {
 
     public static function update_request_status( $id, $status, $admin_response = '' ) {
         global $wpdb;
-        $wpdb->update( self::table(), array(
+        return $wpdb->update( self::table(), array(
             'status'         => $status,
             'admin_response' => sanitize_textarea_field( $admin_response ),
             'resolved_at'    => current_time( 'mysql' ),
@@ -206,7 +206,11 @@ class MBS_Modification {
                     }
 
 	                    }
-	                    $wpdb->update( $table, $update, array( 'ref' => $request->booking_ref ) );
+	                    $booking_updated = $wpdb->update( $table, $update, array( 'ref' => $request->booking_ref ) );
+	                    if ( $booking_updated === false ) {
+	                        MBS_Audit_Log::log( $request->booking_ref, 'modification_update_failed', 'Permitted modification remains pending because the booking update failed: ' . $wpdb->last_error );
+	                        return new WP_Error( 'modification_update_failed', 'The booking change could not be saved. The request remains pending and can be retried safely.' );
+	                    }
 
 	                    if ( $financial_change ) {
 	                    MBS_Audit_Log::log( $request->booking_ref, 'status_changed',
@@ -229,7 +233,9 @@ class MBS_Modification {
             MBS_Audit_Log::log( $request->booking_ref, 'edited', 'Modification request approved and applied by admin' );
         }
 
-        self::update_request_status( $request_id, 'approved' );
+        if ( self::update_request_status( $request_id, 'approved' ) === false ) {
+            return new WP_Error( 'modification_status_update_failed', 'The booking changed, but the request could not be marked approved. Administrator reconciliation is required.' );
+        }
         return true;
     }
 

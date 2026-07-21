@@ -6,6 +6,21 @@ function mbs_audit_migration_assert($condition,$message){
     MBS_Audit_Assertions::current()->check( $condition, $message );
 }
 
+function mbs_audit_malformed_column_case($table,$column,$malformed,$restore,$label){
+    global $wpdb;
+    if($wpdb->query("ALTER TABLE {$table} MODIFY COLUMN {$column} {$malformed}")===false)throw new RuntimeException('Could not create malformed '.$label.' fixture: '.$wpdb->last_error);
+    $marker='3.21.0-malformed-'.sanitize_key($label);update_option('mbs_db_version',$marker,false);
+    $block=static function($query)use($table,$column){if(stripos($query,'ALTER TABLE')!==false&&strpos($query,$table)!==false&&stripos($query,$column)!==false)return 'SELECT 1';return $query;};
+    add_filter('query',$block);$result=MBS_Database::create_tables();remove_filter('query',$block);
+    $state=get_option('mbs_migration_state',array());
+    mbs_audit_migration_assert(is_wp_error($result),'Malformed '.$label.' column was certified.');
+    mbs_audit_migration_assert(get_option('mbs_db_version')===$marker,'Marker advanced for malformed '.$label.' column.');
+    mbs_audit_migration_assert(($state['status']??'')==='failed','Malformed '.$label.' failure was not administrator-visible.');
+    if($wpdb->query("ALTER TABLE {$table} MODIFY COLUMN {$column} {$restore}")===false)throw new RuntimeException('Could not restore '.$label.' fixture: '.$wpdb->last_error);
+    $retry=MBS_Database::create_tables();
+    mbs_audit_migration_assert(!is_wp_error($retry)&&get_option('mbs_db_version')===MBS_DB_VERSION,'Retry failed after restoring '.$label.' column.');
+}
+
 $booking_table=$wpdb->prefix.MBS_TABLE;
 $series_table=$wpdb->prefix.MBS_SERIES_TABLE;
 $reservation_table=$wpdb->prefix.MBS_PAYMENT_RESERVATION_TABLE;
@@ -109,6 +124,15 @@ mbs_audit_migration_assert(($failure_state['status']??'')==='failed','The migrat
 $retry=MBS_Database::create_tables();
 mbs_audit_migration_assert(!is_wp_error($retry)&&get_option('mbs_db_version')===MBS_DB_VERSION,'The failed legacy backfill was not safely retryable.');
 
+// The read-back verification is an independent hard gate.
+$wpdb->update($booking_table,array('legacy_billing_excluded'=>0),array('ref'=>'INT-A-LEGACY-PAID'));
+$verify_marker='3.21.0-schema-6-verification-fault';update_option('mbs_db_version',$verify_marker,false);
+$block_backfill_verification=static function($query)use($booking_table){if(stripos($query,'SELECT COUNT(*) FROM '.$booking_table.' b')!==false)return 'SELECT NULL';return $query;};
+add_filter('query',$block_backfill_verification);$failed_verification=MBS_Database::create_tables();remove_filter('query',$block_backfill_verification);
+mbs_audit_migration_assert(is_wp_error($failed_verification),'A failed legacy exclusion verification did not fail migration.');
+mbs_audit_migration_assert(get_option('mbs_db_version')===$verify_marker,'Marker advanced after legacy exclusion verification failed.');
+$retry=MBS_Database::create_tables();mbs_audit_migration_assert(!is_wp_error($retry),'Legacy exclusion verification failure was not retryable.');
+
 // A same-name malformed currency column must be repaired or block the marker.
 $invoice_table=$wpdb->prefix.MBS_INVOICE_TABLE;
 $wpdb->query("ALTER TABLE {$invoice_table} MODIFY currency VARCHAR(4) NULL DEFAULT NULL");
@@ -128,5 +152,30 @@ mbs_audit_migration_assert(get_option('mbs_db_version')!==MBS_DB_VERSION||$curre
 $wpdb->query("ALTER TABLE {$invoice_table} MODIFY currency CHAR(3) NOT NULL DEFAULT 'GBP'");
 $restored=MBS_Database::create_tables();
 if(is_wp_error($restored))throw new RuntimeException('Could not restore schema after column verification: '.$restored->get_error_message());
+
+// Complete same-name column semantics, not a selected subset.
+mbs_audit_malformed_column_case($invoice_table,'invoice_ref','VARCHAR(40) NULL DEFAULT NULL','VARCHAR(30) NOT NULL','reference');
+mbs_audit_malformed_column_case($invoice_table,'status',"VARCHAR(25) NOT NULL DEFAULT 'draft'","VARCHAR(20) NOT NULL DEFAULT 'draft'",'status');
+mbs_audit_malformed_column_case($invoice_table,'idempotency_key','VARCHAR(120) NOT NULL','VARCHAR(64) NOT NULL','idempotency');
+mbs_audit_malformed_column_case($invoice_table,'due_at','DATE DEFAULT NULL','DATETIME DEFAULT NULL','date');
+mbs_audit_malformed_column_case($booking_table,'amount','DECIMAL(10,3) NOT NULL DEFAULT 0.000','DECIMAL(8,2) NOT NULL DEFAULT 0.00','amount');
+mbs_audit_malformed_column_case($reservation_table,'status','VARCHAR(30) NULL DEFAULT NULL',"VARCHAR(30) NOT NULL DEFAULT 'active'",'nullable-default');
+mbs_audit_malformed_column_case($invoice_table,'id','BIGINT(20) UNSIGNED NOT NULL','BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT','auto-increment-primary');
+
+// Composite column ordering is part of index identity.
+$wpdb->query("ALTER TABLE {$invoice_table} DROP INDEX idx_invoice_status_due, ADD INDEX idx_invoice_status_due (due_at,status)");
+$index_marker='3.21.0-malformed-composite-order';update_option('mbs_db_version',$index_marker,false);
+$block_order=static function($query)use($invoice_table){if(stripos($query,'ALTER TABLE')!==false&&strpos($query,$invoice_table)!==false&&stripos($query,'idx_invoice_status_due')!==false)return 'SELECT 1';return $query;};
+add_filter('query',$block_order);$ordered=MBS_Database::create_tables();remove_filter('query',$block_order);
+mbs_audit_migration_assert(is_wp_error($ordered)&&get_option('mbs_db_version')===$index_marker,'Incorrect composite-index ordering was certified.');
+$wpdb->query("ALTER TABLE {$invoice_table} DROP INDEX idx_invoice_status_due, ADD INDEX idx_invoice_status_due (status,due_at)");
+$restored=MBS_Database::create_tables();if(is_wp_error($restored))throw new RuntimeException('Could not restore composite index: '.$restored->get_error_message());
+
+// A failure in the final semantic read-back must also leave the marker old.
+$post_marker='3.21.0-post-verification-fault';update_option('mbs_db_version',$post_marker,false);
+$block_post=static function($query)use($invoice_table){if(stripos($query,'SHOW FULL COLUMNS FROM `'.$invoice_table.'`')!==false)return 'SELECT * FROM missing_post_verification_fixture';return $query;};
+add_filter('query',$block_post);$post=MBS_Database::create_tables();remove_filter('query',$block_post);
+mbs_audit_migration_assert(is_wp_error($post)&&get_option('mbs_db_version')===$post_marker,'Post-migration semantic verification failure advanced the marker.');
+$retry=MBS_Database::create_tables();mbs_audit_migration_assert(!is_wp_error($retry),'Post-migration verification failure was not retryable.');
 
 MBS_Audit_Assertions::current()->finish( 'registered legacy upgrade, fail-closed migration, and semantic schema verification passed' );

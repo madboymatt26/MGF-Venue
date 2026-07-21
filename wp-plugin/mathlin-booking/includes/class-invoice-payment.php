@@ -87,6 +87,13 @@ class MBS_Invoice_Payment {
 	        ));
 	        if($existing_refund){
 	            if((int)$existing_refund->amount_minor!==$minor||(int)$existing_refund->parent_transaction_id!==(int)$payment->id){$wpdb->query('ROLLBACK');return new WP_Error('idempotency_payload_conflict','This WooCommerce refund identifier was already used with a different amount or payment.');}
+	            if ( $requested_allocations ) {
+	                $metadata = json_decode( (string)$existing_refund->metadata_json, true );
+	                $existing_allocations = is_array($metadata) && isset($metadata['booking_allocations']) ? $metadata['booking_allocations'] : array();
+	                $requested_normalised = $requested_allocations;
+	                ksort( $requested_normalised ); ksort( $existing_allocations );
+	                if ( $requested_normalised !== $existing_allocations ) { $wpdb->query('ROLLBACK'); return new WP_Error('idempotency_payload_conflict','This WooCommerce refund identifier was already used with different booking allocations.'); }
+	            }
 	            if($wpdb->query('COMMIT')===false){$wpdb->query('ROLLBACK');return new WP_Error('refund_transaction_commit_failed','Could not finish idempotent refund reconciliation.');}
 	            return array('transaction'=>$existing_refund,'invoice'=>MBS_Billing_Ledger::get_invoice($invoice_ref),'created'=>false,'idempotent_replay'=>true);
 	        }
@@ -106,8 +113,17 @@ class MBS_Invoice_Payment {
 	            $refund_events = self::apply_refund_allocations( $result['invoice'], $allocations, false );
 	            if ( is_wp_error( $refund_events ) ) { $wpdb->query( 'ROLLBACK' ); return $refund_events; }
 	        }
+	        $outbox_ids = array();
+	        foreach ( $refund_events as $event ) {
+	            $booking = MBS_Bookings::get( $event['booking_ref'] );
+	            if ( ! $booking ) continue;
+	            $queued = MBS_OSM_Integration::queue_refund_reversal( $booking, $invoice_ref, (int)$event['amount_minor'], (int)$order_id, (int)$refund_id, $event['reversal_kind'] ?? 'partial' );
+	            if ( is_wp_error( $queued ) ) { $wpdb->query('ROLLBACK'); return $queued; }
+	            if ( $queued ) $outbox_ids[] = (int)$queued;
+	        }
 	        if ( $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'refund_transaction_commit_failed', 'Could not commit refund reconciliation.' ); }
-	        foreach($refund_events as $event){$booking=MBS_Bookings::get($event['booking_ref']);if($booking)do_action('mbs_booking_refunded',$booking,(int)$event['amount_minor'],(int)$order_id,(int)$refund_id);}
+	        foreach ( array_unique( $outbox_ids ) as $outbox_id ) MBS_OSM_Integration::deliver_outbox_event( $outbox_id );
+	        $result['osm_outbox_ids'] = $outbox_ids;
 	        return $result;
     }
 
@@ -306,7 +322,7 @@ class MBS_Invoice_Payment {
 	            ) );
 	            if ( $updated === false ) { if($manage_transaction)$wpdb->query( 'ROLLBACK' ); return new WP_Error('refund_booking_update_failed','Could not reconcile the refunded occurrence.'); }
 	            if ( $updated ) $reopened_refs[] = sanitize_text_field( $booking_ref );
-	            $refund_events[]=array('booking_ref'=>sanitize_text_field($booking_ref),'amount_minor'=>$amount);
+	            $refund_events[]=array('booking_ref'=>sanitize_text_field($booking_ref),'amount_minor'=>$amount,'reversal_kind'=>$net_minor===0?'full':'partial');
         }
         if ( $manage_transaction && $wpdb->query( 'COMMIT' ) === false ) return new WP_Error('refund_allocation_commit_failed','Could not commit allocation reconciliation.');
         foreach ( $reopened_refs as $ref ) {
