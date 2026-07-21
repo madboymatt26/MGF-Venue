@@ -7,15 +7,17 @@ run_race() {
   invoice_ref="$1"
   mode="$2"
   suffix="$3"
+  order_a="$4"
+  order_b="$5"
   $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/seed-reservation.php "$invoice_ref" "$mode" --allow-root
   log_a="tests/integration/.worker-${suffix}-a"
   log_b="tests/integration/.worker-${suffix}-b"
   exit_a="tests/integration/.exit-${suffix}-a"
   exit_b="tests/integration/.exit-${suffix}-b"
   rm -f "$log_a" "$log_b" "$exit_a" "$exit_b"
-  ( set +e; $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/reservation-worker.php "$invoice_ref" 1001 "$mode" --allow-root >"$log_a" 2>&1; echo "$?" >"$exit_a" ) &
+  ( set +e; $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/reservation-worker.php "$invoice_ref" "$order_a" "$mode" --allow-root >"$log_a" 2>&1; echo "$?" >"$exit_a" ) &
   pid_a=$!
-  ( set +e; $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/reservation-worker.php "$invoice_ref" 1002 "$mode" --allow-root >"$log_b" 2>&1; echo "$?" >"$exit_b" ) &
+  ( set +e; $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/reservation-worker.php "$invoice_ref" "$order_b" "$mode" --allow-root >"$log_b" 2>&1; echo "$?" >"$exit_b" ) &
   pid_b=$!
   wait "$pid_a"
   wait "$pid_b"
@@ -26,12 +28,12 @@ run_race() {
     cat "$log_a" "$log_b" >&2
     exit 1
   fi
-  $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/assert-reservation.php "$invoice_ref" --allow-root
+  $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/assert-reservation.php "$invoice_ref" "$order_a" "$order_b" --allow-root
   echo "OK: synchronised ${mode:-different-session} race produced one winner and one loser."
 }
 
-run_race INT-RES-DIFFERENT different different
-run_race INT-RES-SAME shared same
+run_race INT-RES-DIFFERENT different different 1001 1002
+run_race INT-RES-SAME shared same 2001 2002
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/reservation-state-machine.php --allow-root
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/woocommerce-callbacks.php --allow-root
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/financial-flows.php --allow-root
