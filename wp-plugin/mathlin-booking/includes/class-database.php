@@ -499,19 +499,6 @@ class MBS_Database {
 	        if ( ! $legacy_column ) {
 	            if ( $wpdb->query( "ALTER TABLE {$table} ADD COLUMN legacy_billing_excluded TINYINT(1) NOT NULL DEFAULT 0 AFTER series_id" ) === false ) return new WP_Error( 'legacy_billing_column_failed', 'Could not add the legacy billing exclusion column.' );
 	        }
-	        $series_table = $wpdb->prefix . MBS_SERIES_TABLE;
-	        $backfilled = $wpdb->query(
-	            "UPDATE {$table} b INNER JOIN {$series_table} s ON s.series_ref=b.series_id
-	             SET b.legacy_billing_excluded=1
-	             WHERE b.legacy_billing_excluded=0 AND (b.status IN ('paid','deposit_paid','cancelled','archived') OR b.amount_paid>0 OR b.deposit_paid>0)"
-	        );
-	        if ( $backfilled === false ) return new WP_Error( 'legacy_billing_backfill_failed', 'Could not preserve historical recurring billing during upgrade.' );
-	        $unsafe = (int)$wpdb->get_var(
-	            "SELECT COUNT(*) FROM {$table} b INNER JOIN {$series_table} s ON s.series_ref=b.series_id
-	             WHERE b.legacy_billing_excluded=0 AND (b.status IN ('paid','deposit_paid','cancelled','archived') OR b.amount_paid>0 OR b.deposit_paid>0)"
-	        );
-	        if ( $unsafe !== 0 ) return new WP_Error( 'legacy_billing_backfill_incomplete', 'Historical recurring billing exclusions remain incomplete.' );
-
 	        $reservation_table=$wpdb->prefix.MBS_PAYMENT_RESERVATION_TABLE;
 	        if(!$wpdb->get_row("SHOW COLUMNS FROM {$reservation_table} WHERE Field='balance_version'")){
 	            if($wpdb->query("ALTER TABLE {$reservation_table} ADD COLUMN balance_version BIGINT(20) UNSIGNED NOT NULL DEFAULT 0 AFTER version")===false)return new WP_Error('reservation_generation_column_failed','Could not add reservation balance generations.');
@@ -664,7 +651,7 @@ class MBS_Database {
         // v3.17.2: Rename the WooCommerce payment product to the generic name.
         // Only runs once (guarded by a flag) so it doesn't overwrite any future
         // admin customisation of the product name.
-        if ( ! get_option( 'mbs_woo_product_renamed', false ) ) {
+	        if ( ! get_option( 'mbs_woo_product_renamed', false ) ) {
             $product_id = (int) get_option( 'mbs_woo_product_id', 0 );
             if ( $product_id && function_exists( 'wc_get_product' ) ) {
                 $product = wc_get_product( $product_id );
@@ -674,9 +661,23 @@ class MBS_Database {
                     $product->save();
                 }
             }
-            update_option( 'mbs_woo_product_renamed', true );
-        }
-    }
+	            update_option( 'mbs_woo_product_renamed', true );
+	        }
+
+	        // Run only after every historical payment column above is present.
+	        $series_table = $wpdb->prefix . MBS_SERIES_TABLE;
+	        $backfilled = $wpdb->query(
+	            "UPDATE {$table} b INNER JOIN {$series_table} s ON s.series_ref=b.series_id
+	             SET b.legacy_billing_excluded=1
+	             WHERE b.legacy_billing_excluded=0 AND (b.status IN ('paid','deposit_paid','cancelled','archived') OR b.amount_paid>0 OR b.deposit_paid>0)"
+	        );
+	        if ( $backfilled === false ) return new WP_Error( 'legacy_billing_backfill_failed', 'Could not preserve historical recurring billing during upgrade.' );
+	        $unsafe = (int)$wpdb->get_var(
+	            "SELECT COUNT(*) FROM {$table} b INNER JOIN {$series_table} s ON s.series_ref=b.series_id
+	             WHERE b.legacy_billing_excluded=0 AND (b.status IN ('paid','deposit_paid','cancelled','archived') OR b.amount_paid>0 OR b.deposit_paid>0)"
+	        );
+	        if ( $unsafe !== 0 ) return new WP_Error( 'legacy_billing_backfill_incomplete', 'Historical recurring billing exclusions remain incomplete.' );
+	    }
 
     public static function on_deactivate() {
         // Data is preserved on deactivation. Use uninstall.php to fully remove.
