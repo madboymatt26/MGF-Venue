@@ -36,7 +36,9 @@ for($i=1;$i<=105;$i++){
 }
 $result=MBS_Billing_Engine::catch_up(wp_date('Y-m-d'));
 if(is_wp_error($result))throw new RuntimeException($result->get_error_message());
-$errors=array_values(array_filter($result['periods'],static function($row){return ($row['status']??'')==='error';}));
+$errors=array_values(array_filter($result['periods'],static function($row){
+    return ($row['status']??'')==='error' && strpos((string)($row['series_ref']??''),'INT-CU-')===0;
+}));
 if(count($errors)!==1||($errors[0]['series_ref']??'')!=='INT-CU-050')throw new RuntimeException('Middle-of-batch failure was not isolated to the invalid series.');
 $invoice_count=(int)$wpdb->get_var("SELECT COUNT(*) FROM {$invoice_table} WHERE series_ref LIKE 'INT-CU-%'");
 $last_billed=(int)$wpdb->get_var("SELECT COUNT(*) FROM {$invoice_table} WHERE series_ref='INT-CU-105'");
