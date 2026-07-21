@@ -104,7 +104,7 @@ class MBS_Test_Reservation_WPDB {
             return 1;
         }
 
-        if ( strpos( $sql, "SET order_id=" ) !== false ) {
+        if ( strpos( $sql, "SET order_id=" ) !== false && strpos( $sql, "status='released'" ) === false ) {
             preg_match( '/SET order_id=(\d+)/', $sql, $order_match );
             $order_id = (int) $order_match[1];
             if ( $row->status !== 'active' || $row->order_id !== null || strtotime( $row->expires_at ) <= time() ) return 0;
@@ -118,7 +118,7 @@ class MBS_Test_Reservation_WPDB {
             if ( preg_match( '/AND version=(\d+)/', $sql, $version_match ) && (int) $row->version !== (int) $version_match[1] ) return 0;
             if ( preg_match( '/AND order_id=(\d+)/', $sql, $order_match ) && (int) $row->order_id !== (int) $order_match[1] ) return 0;
             if ( strpos( $sql, 'order_id IS NULL' ) !== false && $row->order_id !== null ) return 0;
-            $row->status = 'released'; $row->version++;
+            $row->order_id = null; $row->status = 'released'; $row->version++;
             return 1;
         }
 
@@ -180,6 +180,16 @@ $wpdb->rows['INV-8']->expires_at = '2000-01-01 00:00:00';
 $replacement = MBS_Invoice_Reservation::acquire( $expiring );
 if ( ! is_array( $replacement ) || $replacement['reservation_ref'] === $old['reservation_ref'] || MBS_Invoice_Reservation::release( 'INV-8', $old['reservation_ref'], 'stale' ) ) {
     fwrite( STDERR, "FAIL: expired replacement was not compare-and-swap safe.\n" ); exit( 1 );
+}
+
+$cancelled_invoice = (object) array( 'id' => 9, 'invoice_ref' => 'INV-9', 'status' => 'issued', 'balance' => 700 );
+$cancelled_claim = MBS_Invoice_Reservation::acquire( $cancelled_invoice );
+MBS_Invoice_Reservation::bind_order( 'INV-9', $cancelled_claim['reservation_ref'], 43 );
+$cancelled = MBS_Invoice_Reservation::release( 'INV-9', $cancelled_claim['reservation_ref'], 'order_cancelled', 43 );
+$released = MBS_Invoice_Reservation::get( 'INV-9' );
+$cancelled_replacement = MBS_Invoice_Reservation::acquire( $cancelled_invoice );
+if ( ! $cancelled || $released->status !== 'released' || $released->order_id !== null || ! is_array( $cancelled_replacement ) || $cancelled_replacement['reservation_ref'] === $cancelled_claim['reservation_ref'] ) {
+    fwrite( STDERR, "FAIL: cancelled bound checkout did not release ownership for safe replacement.\n" ); exit( 1 );
 }
 
 class MBS_Series {

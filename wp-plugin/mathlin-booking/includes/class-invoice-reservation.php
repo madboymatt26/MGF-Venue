@@ -83,7 +83,7 @@ class MBS_Invoice_Reservation {
         global $wpdb;$table=self::table();$r=self::get($invoice_ref);if(!$r||!hash_equals($r->reservation_ref,(string)$reservation_ref))return false;
         $where="invoice_ref=%s AND reservation_ref=%s AND version=%d AND status IN ('active','bound')";$args=array($invoice_ref,$reservation_ref,(int)$r->version);
         if($r->status==='bound'){if(!$order_id||(int)$r->order_id!==(int)$order_id)return false;$where.=' AND order_id=%d';$args[]=(int)$order_id;}else{$where.=' AND order_id IS NULL';}
-        array_unshift($args,"UPDATE {$table} SET status='released',version=version+1,last_error=%s,updated_at=%s WHERE {$where}",sanitize_text_field($reason),current_time('mysql'));
+        array_unshift($args,"UPDATE {$table} SET order_id=NULL,status='released',version=version+1,last_error=%s,updated_at=%s WHERE {$where}",sanitize_text_field($reason),current_time('mysql'));
         return $wpdb->query(call_user_func_array(array($wpdb,'prepare'),$args))===1;
     }
     public static function release_order($order_id){$o=function_exists('wc_get_order')?wc_get_order($order_id):null;if(!$o)return false;return self::release((string)$o->get_meta('_mbs_invoice_ref'),(string)$o->get_meta('_mbs_invoice_reservation_ref'),'order_cancelled',(int)$order_id);}
