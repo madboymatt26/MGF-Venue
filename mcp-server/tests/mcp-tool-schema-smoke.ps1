@@ -8,7 +8,8 @@ $messages = @(
 )
 
 $lines = $messages | ForEach-Object { $_ | ConvertTo-Json -Depth 12 -Compress }
-$responses = @($lines | & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $server | ForEach-Object { $_ | ConvertFrom-Json })
+$powershell = if ( Get-Command powershell.exe -ErrorAction SilentlyContinue ) { 'powershell.exe' } else { 'pwsh' }
+$responses = @($lines | & $powershell -NoLogo -NoProfile -File $server | ForEach-Object { $_ | ConvertFrom-Json })
 $list = $responses | Where-Object { $_.id -eq 2 }
 if ( $null -eq $list -or $null -eq $list.result.tools ) { throw 'tools/list did not return tools.' }
 

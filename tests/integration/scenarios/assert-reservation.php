@@ -6,4 +6,5 @@ $rows = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$table} WHERE invoic
 if ( count( $rows ) !== 1 || $rows[0]->status !== 'bound' || (int) $rows[0]->order_id < 1 ) {
     throw new RuntimeException( 'Concurrent submissions did not produce exactly one bound authoritative order.' );
 }
+if ( ! in_array( (int) $rows[0]->order_id, array( 1001, 1002 ), true ) ) throw new RuntimeException( 'An unexpected worker became authoritative.' );
 echo 'OK: one durable reservation and one authoritative order (' . (int) $rows[0]->order_id . ").\n";

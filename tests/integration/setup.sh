@@ -3,6 +3,12 @@ set -eu
 
 site_url="${MBS_TEST_SITE_URL:-http://localhost:8088}"
 woo_version="${MBS_TEST_WOO_VERSION:-9.3.3}"
+wp_version="${MBS_TEST_WP_VERSION:-6.6.2}"
+
+# The official Docker library stops publishing old PHP variants for newer
+# WordPress point releases. The container supplies the requested PHP runtime;
+# WP-CLI installs the exact compatible WordPress release into the shared volume.
+wp core download --version="$wp_version" --force --allow-root
 
 until wp core is-installed --allow-root >/dev/null 2>&1; do
   if wp core install --url="$site_url" --title='MGF Integration' --admin_user=admin --admin_password=integration-only --admin_email=integration@example.invalid --skip-email --allow-root; then

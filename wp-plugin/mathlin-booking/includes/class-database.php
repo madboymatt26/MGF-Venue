@@ -63,6 +63,9 @@ class MBS_Database {
         // used because WordPress table prefixes and dbDelta do not manage them
         // reliably across all supported hosts.
         $series_table = $wpdb->prefix . MBS_SERIES_TABLE;
+        // dbDelta splits schema statements on semicolons, including quoted
+        // defaults. Inserts persist the full recurrence rule, so the schema
+        // fallback must remain semicolon-free.
         $series_sql = "CREATE TABLE {$series_table} (
             id                    BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
             series_ref            VARCHAR(20)  NOT NULL,
@@ -85,7 +88,7 @@ class MBS_Database {
             notes                 TEXT         DEFAULT '',
             start_date            DATE         NOT NULL,
             repeat_until          DATE         NOT NULL,
-            recurrence_rule       VARCHAR(100) NOT NULL DEFAULT 'FREQ=WEEKLY;INTERVAL=1',
+            recurrence_rule       VARCHAR(100) NOT NULL DEFAULT 'FREQ=WEEKLY',
             schedule_json         LONGTEXT     DEFAULT NULL,
             price_per_booking     DECIMAL(10,2) NOT NULL DEFAULT 0.00,
             estimated_total       DECIMAL(12,2) NOT NULL DEFAULT 0.00,

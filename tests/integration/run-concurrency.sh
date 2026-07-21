@@ -2,18 +2,37 @@
 set -eu
 
 compose='docker compose -f tests/integration/docker-compose.yml'
-$compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/seed-reservation.php --allow-root
 
-rm -f tests/integration/.worker-a tests/integration/.worker-b
-($compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/reservation-worker.php INT-RES-1 1001 --allow-root >tests/integration/.worker-a 2>&1; echo $? >>tests/integration/.worker-a) &
-pid_a=$!
-($compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/reservation-worker.php INT-RES-1 1002 --allow-root >tests/integration/.worker-b 2>&1; echo $? >>tests/integration/.worker-b) &
-pid_b=$!
-wait "$pid_a" || true
-wait "$pid_b" || true
+run_race() {
+  invoice_ref="$1"
+  mode="$2"
+  suffix="$3"
+  $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/seed-reservation.php "$invoice_ref" "$mode" --allow-root
+  log_a="tests/integration/.worker-${suffix}-a"
+  log_b="tests/integration/.worker-${suffix}-b"
+  exit_a="tests/integration/.exit-${suffix}-a"
+  exit_b="tests/integration/.exit-${suffix}-b"
+  rm -f "$log_a" "$log_b" "$exit_a" "$exit_b"
+  ( set +e; $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/reservation-worker.php "$invoice_ref" 1001 "$mode" --allow-root >"$log_a" 2>&1; echo "$?" >"$exit_a" ) &
+  pid_a=$!
+  ( set +e; $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/reservation-worker.php "$invoice_ref" 1002 "$mode" --allow-root >"$log_b" 2>&1; echo "$?" >"$exit_b" ) &
+  pid_b=$!
+  wait "$pid_a"
+  wait "$pid_b"
+  code_a=$(cat "$exit_a")
+  code_b=$(cat "$exit_b")
+  if { [ "$code_a" -eq 0 ] && [ "$code_b" -eq 0 ]; } || { [ "$code_a" -ne 0 ] && [ "$code_b" -ne 0 ]; }; then
+    echo "Expected exactly one successful worker; got A=$code_a B=$code_b" >&2
+    cat "$log_a" "$log_b" >&2
+    exit 1
+  fi
+  $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/assert-reservation.php "$invoice_ref" --allow-root
+  echo "OK: synchronised ${mode:-different-session} race produced one winner and one loser."
+}
 
-$compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/assert-reservation.php INT-RES-1 --allow-root
+run_race INT-RES-DIFFERENT different different
+run_race INT-RES-SAME shared same
+$compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/reservation-state-machine.php --allow-root
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/woocommerce-callbacks.php --allow-root
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/legacy-adoption.php --allow-root
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/mutation-matrix.php --allow-root
-rm -f tests/integration/.worker-a tests/integration/.worker-b

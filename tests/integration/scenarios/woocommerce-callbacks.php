@@ -15,6 +15,7 @@ $failed = $gateway->process_payment( $order->get_id() );
 if ( ! is_wp_error( $failed ) ) throw new RuntimeException( 'Failed-payment mode did not fail.' );
 update_option( 'mbs_test_gateway_mode', 'delayed' );
 $delayed = $gateway->process_payment( $order->get_id() );
+$order = wc_get_order( $order->get_id() );
 if ( ! is_array( $delayed ) || $order->get_status() !== 'on-hold' ) throw new RuntimeException( 'Delayed payment was not held.' );
 
 do_action( 'woocommerce_order_refunded', $order->get_id(), 999999 );
