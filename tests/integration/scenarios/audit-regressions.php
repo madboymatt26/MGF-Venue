@@ -1,21 +1,13 @@
 <?php
 global $wpdb;
-
-$mbs_audit_failures = array();
+require_once __DIR__ . '/audit-assertions.php';
 
 function mbs_audit_case( $name, $callback ) {
-    global $mbs_audit_failures;
-    try {
-        $callback();
-        echo "OK: {$name}.\n";
-    } catch ( Throwable $error ) {
-        $mbs_audit_failures[] = $name . ': ' . $error->getMessage();
-        fwrite( STDERR, "AUDIT REGRESSION: {$name}: {$error->getMessage()}\n" );
-    }
+    MBS_Audit_Assertions::current()->run( $name, $callback );
 }
 
 function mbs_audit_assert( $condition, $message ) {
-    if ( ! $condition ) throw new RuntimeException( $message );
+    MBS_Audit_Assertions::assert_that( $condition, $message );
 }
 
 function mbs_audit_booking( $ref, $amount = '10.00', $offset = 70 ) {
@@ -141,7 +133,7 @@ mbs_audit_case( 'a partial refund opens a new payable balance generation', stati
     mbs_audit_assert( ! is_wp_error($next) && (int)$next['amount_minor'] === 400, 'Part-refund balance cannot start a replacement checkout.' );
 } );
 
-mbs_audit_case( 'an altered Woo total cannot terminally own the remaining balance', static function () {
+mbs_audit_case( 'an altered Woo total is rejected instead of becoming a partial payment', static function () {
     $booking = mbs_audit_booking( 'INT-A-ALTERED', '10.00', 74 );
     $invoice = mbs_audit_invoice( 'altered-total', $booking );
     list( $order ) = mbs_audit_order( $invoice );
@@ -150,8 +142,11 @@ mbs_audit_case( 'an altered Woo total cannot terminally own the remaining balanc
     $order->save();
     mbs_audit_pay( $order );
     $fresh = MBS_Billing_Ledger::get_invoice( $invoice->invoice_ref );
-    $next = MBS_Invoice_Reservation::acquire( $fresh );
-    mbs_audit_assert( (int)$fresh->paid_minor === 900 && !is_wp_error($next) && (int)$next['amount_minor'] === 100, 'A discounted/altered order terminally captured a partially paid invoice.' );
+    $fresh_order = wc_get_order( $order->get_id() );
+    mbs_audit_assert(
+        (int) $fresh->paid_minor === 0 && $fresh_order->get_meta( '_mbs_invoice_reconciliation_required' ) === 'yes',
+        'A £9 order against a £10 reservation was silently accepted as a partial online payment.'
+    );
 } );
 
 mbs_audit_case( 'cancellation credit followed by cash refund reconciles the ledger', static function () {
@@ -209,6 +204,30 @@ mbs_audit_case( 'OSM receives partial and full refund reversals', static functio
     mbs_audit_assert( $reversals === 2, 'OSM income was not offset by both refund events.' );
 } );
 
+mbs_audit_case( 'OSM reversal failure is durably recoverable', static function () {
+    global $wpdb;
+    update_option( 'mbs_osm_enabled', true );
+    update_option( 'mbs_osm_sandbox_mode', false );
+    update_option( 'mbs_osm_section_id', 'audit-section' );
+    update_option( 'mbs_osm_category_id', 'audit-category' );
+    update_option( 'mbs_osm_account_id', 'audit-account' );
+    $booking = mbs_audit_booking( 'INT-A-OSM-RETRY', '10.00', 80 );
+    $invoice = mbs_audit_invoice( 'osm-retry', $booking );
+    list( $order ) = mbs_audit_order( $invoice );
+    $order = mbs_audit_pay( $order );
+    $fail_http = static function () { return new WP_Error( 'audit_osm_down', 'Controlled OSM outage.' ); };
+    add_filter( 'pre_http_request', $fail_http );
+    try {
+        mbs_audit_refund( $order, '10.00', 'OSM durable retry' );
+    } finally {
+        remove_filter( 'pre_http_request', $fail_http );
+    }
+    $outbox_table = $wpdb->prefix . 'mathlin_osm_outbox';
+    $exists = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $outbox_table ) ) === $outbox_table;
+    $pending = $exists ? (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$outbox_table} WHERE status IN ('pending','retry','manual_reconciliation')" ) : 0;
+    mbs_audit_assert( $exists && $pending === 1, 'Failed OSM reversal was not retained in a durable retry/reconciliation outbox.' );
+} );
+
 mbs_audit_case( 'safe non-financial modification preserves issued history', static function () {
     global $wpdb;
     $booking = mbs_audit_booking( 'INT-A-SAFE-MOD', '10.00', 79 );
@@ -223,8 +242,4 @@ mbs_audit_case( 'safe non-financial modification preserves issued history', stat
     mbs_audit_assert(!is_wp_error($approved)&&(int)$fresh->attendees===22&&$before_items===$after_items&&(string)$fresh->amount==='10.00','A non-financial attendee edit was blocked or rewrote financial history.');
 } );
 
-if ( $mbs_audit_failures ) {
-    throw new RuntimeException( count($mbs_audit_failures) . " adversarial regression(s) failed:\n- " . implode("\n- ",$mbs_audit_failures) );
-}
-
-echo "OK: all adversarial runtime regressions passed.\n";
+MBS_Audit_Assertions::current()->finish( 'all adversarial runtime regressions passed' );

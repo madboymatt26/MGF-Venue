@@ -32,6 +32,13 @@ run_race() {
   echo "OK: synchronised ${mode:-different-session} race produced one winner and one loser."
 }
 
+if $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/audit-assertions-self-test.php fail --allow-root; then
+  echo "Controlled false assertion unexpectedly returned success." >&2
+  exit 1
+fi
+echo "OK: controlled false adversarial assertion returned a non-zero WP-CLI exit."
+$compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/audit-assertions-self-test.php pass --allow-root
+
 audit_failed=0
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/audit-regressions.php --allow-root || audit_failed=1
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/audit-migration-regressions.php --allow-root || audit_failed=1
