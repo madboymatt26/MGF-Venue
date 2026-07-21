@@ -67,12 +67,8 @@ class MBS_Series {
                 'created_at' => $first->created_at ?: $now, 'updated_at' => $now,
             ) );
             if ( $inserted === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'legacy_series_registration_failed', 'Could not register legacy series ' . $series_ref . '.' ); }
-            $excluded = $wpdb->query( $wpdb->prepare(
-                "UPDATE {$booking_table} SET legacy_billing_excluded = 1
-                 WHERE series_id = %s AND (status IN ('paid','deposit_paid','cancelled','archived') OR amount_paid > 0 OR deposit_paid > 0)",
-                $series_ref
-            ) );
-            if ( $excluded === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'legacy_billing_baseline_failed', 'Could not preserve the historical billing baseline for ' . $series_ref . '.' ); }
+            $excluded = MBS_Database::backfill_legacy_financial_history( $series_ref );
+            if ( is_wp_error( $excluded ) ) { $wpdb->query( 'ROLLBACK' ); return $excluded; }
             if ( $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'transaction_commit_failed', 'Could not commit legacy-series registration.' ); }
             MBS_Audit_Log::log( $series_ref, 'legacy_series_registered', 'Registered existing occurrence group as legacy per-occurrence billing. Missing terms, skipped dates and prior billing intent were not inferred.', 0 );
             $registered++;

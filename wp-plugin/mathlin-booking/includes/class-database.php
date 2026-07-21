@@ -649,10 +649,9 @@ class MBS_Database {
     private static function historical_financial_predicate( $booking_alias ) {
         global $wpdb;
         $clauses = array(
-            "{$booking_alias}.status IN ('paid','deposit_paid','cancelled','archived')",
+            "{$booking_alias}.status IN ('paid','deposit_paid','credited','refunded','cancelled','archived')",
             "{$booking_alias}.amount_paid > 0",
             "{$booking_alias}.deposit_paid > 0",
-            "COALESCE({$booking_alias}.invoice_number,'') <> ''",
         );
         $item_table = $wpdb->prefix . MBS_INVOICE_ITEM_TABLE;
         $allocation_table = $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE;

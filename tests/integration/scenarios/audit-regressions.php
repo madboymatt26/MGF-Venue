@@ -190,7 +190,7 @@ mbs_audit_case( 'stale balance generation enters reconciliation', static functio
 
 mbs_audit_case( 'persisted invoice orders reject later value edits', static function () {
     $booking=mbs_audit_booking('INT-A-LOCKED-ORDER','10.00',114);$invoice=mbs_audit_invoice('locked-order',$booking);list($order)=mbs_audit_order($invoice);MBS_Woo_Payment::lock_invoice_order($order);
-    $blocked=false;try{$order->set_total('9.00');$order->save();}catch(Throwable $error){$blocked=true;}
+    $blocked=false;try{$order->set_total('9.00');MBS_Woo_Payment::guard_locked_invoice_order($order);$order->save();}catch(Throwable $error){$blocked=true;}
     mbs_audit_assert($blocked,'A persisted exact-value invoice order remained editable.');
 } );
 
@@ -264,7 +264,7 @@ mbs_audit_case( 'duplicate refund callback is a clean successful replay', static
 
 mbs_audit_case( 'cancellation credit supports cumulative cash refunds without double credit', static function () {
     global $wpdb;
-    $booking=mbs_audit_booking('INT-A-CANCEL-CUMULATIVE','10.00',116);$invoice=mbs_audit_invoice('cancel-cumulative',$booking);list($order)=mbs_audit_order($invoice);$order=mbs_audit_pay($order);
+    $booking=mbs_audit_booking('INT-A-CAN-CUM','10.00',116);$invoice=mbs_audit_invoice('cancel-cumulative',$booking);list($order)=mbs_audit_order($invoice);$order=mbs_audit_pay($order);
     $wpdb->update($wpdb->prefix.MBS_TABLE,array('status'=>'cancelled'),array('ref'=>$booking->ref));$credit=MBS_Billing_Engine::reconcile_occurrences(array($booking->ref),true);
     if(is_wp_error($credit))throw new RuntimeException($credit->get_error_message());
     mbs_audit_refund($order,'4.00','Cumulative one');mbs_audit_refund($order,'6.00','Cumulative two');
@@ -274,7 +274,7 @@ mbs_audit_case( 'cancellation credit supports cumulative cash refunds without do
 
 mbs_audit_case( 'partial cash refund before cancellation credit remains balanced', static function () {
     global $wpdb;
-    $booking=mbs_audit_booking('INT-A-REFUND-THEN-CANCEL','10.00',117);$invoice=mbs_audit_invoice('refund-then-cancel',$booking);list($order)=mbs_audit_order($invoice);$order=mbs_audit_pay($order);
+    $booking=mbs_audit_booking('INT-A-REF-CAN','10.00',117);$invoice=mbs_audit_invoice('refund-then-cancel',$booking);list($order)=mbs_audit_order($invoice);$order=mbs_audit_pay($order);
     mbs_audit_refund($order,'4.00','Cash before cancellation');$wpdb->update($wpdb->prefix.MBS_TABLE,array('status'=>'cancelled'),array('ref'=>$booking->ref));$credit=MBS_Billing_Engine::reconcile_occurrences(array($booking->ref),true);
     if(is_wp_error($credit))throw new RuntimeException($credit->get_error_message());mbs_audit_refund($order,'6.00','Cash after cancellation');
     $fresh=MBS_Billing_Ledger::get_invoice($invoice->invoice_ref);$allocation=$wpdb->get_row($wpdb->prepare('SELECT * FROM '.$wpdb->prefix.MBS_BILLING_ALLOCATION_TABLE.' WHERE invoice_id=%d AND booking_ref=%s',(int)$invoice->id,$booking->ref));
@@ -397,7 +397,7 @@ mbs_audit_case( 'failed safe modification remains pending and retries cleanly', 
     global $wpdb;
     $booking=mbs_audit_booking('INT-A-SAFE-MOD-RETRY','10.00',120);$invoice=mbs_audit_invoice('safe-mod-retry',$booking);
     $created=MBS_Modification::create_request(array('ref'=>$booking->ref,'type'=>'modify','changes'=>array('attendees'=>33)));if($created===false)throw new RuntimeException('Could not create retry modification.');$request_id=(int)$wpdb->insert_id;
-    $block=static function($query)use($wpdb){if(stripos($query,'UPDATE '.$wpdb->prefix.MBS_TABLE.' SET')!==false&&stripos($query,'attendees')!==false)return 'UPDATE missing_modification_fixture SET broken=1';return $query;};
+    $block=static function($query)use($wpdb){if(stripos($query,'UPDATE')!==false&&stripos($query,$wpdb->prefix.MBS_TABLE)!==false&&stripos($query,'attendees')!==false)return 'UPDATE missing_modification_fixture SET broken=1';return $query;};
     add_filter('query',$block);$failed=MBS_Modification::approve($request_id);remove_filter('query',$block);
     $request=MBS_Modification::get_request($request_id);$unchanged=MBS_Bookings::get($booking->ref);
     mbs_audit_assert(is_wp_error($failed)&&$request->status==='pending'&&(int)$unchanged->attendees===10,'Failed permitted-field write was incorrectly marked approved.');

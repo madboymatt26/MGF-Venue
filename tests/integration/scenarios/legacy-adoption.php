@@ -82,7 +82,7 @@ $wpdb->insert( $booking_table, array(
     'created_at'=>current_time('mysql'),'updated_at'=>current_time('mysql'),
 ) );
 $fail_baseline = static function( $query ) use ( $booking_table, $failed_series ) {
-    if ( strpos( $query, "UPDATE {$booking_table} SET legacy_billing_excluded" ) !== false && strpos( $query, $failed_series ) !== false ) {
+    if ( strpos( $query, "UPDATE {$booking_table} b" ) !== false && strpos( $query, 'legacy_billing_excluded=1' ) !== false && strpos( $query, $failed_series ) !== false ) {
         return "UPDATE {$booking_table}_missing SET legacy_billing_excluded = 1";
     }
     return $query;
