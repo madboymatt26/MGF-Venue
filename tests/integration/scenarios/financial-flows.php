@@ -163,7 +163,18 @@ list( $cancel_order, $cancel_claim ) = mbs_it_order( $cancel_invoice );
 $cancel_order->update_status( 'cancelled', 'Integration cancellation during checkout.' );
 $cancelled_claim = MBS_Invoice_Reservation::get( $cancel_invoice->invoice_ref );
 $replacement_claim = MBS_Invoice_Reservation::acquire( $cancel_invoice );
-mbs_it_assert( $cancelled_claim->status === 'released' && !is_wp_error($replacement_claim) && $replacement_claim['reservation_ref'] !== $cancel_claim['reservation_ref'], 'Cancellation did not release and replace checkout ownership.' );
+if ( $cancelled_claim->status !== 'released' || is_wp_error($replacement_claim) || $replacement_claim['reservation_ref'] === $cancel_claim['reservation_ref'] ) {
+    $fresh_order=wc_get_order($cancel_order->get_id());
+    throw new RuntimeException(sprintf(
+        'Cancellation did not release and replace checkout ownership (order_status=%s order_invoice=%s order_reservation=%s claim_status=%s claim_order=%d replacement=%s).',
+        $fresh_order?$fresh_order->get_status():'missing',
+        $fresh_order?(string)$fresh_order->get_meta('_mbs_invoice_ref'):'',
+        $fresh_order?(string)$fresh_order->get_meta('_mbs_invoice_reservation_ref'):'',
+        $cancelled_claim?(string)$cancelled_claim->status:'missing',
+        $cancelled_claim?(int)$cancelled_claim->order_id:0,
+        is_wp_error($replacement_claim)?$replacement_claim->get_error_code():(string)$replacement_claim['reservation_ref']
+    ));
+}
 
 // Captured-but-unrecorded reconciliation and verified administrator resolution.
 $rec_booking = mbs_it_booking( 'INT-F-RECON', '10.00', 13 );
