@@ -17,7 +17,7 @@ services:
       - /var/lib/mysql
 
   wordpress:
-    image: wordpress:6.6.2-php8.2-apache
+    image: ${WORDPRESS_IMAGE:-wordpress:6.6.2-php8.2-apache}
     depends_on:
       db:
         condition: service_healthy
@@ -35,7 +35,7 @@ services:
       - ./fixtures/mbs-test-gateway:/var/www/html/wp-content/plugins/mbs-test-gateway
 
   cli:
-    image: wordpress:cli-2.11.0-php8.2
+    image: ${WPCLI_IMAGE:-wordpress:cli-2.11.0-php8.2}
     depends_on:
       db:
         condition: service_healthy
@@ -52,6 +52,7 @@ services:
       - ../../wp-plugin/mathlin-booking:/var/www/html/wp-content/plugins/mathlin-booking
       - ./fixtures/mbs-test-gateway:/var/www/html/wp-content/plugins/mbs-test-gateway
       - ../..:/workspace
+      - ./.cache/wp-cli:/var/www/.wp-cli/cache
     working_dir: /var/www/html
 
   php74:
@@ -72,6 +73,14 @@ services:
 
   php82:
     image: php:8.2-cli
+    profiles: ["matrix"]
+    volumes:
+      - ../..:/workspace
+    working_dir: /workspace
+    command: ["sh", "tests/integration/run-php-suite.sh"]
+
+  php83:
+    image: php:8.3-cli
     profiles: ["matrix"]
     volumes:
       - ../..:/workspace
