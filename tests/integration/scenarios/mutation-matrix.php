@@ -16,10 +16,13 @@ $wpdb->insert($series_table,array(
 if($wpdb->last_error)throw new RuntimeException($wpdb->last_error);
 
 function mbs_mut_booking($ref){
-    global $wpdb,$booking_table,$series_ref,$date,$now;
+    global $wpdb;
+    $booking_table=$wpdb->prefix.MBS_TABLE;
+    $date=wp_date('Y-m-d',strtotime('+45 days'));
+    $now=current_time('mysql');
     $ok=$wpdb->insert($booking_table,array(
         'ref'=>$ref,'status'=>'confirmed','name'=>'Mutation Integration','email'=>'mutation@example.invalid','phone'=>'000','address'=>'Test','space'=>'Hall',
-        'booking_date'=>$date,'booking_date_end'=>$date,'attendees'=>1,'purpose'=>'Mutation matrix','amount'=>'10.00','series_id'=>$series_ref,
+        'booking_date'=>$date,'booking_date_end'=>$date,'attendees'=>1,'purpose'=>'Mutation matrix','amount'=>'10.00','series_id'=>'INT-MUT',
         'created_at'=>$now,'updated_at'=>$now,
     ));
     if($ok===false)throw new RuntimeException($wpdb->last_error);
