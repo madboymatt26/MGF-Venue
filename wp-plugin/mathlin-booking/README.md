@@ -41,28 +41,34 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 - Accounting exports and financial analytics combine invoice-ledger data with
   only unallocated legacy bookings, preventing double counting. GDPR and
   uninstall handling cover every added table.
-- Schema 8 uses a versioned InnoDB payment-
+- Schema 9 uses a versioned InnoDB payment-
   reservation table. Invoice and order ownership are unique, transitions use
   conditional compare-and-swap updates, bound claims do not expire, callbacks
   re-prove ownership, and reconciliation requires evidence of the ledger
 	  payment or a full WooCommerce refund. Expiry is UTC, and a committed refund
-	  or partial capture permits a successor checkout balance generation.
-- Legacy registration atomically marks every already-paid, deposit-paid,
-  cancelled or archived occurrence as permanently excluded from consolidated
-  billing. Adoption never clears that occurrence-level baseline.
+	  or refund permits a successor checkout balance generation. Online orders
+	  must exactly equal the reserved minor-unit amount and currency; coupons,
+	  fees, discounts, edits, stale generations and mismatched captures are
+	  rejected or durably quarantined rather than becoming partial payments.
+- Legacy registration, migration and adoption share one financial-history
+  predicate across legacy statuses/amounts, invoice items, active or released
+  allocations, payments/refunds and credit notes. Matching occurrences are
+  permanently excluded; genuinely unbilled future occurrences stay eligible.
 - Woo refunds link to their original payment and maintain cumulative refunded
   minor units on both payment and occurrence allocations. Ledger, allocation,
   occurrence and invoice changes commit together; refund-before-payment is
   retained for retry after the payment callback.
 - Compatibility Scout mutations reject first-class/non-Scout series and
   financially documented rows. Migration uses a database advisory lock,
-	  verifies column/index semantics, collations and InnoDB engines, and retains
-	  the old schema marker on failure.
+	  checks every material migration result, verifies the historical backfill,
+	  compares every canonical column/index definition, collation and InnoDB
+	  engine, and retains a retryable old marker plus administrator error on any
+	  operation or verification failure.
 - Accounting CSVs distinguish invoice/credit types and signs. Analytics labels
   legacy service-date, invoice issue-date, transaction-date and current-balance
   bases explicitly instead of presenting them as one unexplained FY basis.
 
-### Verification boundary for schema 8
+### Verification boundary for schema 9
 
 The repository includes `tests/integration/docker-compose.yml` with pinned
 WordPress, WooCommerce and MariaDB, separate-process reservation workers, a
@@ -138,12 +144,12 @@ inside an arbitrary external payment provider.
 - Booking form with real-time cost calculation (tier-aware)
 - Multi-day and full-day booking support
 - Recurring weekly bookings (up to one calendar year inclusive, maximum 53 dates)
-- Recurring billing safety: one durable, versioned Woo order owner per current invoice balance generation; refund- or partial-payment remainders can acquire a successor generation, while captured-but-unrecorded payments remain visibly quarantined for evidence-based reconciliation.
-- Issued, part-paid, and overdue positive-balance invoices share one payable rule. Partial refunds use the canonical Woo refund hook, affect only their allocated occurrences, and emit exact OSM reversal records after commit when enabled.
+- Recurring billing safety: one durable, versioned Woo order owner per current invoice balance generation; refund remainders can acquire a successor generation, while mismatched or captured-but-unrecorded payments remain visibly quarantined for evidence-based reconciliation. Explicit manual/offline ledger payments may be partial; an altered online order may not.
+- Issued, part-paid, and overdue positive-balance invoices share one payable rule. Partial refunds use the canonical Woo refund hook and affect only their allocated occurrences. OSM reversals are inserted into a stable-idempotency outbox inside the refund transaction, with delivered/retry/manual-reconciliation states and auditable administrator retry/resolution.
 - Series creation and cancellation/credit reconciliation are transactional; financially documented occurrences require credit-and-replace rather than direct edit or deletion.
 - Late additions to an issued period receive a linked deterministic supplemental invoice, and catch-up keyset-paginates every eligible series beyond 100.
 - Financial reporting separately defines invoiced, gross collected, outstanding, credited/refunded, and net collected. Idempotency keys are bound to operation, target, and payload.
-- Schema 8 upgrades use a connection-owned database advisory lock, validated historical-series backfill, staged health state, semantic column/index/collation verification and InnoDB enforcement before advancing the version marker.
+- Schema 9 upgrades use a connection-owned database advisory lock, multi-source historical-finance backfill, staged health state, complete canonical column/index/collation verification and InnoDB enforcement before advancing the version marker.
 - Conflict detection prevents double bookings (including parent/child space bundling)
 - Configurable minimum notice period
 - Custom form fields (admin-configurable)

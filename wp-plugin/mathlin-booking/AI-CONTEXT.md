@@ -547,15 +547,16 @@ File: `includes/class-woo-ux.php`
 
 ## Recurring-Series and Consolidated-Billing Contracts (v3.21.0)
 
-### Remediated invariants (schema 8)
+### Remediated invariants (schema 9)
 
 - An invoice has one current reservation row and at most one authoritative Woo order owner per invoice-version balance generation. Only unbound active claims expire. Bound/reconciliation claims cannot be replaced; captured/refunded claims can be superseded only after a committed invoice-version change leaves a positive balance. Expiry is UTC.
-- Payability is centralized for issued, part-paid, and overdue positive balances. Refunds use `woocommerce_order_refunded`, link to the original payment, replay successfully before allocation recalculation, include released cancellation-credit allocations, and do not reopen cancelled or unaffected occurrences.
+- Payability is centralized for issued, part-paid, and overdue positive balances. A normal online order must exactly equal its reservation amount/currency/generation and contain one immutable line with no coupon, discount or fee. Mismatched captures enter reconciliation without becoming partial ledger payments. Explicit manual/offline partial ledger payments remain separate.
+- Refunds use `woocommerce_order_refunded`, link to the original payment, replay without another note/event before allocation recalculation, reject conflicting allocation reuse, include released cancellation-credit allocations, and do not reopen cancelled or unaffected occurrences.
 - Recurring creation and cancellation plus required credits share database transactions. Email, Home Assistant, and other irreversible work follows commit.
 - Booking-domain mutation and deletion reject any occurrence with invoice items, allocations, or transactions. Closed-period additions use linked supplemental invoices.
 - Catch-up uses starvation-free keyset pagination. Financial and REST idempotency keys conflict on a different canonical operation, target, or payload.
-- Legacy registration means eligible, not adopted. Registration atomically establishes a permanent occurrence-level billing exclusion for paid, deposit-paid, cancelled and archived history. Explicit adoption records timestamp, administrator and schema version/state without clearing that baseline.
-- Migration state is running, failed, or complete. A connection-owned advisory lock serializes workers; critical column definitions, exact index semantics, table collations and transactional engines are verified. Registered legacy groups are backfilled before adoption. Failure retains the prior version and produces an administrator notice.
+- Legacy registration means eligible, not adopted. Registration, migration and adoption share `MBS_Database`'s central predicate across paid/deposit/credited/refunded/cancelled/archived state, legacy paid amounts, invoice items, released/active allocations, payment/refund transactions and credit notes. Explicit adoption records timestamp, administrator and schema version/state without clearing that baseline.
+- Migration state is running, failed, or complete. A connection-owned advisory lock serializes workers; every material migration result is checked, then canonical temporary-table manifests verify every column definition and exact index semantics plus table collation/engine. Structural and financial-data verification must both pass before the marker advances. Failure retains the prior version, releases the lock, stays retryable and produces an administrator notice.
 
 - Occurrence rows remain authoritative for availability, calendar, Home
   Assistant, heating/access control and occurrence-level changes.
@@ -608,8 +609,11 @@ File: `includes/class-woo-ux.php`
 - Financial analytics/accounting exports must combine invoice records with
 	  only bookings that have no historic billing allocation, or values will be
 	  double counted.
-- OSM income is paired with exact partial/full refund expenditure records emitted
-	  only after the internal refund transaction commits.
+- OSM income is paired with partial/full refund expenditure events inserted into
+	  `mathlin_osm_outbox` in the same transaction as the refund. Each event has a
+	  stable identity and delivered/retry/manual-reconciliation lifecycle. Definite
+	  server failures use bounded backoff; ambiguous responses stop for audited
+	  administrator reconciliation rather than risking duplicate expenditure.
 
 ---
 
@@ -698,10 +702,10 @@ File: `includes/class-woo-ux.php`
 | created_at | DATETIME | |
 | updated_at | DATETIME | Auto-updated |
 
-The four financial tables use integer minor units for every money column. The
-series table intentionally keeps legacy decimal price snapshots because booking
-occurrence amounts are a backward-compatibility contract. No new table uses
-foreign keys; dbDelta-compatible unique keys and transactional services enforce
-invariants instead.
+The first-class invoice, item, transaction, allocation, reservation and OSM
+outbox domains use integer minor units for every money column. The series table
+intentionally keeps legacy decimal price snapshots because booking occurrence
+amounts are a backward-compatibility contract. No new table uses foreign keys;
+dbDelta-compatible unique keys and transactional services enforce invariants.
 
 > Migrations are additive and idempotent in `MBS_Database::create_tables()` and are gated by `MBS_DB_VERSION`, which may advance independently of the public plugin version. The migration smoke harness runs the same schema creation twice.

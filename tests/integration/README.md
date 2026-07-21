@@ -31,21 +31,32 @@ the exact WordPress core version into their shared volume.
 `run-concurrency.sh` starts independent WP-CLI containers, hence independent
 PHP processes and MariaDB connections. Database barriers deliberately align
 shared-session and separate-session workers inside the observable reservation
-critical window; migration and catch-up workers use their own contention
-points. Worker exit codes and final durable rows must agree on one owner.
+critical window. Each ownership race is repeated three times. A separate
+mutation control drops the uniqueness guard and bypasses the CAS path, proves
+two workers can then win, and requires the normal durable-row assertion to
+fail. Migration and catch-up workers use their own contention points.
 
 The behavioural suite creates real plugin invoices, booking allocations,
 WooCommerce orders and `WC_Order_Refund` objects. It covers payment/refund
-callback ordering and clean replay, full/partial-refund repayment, altered order
-totals, cancellation-credit cash refunds, BST reservations, OSM reversals,
-credit-note date exports, safe non-financial modifications, semantic schema
-corruption, registered schema-5/6 legacy upgrades, InnoDB rollback,
-more-than-100-series catch-up, and overlapping workers. The authenticated MCP test sends a real MCP tool call
+callback ordering and noiseless replay, full/partial-refund repayment, exact
+online order values (under/over, coupons, fees, edits, currency and stale
+generations), partial/cumulative/reordered cancellation-credit cash refunds,
+GMT/BST/positive-offset/DST-boundary reservations, durable OSM delivery failure
+and recovery, accounting boundary/non-GBP credit exports, safe-modification
+failure/retry, complete same-name schema corruption, forced migration operation
+and verification faults, mixed financial-history schema-5/6 upgrades, InnoDB
+rollback, more-than-100-series catch-up, and overlapping workers. The authenticated MCP test sends a real MCP tool call
 through the REST/admin compatibility bridge to the disposable WordPress site.
 
 The dependency-free `tests/php-*.php`, admin-parity, and MCP-schema programs are
 reported separately in CI because some are structural/source assertions. They
 are useful regressions but are not counted as real-service behavioural proof.
+
+The adversarial scenarios use `MBS_Audit_Assertions`, whose state belongs to a
+dedicated object rather than ambiguous `wp eval-file` globals. The runner first
+executes an isolated intentionally-false assertion and succeeds only when that
+WP-CLI process exits non-zero. A failed scenario cannot print the final success
+message, and the shell wrapper propagates real scenario exit codes to the job.
 
 The deterministic gateway supports `success`, `delayed`, `failed`, and
 `capture_ledger_failure` modes through the `mbs_test_gateway_mode` option. It
