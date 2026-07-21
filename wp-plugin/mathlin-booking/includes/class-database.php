@@ -503,7 +503,7 @@ class MBS_Database {
 	        if(!$wpdb->get_row("SHOW COLUMNS FROM {$reservation_table} WHERE Field='balance_version'")){
 	            if($wpdb->query("ALTER TABLE {$reservation_table} ADD COLUMN balance_version BIGINT(20) UNSIGNED NOT NULL DEFAULT 0 AFTER version")===false)return new WP_Error('reservation_generation_column_failed','Could not add reservation balance generations.');
 	        }
-	        $owner_rows=$wpdb->get_results("SHOW INDEX FROM {$reservation_table} WHERE Key_name='invoice_owner' ORDER BY Seq_in_index");
+	        $owner_rows=$wpdb->get_results("SHOW INDEX FROM {$reservation_table} WHERE Key_name='invoice_owner'");
 	        $owner_semantics=$owner_rows&&isset($owner_rows[0]->Non_unique)&&isset($owner_rows[0]->Column_name);
 	        $owner_exact=!$owner_semantics||(count($owner_rows)===1&&(int)$owner_rows[0]->Non_unique===0&&(string)$owner_rows[0]->Column_name==='invoice_id');
 	        if(!$owner_exact){

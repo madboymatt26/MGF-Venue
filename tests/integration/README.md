@@ -30,16 +30,17 @@ the exact WordPress core version into their shared volume.
 
 `run-concurrency.sh` starts independent WP-CLI containers, hence independent
 PHP processes and MariaDB connections. Database barriers deliberately align
-shared-session, separate-session, migration, and catch-up workers before their
-contended operations. Worker exit codes and the final durable rows must agree
-on exactly one checkout owner.
+shared-session and separate-session workers inside the observable reservation
+critical window; migration and catch-up workers use their own contention
+points. Worker exit codes and final durable rows must agree on one owner.
 
 The behavioural suite creates real plugin invoices, booking allocations,
 WooCommerce orders and `WC_Order_Refund` objects. It covers payment/refund
-callback ordering and idempotency, partial balances, cancellation, stale
-ownership, reconciliation, adoption rollback, compatibility mutation routes,
-schema upgrade/failure/retry, InnoDB rollback, more-than-100-series catch-up,
-and overlapping workers. The authenticated MCP test sends a real MCP tool call
+callback ordering and clean replay, full/partial-refund repayment, altered order
+totals, cancellation-credit cash refunds, BST reservations, OSM reversals,
+credit-note date exports, safe non-financial modifications, semantic schema
+corruption, registered schema-5/6 legacy upgrades, InnoDB rollback,
+more-than-100-series catch-up, and overlapping workers. The authenticated MCP test sends a real MCP tool call
 through the REST/admin compatibility bridge to the disposable WordPress site.
 
 The dependency-free `tests/php-*.php`, admin-parity, and MCP-schema programs are

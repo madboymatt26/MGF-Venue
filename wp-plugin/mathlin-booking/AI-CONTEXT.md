@@ -547,15 +547,15 @@ File: `includes/class-woo-ux.php`
 
 ## Recurring-Series and Consolidated-Billing Contracts (v3.21.0)
 
-### Remediated invariants (schema 7)
+### Remediated invariants (schema 8)
 
-- An invoice has exactly one versioned reservation row and at most one authoritative Woo order owner for its outstanding balance. Only unbound active claims expire; bound/captured/reconciliation claims cannot be replaced. Every mutation checks token, invoice, order, state and version.
-- Payability is centralized for issued, part-paid, and overdue positive balances. Refunds use `woocommerce_order_refunded`, link to the original payment, carry cumulative deterministic booking allocations, and do not reopen unaffected settled occurrences.
+- An invoice has one current reservation row and at most one authoritative Woo order owner per invoice-version balance generation. Only unbound active claims expire. Bound/reconciliation claims cannot be replaced; captured/refunded claims can be superseded only after a committed invoice-version change leaves a positive balance. Expiry is UTC.
+- Payability is centralized for issued, part-paid, and overdue positive balances. Refunds use `woocommerce_order_refunded`, link to the original payment, replay successfully before allocation recalculation, include released cancellation-credit allocations, and do not reopen cancelled or unaffected occurrences.
 - Recurring creation and cancellation plus required credits share database transactions. Email, Home Assistant, and other irreversible work follows commit.
 - Booking-domain mutation and deletion reject any occurrence with invoice items, allocations, or transactions. Closed-period additions use linked supplemental invoices.
 - Catch-up uses starvation-free keyset pagination. Financial and REST idempotency keys conflict on a different canonical operation, target, or payload.
 - Legacy registration means eligible, not adopted. Registration atomically establishes a permanent occurrence-level billing exclusion for paid, deposit-paid, cancelled and archived history. Explicit adoption records timestamp, administrator and schema version/state without clearing that baseline.
-- Migration state is running, failed, or complete. A connection-owned database advisory lock serializes workers; every runtime table/column/index and transactional engine is verified. Failure retains the prior version and produces an administrator notice.
+- Migration state is running, failed, or complete. A connection-owned advisory lock serializes workers; critical column definitions, exact index semantics, table collations and transactional engines are verified. Registered legacy groups are backfilled before adoption. Failure retains the prior version and produces an administrator notice.
 
 - Occurrence rows remain authoritative for availability, calendar, Home
   Assistant, heating/access control and occurrence-level changes.
@@ -576,7 +576,9 @@ File: `includes/class-woo-ux.php`
 - A billing-relevant edit or hard delete is rejected whenever the occurrence
   has invoice items, allocations or transactions, including released/credited
   history. Cancel it through the recurring-series service (which creates an
-  immutable credit), then create an explicit corrected replacement.
+	  immutable credit), then create an explicit corrected replacement.
+- Non-financial modification fields such as attendee count may be approved
+	  without recalculating price, status or issued financial history.
 - `mathlin_billing_allocations.active_booking_ref` is the canonical uniqueness
   guard preventing an occurrence from being actively charged twice.
 - `mathlin_payment_reservations.invoice_owner` and `order_owner` are the SQL
@@ -585,7 +587,8 @@ File: `includes/class-woo-ux.php`
   the gateway maps them to WooCommerce refunds/hooks.
 - Financial reporting bases: legacy billed/collected values use occurrence
   service date because legacy rows lack invoice/payment timestamps; first-class
-  invoices/credits use issue date; payments/refunds use transaction date;
+	  invoice lines use service date, credit notes use issue date, and
+	  payments/refunds use transaction date;
   outstanding is a current all-date debtor balance. UI labels must preserve
   those distinctions.
 - The Docker integration harness is authoritative for real MariaDB/Woo/process
@@ -603,8 +606,10 @@ File: `includes/class-woo-ux.php`
 - Typed integration writes require the WordPress capability plus a stable
   idempotency key and expected status/version. Read current state first.
 - Financial analytics/accounting exports must combine invoice records with
-  only bookings that have no historic billing allocation, or values will be
-  double counted.
+	  only bookings that have no historic billing allocation, or values will be
+	  double counted.
+- OSM income is paired with exact partial/full refund expenditure records emitted
+	  only after the internal refund transaction commits.
 
 ---
 

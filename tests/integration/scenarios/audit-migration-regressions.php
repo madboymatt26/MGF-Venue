@@ -59,7 +59,7 @@ remove_filter('query',$block_repair);
 $index=$wpdb->get_results("SHOW INDEX FROM {$reservation_table} WHERE Key_name='invoice_owner'");
 $is_exact=count($index)===1&&(int)$index[0]->Non_unique===0&&(string)$index[0]->Column_name==='invoice_id'&&(int)$index[0]->Seq_in_index===1;
 mbs_audit_migration_assert(is_wp_error($semantic)||$is_exact,'Migration advanced despite a same-name, non-unique, wrong-column ownership index.');
-mbs_audit_migration_assert(get_option('mbs_db_version')!=='3.21.0-schema-7-malformed'||$is_exact,'Malformed schema received the current version marker.');
+mbs_audit_migration_assert(get_option('mbs_db_version')!==MBS_DB_VERSION||$is_exact,'Malformed schema received the current version marker.');
 
 // Restore the disposable database so the standard migration suite can continue.
 $wpdb->query("ALTER TABLE {$reservation_table} DROP INDEX invoice_owner, ADD UNIQUE KEY invoice_owner (invoice_id)");

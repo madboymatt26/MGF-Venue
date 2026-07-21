@@ -370,7 +370,9 @@ class MBS_Woo_Payment {
 	            }
 	            $invoice=MBS_Billing_Ledger::get_invoice($invoice_ref);
 	            $actual_minor=MBS_Money::from_decimal_string((string)$order->get_total());
-	            if(is_wp_error($actual_minor)||$actual_minor<1||$actual_minor>$claimed_minor||!$invoice||strtoupper((string)$order->get_currency())!==strtoupper((string)$invoice->currency)){
+	            $order_currency=(string)$order->get_currency();
+	            if($order_currency===''&&function_exists('get_woocommerce_currency'))$order_currency=(string)get_woocommerce_currency();
+	            if(is_wp_error($actual_minor)||$actual_minor<1||$actual_minor>$claimed_minor||!$invoice||strtoupper($order_currency)!==strtoupper((string)$invoice->currency)){
 	                MBS_Invoice_Reservation::reconciliation_required($invoice_ref,$reservation_ref,$order_id,'Captured order total or currency is incompatible with its reserved invoice balance.');
 	                $order->update_meta_data('_mbs_invoice_reconciliation_required','yes');
 	                $order->update_meta_data('_mbs_invoice_reconciliation_error','Captured order total or currency is incompatible with its reserved invoice balance.');
