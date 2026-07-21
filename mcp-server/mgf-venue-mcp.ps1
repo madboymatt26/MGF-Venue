@@ -151,9 +151,14 @@ function Invoke-VenueApi {
     try {
         if ($Method -eq 'POST') {
             $jsonBody = $Body | ConvertTo-Json -Depth 20 -Compress
-            return Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -ContentType 'application/json; charset=utf-8' -Body $jsonBody
+            $response = Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -ContentType 'application/json; charset=utf-8' -Body $jsonBody
+        } else {
+            $response = Invoke-RestMethod -Method Get -Uri $uri -Headers $headers
         }
-        return Invoke-RestMethod -Method Get -Uri $uri -Headers $headers
+        if ($response -is [string] -and $response.TrimStart().StartsWith('<')) {
+            throw 'Venue API returned HTML instead of JSON; check the WordPress REST URL and permalink configuration.'
+        }
+        return $response
     } catch {
         throw (Get-WebErrorMessage $_)
     }

@@ -17,6 +17,11 @@ until wp core is-installed --allow-root >/dev/null 2>&1; do
   sleep 2
 done
 
+# Exercise the same /wp-json/... REST paths used by the MCP server. A fresh
+# WordPress install otherwise uses plain permalinks and serves the home page for
+# those paths instead of routing the request through the REST API.
+wp rewrite structure '/%postname%/' --hard --allow-root
+
 wp plugin install woocommerce --version="$woo_version" --activate --allow-root
 wp plugin activate mathlin-booking mbs-test-gateway --allow-root
 wp option update woocommerce_mbs_test_settings '{"enabled":"yes","title":"MGF deterministic test gateway"}' --format=json --allow-root
