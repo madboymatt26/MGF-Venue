@@ -34,5 +34,8 @@ run_race INT-RES-DIFFERENT different different
 run_race INT-RES-SAME shared same
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/reservation-state-machine.php --allow-root
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/woocommerce-callbacks.php --allow-root
+$compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/financial-flows.php --allow-root
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/legacy-adoption.php --allow-root
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/mutation-matrix.php --allow-root
+sh tests/integration/run-migrations.sh
+sh tests/integration/run-catch-up.sh

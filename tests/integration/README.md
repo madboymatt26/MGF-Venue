@@ -13,21 +13,44 @@ sh tests/integration/run-concurrency.sh
 docker compose -f tests/integration/docker-compose.yml --profile matrix run --rm php74
 docker compose -f tests/integration/docker-compose.yml --profile matrix run --rm php80
 docker compose -f tests/integration/docker-compose.yml --profile matrix run --rm php82
+docker compose -f tests/integration/docker-compose.yml --profile matrix run --rm php83
 ```
 
+GitHub Actions uses the following declared matrix. WooCommerce 9.3 requires
+WordPress 6.5+ and PHP 7.4+; WordPress 6.6.2 is therefore pinned for every row.
+The old-PHP Docker tags supply the declared PHP runtime and `setup.sh` installs
+the exact WordPress core version into their shared volume.
+
+| PHP | WordPress | WooCommerce | MariaDB | Runtime status |
+| --- | --- | --- | --- | --- |
+| 7.4 | 6.6.2 | 9.3.3 | 10.11 | Declared legacy minimum; EOL upstream |
+| 8.0 | 6.6.2 | 9.3.3 | 10.11 | Declared legacy compatibility; EOL upstream |
+| 8.2 | 6.6.2 | 9.3.3 | 10.11 | Primary integration runtime |
+| 8.3 | 6.6.2 | 9.3.3 | 10.11 | Current supported runtime for this pinned stack |
+
 `run-concurrency.sh` starts independent WP-CLI containers, hence independent
-PHP processes and MariaDB connections. It covers two-browser/two-order claim
-contention and asserts the database's unique owner. The Woo smoke creates a real
-order and exercises deterministic failed/delayed modes plus the real refund
-hook. The gateway exposes capture/ledger-failure and refund controls for fuller
-scenarios, but those additional interleavings still need to be added and run;
-do not infer that this initial harness proves them.
+PHP processes and MariaDB connections. Database barriers deliberately align
+shared-session, separate-session, migration, and catch-up workers before their
+contended operations. Worker exit codes and the final durable rows must agree
+on exactly one checkout owner.
+
+The behavioural suite creates real plugin invoices, booking allocations,
+WooCommerce orders and `WC_Order_Refund` objects. It covers payment/refund
+callback ordering and idempotency, partial balances, cancellation, stale
+ownership, reconciliation, adoption rollback, compatibility mutation routes,
+schema upgrade/failure/retry, InnoDB rollback, more-than-100-series catch-up,
+and overlapping workers. The authenticated MCP test sends a real MCP tool call
+through the REST/admin compatibility bridge to the disposable WordPress site.
+
+The dependency-free `tests/php-*.php`, admin-parity, and MCP-schema programs are
+reported separately in CI because some are structural/source assertions. They
+are useful regressions but are not counted as real-service behavioural proof.
 
 The deterministic gateway supports `success`, `delayed`, `failed`, and
 `capture_ledger_failure` modes through the `mbs_test_gateway_mode` option. It
 does not contact a payment provider. Provider-side idempotency and chargeback
 webhooks remain gateway-specific and require separate staging verification.
 
-The selected WordPress/WooCommerce versions still run on PHP 7.4. If the
+The selected WordPress/WooCommerce versions officially allow PHP 7.4. If the
 project upgrades to a WooCommerce release that drops PHP 7.4, the declared
 support policy must be changed deliberately; do not silently skip the 7.4 job.

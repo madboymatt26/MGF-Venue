@@ -22,6 +22,8 @@ $today = new DateTimeImmutable( 'today', wp_timezone() );
 $cases = array(
     array( 'INT-L-PAID', 'paid', -14, '100.00', '0.00' ),
     array( 'INT-L-DEPOSIT', 'deposit_paid', -7, '25.00', '25.00' ),
+    array( 'INT-L-CREDIT', 'credited', -5, '100.00', '0.00' ),
+    array( 'INT-L-REFUND', 'refunded', -3, '100.00', '0.00' ),
     array( 'INT-L-FUTURE', 'confirmed', 14, '0.00', '0.00' ),
     array( 'INT-L-CANCEL', 'cancelled', 21, '0.00', '0.00' ),
     array( 'INT-L-ARCHIVE', 'archived', -30, '0.00', '0.00' ),
@@ -41,7 +43,7 @@ foreach ( $cases as $case ) {
 $registered = MBS_Series::register_legacy_groups();
 if ( is_wp_error( $registered ) ) throw new RuntimeException( $registered->get_error_message() );
 $excluded = $wpdb->get_col( $wpdb->prepare( "SELECT ref FROM {$booking_table} WHERE series_id=%s AND legacy_billing_excluded=1 ORDER BY ref", $series_ref ) );
-if ( $excluded !== array( 'INT-L-ARCHIVE','INT-L-CANCEL','INT-L-DEPOSIT','INT-L-PAID' ) ) throw new RuntimeException( 'Historical baseline was not permanent and complete.' );
+if ( $excluded !== array( 'INT-L-ARCHIVE','INT-L-CANCEL','INT-L-CREDIT','INT-L-DEPOSIT','INT-L-PAID','INT-L-REFUND' ) ) throw new RuntimeException( 'Historical paid/deposit/credited/refunded/cancelled/archived baseline was not permanent and complete.' );
 
 $series = MBS_Series::get( $series_ref );
 $adopted = MBS_Billing_Engine::configure_series( $series_ref, array(
@@ -65,5 +67,34 @@ $repeated = MBS_Billing_Engine::configure_series( $series_ref, array(
     'billing_mode'=>'monthly','billing_treatment'=>'invoice_managed','payment_method'=>'online','deposit_policy'=>'none',
     'invoice_lead_days'=>365,'payment_terms_days'=>14,'billing_schedule'=>array(),'adopt_legacy'=>true,
 ), (int)$fresh->version );
-if ( is_wp_error($repeated) || (int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$booking_table} WHERE series_id=%s AND legacy_billing_excluded=1",$series_ref))!==4 ) throw new RuntimeException('Repeated adoption changed the historical baseline.');
-echo "OK: real registration/adoption/catch-up/repeated-adoption sequence billed only the eligible future occurrence.\n";
+if ( is_wp_error($repeated) || (int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$booking_table} WHERE series_id=%s AND legacy_billing_excluded=1",$series_ref))!==6 ) throw new RuntimeException('Repeated adoption changed the historical baseline.');
+
+// Force the baseline UPDATE to fail and prove the surrounding InnoDB
+// transaction removes the newly inserted first-class series before retry.
+$failed_series = 'INT-LEGACY-FAIL';
+$failed_ref = 'INT-L-FAIL';
+$future = $today->modify('+20 days')->format('Y-m-d');
+$wpdb->insert( $booking_table, array(
+    'ref'=>$failed_ref,'status'=>'paid','name'=>'Legacy Failure','organisation'=>'Integration','email'=>'legacy-failure@example.invalid',
+    'phone'=>'000','address'=>'Test only','space'=>'Hall','kitchen'=>0,'booking_date'=>$future,'booking_date_end'=>$future,
+    'all_day'=>0,'scout_use'=>0,'pricing_tier'=>'standard','start_time'=>'19:00:00','end_time'=>'21:00:00','attendees'=>10,
+    'purpose'=>'Rollback integration','amount'=>'100.00','deposit_paid'=>'0.00','amount_paid'=>'100.00','series_id'=>$failed_series,
+    'created_at'=>current_time('mysql'),'updated_at'=>current_time('mysql'),
+) );
+$fail_baseline = static function( $query ) use ( $booking_table, $failed_series ) {
+    if ( strpos( $query, "UPDATE {$booking_table} SET legacy_billing_excluded" ) !== false && strpos( $query, $failed_series ) !== false ) {
+        return "UPDATE {$booking_table}_missing SET legacy_billing_excluded = 1";
+    }
+    return $query;
+};
+add_filter( 'query', $fail_baseline );
+$failed_registration = MBS_Series::register_legacy_groups();
+remove_filter( 'query', $fail_baseline );
+if ( !is_wp_error($failed_registration) || MBS_Series::get($failed_series) || (int)$wpdb->get_var($wpdb->prepare("SELECT legacy_billing_excluded FROM {$booking_table} WHERE ref=%s",$failed_ref)) !== 0 ) {
+    throw new RuntimeException( 'Failed legacy registration did not roll back the series and baseline together.' );
+}
+$retried_registration = MBS_Series::register_legacy_groups();
+if ( is_wp_error($retried_registration) || !MBS_Series::get($failed_series) || (int)$wpdb->get_var($wpdb->prepare("SELECT legacy_billing_excluded FROM {$booking_table} WHERE ref=%s",$failed_ref)) !== 1 ) {
+    throw new RuntimeException( 'Legacy registration was not safely retryable after rollback.' );
+}
+echo "OK: real registration/adoption/catch-up/repeat plus rollback/retry excluded all historical financial states and billed only the eligible future occurrence.\n";

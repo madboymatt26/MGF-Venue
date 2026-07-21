@@ -34,6 +34,8 @@ jobs:
         php: ['7.4', '8.0', '8.2', '8.3']
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - name: Configure PHP
         uses: shivammathur/setup-php@v2
         with:
@@ -47,7 +49,7 @@ jobs:
         shell: pwsh
         run: ./mcp-server/tests/mcp-tool-schema-smoke.ps1
       - name: Check patch whitespace
-        run: git diff --check HEAD^
+        run: git diff --check HEAD^ HEAD
       - name: Scan tracked files for committed credential formats
         shell: bash
         run: |
@@ -140,6 +142,12 @@ jobs:
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli sh /workspace/tests/integration/setup.sh
       - name: Run separate-process integration scenarios
         run: sh tests/integration/run-concurrency.sh
+      - name: Run authenticated MCP mutation protection against WordPress
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_password="$(docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp user application-password create admin 'MGF integration CI' --porcelain --allow-root)"
+          MGF_VENUE_BASE_URL='http://localhost:8088' MGF_VENUE_USERNAME='admin' MGF_VENUE_APP_PASSWORD="$app_password" pwsh -NoLogo -NoProfile -File mcp-server/tests/mcp-live-mutation.ps1
       - name: Collect service and worker diagnostics
         if: always()
         shell: bash

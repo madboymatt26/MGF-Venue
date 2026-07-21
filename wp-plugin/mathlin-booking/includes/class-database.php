@@ -8,6 +8,8 @@ class MBS_Database {
         $lock = self::acquire_migration_lock();
         if ( is_wp_error( $lock ) ) return $lock;
         update_option( 'mbs_migration_state', array( 'status' => 'running', 'target' => MBS_DB_VERSION, 'started_at' => current_time( 'mysql' ) ), false );
+        /** Exposes a post-lock lifecycle point for operational tooling and deterministic overlap tests. */
+        if ( function_exists( 'do_action' ) ) do_action( 'mbs_migration_lock_acquired', $lock );
         try {
 
         $table   = $wpdb->prefix . MBS_TABLE;
