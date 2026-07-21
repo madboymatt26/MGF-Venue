@@ -37,7 +37,9 @@ run_race INT-RES-SAME shared same 2001 2002
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/reservation-state-machine.php --allow-root
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/woocommerce-callbacks.php --allow-root
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/financial-flows.php --allow-root
+$compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/audit-regressions.php --allow-root
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/legacy-adoption.php --allow-root
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/mutation-matrix.php --allow-root
+$compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/audit-migration-regressions.php --allow-root
 sh tests/integration/run-migrations.sh
 sh tests/integration/run-catch-up.sh
