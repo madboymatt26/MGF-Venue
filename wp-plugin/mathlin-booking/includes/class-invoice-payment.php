@@ -75,13 +75,22 @@ class MBS_Invoice_Payment {
         if ( ! $invoice ) return new WP_Error( 'invoice_not_found', 'Invoice not found.' );
         if ( $wpdb->query( 'START TRANSACTION' ) === false ) return new WP_Error( 'refund_transaction_start_failed', 'Could not start refund reconciliation.' );
         $transaction_table = $wpdb->prefix . MBS_PAYMENT_TRANSACTION_TABLE;
-        $payment = $wpdb->get_row( $wpdb->prepare(
+	        $payment = $wpdb->get_row( $wpdb->prepare(
             "SELECT * FROM {$transaction_table} WHERE invoice_id = %d AND provider = 'woocommerce'
              AND provider_transaction_id = %s AND transaction_type = 'payment' AND status = 'completed' FOR UPDATE",
             (int) $invoice->id, (string) $order_id
-        ) );
-        if ( ! $payment ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'refund_payment_not_recorded', 'The payment callback has not been recorded yet; retry this refund after payment reconciliation.' ); }
-        if ( $minor > ( (int) $payment->amount_minor - (int) $payment->refunded_minor ) ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'refund_exceeds_payment', 'Refund exceeds the remaining amount on this WooCommerce payment.' ); }
+	        ) );
+	        if ( ! $payment ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'refund_payment_not_recorded', 'The payment callback has not been recorded yet; retry this refund after payment reconciliation.' ); }
+	        $existing_refund=$wpdb->get_row($wpdb->prepare(
+	            "SELECT * FROM {$transaction_table} WHERE invoice_id=%d AND provider='woocommerce' AND provider_transaction_id=%s AND transaction_type='refund' FOR UPDATE",
+	            (int)$invoice->id,'refund-'.(int)$refund_id
+	        ));
+	        if($existing_refund){
+	            if((int)$existing_refund->amount_minor!==$minor||(int)$existing_refund->parent_transaction_id!==(int)$payment->id){$wpdb->query('ROLLBACK');return new WP_Error('idempotency_payload_conflict','This WooCommerce refund identifier was already used with a different amount or payment.');}
+	            if($wpdb->query('COMMIT')===false){$wpdb->query('ROLLBACK');return new WP_Error('refund_transaction_commit_failed','Could not finish idempotent refund reconciliation.');}
+	            return array('transaction'=>$existing_refund,'invoice'=>MBS_Billing_Ledger::get_invoice($invoice_ref),'created'=>false,'idempotent_replay'=>true);
+	        }
+	        if ( $minor > ( (int) $payment->amount_minor - (int) $payment->refunded_minor ) ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'refund_exceeds_payment', 'Refund exceeds the remaining amount on this WooCommerce payment.' ); }
         $allocations = self::refund_allocations( $invoice, $minor, $requested_allocations );
         if ( is_wp_error( $allocations ) ) { $wpdb->query( 'ROLLBACK' ); return $allocations; }
         $result = MBS_Billing_Ledger::record_transaction( $invoice_ref, array(
@@ -92,12 +101,14 @@ class MBS_Invoice_Payment {
             'metadata' => array( 'woocommerce_order_id' => (int) $order_id, 'woocommerce_refund_id' => (int) $refund_id, 'booking_allocations' => $allocations ),
         ), false );
         if ( is_wp_error( $result ) ) { $wpdb->query( 'ROLLBACK' ); return $result; }
-        if ( ! is_wp_error( $result ) && ! empty( $result['created'] ) ) {
-            $applied = self::apply_refund_allocations( $result['invoice'], $allocations, false );
-            if ( is_wp_error( $applied ) ) { $wpdb->query( 'ROLLBACK' ); return $applied; }
-        }
-        if ( $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'refund_transaction_commit_failed', 'Could not commit refund reconciliation.' ); }
-        return $result;
+	        $refund_events=array();
+	        if ( ! is_wp_error( $result ) && ! empty( $result['created'] ) ) {
+	            $refund_events = self::apply_refund_allocations( $result['invoice'], $allocations, false );
+	            if ( is_wp_error( $refund_events ) ) { $wpdb->query( 'ROLLBACK' ); return $refund_events; }
+	        }
+	        if ( $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'refund_transaction_commit_failed', 'Could not commit refund reconciliation.' ); }
+	        foreach($refund_events as $event){$booking=MBS_Bookings::get($event['booking_ref']);if($booking)do_action('mbs_booking_refunded',$booking,(int)$event['amount_minor'],(int)$order_id,(int)$refund_id);}
+	        return $result;
     }
 
     /** Capability is enforced by the caller; version and idempotency here. */
@@ -251,7 +262,7 @@ class MBS_Invoice_Payment {
         $rows = $wpdb->get_results( $wpdb->prepare(
             "SELECT a.booking_ref, a.allocated_minor, a.refunded_minor FROM {$allocation_table} a
              LEFT JOIN {$item_table} ii ON ii.invoice_id = a.invoice_id AND ii.booking_ref = a.booking_ref
-             WHERE a.invoice_id = %d AND a.status = 'active'
+	             WHERE a.invoice_id = %d AND a.status IN ('active','released')
              ORDER BY ii.service_date DESC, a.id DESC FOR UPDATE",
             (int) $invoice->id
         ) );
@@ -272,34 +283,36 @@ class MBS_Invoice_Payment {
         $allocation_table = $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE;
         $booking_table = $wpdb->prefix . MBS_TABLE;
         if ( $manage_transaction && $wpdb->query( 'START TRANSACTION' ) === false ) return new WP_Error( 'refund_allocation_start_failed', 'Could not start allocation reconciliation.' );
-        $reopened_refs = array();
-        foreach ( array_keys( $allocations ) as $booking_ref ) {
-            $allocation = $wpdb->get_var( $wpdb->prepare(
-                "SELECT id FROM {$allocation_table} WHERE invoice_id = %d AND booking_ref = %s AND status = 'active' FOR UPDATE",
-                (int) $invoice->id, sanitize_text_field( $booking_ref )
-            ) );
-            if ( ! $allocation ) { if($manage_transaction)$wpdb->query( 'ROLLBACK' ); return new WP_Error('refund_allocation_missing','A refund allocation no longer exists.'); }
+	        $reopened_refs = array();$refund_events=array();
+	        foreach ( array_keys( $allocations ) as $booking_ref ) {
+	            $allocation = $wpdb->get_row( $wpdb->prepare(
+	                "SELECT id,status FROM {$allocation_table} WHERE invoice_id = %d AND booking_ref = %s AND status IN ('active','released') FOR UPDATE",
+	                (int) $invoice->id, sanitize_text_field( $booking_ref )
+	            ) );
+	            if ( ! $allocation ) { if($manage_transaction)$wpdb->query( 'ROLLBACK' ); return new WP_Error('refund_allocation_missing','A refund allocation no longer exists.'); }
             $amount = (int) $allocations[ $booking_ref ];
             $changed = $wpdb->query( $wpdb->prepare(
                 "UPDATE {$allocation_table} SET refunded_minor = refunded_minor + %d, updated_at = %s WHERE id = %d AND refunded_minor + %d <= allocated_minor",
-                $amount, current_time('mysql'), (int)$allocation, $amount
-            ) );
+	                $amount, current_time('mysql'), (int)$allocation->id, $amount
+	            ) );
             if ( $changed !== 1 ) { if($manage_transaction)$wpdb->query('ROLLBACK'); return new WP_Error('refund_allocation_exceeded','Refund exceeds the remaining booking allocation.'); }
-            $net_minor = (int) $wpdb->get_var( $wpdb->prepare( "SELECT allocated_minor - refunded_minor FROM {$allocation_table} WHERE id = %d", (int)$allocation ) );
+	            $net_minor = (int) $wpdb->get_var( $wpdb->prepare( "SELECT allocated_minor - refunded_minor FROM {$allocation_table} WHERE id = %d", (int)$allocation->id ) );
             $net_decimal = MBS_Money::decimal( $net_minor );
             if ( is_wp_error( $net_decimal ) ) { if($manage_transaction)$wpdb->query('ROLLBACK'); return $net_decimal; }
-            $updated = $wpdb->query( $wpdb->prepare(
-                "UPDATE {$booking_table} SET status = %s, amount_paid = %s, access_sent = 0 WHERE ref = %s AND status IN ('paid','deposit_paid','confirmed')",
-                $net_minor > 0 ? 'deposit_paid' : 'confirmed', $net_decimal, sanitize_text_field( $booking_ref )
-            ) );
-            if ( $updated === false ) { if($manage_transaction)$wpdb->query( 'ROLLBACK' ); return new WP_Error('refund_booking_update_failed','Could not reconcile the refunded occurrence.'); }
-            if ( $updated ) $reopened_refs[] = sanitize_text_field( $booking_ref );
+	            $updated=0;
+	            if($allocation->status==='active')$updated = $wpdb->query( $wpdb->prepare(
+	                "UPDATE {$booking_table} SET status = %s, amount_paid = %s, access_sent = 0 WHERE ref = %s AND status IN ('paid','deposit_paid','confirmed')",
+	                $net_minor > 0 ? 'deposit_paid' : 'confirmed', $net_decimal, sanitize_text_field( $booking_ref )
+	            ) );
+	            if ( $updated === false ) { if($manage_transaction)$wpdb->query( 'ROLLBACK' ); return new WP_Error('refund_booking_update_failed','Could not reconcile the refunded occurrence.'); }
+	            if ( $updated ) $reopened_refs[] = sanitize_text_field( $booking_ref );
+	            $refund_events[]=array('booking_ref'=>sanitize_text_field($booking_ref),'amount_minor'=>$amount);
         }
         if ( $manage_transaction && $wpdb->query( 'COMMIT' ) === false ) return new WP_Error('refund_allocation_commit_failed','Could not commit allocation reconciliation.');
         foreach ( $reopened_refs as $ref ) {
             MBS_Audit_Log::log( $ref, 'status_changed', 'This occurrence was reopened after its allocation on consolidated invoice ' . $invoice->invoice_ref . ' was refunded; unaffected occurrences remain settled.', 0 );
         }
-        return true;
+	        return $refund_events;
     }
 
     private static function gateway_decimal_to_minor( $value ) {

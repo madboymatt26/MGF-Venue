@@ -88,11 +88,12 @@ class MBS_Accounting_Export {
         $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
         $item_table = $wpdb->prefix . MBS_INVOICE_ITEM_TABLE;
         $where = array( "i.status NOT IN ('draft','void')" ); $params = array();
-        if ( $date_from ) { $where[] = 'it.service_date >= %s'; $params[] = $date_from; }
-        if ( $date_to ) { $where[] = 'it.service_date <= %s'; $params[] = $date_to; }
-        $sql = "SELECT i.*, it.item_ref, it.booking_ref, it.description, it.line_total_minor, it.service_date
-                FROM {$invoice_table} i INNER JOIN {$item_table} it ON it.invoice_id = i.id
-                WHERE " . implode( ' AND ', $where ) . ' ORDER BY it.service_date ASC, i.id ASC, it.id ASC';
+	        $date_basis='COALESCE(it.service_date,DATE(i.issued_at),DATE(i.created_at))';
+	        if ( $date_from ) { $where[] = $date_basis.' >= %s'; $params[] = $date_from; }
+	        if ( $date_to ) { $where[] = $date_basis.' <= %s'; $params[] = $date_to; }
+	        $sql = "SELECT i.*, it.item_ref, it.booking_ref, it.description, it.line_total_minor, it.service_date, {$date_basis} AS accounting_date
+	                FROM {$invoice_table} i INNER JOIN {$item_table} it ON it.invoice_id = i.id
+	                WHERE " . implode( ' AND ', $where ) . ' ORDER BY accounting_date ASC, i.id ASC, it.id ASC';
         $rows = $params ? $wpdb->get_results( $wpdb->prepare( $sql, $params ) ) : $wpdb->get_results( $sql );
         foreach ( $rows as $row ) {
             $records[] = (object) array(

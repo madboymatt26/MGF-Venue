@@ -33,7 +33,8 @@ class MBS_OSM_Integration {
         add_action( 'mbs_booking_status_changed', array( $this, 'on_status_change' ), 10, 3 );
 
         // Fallback: also hook directly into the places where status is set to paid
-        add_action( 'mbs_booking_paid', array( $this, 'push_payment_to_osm' ), 10, 2 );
+	        add_action( 'mbs_booking_paid', array( $this, 'push_payment_to_osm' ), 10, 2 );
+	        add_action( 'mbs_booking_refunded', array( $this, 'push_refund_to_osm' ), 10, 4 );
 
         // Admin settings tab
         add_action( 'wp_ajax_mbs_save_osm_settings', array( $this, 'ajax_save_settings' ) );
@@ -285,7 +286,7 @@ class MBS_OSM_Integration {
      * @param object $booking  The booking object
      * @param int    $order_id Optional WooCommerce order ID
      */
-    public function push_payment_to_osm( $booking, $order_id = 0 ) {
+	    public function push_payment_to_osm( $booking, $order_id = 0 ) {
         $settings = self::get_settings();
 
         if ( ! $settings['enabled'] ) return;
@@ -331,8 +332,33 @@ class MBS_OSM_Integration {
             'Payment pushed to OSM (Section: ' . $settings['section_id'] . ', £' . number_format( $booking->amount, 2 ) . ')'
         );
 
-        error_log( '[MBS-OSM] Successfully pushed payment for ' . $booking->ref . ' to OSM.' );
-    }
+	        error_log( '[MBS-OSM] Successfully pushed payment for ' . $booking->ref . ' to OSM.' );
+	    }
+
+	    /** Push an exact cash reversal after the internal refund transaction commits. */
+	    public function push_refund_to_osm($booking,$amount_minor,$order_id=0,$refund_id=0){
+	        $settings=self::get_settings();
+	        if(!$settings['enabled']||empty($settings['section_id']))return;
+	        $amount=MBS_Money::decimal((int)$amount_minor);
+	        if(is_wp_error($amount))return;
+	        $payload=self::build_payload($booking);
+	        $payload['amount']=$amount;
+	        $payload['type']='expenditure';
+	        $payload['description']='Refund: '.$payload['description'];
+	        $payload['order_id']=(int)$order_id;
+	        $payload['refund_id']=(int)$refund_id;
+	        if($settings['sandbox_mode']){
+	            error_log('[MBS-OSM] SANDBOX MODE - Would POST refund reversal: '.wp_json_encode($payload));
+	            MBS_Audit_Log::log($booking->ref,'osm_sandbox_refund','OSM sandbox: refund reversal payload logged ('.MBS_Money::format((int)$amount_minor).').');
+	            return;
+	        }
+	        $result=self::api_call('POST',sprintf(self::OSM_FINANCE_ADD_RECORD,$settings['section_id']),$payload);
+	        if(is_wp_error($result)){
+	            MBS_Audit_Log::log($booking->ref,'osm_refund_error','OSM refund reversal failed: '.$result->get_error_message());
+	            return;
+	        }
+	        MBS_Audit_Log::log($booking->ref,'osm_refund_synced','Refund reversal pushed to OSM ('.MBS_Money::format((int)$amount_minor).').');
+	    }
 
     /**
      * Hook: when any booking status changes, check if it's now PAID.

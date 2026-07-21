@@ -387,7 +387,7 @@ class MBS_Billing_Ledger {
                 : max( 0, (int) $invoice->paid_minor - $amount );
             $covered = $paid + (int) $invoice->credited_minor;
             $is_overdue = ! empty( $invoice->due_at ) && $invoice->due_at < $now;
-            $invoice_status = $covered >= (int) $invoice->total_minor ? 'paid' : ( $is_overdue ? 'overdue' : ( $paid > 0 ? 'part_paid' : 'issued' ) );
+	            $invoice_status = (int)$invoice->credited_minor >= (int)$invoice->total_minor ? 'credited' : ( $covered >= (int) $invoice->total_minor ? 'paid' : ( $is_overdue ? 'overdue' : ( $paid > 0 ? 'part_paid' : 'issued' ) ) );
             $invoice_updated = $wpdb->query( $wpdb->prepare(
                 "UPDATE {$invoice_table} SET paid_minor = %d, status = %s, version = version + 1, updated_at = %s WHERE id = %d",
                 $paid, $invoice_status, $now, (int) $invoice->id

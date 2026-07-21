@@ -56,9 +56,24 @@ class MBS_Billing_Engine {
         $schedule = $configuration['billing_schedule'] ?? array();
         if ( ! is_array( $schedule ) ) return new WP_Error( 'invalid_billing_schedule', 'Billing schedule must be structured data.' );
 
-        $adopting = ! empty( $current->metadata_incomplete ) && $current->billing_treatment === 'legacy_per_occurrence'
-            && $treatment === 'invoice_managed' && ! empty( $configuration['adopt_legacy'] );
-        $updated = $wpdb->query( $wpdb->prepare(
+	        $adopting = ! empty( $current->metadata_incomplete ) && $current->billing_treatment === 'legacy_per_occurrence'
+	            && $treatment === 'invoice_managed' && ! empty( $configuration['adopt_legacy'] );
+	        if($adopting){
+	            $booking_table=$wpdb->prefix.MBS_TABLE;
+	            $preserved=$wpdb->query($wpdb->prepare(
+	                "UPDATE {$booking_table} SET legacy_billing_excluded=1 WHERE series_id=%s
+	                 AND (status IN ('paid','deposit_paid','cancelled','archived') OR amount_paid>0 OR deposit_paid>0)",
+	                sanitize_text_field($series_ref)
+	            ));
+	            if($preserved===false)return new WP_Error('legacy_billing_backfill_failed','Could not preserve the legacy billing baseline; adoption was not applied.');
+	            $unsafe=(int)$wpdb->get_var($wpdb->prepare(
+	                "SELECT COUNT(*) FROM {$booking_table} WHERE series_id=%s AND legacy_billing_excluded=0
+	                 AND (status IN ('paid','deposit_paid','cancelled','archived') OR amount_paid>0 OR deposit_paid>0)",
+	                sanitize_text_field($series_ref)
+	            ));
+	            if($unsafe!==0)return new WP_Error('legacy_billing_backfill_incomplete','Historical occurrences remain unsafe to adopt.');
+	        }
+	        $updated = $wpdb->query( $wpdb->prepare(
             "UPDATE {$table}
              SET billing_mode = %s, billing_treatment = %s, invoice_lead_days = %d,
                  payment_terms_days = %d, billing_schedule_json = %s,

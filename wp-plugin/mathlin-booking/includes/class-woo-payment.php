@@ -361,13 +361,23 @@ class MBS_Woo_Payment {
             $invoice_items_found = true;
             $reservation_ref = (string) $item->get_meta( '_mbs_invoice_reservation_ref' );
             $claimed_minor = (int) $item->get_meta( '_mbs_invoice_amount_minor' );
-            if ( ! $reservation_ref || $claimed_minor < 1 || ! MBS_Invoice_Reservation::validate( $invoice_ref, $reservation_ref, $claimed_minor, $order_id ) ) {
+	            if ( ! $reservation_ref || $claimed_minor < 1 || ! MBS_Invoice_Reservation::validate( $invoice_ref, $reservation_ref, $claimed_minor, $order_id ) ) {
                 $order->update_meta_data( '_mbs_invoice_reconciliation_required', 'yes' );
                 $order->update_meta_data( '_mbs_invoice_reconciliation_error', 'The captured order does not own the authoritative invoice reservation.' );
                 $order->add_order_note( 'CRITICAL: Captured invoice payment failed reservation ownership validation; do not retry capture. Reconcile or refund this order.' );
                 MBS_Audit_Log::log( $invoice_ref, 'payment_reconciliation_required', 'WooCommerce Order #' . $order_id . ' failed reservation ownership validation.', 0 );
-                continue;
-            }
+	                continue;
+	            }
+	            $invoice=MBS_Billing_Ledger::get_invoice($invoice_ref);
+	            $actual_minor=MBS_Money::from_decimal_string((string)$order->get_total());
+	            if(is_wp_error($actual_minor)||$actual_minor<1||$actual_minor>$claimed_minor||!$invoice||strtoupper((string)$order->get_currency())!==strtoupper((string)$invoice->currency)){
+	                MBS_Invoice_Reservation::reconciliation_required($invoice_ref,$reservation_ref,$order_id,'Captured order total or currency is incompatible with its reserved invoice balance.');
+	                $order->update_meta_data('_mbs_invoice_reconciliation_required','yes');
+	                $order->update_meta_data('_mbs_invoice_reconciliation_error','Captured order total or currency is incompatible with its reserved invoice balance.');
+	                $order->add_order_note('CRITICAL: Captured invoice order total/currency exceeds or differs from the safe ledger boundary; reconcile or refund this order.');
+	                continue;
+	            }
+	            if($actual_minor!==$claimed_minor)$order->add_order_note(sprintf('Partial invoice payment recorded: %s captured against a %s reserved balance; the remainder requires a new checkout.',MBS_Money::format($actual_minor),MBS_Money::format($claimed_minor)));
             // Integration gateways may inject a deterministic pre-ledger
             // failure; production integrations should normally leave this null.
             $payment = apply_filters( 'mbs_invoice_gateway_payment_preflight', null, $invoice_ref, $order_id, $reservation_ref );
@@ -523,16 +533,17 @@ class MBS_Woo_Payment {
                 if ( is_string( $requested_allocations ) ) $requested_allocations = json_decode( $requested_allocations, true );
                 if ( ! is_array( $requested_allocations ) ) $requested_allocations = array();
                 foreach ( array_keys( $invoice_refs ) as $invoice_ref ) {
-                    $result = MBS_Invoice_Payment::record_gateway_refund( $invoice_ref, $amount, $order_id, $refund->get_id(), $requested_allocations );
+	                    $result = MBS_Invoice_Payment::record_gateway_refund( $invoice_ref, $amount, $order_id, $refund->get_id(), $requested_allocations );
                     if ( is_wp_error( $result ) ) {
-                        if ( in_array( $result->get_error_code(), array( 'refund_exceeds_paid', 'refund_payment_not_recorded', 'invoice_not_found' ), true ) ) {
+	                        if ( in_array( $result->get_error_code(), array( 'refund_exceeds_paid', 'refund_payment_not_recorded', 'invoice_not_found', 'refund_allocation_failed', 'refund_allocation_missing' ), true ) ) {
                             $pending = (array) $order->get_meta( '_mbs_pending_invoice_refunds', true );
                             $pending[] = (int) $refund->get_id();
                             $order->update_meta_data( '_mbs_pending_invoice_refunds', array_values( array_unique( $pending ) ) );
                         }
                         $order->add_order_note( '⚠️ Consolidated invoice refund could not be recorded: ' . $result->get_error_message() );
-                    } else {
-                        $order->add_order_note( sprintf( 'Refund #%d recorded against consolidated invoice %s.', $refund->get_id(), $invoice_ref ) );
+	                    } else {
+	                        MBS_Invoice_Reservation::refunded($invoice_ref,$order_id);
+	                        $order->add_order_note( sprintf( 'Refund #%d recorded against consolidated invoice %s.', $refund->get_id(), $invoice_ref ) );
                     }
                 }
             }

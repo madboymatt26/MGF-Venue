@@ -108,9 +108,12 @@ class MBS_Modification {
         $request = self::get_request( $request_id );
         if ( ! $request || $request->status !== 'pending' ) return false;
 
-        $booking = MBS_Bookings::get( $request->booking_ref );
-        if ( ! $booking ) return false;
-        if ( MBS_Bookings::has_financial_history( $request->booking_ref ) ) {
+	        $booking = MBS_Bookings::get( $request->booking_ref );
+	        if ( ! $booking ) return false;
+	        $changes = $request->request_type === 'modify' ? ( json_decode( $request->requested_data, true ) ?: array() ) : array();
+	        $financial_fields = array( 'space', 'date', 'date_end', 'start_time', 'end_time', 'kitchen', 'booking_type' );
+	        $financial_change = (bool) array_intersect( $financial_fields, array_keys( $changes ) );
+	        if ( MBS_Bookings::has_financial_history( $request->booking_ref ) && ( $request->request_type === 'cancel' || $financial_change ) ) {
             return new WP_Error( 'billed_occurrence_immutable', 'This request cannot be applied because the occurrence has financial history. Use the credit-and-replace workflow.' );
         }
 
@@ -121,8 +124,7 @@ class MBS_Modification {
             MBS_Audit_Log::log( $request->booking_ref, 'cancelled', 'Cancellation request approved by admin' );
         } else {
             // Approve modification — apply the requested changes
-            $changes = json_decode( $request->requested_data, true ) ?: array();
-            if ( ! empty( $changes ) ) {
+	            if ( ! empty( $changes ) ) {
                 global $wpdb;
                 $table  = $wpdb->prefix . MBS_TABLE;
                 $update = array();
@@ -177,7 +179,8 @@ class MBS_Modification {
                         }
                     }
 
-                    // Recalculate cost
+	                    if ( $financial_change ) {
+	                    // Recalculate cost
                     $space     = $update['space'] ?? $booking->space;
                     $start     = $update['start_time'] ?? $booking->start_time;
                     $end       = $update['end_time'] ?? $booking->end_time;
@@ -202,16 +205,21 @@ class MBS_Modification {
                         $update['status'] = 'confirmed';
                     }
 
-                    $wpdb->update( $table, $update, array( 'ref' => $request->booking_ref ) );
+	                    }
+	                    $wpdb->update( $table, $update, array( 'ref' => $request->booking_ref ) );
 
-                    MBS_Audit_Log::log( $request->booking_ref, 'status_changed',
+	                    if ( $financial_change ) {
+	                    MBS_Audit_Log::log( $request->booking_ref, 'status_changed',
                         sprintf( 'Modification approved: status set to %s (was %s, cost %s → %s, amount_paid: £%s)',
                             $update['status'], $booking->status,
                             '£' . number_format( (float) $booking->amount, 2 ),
                             '£' . number_format( (float) $new_amount, 2 ),
                             number_format( $amount_paid, 2 )
                         )
-                    );
+	                    );
+	                    } else {
+	                        MBS_Audit_Log::log( $request->booking_ref, 'modification_approved', 'Approved non-financial fields without changing issued financial history.' );
+	                    }
                 }
             }
 

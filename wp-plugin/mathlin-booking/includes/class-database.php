@@ -254,9 +254,10 @@ class MBS_Database {
             invoice_ref        VARCHAR(30) NOT NULL,
             order_id           BIGINT(20) UNSIGNED DEFAULT NULL,
             amount_minor       BIGINT(20) UNSIGNED NOT NULL,
-            status             VARCHAR(30) NOT NULL DEFAULT 'active',
-            version            BIGINT(20) UNSIGNED NOT NULL DEFAULT 1,
-            expires_at         DATETIME DEFAULT NULL,
+	            status             VARCHAR(30) NOT NULL DEFAULT 'active',
+	            version            BIGINT(20) UNSIGNED NOT NULL DEFAULT 1,
+	            balance_version    BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+	            expires_at         DATETIME DEFAULT NULL,
             last_error         TEXT DEFAULT '',
             created_at         DATETIME NOT NULL,
             updated_at         DATETIME NOT NULL,
@@ -411,7 +412,7 @@ class MBS_Database {
                 'indexes' => array( 'PRIMARY','active_booking','idx_allocation_invoice','idx_allocation_booking' ),
             ),
             $wpdb->prefix . MBS_PAYMENT_RESERVATION_TABLE => array(
-                'columns' => array( 'id','reservation_ref','invoice_id','invoice_ref','order_id','amount_minor','status','version','expires_at','last_error','created_at','updated_at' ),
+	                'columns' => array( 'id','reservation_ref','invoice_id','invoice_ref','order_id','amount_minor','status','version','balance_version','expires_at','last_error','created_at','updated_at' ),
                 'indexes' => array( 'PRIMARY','reservation_ref','invoice_owner','order_owner','idx_reservation_status' ),
             ),
             $wpdb->prefix . 'mathlin_blocked_dates' => array( 'columns' => array( 'id','date_from','date_to','space','reason','created_at' ), 'indexes' => array( 'PRIMARY','idx_dates' ) ),
@@ -419,15 +420,63 @@ class MBS_Database {
             $wpdb->prefix . 'mathlin_email_queue' => array( 'columns' => array( 'id','to_email','subject','body','headers','attachments','attempts','status','next_retry','created_at' ), 'indexes' => array( 'PRIMARY','idx_status' ) ),
             $wpdb->prefix . 'mathlin_mod_requests' => array( 'columns' => array( 'id','booking_ref','request_type','status','requested_data','notes','admin_response','resolved_at','resolved_by','created_at' ), 'indexes' => array( 'PRIMARY','idx_ref','idx_status' ) ),
         );
-        $missing = array();
-        foreach ( $requirements as $table => $required ) {
+	        $missing = array();
+	        $index_semantics = array(
+	            $wpdb->prefix.MBS_TABLE => array('PRIMARY'=>array(true,array('id')),'idx_date'=>array(false,array('booking_date')),'idx_status'=>array(false,array('status')),'idx_ref'=>array(false,array('ref')),'idx_series'=>array(false,array('series_id')),'idx_email'=>array(false,array('email')),'idx_chase'=>array(false,array('status','created_at','chase_count'))),
+	            $wpdb->prefix.MBS_SERIES_TABLE => array('PRIMARY'=>array(true,array('id')),'series_ref'=>array(true,array('series_ref')),'idx_series_status'=>array(false,array('status')),'idx_series_email'=>array(false,array('contact_email')),'idx_series_dates'=>array(false,array('start_date','repeat_until')),'idx_series_billing'=>array(false,array('billing_treatment','billing_mode'))),
+	            $wpdb->prefix.MBS_INVOICE_TABLE => array('PRIMARY'=>array(true,array('id')),'invoice_ref'=>array(true,array('invoice_ref')),'invoice_idempotency'=>array(true,array('idempotency_key')),'idx_invoice_series'=>array(false,array('series_ref')),'idx_invoice_status_due'=>array(false,array('status','due_at')),'idx_invoice_period'=>array(false,array('period_start','period_end')),'idx_invoice_parent'=>array(false,array('parent_invoice_id'))),
+	            $wpdb->prefix.MBS_INVOICE_ITEM_TABLE => array('PRIMARY'=>array(true,array('id')),'item_ref'=>array(true,array('item_ref')),'idx_item_invoice'=>array(false,array('invoice_id')),'idx_item_booking'=>array(false,array('booking_ref')),'idx_item_service_date'=>array(false,array('service_date'))),
+	            $wpdb->prefix.MBS_PAYMENT_TRANSACTION_TABLE => array('PRIMARY'=>array(true,array('id')),'transaction_ref'=>array(true,array('transaction_ref')),'transaction_idempotency'=>array(true,array('idempotency_key')),'provider_transaction'=>array(true,array('provider','provider_transaction_id')),'idx_transaction_invoice'=>array(false,array('invoice_id','status')),'idx_transaction_occurred'=>array(false,array('occurred_at')),'idx_transaction_parent'=>array(false,array('parent_transaction_id'))),
+	            $wpdb->prefix.MBS_BILLING_ALLOCATION_TABLE => array('PRIMARY'=>array(true,array('id')),'active_booking'=>array(true,array('active_booking_ref')),'idx_allocation_invoice'=>array(false,array('invoice_id','status')),'idx_allocation_booking'=>array(false,array('booking_ref'))),
+	            $wpdb->prefix.MBS_PAYMENT_RESERVATION_TABLE => array('PRIMARY'=>array(true,array('id')),'reservation_ref'=>array(true,array('reservation_ref')),'invoice_owner'=>array(true,array('invoice_id')),'order_owner'=>array(true,array('order_id')),'idx_reservation_status'=>array(false,array('status','expires_at'))),
+	            $wpdb->prefix.'mathlin_blocked_dates' => array('PRIMARY'=>array(true,array('id')),'idx_dates'=>array(false,array('date_from','date_to'))),
+	            $wpdb->prefix.'mathlin_audit_log' => array('PRIMARY'=>array(true,array('id')),'idx_ref'=>array(false,array('ref')),'idx_action'=>array(false,array('action')),'idx_date'=>array(false,array('created_at'))),
+	            $wpdb->prefix.'mathlin_email_queue' => array('PRIMARY'=>array(true,array('id')),'idx_status'=>array(false,array('status','next_retry'))),
+	            $wpdb->prefix.'mathlin_mod_requests' => array('PRIMARY'=>array(true,array('id')),'idx_ref'=>array(false,array('booking_ref')),'idx_status'=>array(false,array('status'))),
+	        );
+	        $column_semantics = array(
+	            $wpdb->prefix.MBS_TABLE => array('id'=>array('bigint(20) unsigned','NO',null,'auto_increment'),'legacy_billing_excluded'=>array('tinyint(1)','NO','0','')),
+	            $wpdb->prefix.MBS_SERIES_TABLE => array('id'=>array('bigint(20) unsigned','NO',null,'auto_increment'),'version'=>array('bigint(20) unsigned','NO','1','')),
+	            $wpdb->prefix.MBS_INVOICE_TABLE => array('id'=>array('bigint(20) unsigned','NO',null,'auto_increment'),'version'=>array('bigint(20) unsigned','NO','1',''),'total_minor'=>array('bigint(20)','NO','0',''),'paid_minor'=>array('bigint(20)','NO','0',''),'credited_minor'=>array('bigint(20)','NO','0','')),
+	            $wpdb->prefix.MBS_INVOICE_ITEM_TABLE => array('id'=>array('bigint(20) unsigned','NO',null,'auto_increment'),'invoice_id'=>array('bigint(20) unsigned','NO',null,''),'line_total_minor'=>array('bigint(20)','NO','0','')),
+	            $wpdb->prefix.MBS_PAYMENT_TRANSACTION_TABLE => array('id'=>array('bigint(20) unsigned','NO',null,'auto_increment'),'invoice_id'=>array('bigint(20) unsigned','NO',null,''),'amount_minor'=>array('bigint(20) unsigned','NO',null,''),'refunded_minor'=>array('bigint(20) unsigned','NO','0','')),
+	            $wpdb->prefix.MBS_BILLING_ALLOCATION_TABLE => array('id'=>array('bigint(20) unsigned','NO',null,'auto_increment'),'invoice_id'=>array('bigint(20) unsigned','NO',null,''),'allocated_minor'=>array('bigint(20)','NO','0',''),'refunded_minor'=>array('bigint(20) unsigned','NO','0','')),
+	            $wpdb->prefix.MBS_PAYMENT_RESERVATION_TABLE => array('id'=>array('bigint(20) unsigned','NO',null,'auto_increment'),'invoice_id'=>array('bigint(20) unsigned','NO',null,''),'order_id'=>array('bigint(20) unsigned','YES',null,''),'amount_minor'=>array('bigint(20) unsigned','NO',null,''),'version'=>array('bigint(20) unsigned','NO','1',''),'balance_version'=>array('bigint(20) unsigned','NO','0','')),
+	        );
+	        foreach ( $requirements as $table => $required ) {
             if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) ) !== $table ) { $missing[] = 'table ' . $table; continue; }
             $columns = $wpdb->get_col( "SHOW COLUMNS FROM `{$table}`", 0 );
             foreach ( $required['columns'] as $column ) if ( ! in_array( $column, $columns, true ) ) $missing[] = $table . '.' . $column;
-            $index_rows = $wpdb->get_results( "SHOW INDEX FROM `{$table}`" );
-            $indexes = array_values( array_unique( array_map( static function ( $row ) { return (string) $row->Key_name; }, (array) $index_rows ) ) );
-            foreach ( $required['indexes'] as $index ) if ( ! in_array( $index, $indexes, true ) ) $missing[] = $table . ' index ' . $index;
-        }
+	            $full_columns = $wpdb->get_results( "SHOW FULL COLUMNS FROM `{$table}`" );
+	            $columns_by_name = array();
+	            foreach((array)$full_columns as $column)if(isset($column->Field))$columns_by_name[$column->Field]=$column;
+	            if(isset($columns_by_name['id'])){
+	                $id=$columns_by_name['id'];
+	                if(strtolower((string)$id->Type)!=='bigint(20) unsigned'||(string)$id->Null!=='NO'||strtolower((string)$id->Extra)!=='auto_increment')$missing[]=$table.'.id definition';
+	            }
+	            if(!empty($wpdb->collate)){
+	                $table_status=$wpdb->get_row($wpdb->prepare('SHOW TABLE STATUS LIKE %s',$table));
+	                if($table_status&&strtolower((string)$table_status->Collation)!==strtolower((string)$wpdb->collate))$missing[]=$table.' collation';
+	            }
+	            foreach(($column_semantics[$table]??array()) as $name=>$expected){
+	                if(!isset($columns_by_name[$name]))continue;
+	                $actual=$columns_by_name[$name];
+	                $actual_default=$actual->Default===null?null:(string)$actual->Default;
+	                if(strtolower((string)$actual->Type)!==$expected[0]||(string)$actual->Null!==$expected[1]||$actual_default!==$expected[2]||strtolower((string)$actual->Extra)!==$expected[3])$missing[]=$table.'.'.$name.' definition';
+	            }
+	            $index_rows = $wpdb->get_results( "SHOW INDEX FROM `{$table}`" );
+	            $indexes = array_values( array_unique( array_map( static function ( $row ) { return (string) $row->Key_name; }, (array) $index_rows ) ) );
+	            foreach ( $required['indexes'] as $index ) if ( ! in_array( $index, $indexes, true ) ) $missing[] = $table . ' index ' . $index;
+	            $semantic_index_rows=$index_rows&&isset($index_rows[0]->Non_unique)&&isset($index_rows[0]->Column_name);
+	            foreach(($index_semantics[$table]??array()) as $name=>$expected){
+	                if(!$semantic_index_rows)continue;
+	                $rows=array_values(array_filter((array)$index_rows,static function($row)use($name){return(string)$row->Key_name===$name;}));
+	                usort($rows,static function($a,$b){return(int)$a->Seq_in_index<=>(int)$b->Seq_in_index;});
+	                $unique=$rows&&((int)$rows[0]->Non_unique===0);
+	                $index_columns=array_map(static function($row){return(string)$row->Column_name;},$rows);
+	                if(!$rows||$unique!==$expected[0]||$index_columns!==$expected[1])$missing[]=$table.' index '.$name.' definition';
+	            }
+	        }
         return $missing ? new WP_Error( 'migration_verification_failed', 'Database migration is incomplete: ' . implode( ', ', $missing ) ) : true;
     }
 
@@ -440,9 +489,40 @@ class MBS_Database {
     /**
      * Run database migrations for existing installs.
      */
-    private static function maybe_run_migrations() {
+	    private static function maybe_run_migrations() {
         global $wpdb;
-        $table = $wpdb->prefix . MBS_TABLE;
+	        $table = $wpdb->prefix . MBS_TABLE;
+
+	        // Schema 7 introduced this safety boundary. Add it explicitly because
+	        // dbDelta does not reliably alter CREATE TABLE IF NOT EXISTS shapes.
+	        $legacy_column = $wpdb->get_row( "SHOW COLUMNS FROM {$table} WHERE Field = 'legacy_billing_excluded'" );
+	        if ( ! $legacy_column ) {
+	            if ( $wpdb->query( "ALTER TABLE {$table} ADD COLUMN legacy_billing_excluded TINYINT(1) NOT NULL DEFAULT 0 AFTER series_id" ) === false ) return new WP_Error( 'legacy_billing_column_failed', 'Could not add the legacy billing exclusion column.' );
+	        }
+	        $series_table = $wpdb->prefix . MBS_SERIES_TABLE;
+	        $backfilled = $wpdb->query(
+	            "UPDATE {$table} b INNER JOIN {$series_table} s ON s.series_ref=b.series_id
+	             SET b.legacy_billing_excluded=1
+	             WHERE b.legacy_billing_excluded=0 AND (b.status IN ('paid','deposit_paid','cancelled','archived') OR b.amount_paid>0 OR b.deposit_paid>0)"
+	        );
+	        if ( $backfilled === false ) return new WP_Error( 'legacy_billing_backfill_failed', 'Could not preserve historical recurring billing during upgrade.' );
+	        $unsafe = (int)$wpdb->get_var(
+	            "SELECT COUNT(*) FROM {$table} b INNER JOIN {$series_table} s ON s.series_ref=b.series_id
+	             WHERE b.legacy_billing_excluded=0 AND (b.status IN ('paid','deposit_paid','cancelled','archived') OR b.amount_paid>0 OR b.deposit_paid>0)"
+	        );
+	        if ( $unsafe !== 0 ) return new WP_Error( 'legacy_billing_backfill_incomplete', 'Historical recurring billing exclusions remain incomplete.' );
+
+	        $reservation_table=$wpdb->prefix.MBS_PAYMENT_RESERVATION_TABLE;
+	        if(!$wpdb->get_row("SHOW COLUMNS FROM {$reservation_table} WHERE Field='balance_version'")){
+	            if($wpdb->query("ALTER TABLE {$reservation_table} ADD COLUMN balance_version BIGINT(20) UNSIGNED NOT NULL DEFAULT 0 AFTER version")===false)return new WP_Error('reservation_generation_column_failed','Could not add reservation balance generations.');
+	        }
+	        $owner_rows=$wpdb->get_results("SHOW INDEX FROM {$reservation_table} WHERE Key_name='invoice_owner' ORDER BY Seq_in_index");
+	        $owner_semantics=$owner_rows&&isset($owner_rows[0]->Non_unique)&&isset($owner_rows[0]->Column_name);
+	        $owner_exact=!$owner_semantics||(count($owner_rows)===1&&(int)$owner_rows[0]->Non_unique===0&&(string)$owner_rows[0]->Column_name==='invoice_id');
+	        if(!$owner_exact){
+	            if($owner_rows&&$wpdb->query("ALTER TABLE {$reservation_table} DROP INDEX invoice_owner")===false)return new WP_Error('reservation_owner_index_drop_failed','Could not replace malformed invoice ownership index.');
+	            if($wpdb->query("ALTER TABLE {$reservation_table} ADD UNIQUE KEY invoice_owner (invoice_id)")===false)return new WP_Error('reservation_owner_index_failed','Could not enforce unique invoice ownership.');
+	        }
 
         // Migrate ENUM status column to VARCHAR if needed
         $col_info = $wpdb->get_row( "SHOW COLUMNS FROM {$table} WHERE Field = 'status'" );

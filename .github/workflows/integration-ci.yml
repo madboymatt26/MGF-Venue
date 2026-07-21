@@ -6,11 +6,6 @@ on:
     branches:
       - feature/recurring-series-billing
   pull_request:
-    paths:
-      - '.github/workflows/integration-ci.yml'
-      - 'wp-plugin/**'
-      - 'tests/**'
-      - 'mcp-server/**'
 
 permissions:
   contents: read
