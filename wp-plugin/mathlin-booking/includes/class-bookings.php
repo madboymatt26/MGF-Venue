@@ -1770,6 +1770,12 @@ f) On detection of a fire, the Hirer must break a glass and assist evacuation of
         // Anonymise modification request notes
         foreach ( $booking_refs as $booking_ref ) $wpdb->update( $mod_table, array( 'notes' => '', 'admin_response' => '' ), array( 'booking_ref' => $booking_ref ) );
 
+        // Anonymise OSM outbox payload for erased bookings (reversal context may contain PII)
+        $osm_outbox_table = $wpdb->prefix . MBS_OSM_OUTBOX_TABLE;
+        foreach ( $booking_refs as $booking_ref ) {
+            $wpdb->update( $osm_outbox_table, array( 'payload_json' => wp_json_encode( array( 'gdpr_erased' => true ) ) ), array( 'booking_ref' => $booking_ref ) );
+        }
+
         $total_affected = max( 0, (int) $affected ) + max( 0, (int) $series_affected ) + max( 0, (int) $invoice_affected );
         $items_removed = $total_affected > 0;
 
