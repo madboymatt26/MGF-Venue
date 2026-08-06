@@ -1,0 +1,93 @@
+name: mgf-venue-integration
+
+services:
+  db:
+    image: mariadb:10.11
+    environment:
+      MARIADB_DATABASE: wordpress
+      MARIADB_USER: wordpress
+      MARIADB_PASSWORD: wordpress-test-only
+      MARIADB_ROOT_PASSWORD: root-test-only
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    tmpfs:
+      - /var/lib/mysql
+
+  wordpress:
+    image: ${WORDPRESS_IMAGE:-wordpress:6.6.2-php8.2-apache}
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress-test-only
+      WORDPRESS_DB_NAME: wordpress
+      WORDPRESS_DEBUG: "1"
+      WORDPRESS_CONFIG_EXTRA: |
+        define( 'WP_ENVIRONMENT_TYPE', 'local' );
+    ports:
+      - "8088:80"
+    volumes:
+      - wp-data:/var/www/html
+      - ../../wp-plugin/mathlin-booking:/var/www/html/wp-content/plugins/mathlin-booking
+      - ./fixtures/mbs-test-gateway:/var/www/html/wp-content/plugins/mbs-test-gateway
+
+  cli:
+    image: ${WPCLI_IMAGE:-wordpress:cli-2.11.0-php8.2}
+    depends_on:
+      db:
+        condition: service_healthy
+      wordpress:
+        condition: service_started
+    user: "33:33"
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress-test-only
+      WORDPRESS_DB_NAME: wordpress
+    volumes:
+      - wp-data:/var/www/html
+      - ../../wp-plugin/mathlin-booking:/var/www/html/wp-content/plugins/mathlin-booking
+      - ./fixtures/mbs-test-gateway:/var/www/html/wp-content/plugins/mbs-test-gateway
+      - ../..:/workspace
+      - ./.cache/wp-cli:/var/www/.wp-cli/cache
+    working_dir: /var/www/html
+
+  php74:
+    image: php:7.4-cli
+    profiles: ["matrix"]
+    volumes:
+      - ../..:/workspace
+    working_dir: /workspace
+    command: ["sh", "tests/integration/run-php-suite.sh"]
+
+  php80:
+    image: php:8.0-cli
+    profiles: ["matrix"]
+    volumes:
+      - ../..:/workspace
+    working_dir: /workspace
+    command: ["sh", "tests/integration/run-php-suite.sh"]
+
+  php82:
+    image: php:8.2-cli
+    profiles: ["matrix"]
+    volumes:
+      - ../..:/workspace
+    working_dir: /workspace
+    command: ["sh", "tests/integration/run-php-suite.sh"]
+
+  php83:
+    image: php:8.3-cli
+    profiles: ["matrix"]
+    volumes:
+      - ../..:/workspace
+    working_dir: /workspace
+    command: ["sh", "tests/integration/run-php-suite.sh"]
+
+volumes:
+  wp-data:

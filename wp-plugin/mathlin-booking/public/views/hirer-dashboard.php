@@ -5,7 +5,16 @@ $email   = $user->user_email;
 $name    = get_user_meta( $user->ID, 'first_name', true ) ?: $user->display_name;
 $stats   = MBS_Hirer_Portal::get_hirer_stats( $email );
 $bookings = MBS_Hirer_Portal::get_bookings_for_email( $email );
+$series   = MBS_Hirer_Portal::get_series_for_email( $email );
+$invoices = MBS_Hirer_Portal::get_invoices_for_email( $email );
 $spaces  = MBS_Bookings::get_spaces();
+$series_refs = array();
+foreach ( $series as $series_row ) $series_refs[ $series_row->series_ref ] = true;
+$legacy_bookings = array_values( array_filter( $bookings, static function ( $booking ) use ( $series_refs ) {
+    return empty( $booking->series_id ) || ! isset( $series_refs[ $booking->series_id ] );
+} ) );
+$invoices_by_series = array();
+foreach ( $invoices as $invoice ) $invoices_by_series[ $invoice->series_ref ][] = $invoice;
 ?>
 
 <div class="nms-wrap">
@@ -40,17 +49,85 @@ $spaces  = MBS_Bookings::get_spaces();
             <div style="font-size:0.8rem;color:#6b7280;">Total Bookings</div>
         </div>
         <div class="nms-form-section" style="text-align:center;padding:1rem;">
-            <div style="font-size:1.75rem;font-weight:800;color:#7413DC;">&pound;<?php echo number_format( $stats['total_spent'], 0 ); ?></div>
-            <div style="font-size:0.8rem;color:#6b7280;">Total Spent</div>
+            <div style="font-size:1.75rem;font-weight:800;color:#7413DC;"><?php echo esc_html( MBS_Money::format( $stats['total_spent_minor'] ) ); ?></div>
+            <div style="font-size:0.8rem;color:#6b7280;">Actually Paid</div>
         </div>
     </div>
 
+    <?php if ( $series ) : ?>
+    <div class="nms-form-section" style="margin-bottom:1.5rem;">
+        <h3>Your Recurring Bookings</h3>
+        <p class="nms-muted">Each series is grouped here. Billing and payment are handled per invoice, not per date.</p>
+        <?php foreach ( $series as $s ) :
+            $occurrences = MBS_Series::occurrences( $s->series_ref, false );
+            $series_invoices = $invoices_by_series[ $s->series_ref ] ?? array();
+            $next_occurrence = null;
+            foreach ( $occurrences as $occurrence ) {
+                if ( $occurrence->booking_date >= wp_date( 'Y-m-d' ) && ! in_array( $occurrence->status, array( 'cancelled', 'archived' ), true ) ) { $next_occurrence = $occurrence; break; }
+            }
+            $outstanding = 0;
+            $next_invoice = null;
+            foreach ( $series_invoices as $invoice ) {
+                $balance = MBS_Billing_Ledger::balance_minor( $invoice );
+                if ( $balance > 0 && in_array( $invoice->status, array( 'issued', 'part_paid', 'overdue' ), true ) ) {
+                    $outstanding += $balance;
+                    if ( ! $next_invoice || $invoice->due_at < $next_invoice->due_at ) $next_invoice = $invoice;
+                }
+            }
+        ?>
+        <article style="border:1px solid #e0d0f0;border-radius:8px;padding:1rem;margin:1rem 0;">
+            <div style="display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
+                <div><strong><?php echo esc_html( $s->space ); ?></strong><br><span class="nms-muted"><?php echo esc_html( $s->series_ref ); ?> · <?php echo esc_html( ucfirst( str_replace( '_', ' ', $s->status ) ) ); ?></span></div>
+                <div style="text-align:right;"><strong><?php echo esc_html( MBS_Money::format( MBS_Money::from_decimal_string( (string) $s->price_per_booking ) ) ); ?></strong> per booking<br><span class="nms-muted"><?php echo esc_html( ucfirst( str_replace( '_', ' ', $s->billing_mode ) ) ); ?> billing</span></div>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0.75rem;margin-top:1rem;">
+                <div><span class="nms-muted">Schedule</span><br>Weekly, <?php echo esc_html( $s->all_day ? 'all day' : substr( $s->start_time, 0, 5 ) . '–' . substr( $s->end_time, 0, 5 ) ); ?></div>
+                <div><span class="nms-muted">Next date</span><br><?php echo $next_occurrence ? esc_html( wp_date( 'j M Y', strtotime( $next_occurrence->booking_date ) ) ) : 'No future date'; ?></div>
+                <div><span class="nms-muted">Estimated series value</span><br><?php echo esc_html( '£' . number_format( (float) $s->estimated_total, 2 ) ); ?></div>
+                <div><span class="nms-muted">Outstanding</span><br><?php echo esc_html( MBS_Money::format( $outstanding ) ); ?></div>
+                <div><span class="nms-muted">Next invoice</span><br><?php echo $next_invoice ? esc_html( $next_invoice->invoice_ref . ' · due ' . wp_date( 'j M Y', strtotime( $next_invoice->due_at ) ) ) : 'None outstanding'; ?></div>
+            </div>
+            <details style="margin-top:1rem;">
+                <summary style="cursor:pointer;font-weight:600;">View <?php echo (int) count( $occurrences ); ?> booking dates</summary>
+                <ul style="columns:2;min-width:260px;">
+                    <?php foreach ( $occurrences as $occurrence ) : ?>
+                    <li><?php echo esc_html( wp_date( 'D j M Y', strtotime( $occurrence->booking_date ) ) . ' — ' . MBS_Bookings::status_label( $occurrence->status ) ); ?></li>
+                    <?php endforeach; ?>
+                </ul>
+            </details>
+        </article>
+        <?php endforeach; ?>
+    </div>
+    <?php endif; ?>
+
+    <?php if ( $invoices ) : ?>
+    <div class="nms-form-section" style="margin-bottom:1.5rem;">
+        <h3>Invoices &amp; Payments</h3>
+        <?php foreach ( $invoices as $invoice ) :
+            $balance = MBS_Billing_Ledger::balance_minor( $invoice );
+            $invoice_series = isset( $series_refs[ $invoice->series_ref ] ) ? MBS_Series::get( $invoice->series_ref ) : null;
+            $pay_url = $balance > 0 ? MBS_Invoice_Payment::generate_payment_url( $invoice ) : '';
+            $transactions = MBS_Hirer_Portal::invoice_transactions( $invoice->id );
+        ?>
+        <div style="border-top:1px solid #e5e7eb;padding:1rem 0;display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
+            <div><strong><?php echo esc_html( $invoice->invoice_ref ); ?></strong> · <?php echo esc_html( ucfirst( str_replace( '_', ' ', $invoice->status ) ) ); ?><br><span class="nms-muted"><?php echo esc_html( wp_date( 'j M Y', strtotime( $invoice->period_start ) ) . '–' . wp_date( 'j M Y', strtotime( $invoice->period_end ) ) ); ?> · Total <?php echo esc_html( MBS_Money::format( (int) $invoice->total_minor, $invoice->currency ) ); ?> · Paid <?php echo esc_html( MBS_Money::format( (int) $invoice->paid_minor, $invoice->currency ) ); ?></span>
+                <?php if ( $transactions ) : ?><details><summary>Payment history</summary><ul><?php foreach ( $transactions as $transaction ) : ?><li><?php echo esc_html( wp_date( 'j M Y', strtotime( $transaction->occurred_at ) ) . ' · ' . ucfirst( $transaction->transaction_type ) . ' ' . MBS_Money::format( (int) $transaction->amount_minor, $transaction->currency ) ); ?></li><?php endforeach; ?></ul></details><?php endif; ?>
+            </div>
+            <div style="text-align:right;"><strong>Balance <?php echo esc_html( MBS_Money::format( $balance, $invoice->currency ) ); ?></strong><br>
+                <?php if ( $pay_url ) : ?><a href="<?php echo esc_url( $pay_url ); ?>" class="nms-btn nms-btn-sm" style="background:#2ecc71;color:#fff;border-color:#2ecc71;">Pay this invoice</a>
+                <?php elseif ( $balance > 0 && $invoice_series && $invoice_series->payment_method === 'offline_bacs' ) : ?><span class="nms-muted">Pay by BACS using <?php echo esc_html( $invoice->invoice_ref ); ?></span><?php endif; ?>
+            </div>
+        </div>
+        <?php endforeach; ?>
+    </div>
+    <?php endif; ?>
+
     <!-- Bookings list -->
     <div class="nms-form-section">
-        <h3>Your Bookings</h3>
+        <h3>One-off &amp; Legacy Bookings</h3>
 
-        <?php if ( empty( $bookings ) ) : ?>
-            <p class="nms-muted">You don't have any bookings yet.</p>
+        <?php if ( empty( $legacy_bookings ) ) : ?>
+            <p class="nms-muted">You don't have any separate one-off bookings.</p>
         <?php else : ?>
             <div style="overflow-x:auto;">
                 <table style="width:100%;border-collapse:collapse;font-size:0.875rem;">
@@ -66,7 +143,7 @@ $spaces  = MBS_Bookings::get_spaces();
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ( $bookings as $b ) :
+                        <?php foreach ( $legacy_bookings as $b ) :
                             $is_daily = ! empty( $b->all_day );
                             $time_str = $is_daily ? 'All day' : ( substr( $b->start_time, 0, 5 ) . '–' . substr( $b->end_time, 0, 5 ) );
                             $is_past  = strtotime( $b->booking_date ) < strtotime( 'today' );

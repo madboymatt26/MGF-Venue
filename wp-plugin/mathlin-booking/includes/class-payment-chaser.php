@@ -25,6 +25,23 @@ class MBS_Payment_Chaser {
         wp_clear_scheduled_hook( 'mbs_daily_payment_chase' );
     }
 
+    /** Whether this individual booking is allowed through occurrence chasing. */
+    public static function should_chase_occurrence( $booking ) {
+        $treatment = MBS_Series::billing_treatment_for_booking( $booking );
+        return in_array( $treatment, array( 'one_off', 'legacy_per_occurrence' ), true );
+    }
+
+    public static function chase_suppression_message( $booking ) {
+        $treatment = MBS_Series::billing_treatment_for_booking( $booking );
+        if ( $treatment === 'none' ) {
+            return 'This booking has no billing and must not receive a payment chase.';
+        }
+        if ( in_array( $treatment, array( 'manual_consolidated', 'invoice_managed' ), true ) ) {
+            return 'This booking belongs to a consolidated series. Manage reminders against the series or its invoices, not the individual occurrence.';
+        }
+        return '';
+    }
+
     /**
      * Auto-chase: find overdue confirmed bookings and send reminders.
      * Also finds deposit_paid bookings approaching their balance due date.
@@ -87,8 +104,9 @@ class MBS_Payment_Chaser {
 
         $count = 0;
         foreach ( $bookings as $booking ) {
-            self::send_chase( $booking );
-            $count++;
+            if ( self::send_chase( $booking ) ) {
+                $count++;
+            }
         }
 
         if ( $count > 0 ) {
@@ -103,6 +121,10 @@ class MBS_Payment_Chaser {
      * @param bool   $manual   Whether this is a manual chase (affects wording)
      */
     public static function send_chase( $booking, $manual = false ) {
+        if ( ! self::should_chase_occurrence( $booking ) ) {
+            return false;
+        }
+
         $chase_count = (int) ( $booking->chase_count ?? 0 );
         $org         = MBS_Email_Templates::get_org_settings();
         $admin_email = MBS_Bookings::get_admin_email();
@@ -113,13 +135,13 @@ class MBS_Payment_Chaser {
         $balance_due     = $total_amount - $amount_paid_val;
 
         // If nothing is owed, don't chase
-        if ( $balance_due <= 0.01 ) return;
+        if ( $balance_due <= 0.01 ) return false;
 
         // B2B EXEMPTION: offline-invoicing tiers get a gentle statement reminder
         // instead of the escalating "pay now or cancel" chase sequence.
         if ( MBS_Bookings::booking_is_offline( $booking ) ) {
             self::send_b2b_statement_reminder( $booking, $balance_due, $manual );
-            return;
+            return true;
         }
 
         // Determine chase type based on what's already been paid
@@ -227,6 +249,7 @@ class MBS_Payment_Chaser {
         $type = $manual ? 'Manual payment chase' : 'Auto payment chase';
         $what = ' (' . $chase_type . ' £' . number_format( $amount_due, 2 ) . ')';
         MBS_Audit_Log::log( $booking->ref, 'payment_chase', $type . ' (chase #' . ( $chase_count + 1 ) . ')' . $what );
+        return true;
     }
 
     /**
@@ -304,5 +327,6 @@ class MBS_Payment_Chaser {
         // Audit log
         $type = $manual ? 'Manual B2B statement reminder' : 'Auto B2B statement reminder';
         MBS_Audit_Log::log( $booking->ref, 'payment_chase', $type . ' (reminder #' . ( $chase_count + 1 ) . ', balance £' . number_format( $balance_due, 2 ) . ')' );
+        return true;
     }
 }

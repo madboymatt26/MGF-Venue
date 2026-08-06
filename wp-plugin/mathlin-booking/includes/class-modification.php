@@ -94,7 +94,7 @@ class MBS_Modification {
 
     public static function update_request_status( $id, $status, $admin_response = '' ) {
         global $wpdb;
-        $wpdb->update( self::table(), array(
+        return $wpdb->update( self::table(), array(
             'status'         => $status,
             'admin_response' => sanitize_textarea_field( $admin_response ),
             'resolved_at'    => current_time( 'mysql' ),
@@ -108,8 +108,14 @@ class MBS_Modification {
         $request = self::get_request( $request_id );
         if ( ! $request || $request->status !== 'pending' ) return false;
 
-        $booking = MBS_Bookings::get( $request->booking_ref );
-        if ( ! $booking ) return false;
+	        $booking = MBS_Bookings::get( $request->booking_ref );
+	        if ( ! $booking ) return false;
+	        $changes = $request->request_type === 'modify' ? ( json_decode( $request->requested_data, true ) ?: array() ) : array();
+	        $financial_fields = array( 'space', 'date', 'date_end', 'start_time', 'end_time', 'kitchen', 'booking_type' );
+	        $financial_change = (bool) array_intersect( $financial_fields, array_keys( $changes ) );
+	        if ( MBS_Bookings::has_financial_history( $request->booking_ref ) && ( $request->request_type === 'cancel' || $financial_change ) ) {
+            return new WP_Error( 'billed_occurrence_immutable', 'This request cannot be applied because the occurrence has financial history. Use the credit-and-replace workflow.' );
+        }
 
         if ( $request->request_type === 'cancel' ) {
             // Approve cancellation
@@ -118,8 +124,7 @@ class MBS_Modification {
             MBS_Audit_Log::log( $request->booking_ref, 'cancelled', 'Cancellation request approved by admin' );
         } else {
             // Approve modification — apply the requested changes
-            $changes = json_decode( $request->requested_data, true ) ?: array();
-            if ( ! empty( $changes ) ) {
+	            if ( ! empty( $changes ) ) {
                 global $wpdb;
                 $table  = $wpdb->prefix . MBS_TABLE;
                 $update = array();
@@ -174,7 +179,8 @@ class MBS_Modification {
                         }
                     }
 
-                    // Recalculate cost
+	                    if ( $financial_change ) {
+	                    // Recalculate cost
                     $space     = $update['space'] ?? $booking->space;
                     $start     = $update['start_time'] ?? $booking->start_time;
                     $end       = $update['end_time'] ?? $booking->end_time;
@@ -199,16 +205,25 @@ class MBS_Modification {
                         $update['status'] = 'confirmed';
                     }
 
-                    $wpdb->update( $table, $update, array( 'ref' => $request->booking_ref ) );
+	                    }
+	                    $booking_updated = $wpdb->update( $table, $update, array( 'ref' => $request->booking_ref ) );
+	                    if ( $booking_updated === false ) {
+	                        MBS_Audit_Log::log( $request->booking_ref, 'modification_update_failed', 'Permitted modification remains pending because the booking update failed: ' . $wpdb->last_error );
+	                        return new WP_Error( 'modification_update_failed', 'The booking change could not be saved. The request remains pending and can be retried safely.' );
+	                    }
 
-                    MBS_Audit_Log::log( $request->booking_ref, 'status_changed',
+	                    if ( $financial_change ) {
+	                    MBS_Audit_Log::log( $request->booking_ref, 'status_changed',
                         sprintf( 'Modification approved: status set to %s (was %s, cost %s → %s, amount_paid: £%s)',
                             $update['status'], $booking->status,
                             '£' . number_format( (float) $booking->amount, 2 ),
                             '£' . number_format( (float) $new_amount, 2 ),
                             number_format( $amount_paid, 2 )
                         )
-                    );
+	                    );
+	                    } else {
+	                        MBS_Audit_Log::log( $request->booking_ref, 'modification_approved', 'Approved non-financial fields without changing issued financial history.' );
+	                    }
                 }
             }
 
@@ -218,7 +233,9 @@ class MBS_Modification {
             MBS_Audit_Log::log( $request->booking_ref, 'edited', 'Modification request approved and applied by admin' );
         }
 
-        self::update_request_status( $request_id, 'approved' );
+        if ( self::update_request_status( $request_id, 'approved' ) === false ) {
+            return new WP_Error( 'modification_status_update_failed', 'The booking changed, but the request could not be marked approved. Administrator reconciliation is required.' );
+        }
         return true;
     }
 

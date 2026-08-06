@@ -4,11 +4,96 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.20.1
+**Current Version:** 3.21.0
 **Requires WordPress:** 5.0+  
 **Requires PHP:** 7.4+  
 **Tested with WordPress:** 6.7  
 **License:** GPL-2.0+
+
+---
+
+## 3.21.0 Consolidated billing domain
+
+- Adds first-class recurring series, immutable consolidated invoice and credit
+  documents, invoice items, payment transactions and booking allocations.
+- New external recurring requests default to monthly invoicing in advance,
+  no deposit, and £0 due when the request is submitted. Offline invoicing is
+  a payment method (BACS/PO), not a billing frequency.
+- Adds a Recurring Series admin screen with approval, pause/resume, extension,
+  explicit legacy adoption, billing preview, invoices, payments and audit.
+- Groups recurring occurrences in the hirer portal. "Actually Paid" now uses
+  completed payments/refunds rather than confirmed-but-unpaid booking value.
+- Adds one customer-branded request/approval/invoice/reminder/receipt/change
+  communication per series or invoice; occurrence reminders are suppressed.
+- Adds typed REST/MCP series and invoice tools. Every financial/status write
+  requires capability checks, idempotency and optimistic concurrency; email
+  remains opt-in for MCP calls.
+- Registers existing `series_id` groups as `legacy_per_occurrence` with
+  `metadata_incomplete=true`; prior terms, skipped dates and billing intent are
+  never inferred, and paid legacy occurrences are never invoiced again.
+- Stores all new financial values as integer minor units and rejects floats at
+  the financial-write boundary.
+- Makes issued financial lines immutable; voids, credits, payments and refunds
+  are retained as additive, idempotent ledger records.
+- Prevents billed occurrences being silently rewritten: cancel-and-replace is
+  required so the original invoice receives an immutable credit first. Past
+  paid occurrences are preserved when an administrator cancels a series.
+- Accounting exports and financial analytics combine invoice-ledger data with
+  only unallocated legacy bookings, preventing double counting. GDPR and
+  uninstall handling cover every added table.
+- Schema 9 uses a versioned InnoDB payment-
+  reservation table. Invoice and order ownership are unique, transitions use
+  conditional compare-and-swap updates, bound claims do not expire, callbacks
+  re-prove ownership, and reconciliation requires evidence of the ledger
+	  payment or a full WooCommerce refund. Expiry is UTC, and a committed refund
+	  or refund permits a successor checkout balance generation. Online orders
+	  must exactly equal the reserved minor-unit amount and currency; coupons,
+	  fees, discounts, edits, stale generations and mismatched captures are
+	  rejected or durably quarantined rather than becoming partial payments.
+- Legacy registration, migration and adoption share one financial-history
+  predicate across legacy statuses/amounts, invoice items, active or released
+  allocations, payments/refunds and credit notes. Matching occurrences are
+  permanently excluded; genuinely unbilled future occurrences stay eligible.
+- Woo refunds link to their original payment and maintain cumulative refunded
+  minor units on both payment and occurrence allocations. Ledger, allocation,
+  occurrence and invoice changes commit together; refund-before-payment is
+  retained for retry after the payment callback.
+- Compatibility Scout mutations reject first-class/non-Scout series and
+  financially documented rows. Migration uses a database advisory lock,
+	  checks every material migration result, verifies the historical backfill,
+	  compares every canonical column/index definition, collation and InnoDB
+	  engine, and retains a retryable old marker plus administrator error on any
+	  operation or verification failure.
+- Accounting CSVs distinguish invoice/credit types and signs. Analytics labels
+  legacy service-date, invoice issue-date, transaction-date and current-balance
+  bases explicitly instead of presenting them as one unexplained FY basis.
+
+### Verification boundary for schema 9
+
+The repository includes `tests/integration/docker-compose.yml` with pinned
+WordPress, WooCommerce and MariaDB, separate-process reservation workers, a
+deterministic no-money gateway, real Woo object/hook scenarios, and PHP
+7.4/8.0/8.2/8.3 jobs. These container tests must pass before staging. Local PHP
+tests use mocks/fake databases and do not prove real
+MariaDB concurrency, accounting-package import, provider-side idempotency or
+gateway chargeback webhooks.
+
+Duplicate capture prevention is bounded by the plugin's checkout ownership
+protocol. A production gateway must also provide idempotent capture semantics
+for repeated provider requests/callbacks; the plugin cannot guarantee behavior
+inside an arbitrary external payment provider.
+
+---
+
+## 3.20.2 Recurrence safety
+
+- Generates weekly dates with `DateTimeImmutable` in the WordPress timezone so
+  the local weekday remains stable across GMT/BST changes.
+- Validates real dates, a required repeat-until date, a one-calendar-year/53
+  occurrence limit, and rejects recurring multi-day requests.
+- Reports an explicit accepted, conflict, blocked, or error result for every
+  attempted date and stops on systemic persistence failures.
+- Uses collision-checked series references and verifies every occurrence link.
 
 ---
 
@@ -58,7 +143,13 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 - Interactive availability calendar with blocked date indicators
 - Booking form with real-time cost calculation (tier-aware)
 - Multi-day and full-day booking support
-- Recurring weekly bookings (up to 52 weeks)
+- Recurring weekly bookings (up to one calendar year inclusive, maximum 53 dates)
+- Recurring billing safety: one durable, versioned Woo order owner per current invoice balance generation; refund remainders can acquire a successor generation, while mismatched or captured-but-unrecorded payments remain visibly quarantined for evidence-based reconciliation. Explicit manual/offline ledger payments may be partial; an altered online order may not.
+- Issued, part-paid, and overdue positive-balance invoices share one payable rule. Partial refunds use the canonical Woo refund hook and affect only their allocated occurrences. OSM reversals are inserted into a stable-idempotency outbox inside the refund transaction, with delivered/retry/manual-reconciliation states and auditable administrator retry/resolution.
+- Series creation and cancellation/credit reconciliation are transactional; financially documented occurrences require credit-and-replace rather than direct edit or deletion.
+- Late additions to an issued period receive a linked deterministic supplemental invoice, and catch-up keyset-paginates every eligible series beyond 100.
+- Financial reporting separately defines invoiced, gross collected, outstanding, credited/refunded, and net collected. Idempotency keys are bound to operation, target, and payload.
+- Schema 9 upgrades use a connection-owned database advisory lock, multi-source historical-finance backfill, staged health state, complete canonical column/index/collation verification and InnoDB enforcement before advancing the version marker.
 - Conflict detection prevents double bookings (including parent/child space bundling)
 - Configurable minimum notice period
 - Custom form fields (admin-configurable)

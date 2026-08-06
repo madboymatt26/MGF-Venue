@@ -51,6 +51,7 @@ class MBS_Bookings {
             'deposit_paid' => 'Deposit Paid',
             'paid'         => 'Paid',
             'cancelled'    => 'Cancelled',
+            'cancelled_future' => 'Future Cancelled',
             'archived'     => 'Archived',
         );
         return $labels[ $status ] ?? ucfirst( $status );
@@ -412,7 +413,7 @@ class MBS_Bookings {
      *                                     manager to override Scout use and
      *                                     set an explicit non-negative amount.
      */
-    public static function create( $data, $trusted_admin_context = false ) {
+    public static function create( $data, $trusted_admin_context = false, $manage_transaction = true ) {
         global $wpdb;
         $table = $wpdb->prefix . MBS_TABLE;
 
@@ -510,7 +511,7 @@ class MBS_Bookings {
         }
 
         // SEC-001: Use transaction with row locking to prevent race condition double bookings
-        $wpdb->query( 'START TRANSACTION' );
+        if ( $manage_transaction && $wpdb->query( 'START TRANSACTION' ) === false ) return new WP_Error( 'transaction_start_failed', 'Could not start booking creation.' );
 
         $space_val = sanitize_text_field( $data['space'] );
         $spaces_to_lock = array_unique( array_merge( array( $space_val ), self::get_related_spaces( $space_val ) ) );
@@ -536,7 +537,7 @@ class MBS_Bookings {
 
             $blocked = MBS_Blocked_Dates::is_blocked( $check_date, $space_val );
             if ( $blocked ) {
-                $wpdb->query( 'ROLLBACK' );
+                if ( $manage_transaction ) $wpdb->query( 'ROLLBACK' );
                 return new WP_Error( 'blocked_date', 'The venue is blocked on ' . $check_date . ( $blocked->reason ? ': ' . $blocked->reason : '.' ) );
             }
 
@@ -548,18 +549,18 @@ class MBS_Bookings {
                 $all_day
             );
             if ( ! empty( $tx_conflicts ) ) {
-                $wpdb->query( 'ROLLBACK' );
+                if ( $manage_transaction ) $wpdb->query( 'ROLLBACK' );
                 return new WP_Error( 'conflict', self::format_conflict_message( $tx_conflicts ) );
             }
         }
 
         $result = $wpdb->insert( $table, $insert );
         if ( $result === false ) {
-            $wpdb->query( 'ROLLBACK' );
+            if ( $manage_transaction ) $wpdb->query( 'ROLLBACK' );
             return new WP_Error( 'db_error', 'Could not save booking.' );
         }
 
-        $wpdb->query( 'COMMIT' );
+        if ( $manage_transaction && $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'transaction_commit_failed', 'Could not commit booking creation.' ); }
 
         // Audit log
         MBS_Audit_Log::log( $ref, 'created', 'Booking created by ' . sanitize_text_field( $data['name'] ) . ' for ' . sanitize_text_field( $data['space'] ) . ' on ' . sanitize_text_field( $data['booking_date'] ), 0 );
@@ -684,6 +685,8 @@ class MBS_Bookings {
         $table   = $wpdb->prefix . MBS_TABLE;
         $allowed = array( 'pending', 'confirmed', 'cancelled', 'archived', 'paid', 'deposit_paid' );
         if ( ! in_array( $status, $allowed ) ) return false;
+        $current = self::get( $ref );
+        if ( $current && $current->status !== $status && self::has_financial_history( $ref ) ) return false;
 
         $result = $wpdb->update(
             $table,
@@ -734,8 +737,41 @@ class MBS_Bookings {
     public static function delete( $ref ) {
         global $wpdb;
         $table = $wpdb->prefix . MBS_TABLE;
+        if ( self::has_financial_history( $ref ) ) return false;
         MBS_Audit_Log::log( $ref, 'deleted', 'Booking permanently deleted' );
         return $wpdb->delete( $table, array( 'ref' => $ref ), array( '%s' ) );
+    }
+
+    /** Any invoice item/allocation/transaction makes the occurrence an immutable financial record. */
+    public static function has_financial_history( $ref ) {
+        global $wpdb;
+        $allocation = $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE;
+        $items = $wpdb->prefix . MBS_INVOICE_ITEM_TABLE;
+        $transactions = $wpdb->prefix . MBS_PAYMENT_TRANSACTION_TABLE;
+        $exists = $wpdb->get_var( $wpdb->prepare(
+            "SELECT 1 FROM {$allocation} a
+             LEFT JOIN {$transactions} t ON t.invoice_id = a.invoice_id
+             WHERE a.booking_ref = %s
+             UNION SELECT 1 FROM {$items} ii WHERE ii.booking_ref = %s LIMIT 1",
+            sanitize_text_field( $ref ), sanitize_text_field( $ref )
+        ) );
+        return (bool) $exists;
+    }
+
+    /** Compatibility series actions are only for genuinely legacy Scout rows. */
+    public static function is_legacy_scout_series( $series_id ) {
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_TABLE;
+        $series = MBS_Series::get( sanitize_text_field( $series_id ) );
+        if ( $series ) {
+            $registered_legacy_scout = ! empty( $series->metadata_incomplete ) && ! empty( $series->scout_use ) && $series->billing_treatment === 'none';
+            if ( ! $registered_legacy_scout ) return false;
+        }
+        $counts = $wpdb->get_row( $wpdb->prepare(
+            "SELECT COUNT(*) AS total, SUM(CASE WHEN scout_use = 0 THEN 1 ELSE 0 END) AS non_scout FROM {$table} WHERE series_id = %s",
+            sanitize_text_field( $series_id )
+        ) );
+        return $counts && (int) $counts->total > 0 && (int) $counts->non_scout === 0;
     }
 
     // ── Conflict Detection ─────────────────────────────────────────────────────
@@ -839,7 +875,30 @@ class MBS_Bookings {
      * Generate a unique series ID for recurring bookings.
      */
     public static function generate_series_id() {
-        return 'SER-' . strtoupper( substr( base_convert( uniqid(), 16, 36 ), -6 ) );
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_TABLE;
+        $series_table = $wpdb->prefix . MBS_SERIES_TABLE;
+
+        do {
+            try {
+                $suffix = strtoupper( bin2hex( random_bytes( 6 ) ) );
+            } catch ( Exception $e ) {
+                $suffix = strtoupper( wp_generate_password( 12, false, false ) );
+            }
+            $series_id = 'SER-' . $suffix;
+            $exists = $wpdb->get_var( $wpdb->prepare(
+                "SELECT id FROM {$table} WHERE series_id = %s LIMIT 1",
+                $series_id
+            ) );
+            if ( ! $exists ) {
+                $exists = $wpdb->get_var( $wpdb->prepare(
+                    "SELECT id FROM {$series_table} WHERE series_ref = %s LIMIT 1",
+                    $series_id
+                ) );
+            }
+        } while ( $exists );
+
+        return $series_id;
     }
 
     /**
@@ -852,25 +911,18 @@ class MBS_Bookings {
      * @return array  Array of created booking refs, or WP_Error
      */
     public static function create_recurring( $data, $repeat_until, $trusted_admin_context = false ) {
-        $series_id  = self::generate_series_id();
-        $start_date = sanitize_text_field( $data['booking_date'] );
-        $end_date   = sanitize_text_field( $repeat_until );
-        $refs       = array();
-        $conflicts  = array();
-
-        $current = strtotime( $start_date );
-        $end     = strtotime( $end_date );
-
-        if ( $current > $end ) {
-            return new WP_Error( 'invalid_range', 'Repeat-until date must be after the booking date.' );
+        global $wpdb;
+        $dates = MBS_Recurrence::weekly_dates( $data, $repeat_until );
+        if ( is_wp_error( $dates ) ) {
+            return $dates;
         }
 
-        // Limit to 52 weeks max to prevent abuse
-        $max_occurrences = 52;
-        $count = 0;
+        $series_id  = self::generate_series_id();
+        $refs       = array();
+        $occurrences = array();
+        if ( $wpdb->query( 'START TRANSACTION' ) === false ) return new WP_Error( 'transaction_start_failed', 'Could not start recurring booking creation.' );
 
-        while ( $current <= $end && $count < $max_occurrences ) {
-            $date_str = wp_date( 'Y-m-d', $current );
+        foreach ( $dates as $date_str ) {
 
             // Check for conflicts on each date
             $all_day = ! empty( $data['all_day'] );
@@ -885,10 +937,20 @@ class MBS_Bookings {
             // Check blocked dates
             $blocked = MBS_Blocked_Dates::is_blocked( $date_str, sanitize_text_field( $data['space'] ) );
 
-            if ( ! empty( $date_conflicts ) || $blocked ) {
-                $conflicts[] = $date_str;
-                $current += 7 * 86400; // Skip this week
-                $count++;
+            if ( ! empty( $date_conflicts ) ) {
+                $occurrences[] = array(
+                    'date'    => $date_str,
+                    'status'  => 'conflict',
+                    'message' => self::format_conflict_message( $date_conflicts ),
+                );
+                continue;
+            }
+            if ( $blocked ) {
+                $occurrences[] = array(
+                    'date'    => $date_str,
+                    'status'  => 'blocked',
+                    'message' => $blocked->reason ? sanitize_text_field( $blocked->reason ) : 'This date is blocked.',
+                );
                 continue;
             }
 
@@ -897,39 +959,118 @@ class MBS_Bookings {
             $booking_data['booking_date'] = $date_str;
             $booking_data['booking_date_end'] = $date_str;
 
-            $result = self::create( $booking_data, $trusted_admin_context );
+            $result = self::create( $booking_data, $trusted_admin_context, false );
 
             if ( is_wp_error( $result ) ) {
-                $current += 7 * 86400;
-                $count++;
-                continue;
+                // A conflict or blocked date can appear between the pre-check
+                // and the transaction-time re-check. Those remain date-level
+                // outcomes. Any other failure is systemic and aborts the run.
+                $code = $result->get_error_code();
+                if ( in_array( $code, array( 'conflict', 'blocked_date' ), true ) ) {
+                    $occurrences[] = array(
+                        'date'    => $date_str,
+                        'status'  => $code === 'conflict' ? 'conflict' : 'blocked',
+                        'message' => $result->get_error_message(),
+                    );
+                    continue;
+                }
+
+                $occurrences[] = array(
+                    'date'    => $date_str,
+                    'status'  => 'error',
+                    'message' => $result->get_error_message(),
+                );
+                $wpdb->query( 'ROLLBACK' );
+                return new WP_Error(
+                    'recurrence_create_failed',
+                    'The recurring request stopped because a booking could not be saved. No later dates were attempted.',
+                    array(
+                        'series_id'   => $series_id,
+                        'occurrences' => $occurrences,
+                    )
+                );
             }
 
             // Link to series
-            global $wpdb;
             $table = $wpdb->prefix . MBS_TABLE;
-            $wpdb->update(
+            $linked = $wpdb->update(
                 $table,
                 array( 'series_id' => $series_id ),
                 array( 'ref' => $result['ref'] ),
                 array( '%s' ), array( '%s' )
             );
 
+            $verified_series = $linked === false ? null : $wpdb->get_var( $wpdb->prepare(
+                "SELECT series_id FROM {$table} WHERE ref = %s",
+                $result['ref']
+            ) );
+            if ( $linked === false || $verified_series !== $series_id ) {
+                $wpdb->query( 'ROLLBACK' );
+                $occurrences[] = array(
+                    'date'    => $date_str,
+                    'status'  => 'error',
+                    'message' => 'The booking was saved but could not be linked to its series.',
+                );
+                return new WP_Error(
+                    'series_link_failed',
+                    'The recurring request stopped because an occurrence could not be linked to the series.',
+                    array(
+                        'series_id'   => $series_id,
+                        'occurrences' => $occurrences,
+                    )
+                );
+            }
+
             $refs[] = $result['ref'];
-            $current += 7 * 86400; // Next week
-            $count++;
+            $occurrences[] = array(
+                'date'   => $date_str,
+                'status' => 'accepted',
+                'ref'    => $result['ref'],
+            );
         }
 
         if ( empty( $refs ) ) {
-            return new WP_Error( 'no_bookings', 'Could not create any bookings. All dates had conflicts or were blocked.' );
+            $wpdb->query( 'ROLLBACK' );
+            return new WP_Error(
+                'no_bookings',
+                'Could not create any bookings. All dates had conflicts or were blocked.',
+                array(
+                    'series_id'   => $series_id,
+                    'occurrences' => $occurrences,
+                )
+            );
         }
+
+        $series = MBS_Series::create_from_request( $series_id, $data, $repeat_until, $occurrences, $refs );
+        if ( is_wp_error( $series ) ) {
+            $wpdb->query( 'ROLLBACK' );
+            return new WP_Error(
+                'series_metadata_failed',
+                'The recurring request could not be completed and its new occurrences were removed. Please try again.',
+                array(
+                    'cause'       => $series->get_error_code(),
+                    'series_id'   => $series_id,
+                    'occurrences' => $occurrences,
+                )
+            );
+        }
+        if ( $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'transaction_commit_failed', 'Could not commit recurring booking creation.' ); }
+
+        $skipped = array_values( array_map(
+            static function ( $occurrence ) { return $occurrence['date']; },
+            array_filter( $occurrences, static function ( $occurrence ) {
+                return $occurrence['status'] !== 'accepted';
+            } )
+        ) );
 
         return array(
             'series_id'  => $series_id,
             'refs'       => $refs,
             'created'    => count( $refs ),
-            'skipped'    => $conflicts,
-            'total_weeks' => $count,
+            'skipped'    => $skipped,
+            'total_weeks' => count( $dates ),
+            'occurrences' => $occurrences,
+            'series'      => $series,
         );
     }
 
@@ -950,6 +1091,10 @@ class MBS_Bookings {
      */
     public static function update_series_status( $series_id, $status ) {
         global $wpdb;
+        $registered = MBS_Series::get( sanitize_text_field( $series_id ) );
+        if ( $registered && ( empty( $registered->metadata_incomplete ) || $registered->billing_treatment !== 'legacy_per_occurrence' ) ) {
+            return new WP_Error( 'canonical_series_required', 'This first-class series must use the versioned series service.' );
+        }
         $table   = $wpdb->prefix . MBS_TABLE;
         $allowed = array( 'pending', 'confirmed', 'deposit_paid', 'cancelled', 'archived', 'paid' );
         if ( ! in_array( $status, $allowed ) ) return false;
@@ -993,6 +1138,7 @@ class MBS_Bookings {
      */
     public static function cancel_series_future( $series_id ) {
         global $wpdb;
+        if ( ! self::is_legacy_scout_series( $series_id ) ) return new WP_Error( 'canonical_series_required', 'This action is limited to legacy Scout series; use the versioned series cancellation service.' );
         $table = $wpdb->prefix . MBS_TABLE;
         $today = wp_date( 'Y-m-d' );
 
@@ -1043,6 +1189,7 @@ class MBS_Bookings {
      */
     public static function update_series_future( $series_id, $fields ) {
         global $wpdb;
+        if ( ! self::is_legacy_scout_series( $series_id ) ) return new WP_Error( 'canonical_series_required', 'This action is limited to legacy Scout series; use the versioned series service.' );
         $table = $wpdb->prefix . MBS_TABLE;
         $today = wp_date( 'Y-m-d' );
 
@@ -1072,6 +1219,9 @@ class MBS_Bookings {
         $skipped = array();
 
         foreach ( $bookings as $b ) {
+            if ( self::has_financial_history( $b->ref ) ) {
+                return new WP_Error( 'billed_occurrence_immutable', 'A billed occurrence cannot be edited. Credit and replace it instead.' );
+            }
             $space   = $new_space !== null ? $new_space : $b->space;
             $start   = $new_start !== null ? $new_start : $b->start_time;
             $end     = $new_end   !== null ? $new_end   : $b->end_time;
@@ -1149,6 +1299,7 @@ class MBS_Bookings {
      */
     public static function extend_series( $series_id, $new_end ) {
         global $wpdb;
+        if ( ! self::is_legacy_scout_series( $series_id ) ) return new WP_Error( 'canonical_series_required', 'This action is limited to legacy Scout series; use the versioned series extension service.' );
         $table = $wpdb->prefix . MBS_TABLE;
 
         $bookings = self::get_series( $series_id );
@@ -1185,7 +1336,9 @@ class MBS_Bookings {
             $date_str = wp_date( 'Y-m-d', $d );
 
             // Transaction + row lock: prevent a TOCTOU race with a public booking.
-            $wpdb->query( 'START TRANSACTION' );
+            if ( $wpdb->query( 'START TRANSACTION' ) === false ) {
+                return new WP_Error( 'transaction_start_failed', 'Could not start the series-extension transaction.' );
+            }
             $wpdb->query( $wpdb->prepare(
                 "SELECT id FROM {$table} WHERE space = %s AND booking_date = %s AND status NOT IN ('cancelled','archived') FOR UPDATE",
                 $template->space, $date_str
@@ -1212,7 +1365,7 @@ class MBS_Bookings {
             );
 
             $ref = self::generate_ref();
-            $wpdb->insert( $table, array(
+            $inserted = $wpdb->insert( $table, array(
                 'ref'              => $ref,
                 'status'           => $template->status,
                 'name'             => $template->name,
@@ -1237,7 +1390,19 @@ class MBS_Bookings {
                 'series_id'        => $series_id,
                 'modification_token' => wp_generate_password( 32, false ),
             ) );
-            $wpdb->query( 'COMMIT' );
+            if ( $inserted === false ) {
+                $wpdb->query( 'ROLLBACK' );
+                return new WP_Error( 'series_extension_failed', 'Could not create an extended occurrence; no further occurrences were saved.' );
+            }
+            $linked = $wpdb->get_var( $wpdb->prepare( "SELECT series_id FROM {$table} WHERE ref = %s", $ref ) );
+            if ( $linked !== $series_id ) {
+                $wpdb->query( 'ROLLBACK' );
+                return new WP_Error( 'series_extension_link_failed', 'Could not verify the extended occurrence belongs to this series.' );
+            }
+            if ( $wpdb->query( 'COMMIT' ) === false ) {
+                $wpdb->query( 'ROLLBACK' );
+                return new WP_Error( 'transaction_commit_failed', 'Could not commit the series extension.' );
+            }
 
             // Keep Home Assistant in step for confirmed occurrences.
             if ( $template->status === 'confirmed' ) {
@@ -1277,6 +1442,7 @@ class MBS_Bookings {
      */
     public static function reopen_series_future( $series_id ) {
         global $wpdb;
+        if ( ! self::is_legacy_scout_series( $series_id ) ) return new WP_Error( 'canonical_series_required', 'This action is limited to legacy Scout series.' );
         $table = $wpdb->prefix . MBS_TABLE;
         $today = wp_date( 'Y-m-d' );
 
@@ -1286,6 +1452,9 @@ class MBS_Bookings {
             $series_id,
             $today
         ) );
+        foreach ( $affected as $booking ) {
+            if ( self::has_financial_history( $booking->ref ) ) return new WP_Error( 'financial_replacement_required', 'A credited or refunded occurrence cannot be reopened through the legacy action; create an explicit replacement occurrence.' );
+        }
 
         $result = $wpdb->query( $wpdb->prepare(
             "UPDATE {$table} SET status = 'confirmed'
@@ -1328,9 +1497,16 @@ class MBS_Bookings {
      */
     public static function delete_series( $series_id, $scope = 'all' ) {
         global $wpdb;
+        if ( ! self::is_legacy_scout_series( $series_id ) ) return new WP_Error( 'canonical_series_required', 'This action is limited to legacy Scout series.' );
         $table = $wpdb->prefix . MBS_TABLE;
         $today = wp_date( 'Y-m-d' );
         $future_only = ( $scope === 'future' );
+        $history_ref = $wpdb->get_var( $wpdb->prepare(
+            "SELECT b.ref FROM {$table} b INNER JOIN {$wpdb->prefix}" . MBS_INVOICE_ITEM_TABLE . " ii ON ii.booking_ref = b.ref
+             WHERE b.series_id = %s" . ( $future_only ? " AND b.booking_date >= %s" : '' ) . " LIMIT 1",
+            $future_only ? array( $series_id, $today ) : array( $series_id )
+        ) );
+        if ( $history_ref ) return false;
 
         // Notify HA to clear any active (confirmed) future bookings first —
         // these have live calendar entries / automations regardless of scope.
@@ -1544,6 +1720,12 @@ f) On detection of a fire, the Hirer must break a glass and assist evacuation of
         $audit_table = $wpdb->prefix . 'mathlin_audit_log';
         $queue_table = $wpdb->prefix . 'mathlin_email_queue';
         $mod_table   = $wpdb->prefix . 'mathlin_mod_requests';
+        $series_table = $wpdb->prefix . MBS_SERIES_TABLE;
+        $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
+        $transaction_table = $wpdb->prefix . MBS_PAYMENT_TRANSACTION_TABLE;
+        $booking_refs = $wpdb->get_col( $wpdb->prepare( "SELECT ref FROM {$table} WHERE email = %s", $email ) );
+        $series_refs = $wpdb->get_col( $wpdb->prepare( "SELECT series_ref FROM {$series_table} WHERE contact_email = %s", $email ) );
+        $invoice_rows = $wpdb->get_results( $wpdb->prepare( "SELECT id, invoice_ref FROM {$invoice_table} WHERE contact_email = %s", $email ) );
 
         // Anonymise PII in bookings but preserve financial data (amount, dates, space)
         $affected = $wpdb->query( $wpdb->prepare(
@@ -1560,13 +1742,24 @@ f) On detection of a fire, the Hirer must break a glass and assist evacuation of
             $email
         ) );
 
-        // Anonymise IP addresses in audit log for this person's bookings
-        $wpdb->query( $wpdb->prepare(
-            "UPDATE {$audit_table} SET ip_address = '0.0.0.0', user_name = 'Anonymised'
-             WHERE ref IN (SELECT ref FROM {$table} WHERE email LIKE 'erased-%@anonymised.invalid')
-             AND user_name != 'System'",
+        $series_affected = $wpdb->query( $wpdb->prepare(
+            "UPDATE {$series_table} SET contact_name = 'Anonymised', contact_email = CONCAT('erased-series-', id, '@anonymised.invalid'),
+             contact_phone = '', contact_address = '', contact_organisation = '', notes = '' WHERE contact_email = %s",
             $email
         ) );
+        $invoice_affected = $wpdb->query( $wpdb->prepare(
+            "UPDATE {$invoice_table} SET contact_name = 'Anonymised', contact_email = CONCAT('erased-invoice-', id, '@anonymised.invalid'),
+             contact_address = '', contact_organisation = '' WHERE contact_email = %s",
+            $email
+        ) );
+        foreach ( $invoice_rows as $invoice_row ) {
+            $wpdb->update( $transaction_table, array( 'metadata_json' => wp_json_encode( array( 'gdpr_erased' => true ) ) ), array( 'invoice_id' => (int) $invoice_row->id ) );
+        }
+
+        // Anonymise IP addresses in audit log for this person's bookings
+        foreach ( array_merge( $booking_refs, $series_refs, wp_list_pluck( $invoice_rows, 'invoice_ref' ) ) as $audit_ref ) {
+            $wpdb->query( $wpdb->prepare( "UPDATE {$audit_table} SET ip_address = '0.0.0.0', user_name = 'Anonymised' WHERE ref = %s AND user_name != 'System'", $audit_ref ) );
+        }
 
         // Delete any queued emails containing this person's data
         $wpdb->query( $wpdb->prepare(
@@ -1575,18 +1768,22 @@ f) On detection of a fire, the Hirer must break a glass and assist evacuation of
         ) );
 
         // Anonymise modification request notes
-        $wpdb->query( $wpdb->prepare(
-            "UPDATE {$mod_table} SET notes = '', admin_response = ''
-             WHERE booking_ref IN (SELECT ref FROM {$table} WHERE email LIKE 'erased-%@anonymised.invalid')"
-        ) );
+        foreach ( $booking_refs as $booking_ref ) $wpdb->update( $mod_table, array( 'notes' => '', 'admin_response' => '' ), array( 'booking_ref' => $booking_ref ) );
 
-        $items_removed = $affected > 0;
+        // Anonymise OSM outbox payload for erased bookings (reversal context may contain PII)
+        $osm_outbox_table = $wpdb->prefix . MBS_OSM_OUTBOX_TABLE;
+        foreach ( $booking_refs as $booking_ref ) {
+            $wpdb->update( $osm_outbox_table, array( 'payload_json' => wp_json_encode( array( 'gdpr_erased' => true ) ) ), array( 'booking_ref' => $booking_ref ) );
+        }
+
+        $total_affected = max( 0, (int) $affected ) + max( 0, (int) $series_affected ) + max( 0, (int) $invoice_affected );
+        $items_removed = $total_affected > 0;
 
         return array(
             'items_removed'  => $items_removed,
             'items_retained' => $items_removed, // Financial records retained but anonymised
             'messages'       => $items_removed
-                ? array( sprintf( '%d booking record(s) anonymised. Financial totals preserved for audit.', $affected ) )
+                ? array( sprintf( '%d booking, series or invoice record(s) anonymised. Financial totals preserved for audit.', $total_affected ) )
                 : array(),
             'done'           => true,
         );
@@ -1625,6 +1822,35 @@ f) On detection of a fire, the Hirer must break a glass and assist evacuation of
                     array( 'name' => 'Created',      'value' => $b->created_at ),
                 ),
             );
+        }
+
+        $series_table = $wpdb->prefix . MBS_SERIES_TABLE;
+        $series_rows = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$series_table} WHERE contact_email = %s LIMIT 100", $email ) );
+        foreach ( $series_rows as $series ) {
+            $export_items[] = array(
+                'group_id' => 'mathlin-booking-series', 'group_label' => 'Recurring Venue Booking Series', 'item_id' => 'series-' . $series->id,
+                'data' => array(
+                    array( 'name' => 'Series reference', 'value' => $series->series_ref ), array( 'name' => 'Name', 'value' => $series->contact_name ),
+                    array( 'name' => 'Email', 'value' => $series->contact_email ), array( 'name' => 'Organisation', 'value' => $series->contact_organisation ),
+                    array( 'name' => 'Space', 'value' => $series->space ), array( 'name' => 'Start date', 'value' => $series->start_date ),
+                    array( 'name' => 'Repeat until', 'value' => $series->repeat_until ), array( 'name' => 'Status', 'value' => $series->status ),
+                    array( 'name' => 'Billing mode', 'value' => $series->billing_mode ), array( 'name' => 'Terms accepted', 'value' => $series->terms_accepted_at ?: 'Not recorded' ),
+                ),
+            );
+        }
+        $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
+        $transaction_table = $wpdb->prefix . MBS_PAYMENT_TRANSACTION_TABLE;
+        $invoice_rows = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$invoice_table} WHERE contact_email = %s LIMIT 100", $email ) );
+        foreach ( $invoice_rows as $invoice ) {
+            $data = array(
+                array( 'name' => 'Invoice reference', 'value' => $invoice->invoice_ref ), array( 'name' => 'Series reference', 'value' => $invoice->series_ref ),
+                array( 'name' => 'Status', 'value' => $invoice->status ), array( 'name' => 'Period', 'value' => $invoice->period_start . ' to ' . $invoice->period_end ),
+                array( 'name' => 'Total', 'value' => MBS_Money::format( (int) $invoice->total_minor, $invoice->currency ) ),
+                array( 'name' => 'Paid', 'value' => MBS_Money::format( (int) $invoice->paid_minor, $invoice->currency ) ),
+            );
+            $transactions = $wpdb->get_results( $wpdb->prepare( "SELECT transaction_ref, transaction_type, status, amount_minor, currency, occurred_at FROM {$transaction_table} WHERE invoice_id = %d", (int) $invoice->id ) );
+            foreach ( $transactions as $transaction ) $data[] = array( 'name' => 'Payment transaction', 'value' => $transaction->transaction_ref . ' · ' . $transaction->transaction_type . ' · ' . MBS_Money::format( (int) $transaction->amount_minor, $transaction->currency ) . ' · ' . $transaction->occurred_at );
+            $export_items[] = array( 'group_id' => 'mathlin-invoices', 'group_label' => 'Venue Invoices and Payments', 'item_id' => 'invoice-' . $invoice->id, 'data' => $data );
         }
 
         return array(

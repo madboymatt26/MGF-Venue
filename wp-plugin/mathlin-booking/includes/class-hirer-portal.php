@@ -93,6 +93,33 @@ class MBS_Hirer_Portal {
         ) );
     }
 
+    public static function get_series_for_email( $email ) {
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_SERIES_TABLE;
+        return $wpdb->get_results( $wpdb->prepare(
+            "SELECT * FROM {$table} WHERE contact_email = %s ORDER BY start_date DESC",
+            sanitize_email( $email )
+        ) );
+    }
+
+    public static function get_invoices_for_email( $email ) {
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_INVOICE_TABLE;
+        return $wpdb->get_results( $wpdb->prepare(
+            "SELECT * FROM {$table} WHERE contact_email = %s AND document_type = 'invoice' ORDER BY period_start DESC, created_at DESC",
+            sanitize_email( $email )
+        ) );
+    }
+
+    public static function invoice_transactions( $invoice_id ) {
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_PAYMENT_TRANSACTION_TABLE;
+        return $wpdb->get_results( $wpdb->prepare(
+            "SELECT transaction_ref, provider, transaction_type, status, amount_minor, currency, occurred_at FROM {$table} WHERE invoice_id = %d ORDER BY occurred_at DESC, id DESC",
+            (int) $invoice_id
+        ) );
+    }
+
     /**
      * Get hirer stats for their dashboard.
      */
@@ -100,11 +127,32 @@ class MBS_Hirer_Portal {
         global $wpdb;
         $table = $wpdb->prefix . MBS_TABLE;
 
+        // Consolidated invoices are authoritative once an occurrence has ever
+        // been allocated. Count completed ledger payments minus refunds once,
+        // then add only genuinely legacy booking payments.
+        $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
+        $transaction_table = $wpdb->prefix . MBS_PAYMENT_TRANSACTION_TABLE;
+        $allocation_table = $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE;
+        $invoice_paid_minor = (int) $wpdb->get_var( $wpdb->prepare(
+            "SELECT COALESCE(SUM(CASE WHEN t.transaction_type = 'payment' THEN t.amount_minor ELSE -t.amount_minor END), 0)
+             FROM {$transaction_table} t INNER JOIN {$invoice_table} i ON i.id = t.invoice_id
+             WHERE i.contact_email = %s AND i.document_type = 'invoice' AND t.status = 'completed'",
+            sanitize_email( $email )
+        ) );
+        $legacy_paid_decimal = (string) $wpdb->get_var( $wpdb->prepare(
+            "SELECT COALESCE(SUM(CASE WHEN b.amount_paid > 0 THEN b.amount_paid WHEN b.status = 'paid' THEN b.amount ELSE 0 END), 0)
+             FROM {$table} b LEFT JOIN {$allocation_table} a ON a.booking_ref = b.ref
+             WHERE b.email = %s AND a.id IS NULL",
+            sanitize_email( $email )
+        ) );
+        $legacy_paid_minor = MBS_Money::from_decimal_string( $legacy_paid_decimal );
+        if ( is_wp_error( $legacy_paid_minor ) ) $legacy_paid_minor = 0;
+
         return array(
             'total'     => (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE email = %s AND status != 'archived'", $email ) ),
             'upcoming'  => (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE email = %s AND booking_date >= CURDATE() AND status IN ('confirmed', 'deposit_paid', 'paid')", $email ) ),
             'pending'   => (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE email = %s AND status = 'pending'", $email ) ),
-            'total_spent' => (float) $wpdb->get_var( $wpdb->prepare( "SELECT COALESCE(SUM(amount), 0) FROM {$table} WHERE email = %s AND status IN ('confirmed', 'deposit_paid', 'paid')", $email ) ),
+            'total_spent_minor' => max( 0, $invoice_paid_minor + $legacy_paid_minor ),
         );
     }
 

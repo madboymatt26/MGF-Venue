@@ -1,0 +1,166 @@
+name: Integration CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/recurring-series-billing
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  WP_VERSION: '6.6.2'
+  WOO_VERSION: '9.3.3'
+  MARIADB_VERSION: '10.11'
+
+jobs:
+  source-checks:
+    name: Source checks / PHP ${{ matrix.php }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['7.4', '8.0', '8.2', '8.3']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Configure PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+      - name: Run PHP lint and dependency-free programs
+        run: sh tests/integration/run-php-suite.sh
+      - name: Check admin handler parity
+        run: php mcp-server/tests/php-admin-parity-smoke.php
+      - name: Validate MCP schemas
+        shell: pwsh
+        run: ./mcp-server/tests/mcp-tool-schema-smoke.ps1
+      - name: Check patch whitespace
+        run: git diff --check HEAD^ HEAD
+      - name: Scan tracked files for committed credential formats
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git grep -nE '(gh[pousr]_[A-Za-z0-9]{30,}|AKIA[0-9A-Z]{16}|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----)' -- . ':!marketing/*.pdf'; then
+            echo 'Potential committed credential detected.' >&2
+            exit 1
+          fi
+
+  wordpress-runtime:
+    name: WP ${{ matrix.wordpress }} / Woo ${{ matrix.woocommerce }} / PHP ${{ matrix.php }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - php: '7.4'
+            wordpress: '6.6.2'
+            woocommerce: '9.3.3'
+            wordpress_image: 'wordpress:php7.4-apache'
+            wpcli_image: 'wordpress:cli-php7.4'
+          - php: '8.0'
+            wordpress: '6.6.2'
+            woocommerce: '9.3.3'
+            wordpress_image: 'wordpress:php8.0-apache'
+            wpcli_image: 'wordpress:cli-php8.0'
+          - php: '8.2'
+            wordpress: '6.6.2'
+            woocommerce: '9.3.3'
+            wordpress_image: 'wordpress:6.6.2-php8.2-apache'
+            wpcli_image: 'wordpress:cli-2.11.0-php8.2'
+          - php: '8.3'
+            wordpress: '6.6.2'
+            woocommerce: '9.3.3'
+            wordpress_image: 'wordpress:6.6.2-php8.3-apache'
+            wpcli_image: 'wordpress:cli-2.11.0-php8.3'
+    env:
+      WORDPRESS_IMAGE: ${{ matrix.wordpress_image }}
+      WPCLI_IMAGE: ${{ matrix.wpcli_image }}
+      MBS_TEST_WP_VERSION: ${{ matrix.wordpress }}
+      MBS_TEST_WOO_VERSION: ${{ matrix.woocommerce }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore WP-CLI download cache
+        uses: actions/cache@v4
+        with:
+          path: tests/integration/.cache/wp-cli
+          key: wp-cli-woo-${{ matrix.woocommerce }}
+      - name: Prepare disposable cache
+        run: mkdir -p tests/integration/.cache/wp-cli && chmod 0777 tests/integration/.cache/wp-cli
+      - name: Start MariaDB and WordPress
+        run: docker compose -f tests/integration/docker-compose.yml up -d db wordpress
+      - name: Install WordPress, WooCommerce, plugin, and test gateway
+        run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli sh /workspace/tests/integration/setup.sh
+      - name: Show exact runtime versions
+        run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/runtime-smoke.php --allow-root
+      - name: Collect service diagnostics
+        if: always()
+        run: docker compose -f tests/integration/docker-compose.yml logs --no-color > integration-services.log
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-${{ matrix.php }}-diagnostics
+          path: integration-services.log
+          if-no-files-found: error
+      - name: Stop disposable services
+        if: always()
+        run: docker compose -f tests/integration/docker-compose.yml down -v --remove-orphans
+
+  financial-integration:
+    name: Real financial and concurrency integration
+    runs-on: ubuntu-24.04
+    env:
+      WORDPRESS_IMAGE: wordpress:6.6.2-php8.2-apache
+      WPCLI_IMAGE: wordpress:cli-2.11.0-php8.2
+      MBS_TEST_WOO_VERSION: '9.3.3'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore WP-CLI download cache
+        uses: actions/cache@v4
+        with:
+          path: tests/integration/.cache/wp-cli
+          key: wp-cli-woo-9.3.3
+      - name: Prepare disposable cache
+        run: mkdir -p tests/integration/.cache/wp-cli && chmod 0777 tests/integration/.cache/wp-cli
+      - name: Start MariaDB and WordPress
+        run: docker compose -f tests/integration/docker-compose.yml up -d db wordpress
+      - name: Install the real runtime
+        run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli sh /workspace/tests/integration/setup.sh
+      - name: Run separate-process integration scenarios
+        run: sh tests/integration/run-concurrency.sh
+      - name: Run authenticated MCP mutation protection against WordPress
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_password="$(docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp user application-password create admin 'MGF integration CI' --porcelain --allow-root)"
+          MGF_VENUE_BASE_URL='http://localhost:8088' MGF_VENUE_USERNAME='admin' MGF_VENUE_APP_PASSWORD="$app_password" pwsh -NoLogo -NoProfile -File mcp-server/tests/mcp-live-mutation.ps1
+      - name: Collect service and worker diagnostics
+        if: always()
+        shell: bash
+        run: |
+          docker compose -f tests/integration/docker-compose.yml logs --no-color > integration-services.log
+          for file in tests/integration/.worker-* tests/integration/.exit-*; do
+            if [[ -f "$file" ]]; then cp "$file" "$(basename "$file").log"; fi
+          done
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: financial-integration-diagnostics
+          path: |
+            integration-services.log
+            .worker-*.log
+            .exit-*.log
+          if-no-files-found: error
+      - name: Stop disposable services
+        if: always()
+        run: docker compose -f tests/integration/docker-compose.yml down -v --remove-orphans

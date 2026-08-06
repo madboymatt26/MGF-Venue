@@ -25,6 +25,13 @@ class MBS_Admin {
         add_action( 'wp_ajax_mbs_delete_blocked', array( $this, 'ajax_delete_blocked' ) );
         add_action( 'wp_ajax_mbs_clear_expired_blocks', array( $this, 'ajax_clear_expired_blocks' ) );
         add_action( 'wp_ajax_mbs_update_series_status', array( $this, 'ajax_update_series_status' ) );
+        add_action( 'wp_ajax_mbs_resend_series_confirmation', array( $this, 'ajax_resend_series_confirmation' ) );
+        add_action( 'wp_ajax_mbs_record_invoice_manual_payment', array( $this, 'ajax_record_invoice_manual_payment' ) );
+        add_action( 'wp_ajax_mbs_resolve_invoice_reconciliation', array( $this, 'ajax_resolve_invoice_reconciliation' ) );
+        add_action( 'wp_ajax_mbs_configure_series_billing', array( $this, 'ajax_configure_series_billing' ) );
+        add_action( 'wp_ajax_mbs_pause_series', array( $this, 'ajax_pause_series' ) );
+        add_action( 'wp_ajax_mbs_catch_up_series_billing', array( $this, 'ajax_catch_up_series_billing' ) );
+        add_action( 'wp_ajax_mbs_extend_external_series', array( $this, 'ajax_extend_external_series' ) );
         add_action( 'wp_ajax_mbs_cancel_scout_series', array( $this, 'ajax_cancel_scout_series' ) );
         add_action( 'wp_ajax_mbs_edit_scout_series', array( $this, 'ajax_edit_scout_series' ) );
         add_action( 'wp_ajax_mbs_extend_scout_series', array( $this, 'ajax_extend_scout_series' ) );
@@ -73,6 +80,7 @@ class MBS_Admin {
             30
         );
         add_submenu_page( 'mathlin-booking', 'All Bookings', $bookings_label, $booking_cap, 'mathlin-booking', array( $this, 'render_dashboard' ) );
+        add_submenu_page( 'mathlin-booking', 'Recurring Series', 'Recurring Series', $booking_cap, 'mathlin-series', array( $this, 'render_series' ) );
         // Scout Nights: only show if the feature is enabled in Settings
         if ( get_option( 'mbs_scout_nights_enabled', 1 ) ) {
             add_submenu_page( 'mathlin-booking', 'Scout Nights', 'Scout Nights', $booking_cap, 'mathlin-scout-nights', array( $this, 'render_scout_nights' ) );
@@ -143,6 +151,10 @@ class MBS_Admin {
      */
     private static function can_delete_bookings() {
         return current_user_can( 'manage_options' );
+    }
+
+    private static function invoice_manages_occurrence( $booking ) {
+        return $booking && in_array( MBS_Series::billing_treatment_for_booking( $booking ), array( 'manual_consolidated', 'invoice_managed', 'none' ), true );
     }
 
     public function enqueue_assets( $hook ) {
@@ -219,6 +231,20 @@ class MBS_Admin {
         include MBS_PLUGIN_DIR . 'admin/views/scout-nights.php';
     }
 
+    public function render_series() {
+        $ref = sanitize_text_field( $_GET['ref'] ?? '' );
+        $status = sanitize_key( $_GET['status'] ?? '' );
+        $search = sanitize_text_field( $_GET['s'] ?? '' );
+        $series = $ref ? MBS_Series::get( $ref ) : null;
+        $series_rows = $ref ? array() : MBS_Series::get_all( array( 'status' => $status, 'search' => $search ) );
+        $occurrences = $series ? MBS_Series::occurrences( $series->series_ref ) : array();
+        $exceptions = $series ? MBS_Series::exceptions( $series ) : array();
+        $invoices = $series ? MBS_Series::invoices( $series->series_ref ) : array();
+        $preview = $series ? MBS_Billing_Engine::preview( $series->series_ref ) : array();
+        $audit = $series ? MBS_Audit_Log::get_for_booking( $series->series_ref ) : array();
+        include MBS_PLUGIN_DIR . 'admin/views/series.php';
+    }
+
     // ── AJAX handlers ──────────────────────────────────────────────────────────
     public function ajax_update_status() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
@@ -228,7 +254,17 @@ class MBS_Admin {
         $status = sanitize_text_field( $_POST['status'] ?? '' );
         $reason = sanitize_textarea_field( $_POST['reason'] ?? '' );
 
+        $current = MBS_Bookings::get( $ref );
+        if ( ! $current ) wp_send_json_error( 'Booking not found.' );
+        if ( ! empty( $current->series_id ) && MBS_Series::get( $current->series_id ) ) {
+            wp_send_json_error( 'Change first-class recurring occurrences through the versioned series screen.', 409 );
+        }
+        if ( in_array( $status, array( 'paid', 'deposit_paid' ), true ) && self::invoice_manages_occurrence( $current ) ) {
+            wp_send_json_error( 'Record payment against the consolidated invoice, not an individual occurrence.', 409 );
+        }
+
         $result = MBS_Bookings::update_status( $ref, $status );
+        if ( $result === false ) wp_send_json_error( 'This booking cannot be changed because it has financial history.', 409 );
 
         if ( $status === 'confirmed' ) {
             $booking = MBS_Bookings::get( $ref );
@@ -275,6 +311,7 @@ class MBS_Admin {
         $ref = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
         $booking = MBS_Bookings::get( $ref );
         if ( ! $booking ) wp_send_json_error( 'Booking not found.' );
+        if ( self::invoice_manages_occurrence( $booking ) ) wp_send_json_error( 'Record credits or refunds through the consolidated invoice ledger.', 409 );
 
         // Set amount_paid = amount to balance the books (refund has been processed)
         global $wpdb;
@@ -298,6 +335,7 @@ class MBS_Admin {
         $ref = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
         $booking = MBS_Bookings::get( $ref );
         if ( ! $booking ) wp_send_json_error( 'Booking not found.' );
+        if ( self::invoice_manages_occurrence( $booking ) ) wp_send_json_error( 'Recurring consolidated series do not use per-occurrence deposits.', 409 );
         if ( $booking->status !== 'confirmed' ) wp_send_json_error( 'Booking must be in Confirmed status to mark deposit paid.' );
 
         $deposit_amount = MBS_Bookings::calculate_deposit( (float) $booking->amount );
@@ -329,6 +367,7 @@ class MBS_Admin {
         $ref = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
         $booking = MBS_Bookings::get( $ref );
         if ( ! $booking ) wp_send_json_error( 'Booking not found.' );
+        if ( self::invoice_manages_occurrence( $booking ) ) wp_send_json_error( 'Recurring consolidated series do not use per-occurrence deposits.', 409 );
         if ( $booking->status !== 'deposit_paid' ) wp_send_json_error( 'Booking is not in Deposit Paid status.' );
 
         MBS_Bookings::update_status( $ref, 'confirmed' );
@@ -355,6 +394,10 @@ class MBS_Admin {
         $status = sanitize_text_field( $_POST['status'] ?? 'confirmed' );
         $booking = MBS_Bookings::get( $ref );
         if ( ! $booking ) wp_send_json_error( 'Booking not found.' );
+        if ( MBS_Bookings::has_financial_history( $ref ) ) wp_send_json_error( 'A booking with financial history cannot be restored directly. Use credit and replacement records.', 409 );
+        if ( self::invoice_manages_occurrence( $booking ) && in_array( $status, array( 'deposit_paid', 'paid' ), true ) ) {
+            wp_send_json_error( 'Restore consolidated-series payment state through the invoice ledger.', 409 );
+        }
 
         // Only allow restoring from archived or cancelled
         if ( ! in_array( $booking->status, array( 'archived', 'cancelled' ) ) ) {
@@ -461,7 +504,7 @@ class MBS_Admin {
 
             // M-1: Wrap conflict check + insert in a transaction with row locking to
             // prevent a TOCTOU race where a public booking lands between check and insert.
-            $wpdb->query( 'START TRANSACTION' );
+            if ( $wpdb->query( 'START TRANSACTION' ) === false ) wp_send_json_error( 'Could not start recurring booking creation.', 500 );
             $wpdb->query( $wpdb->prepare(
                 "SELECT id FROM {$table} WHERE space = %s AND booking_date = %s AND status NOT IN ('cancelled','archived') FOR UPDATE",
                 $space, $date_str
@@ -507,7 +550,7 @@ class MBS_Admin {
                 'series_id'        => $series_id,
                 'modification_token' => wp_generate_password( 32, false ),
             ) );
-            $wpdb->query( 'COMMIT' );
+            if ( $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); wp_send_json_error( 'Could not commit recurring booking creation.', 500 ); }
             $created++;
         }
 
@@ -874,19 +917,186 @@ class MBS_Admin {
 
         if ( ! $series_id ) wp_send_json_error( 'No series ID provided.' );
 
-        $result = MBS_Bookings::update_series_status( $series_id, $status );
+        $series = MBS_Series::get( $series_id );
+        if ( $series ) {
+            $expected_status  = sanitize_text_field( $_POST['expected_status'] ?? '' );
+            $expected_version = absint( $_POST['expected_version'] ?? 0 );
+            if ( $expected_status === '' || $expected_version < 1 ) {
+                wp_send_json_error( 'Series status and version preconditions are required. Refresh and try again.', 409 );
+            }
 
+            if ( $status === 'confirmed' ) {
+                $result = MBS_Series::approve( $series_id, $expected_status, $expected_version, true );
+                $count  = is_wp_error( $result ) ? 0 : (int) $result['updated'];
+            } elseif ( $status === 'cancelled' ) {
+                $scope  = sanitize_key( $_POST['scope'] ?? 'all' );
+                $result = MBS_Series::cancel( $series_id, $scope, $expected_status, $expected_version, true );
+                $count  = is_wp_error( $result ) ? 0 : (int) $result['cancelled'];
+            } else {
+                wp_send_json_error( 'First-class series support only approval or cancellation through this action.' );
+            }
+            if ( is_wp_error( $result ) ) {
+                wp_send_json_error( $result->get_error_message(), $result->get_error_code() === 'series_precondition_failed' ? 409 : 400 );
+            }
+            wp_send_json_success( array(
+                'series_id'   => $series_id,
+                'status'      => $status,
+                'count'       => $count,
+                'no_op'       => ! empty( $result['no_op'] ),
+                'email_sent'  => $result['email_sent'] ?? null,
+                'new_version' => isset( $result['series']->version ) ? (int) $result['series']->version : $expected_version,
+            ) );
+        }
+
+        // Legacy series retain their historical per-occurrence behaviour until
+        // they are deliberately adopted into first-class series metadata.
+        $result = MBS_Bookings::update_series_status( $series_id, $status );
         if ( $status === 'confirmed' ) {
-            $bookings = MBS_Bookings::get_series( $series_id );
-            foreach ( $bookings as $booking ) {
+            foreach ( MBS_Bookings::get_series( $series_id ) as $booking ) {
                 if ( $booking->status === 'confirmed' ) {
                     MBS_Email::notify_confirmed( $booking );
                 }
             }
         }
-
         $count = count( MBS_Bookings::get_series( $series_id ) );
-        wp_send_json_success( array( 'series_id' => $series_id, 'status' => $status, 'count' => $count ) );
+        wp_send_json_success( array( 'series_id' => $series_id, 'status' => $status, 'count' => $count, 'legacy' => true ) );
+    }
+
+    public function ajax_resend_series_confirmation() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
+        $series_id = sanitize_text_field( $_POST['series_id'] ?? '' );
+        $result = MBS_Series::resend_confirmation( $series_id );
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( $result->get_error_message() );
+        }
+        wp_send_json_success( $result );
+    }
+
+    public function ajax_record_invoice_manual_payment() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to record invoice payments.', 403 );
+        $invoice_ref = sanitize_text_field( $_POST['invoice_ref'] ?? '' );
+        $amount_minor = sanitize_text_field( $_POST['amount_minor'] ?? '' );
+        $idempotency_key = sanitize_text_field( $_POST['idempotency_key'] ?? '' );
+        $expected_version = absint( $_POST['expected_version'] ?? 0 );
+        if ( ! $invoice_ref || $amount_minor === '' || ! $idempotency_key || $expected_version < 1 ) {
+            wp_send_json_error( 'Invoice reference, amount in minor units, idempotency key and expected version are required.' );
+        }
+        $result = MBS_Invoice_Payment::record_manual_payment(
+            $invoice_ref, $amount_minor, $idempotency_key, $expected_version,
+            sanitize_text_field( $_POST['note'] ?? '' )
+        );
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( $result->get_error_message(), $result->get_error_code() === 'invoice_precondition_failed' ? 409 : 400 );
+        }
+        wp_send_json_success( array(
+            'invoice_ref' => $result['invoice']->invoice_ref,
+            'status' => $result['invoice']->status,
+            'version' => (int) $result['invoice']->version,
+            'balance_minor' => MBS_Billing_Ledger::balance_minor( $result['invoice'] ),
+            'idempotent_replay' => ! empty( $result['idempotent_replay'] ),
+        ) );
+    }
+
+    /** Resolve a captured-payment exception only after an administrator verifies the ledger or refund. */
+    public function ajax_resolve_invoice_reconciliation() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'Only an administrator can resolve payment reconciliation.', 403 );
+
+        $invoice_ref = sanitize_text_field( $_POST['invoice_ref'] ?? '' );
+        $reservation_ref = sanitize_text_field( $_POST['reservation_ref'] ?? '' );
+        $order_id = absint( $_POST['order_id'] ?? 0 );
+        $resolution = sanitize_key( $_POST['resolution'] ?? '' );
+        if ( ! $invoice_ref || ! $reservation_ref || ! $order_id ) wp_send_json_error( 'Invoice, reservation and order are required.', 400 );
+
+        $requested_resolution = $resolution;
+        if ( $resolution === 'record_payment' ) {
+            $order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
+            if ( ! $order ) wp_send_json_error( 'The WooCommerce order no longer exists.', 400 );
+            $recorded = MBS_Invoice_Payment::record_gateway_payment( $invoice_ref, $order->get_total(), $order_id, $reservation_ref );
+            if ( is_wp_error( $recorded ) ) wp_send_json_error( $recorded->get_error_message(), 409 );
+            $resolution = 'ledger_recorded';
+        }
+
+        $resolved = MBS_Invoice_Reservation::resolve( $invoice_ref, $reservation_ref, $order_id, $resolution );
+        if ( is_wp_error( $resolved ) ) wp_send_json_error( $resolved->get_error_message(), 400 );
+        if ( ! $resolved ) wp_send_json_error( 'The reconciliation state changed; refresh and verify it again.', 409 );
+
+        $order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
+        if ( $order ) {
+            $order->delete_meta_data( '_mbs_invoice_reconciliation_required' );
+            $order->update_meta_data( '_mbs_invoice_reconciliation_resolution', $resolution );
+            $order->save();
+            $order->add_order_note( 'Invoice payment reconciliation resolved by administrator: ' . $resolution . '.' );
+        }
+        MBS_Audit_Log::log( $invoice_ref, 'payment_reconciliation_resolved', 'Order #' . $order_id . ' resolved as ' . $resolution . ' by administrator.' );
+        wp_send_json_success( array( 'invoice_ref' => $invoice_ref, 'order_id' => $order_id, 'status' => $requested_resolution ) );
+    }
+
+    public function ajax_configure_series_billing() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to change series billing.', 403 );
+        $series_ref = sanitize_text_field( $_POST['series_ref'] ?? '' );
+        $expected_version = absint( $_POST['expected_version'] ?? 0 );
+        if ( ! $series_ref || $expected_version < 1 ) wp_send_json_error( 'Series reference and current version are required.', 400 );
+
+        $schedule = array();
+        $schedule_json = wp_unslash( $_POST['billing_schedule_json'] ?? '' );
+        if ( $schedule_json !== '' ) {
+            $schedule = json_decode( $schedule_json, true );
+            if ( ! is_array( $schedule ) ) wp_send_json_error( 'The term schedule is not valid JSON.', 400 );
+        }
+        $result = MBS_Billing_Engine::configure_series( $series_ref, array(
+            'billing_mode' => sanitize_key( $_POST['billing_mode'] ?? '' ),
+            'billing_treatment' => sanitize_key( $_POST['billing_treatment'] ?? '' ),
+            'payment_method' => sanitize_key( $_POST['payment_method'] ?? '' ),
+            'deposit_policy' => 'none',
+            'invoice_lead_days' => absint( $_POST['invoice_lead_days'] ?? 28 ),
+            'payment_terms_days' => absint( $_POST['payment_terms_days'] ?? 14 ),
+            'billing_schedule' => $schedule,
+            'adopt_legacy' => ! empty( $_POST['adopt_legacy'] ),
+        ), $expected_version );
+        if ( is_wp_error( $result ) ) wp_send_json_error( $result->get_error_message(), $result->get_error_code() === 'series_precondition_failed' ? 409 : 400 );
+        MBS_Audit_Log::log( $series_ref, 'series_billing_changed', 'Billing changed to ' . $result->billing_mode . ' / ' . $result->billing_treatment . ' using ' . $result->payment_method . '.' );
+        if ( in_array( $result->status, array( 'confirmed', 'paused' ), true ) ) {
+            MBS_Email::notify_series_changed( $result, MBS_Series::active_occurrences( $series_ref ) );
+        }
+        wp_send_json_success( array( 'series_ref' => $series_ref, 'version' => (int) $result->version ) );
+    }
+
+    public function ajax_pause_series() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to pause series billing.', 403 );
+        $result = MBS_Series::set_paused(
+            sanitize_text_field( $_POST['series_ref'] ?? '' ),
+            ! empty( $_POST['paused'] ),
+            sanitize_key( $_POST['expected_status'] ?? '' ),
+            absint( $_POST['expected_version'] ?? 0 )
+        );
+        if ( is_wp_error( $result ) ) wp_send_json_error( $result->get_error_message(), $result->get_error_code() === 'series_precondition_failed' ? 409 : 400 );
+        wp_send_json_success( array( 'status' => $result['series']->status, 'version' => (int) $result['series']->version, 'no_op' => ! empty( $result['no_op'] ) ) );
+    }
+
+    public function ajax_catch_up_series_billing() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to generate invoices.', 403 );
+        $result = MBS_Billing_Engine::catch_up( wp_date( 'Y-m-d' ) );
+        if ( is_wp_error( $result ) ) wp_send_json_error( $result->get_error_message(), 400 );
+        wp_send_json_success( $result );
+    }
+
+    public function ajax_extend_external_series() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to extend series.', 403 );
+        $result = MBS_Series::extend(
+            sanitize_text_field( $_POST['series_ref'] ?? '' ),
+            sanitize_text_field( $_POST['repeat_until'] ?? '' ),
+            absint( $_POST['expected_version'] ?? 0 ),
+            true
+        );
+        if ( is_wp_error( $result ) ) wp_send_json_error( $result->get_error_message(), $result->get_error_code() === 'series_precondition_failed' ? 409 : 400 );
+        wp_send_json_success( array( 'series_ref' => $result['series']->series_ref, 'version' => (int) $result['series']->version, 'created' => count( $result['created'] ), 'skipped' => (int) $result['skipped'] ) );
     }
 
     /**
@@ -901,7 +1111,9 @@ class MBS_Admin {
         if ( ! $series_id ) wp_send_json_error( 'No series ID provided.' );
 
         $cancelled = MBS_Bookings::cancel_series_future( $series_id );
-        if ( $cancelled === false ) {
+        if ( is_wp_error( $cancelled ) ) {
+            wp_send_json_error( $cancelled->get_error_message(), 409 );
+        } elseif ( $cancelled === false ) {
             wp_send_json_error( 'Database error cancelling the series.' );
         }
 
@@ -997,7 +1209,9 @@ class MBS_Admin {
         if ( ! $series_id ) wp_send_json_error( 'No series ID provided.' );
 
         $reopened = MBS_Bookings::reopen_series_future( $series_id );
-        if ( $reopened === false ) {
+        if ( is_wp_error( $reopened ) ) {
+            wp_send_json_error( $reopened->get_error_message(), 409 );
+        } elseif ( $reopened === false ) {
             wp_send_json_error( 'Database error reopening the series.' );
         }
 
@@ -1025,7 +1239,9 @@ class MBS_Admin {
         $scope = ( ( $_POST['scope'] ?? 'all' ) === 'future' ) ? 'future' : 'all';
 
         $deleted = MBS_Bookings::delete_series( $series_id, $scope );
-        if ( $deleted === false ) {
+        if ( is_wp_error( $deleted ) ) {
+            wp_send_json_error( $deleted->get_error_message(), 409 );
+        } elseif ( $deleted === false ) {
             wp_send_json_error( 'Database error deleting the series.' );
         }
 
@@ -1061,6 +1277,9 @@ class MBS_Admin {
             wp_send_json_error( 'Can only chase payment for confirmed or deposit-paid bookings.' );
         }
 
+        if ( ! MBS_Payment_Chaser::should_chase_occurrence( $booking ) ) {
+            wp_send_json_error( MBS_Payment_Chaser::chase_suppression_message( $booking ) );
+        }
         MBS_Payment_Chaser::send_chase( $booking, true );
         wp_send_json_success( array( 'ref' => $ref, 'chase_count' => ( $booking->chase_count ?? 0 ) + 1 ) );
     }
@@ -1156,6 +1375,28 @@ class MBS_Admin {
         $new_start = sanitize_text_field( $_POST['start_time'] ?? '' );
         $new_end   = sanitize_text_field( $_POST['end_time'] ?? '' );
         $new_allday = ! empty( $_POST['all_day'] );
+
+        $billing_fields_changed =
+            $new_space !== $booking->space ||
+            $new_date !== $booking->booking_date ||
+            $date_to !== ( $booking->booking_date_end ?: $booking->booking_date ) ||
+            $new_start !== (string) $booking->start_time ||
+            $new_end !== (string) $booking->end_time ||
+            $new_allday !== (bool) $booking->all_day ||
+            ( ! empty( $_POST['kitchen'] ) ) !== (bool) $booking->kitchen ||
+            $scout_use !== (bool) $booking->scout_use ||
+            abs( $old_amount - $new_amount ) > 0.009;
+        if ( $billing_fields_changed ) {
+        if ( MBS_Bookings::has_financial_history( $ref ) ) {
+                wp_send_json_error(
+                    sprintf(
+                        'This occurrence is already included on invoice %s. Cancel it through the recurring-series controls so the invoice is credited, then add a replacement occurrence; issued invoice details cannot be overwritten.',
+                        $allocation->invoice_ref
+                    ),
+                    409
+                );
+            }
+        }
 
         if ( $new_space !== $booking->space || $new_date !== $booking->booking_date ||
              $new_start !== $booking->start_time || $new_end !== $booking->end_time ) {
@@ -1316,7 +1557,9 @@ class MBS_Admin {
         if ( ! $id ) wp_send_json_error( 'Invalid request ID.' );
 
         $result = MBS_Modification::approve( $id );
-        if ( $result ) {
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( $result->get_error_message(), 409 );
+        } elseif ( $result ) {
             wp_send_json_success( array( 'approved' => true ) );
         } else {
             wp_send_json_error( 'Could not approve this request.' );
@@ -1377,7 +1620,7 @@ class MBS_Admin {
                 continue;
             }
 
-            MBS_Bookings::update_status( $ref, $action );
+            if ( MBS_Bookings::update_status( $ref, $action ) === false ) { $skipped++; continue; }
 
             // Send appropriate emails
             if ( $action === 'confirmed' ) {

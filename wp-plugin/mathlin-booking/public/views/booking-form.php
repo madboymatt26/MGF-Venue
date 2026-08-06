@@ -180,9 +180,8 @@
                     </div>
                     <div class="nms-form-group" id="nms-repeat-until-group" style="display:none">
                         <label for="nms-repeat-until">Repeat Until <span class="nms-req">*</span></label>
-                        <input type="date" id="nms-repeat-until" name="repeat_until"
-                               min="<?php echo esc_attr( wp_date( 'Y-m-d', strtotime( '+7 days' ) ) ); ?>">
-                        <p class="nms-field-hint">Booking will repeat every week until this date (max 52 weeks). Dates with conflicts will be skipped.</p>
+                        <input type="date" id="nms-repeat-until" name="repeat_until">
+                        <p class="nms-field-hint">Booking will repeat weekly for up to one calendar year (maximum 53 dates). Dates with conflicts will be skipped.</p>
                     </div>
                 </div>
 
@@ -229,16 +228,28 @@
                         <span>Kitchen add-on</span>
                         <span>£10.00</span>
                     </div>
-                    <div class="nms-cost-row" id="nms-cost-recurring-row" style="display:none">
-                        <span>Recurring total</span>
+                    <div class="nms-cost-row nms-recurring-cost-row" id="nms-cost-recurring-unit-row" style="display:none">
+                        <span>Price per booking</span>
+                        <span id="nms-cost-recurring-unit">£0.00</span>
+                    </div>
+                    <div class="nms-cost-row nms-recurring-cost-row" id="nms-cost-recurring-count-row" style="display:none">
+                        <span>Requested dates</span>
+                        <span id="nms-cost-recurring-count">0</span>
+                    </div>
+                    <div class="nms-cost-row nms-recurring-cost-row" id="nms-cost-recurring-estimate-row" style="display:none">
+                        <span>Estimated full series value</span>
+                        <span id="nms-cost-recurring-estimate">£0.00</span>
+                    </div>
+                    <div class="nms-cost-row nms-recurring-cost-row" id="nms-cost-recurring-due-row" style="display:none">
+                        <span>Amount due at submission</span>
+                        <span id="nms-cost-recurring-due">£0.00</span>
+                    </div>
+                    <div class="nms-cost-row nms-cost-total" id="nms-cost-one-off-total-row">
+                        <span>Estimated Total</span>
                         <span>£0.00</span>
                     </div>
-                    <div class="nms-cost-row nms-cost-total">
-                        <span>Estimated Total</span>
-                        <span id="nms-cost-total">£0.00</span>
-                    </div>
                 </div>
-                <p class="nms-cost-note">* Final invoice issued upon confirmation by our booking team.</p>
+                <p class="nms-cost-note" id="nms-cost-note">* Final invoice issued upon confirmation by our booking team.</p>
             </div>
 
             <div class="nms-form-actions">

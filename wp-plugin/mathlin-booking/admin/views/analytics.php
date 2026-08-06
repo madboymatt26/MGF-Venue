@@ -70,35 +70,96 @@ $avg_value = $total_fy > 0 ? $revenue_fy / $total_fy : 0;
 $paid_count     = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE status = 'paid' AND scout_use = 0 AND booking_date BETWEEN %s AND %s", $fy_start, $fy_end ) );
 $unpaid_count   = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE status = 'confirmed' AND scout_use = 0 AND booking_date BETWEEN %s AND %s", $fy_start, $fy_end ) );
 
-// ── Financial: billed vs collected vs outstanding (this FY, commercial only) ──
-$billed_fy = $revenue_fy; // SUM(amount) already computed above
-$collected_fy = (float) $wpdb->get_var( $wpdb->prepare(
-    "SELECT COALESCE(SUM(amount_paid), 0) FROM {$table} WHERE status IN ('confirmed', 'deposit_paid', 'paid') AND scout_use = 0 AND booking_date BETWEEN %s AND %s",
+// ── Financial: immutable invoices + genuinely legacy unallocated bookings ────
+$invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
+$transaction_table = $wpdb->prefix . MBS_PAYMENT_TRANSACTION_TABLE;
+$allocation_table = $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE;
+// Financial reporting bases are intentionally explicit. Legacy rows have no
+// invoice/payment timestamps, so their billed and collected values use service
+// date (booking_date). First-class invoices use issue date; payments/refunds
+// use transaction date. Outstanding is a current balance across all dates.
+$legacy_billed = (float) $wpdb->get_var( $wpdb->prepare(
+    "SELECT COALESCE(SUM(b.amount), 0) FROM {$table} b
+     WHERE b.status IN ('confirmed','deposit_paid','paid') AND b.scout_use = 0
+     AND b.booking_date BETWEEN %s AND %s AND NOT EXISTS (SELECT 1 FROM {$allocation_table} a WHERE a.booking_ref = b.ref)",
     $fy_start, $fy_end
 ) );
+$invoice_billed_minor = (int) $wpdb->get_var( $wpdb->prepare(
+    "SELECT COALESCE(SUM(total_minor), 0) FROM {$invoice_table}
+     WHERE document_type = 'invoice' AND status NOT IN ('draft','void') AND DATE(issued_at) BETWEEN %s AND %s",
+    $fy_start, $fy_end
+) );
+$invoiced_fy = $legacy_billed + ( $invoice_billed_minor / 100 );
+$billed_fy = $invoiced_fy;
+$legacy_collected = (float) $wpdb->get_var( $wpdb->prepare(
+    "SELECT COALESCE(SUM(b.amount_paid), 0) FROM {$table} b
+     WHERE b.scout_use = 0 AND b.booking_date BETWEEN %s AND %s
+     AND NOT EXISTS (SELECT 1 FROM {$allocation_table} a WHERE a.booking_ref = b.ref)",
+    $fy_start, $fy_end
+) );
+$invoice_collected_minor = (int) $wpdb->get_var( $wpdb->prepare(
+    "SELECT COALESCE(SUM(t.amount_minor), 0)
+     FROM {$transaction_table} t INNER JOIN {$invoice_table} i ON i.id = t.invoice_id
+     WHERE t.status = 'completed' AND t.transaction_type = 'payment' AND DATE(t.occurred_at) BETWEEN %s AND %s",
+    $fy_start, $fy_end
+) );
+$collected_fy = $legacy_collected + ( $invoice_collected_minor / 100 );
+$invoice_refunded_minor = (int) $wpdb->get_var( $wpdb->prepare(
+    "SELECT COALESCE(SUM(t.amount_minor), 0) FROM {$transaction_table} t
+     WHERE t.status = 'completed' AND t.transaction_type = 'refund' AND DATE(t.occurred_at) BETWEEN %s AND %s",
+    $fy_start, $fy_end
+) );
+$credited_minor = abs( (int) $wpdb->get_var( $wpdb->prepare(
+    "SELECT COALESCE(SUM(total_minor), 0) FROM {$invoice_table}
+     WHERE document_type = 'credit_note' AND status NOT IN ('draft','void') AND DATE(issued_at) BETWEEN %s AND %s",
+    $fy_start, $fy_end
+) ) );
+$credited_refunded_fy = ( $credited_minor + $invoice_refunded_minor ) / 100;
+$net_collected_fy = $collected_fy - ( $invoice_refunded_minor / 100 );
 
 // Outstanding debtors: balance still owed on live (non-cancelled, non-archived)
 // bookings, regardless of event date — this is money currently chaseable.
-$outstanding_total = (float) $wpdb->get_var(
-    "SELECT COALESCE(SUM(GREATEST(amount - amount_paid, 0)), 0) FROM {$table}
-     WHERE status IN ('confirmed', 'deposit_paid') AND scout_use = 0"
+$legacy_outstanding = (float) $wpdb->get_var(
+    "SELECT COALESCE(SUM(GREATEST(b.amount - b.amount_paid, 0)), 0) FROM {$table} b
+     WHERE b.status IN ('confirmed','deposit_paid') AND b.scout_use = 0
+     AND NOT EXISTS (SELECT 1 FROM {$allocation_table} a WHERE a.booking_ref = b.ref)"
 );
+$invoice_outstanding_minor = (int) $wpdb->get_var(
+    "SELECT COALESCE(SUM(GREATEST(total_minor - paid_minor - credited_minor, 0)), 0) FROM {$invoice_table}
+     WHERE document_type = 'invoice' AND status IN ('issued','part_paid','overdue')"
+);
+$outstanding_total = $legacy_outstanding + ( $invoice_outstanding_minor / 100 );
 $outstanding_count = (int) $wpdb->get_var(
-    "SELECT COUNT(*) FROM {$table}
-     WHERE status IN ('confirmed', 'deposit_paid') AND scout_use = 0 AND (amount - amount_paid) > 0.01"
-);
+    "SELECT COUNT(*) FROM {$table} b WHERE b.status IN ('confirmed','deposit_paid') AND b.scout_use = 0
+     AND (b.amount - b.amount_paid) > 0.01 AND NOT EXISTS (SELECT 1 FROM {$allocation_table} a WHERE a.booking_ref = b.ref)"
+) + (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$invoice_table} WHERE document_type = 'invoice' AND status IN ('issued','part_paid','overdue') AND total_minor > paid_minor + credited_minor" );
 $overdue_count = (int) $wpdb->get_var(
-    "SELECT COUNT(*) FROM {$table}
-     WHERE status IN ('confirmed', 'deposit_paid') AND scout_use = 0 AND (amount - amount_paid) > 0.01 AND chase_count > 0"
-);
+    "SELECT COUNT(*) FROM {$table} b WHERE b.status IN ('confirmed','deposit_paid') AND b.scout_use = 0
+     AND (b.amount - b.amount_paid) > 0.01 AND b.chase_count > 0 AND NOT EXISTS (SELECT 1 FROM {$allocation_table} a WHERE a.booking_ref = b.ref)"
+) + (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$invoice_table} WHERE document_type = 'invoice' AND status IN ('issued','part_paid','overdue') AND due_at < %s AND total_minor > paid_minor + credited_minor", current_time( 'mysql' ) ) );
 
 // Collection rate (% of billed income actually received) this FY
-$collection_rate = $billed_fy > 0 ? round( ( $collected_fy / $billed_fy ) * 100, 1 ) : 0;
+$collection_rate = $invoiced_fy > 0 ? round( ( $net_collected_fy / $invoiced_fy ) * 100, 1 ) : 0;
+$legacy_prev_invoiced = (float) $wpdb->get_var( $wpdb->prepare(
+    "SELECT COALESCE(SUM(b.amount), 0) FROM {$table} b WHERE b.status IN ('confirmed','deposit_paid','paid')
+     AND b.scout_use = 0 AND b.booking_date BETWEEN %s AND %s
+     AND NOT EXISTS (SELECT 1 FROM {$allocation_table} a WHERE a.booking_ref = b.ref)",
+    $prev_fy_start, $prev_fy_end
+) );
+$invoice_prev_invoiced_minor = (int) $wpdb->get_var( $wpdb->prepare(
+    "SELECT COALESCE(SUM(total_minor), 0) FROM {$invoice_table} WHERE document_type = 'invoice'
+     AND status NOT IN ('draft','void') AND DATE(issued_at) BETWEEN %s AND %s",
+    $prev_fy_start, $prev_fy_end
+) );
+$revenue_fy = $invoiced_fy;
+$revenue_prev = $legacy_prev_invoiced + ( $invoice_prev_invoiced_minor / 100 );
+$avg_value = $total_fy > 0 ? $invoiced_fy / $total_fy : 0;
 
 // Deposits held: money received on bookings not yet fully paid
 $deposits_held = (float) $wpdb->get_var(
-    "SELECT COALESCE(SUM(amount_paid), 0) FROM {$table}
-     WHERE status = 'deposit_paid' AND scout_use = 0"
+    "SELECT COALESCE(SUM(b.amount_paid), 0) FROM {$table} b
+     WHERE b.status = 'deposit_paid' AND b.scout_use = 0
+     AND NOT EXISTS (SELECT 1 FROM {$allocation_table} a WHERE a.booking_ref = b.ref)"
 );
 
 // Kitchen add-on uptake & estimated income (this FY), grouped by the tier
@@ -265,13 +326,13 @@ foreach ( $by_tier as $t ) {
     $tier_revenue[] = (float) $t->revenue;
 }
 
-// Billed vs collected vs outstanding (for the financial bar)
-$fin_labels = array( 'Billed', 'Collected', 'Outstanding' );
-$fin_values = array( round( $billed_fy, 2 ), round( $collected_fy, 2 ), round( max( 0, $billed_fy - $collected_fy ), 2 ) );
+// Defined ledger-backed metrics; outstanding is a current balance, not invoiced minus cash by issue year.
+$fin_labels = array( 'Invoiced in FY', 'Net cash in FY', 'Outstanding now' );
+$fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), round( $outstanding_total, 2 ) );
 ?>
 <div class="wrap mbs-admin">
     <h1><?php echo MBS_Admin::brand_mark(); ?>MGF Venue – Analytics</h1>
-    <p class="nms-muted">Financial Year: <?php echo esc_html( $fy_label ); ?></p>
+    <p class="nms-muted">Financial Year: <?php echo esc_html( $fy_label ); ?>. Legacy values use booking/service date; consolidated invoices use issue date; payments and refunds use transaction date. Outstanding is the current balance across all dates.</p>
 
     <!-- Summary cards -->
     <div class="nms-stats-row" style="margin-bottom:2rem;">
@@ -281,7 +342,7 @@ $fin_values = array( round( $billed_fy, 2 ), round( $collected_fy, 2 ), round( m
         </div>
         <div class="nms-stat-card nms-stat-revenue">
             <div class="nms-stat-val">&pound;<?php echo number_format( $revenue_fy, 0 ); ?></div>
-            <div class="nms-stat-label">Revenue This FY
+            <div class="nms-stat-label">Invoiced This FY (service/issue date)
                 <?php if ( $yoy_pct !== null ) : ?>
                     <span style="color:<?php echo $yoy_pct >= 0 ? '#2ecc71' : '#e74c3c'; ?>;font-weight:700;">
                         <?php echo $yoy_pct >= 0 ? '▲' : '▼'; ?> <?php echo esc_html( abs( $yoy_pct ) ); ?>%
@@ -291,7 +352,7 @@ $fin_values = array( round( $billed_fy, 2 ), round( $collected_fy, 2 ), round( m
         </div>
         <div class="nms-stat-card">
             <div class="nms-stat-val">&pound;<?php echo number_format( $revenue_prev, 0 ); ?></div>
-            <div class="nms-stat-label">Revenue Last FY</div>
+            <div class="nms-stat-label">Invoiced Last FY (service/issue date)</div>
         </div>
         <div class="nms-stat-card">
             <div class="nms-stat-val">&pound;<?php echo number_format( $avg_value, 0 ); ?></div>
@@ -308,11 +369,19 @@ $fin_values = array( round( $billed_fy, 2 ), round( $collected_fy, 2 ), round( m
     <div class="nms-stats-row" style="margin-bottom:2rem;">
         <div class="nms-stat-card nms-stat-revenue">
             <div class="nms-stat-val">&pound;<?php echo number_format( $collected_fy, 0 ); ?></div>
-            <div class="nms-stat-label">Collected This FY (<?php echo esc_html( $collection_rate ); ?>%)</div>
+            <div class="nms-stat-label">Collected This FY (legacy service date / ledger transaction date)</div>
         </div>
         <div class="nms-stat-card nms-stat-pending">
             <div class="nms-stat-val">&pound;<?php echo number_format( $outstanding_total, 0 ); ?></div>
             <div class="nms-stat-label">Outstanding (<?php echo $outstanding_count; ?> booking<?php echo $outstanding_count === 1 ? '' : 's'; ?><?php if ( $overdue_count > 0 ) : ?>, <?php echo $overdue_count; ?> overdue<?php endif; ?>)</div>
+        </div>
+        <div class="nms-stat-card">
+            <div class="nms-stat-val">&pound;<?php echo number_format( $credited_refunded_fy, 0 ); ?></div>
+            <div class="nms-stat-label">Credited / Refunded This FY (issue / transaction date)</div>
+        </div>
+        <div class="nms-stat-card nms-stat-revenue">
+            <div class="nms-stat-val">&pound;<?php echo number_format( $net_collected_fy, 0 ); ?></div>
+            <div class="nms-stat-label">Net Cash This FY (<?php echo esc_html( $collection_rate ); ?>%; date bases above)</div>
         </div>
         <div class="nms-stat-card">
             <div class="nms-stat-val">&pound;<?php echo number_format( $deposits_held, 0 ); ?></div>
@@ -387,9 +456,9 @@ $fin_values = array( round( $billed_fy, 2 ), round( $collected_fy, 2 ), round( m
             </div>
         </div>
 
-        <!-- Billed vs Collected vs Outstanding -->
+        <!-- Measures with explicitly different date bases -->
         <div class="nms-card">
-            <div class="nms-card-header"><h2>💷 Billed vs Collected (FY)</h2></div>
+            <div class="nms-card-header"><h2>💷 Financial Measures (see date-basis note)</h2></div>
             <div style="padding:1.5rem;">
                 <canvas id="mbs-chart-financial" height="250"></canvas>
             </div>
@@ -628,7 +697,7 @@ $fin_values = array( round( $billed_fy, 2 ), round( $collected_fy, 2 ), round( m
         options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
     });
 
-    // Billed vs Collected vs Outstanding
+    // Financial measures: issue/service FY, transaction/service FY, and current balance.
     new Chart(document.getElementById('mbs-chart-financial'), {
         type: 'bar',
         data: {

@@ -86,7 +86,7 @@ class MBS_Rest_API {
 
         register_rest_route( self::API_NAMESPACE, '/bookings/(?P<ref>[A-Z0-9\-]+)/status', array(
             'methods'             => 'POST',
-            'callback'            => array( $this, 'update_status' ),
+            'callback'            => array( $this, 'update_admin_status' ),
             'permission_callback' => array( $this, 'admin_permission' ),
             'args'                => array(
                 'status' => array(
@@ -96,6 +96,9 @@ class MBS_Rest_API {
                         return in_array( $v, array( 'pending', 'confirmed', 'cancelled' ) );
                     },
                 ),
+                'expected_status' => array( 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ),
+                'idempotency_key' => array( 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ),
+                'notify_hirer' => array( 'default' => false, 'sanitize_callback' => 'rest_sanitize_boolean' ),
             ),
         ) );
 
@@ -177,6 +180,7 @@ class MBS_Rest_API {
                         return in_array( $value, array( 'pending', 'confirmed', 'deposit_paid', 'paid', 'cancelled', 'archived' ), true );
                     },
                 ),
+                'idempotency_key' => array( 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ),
                 'notify_hirer'    => array( 'default' => false, 'sanitize_callback' => 'rest_sanitize_boolean' ),
                 'reason'          => array( 'default' => '', 'sanitize_callback' => 'sanitize_textarea_field' ),
             ),
@@ -215,6 +219,48 @@ class MBS_Rest_API {
         register_rest_route( self::API_NAMESPACE, '/admin/series/(?P<series_id>[A-Z0-9\-]+)', array(
             'methods'             => 'GET',
             'callback'            => array( $this, 'get_admin_series' ),
+            'permission_callback' => array( $this, 'booking_manager_permission' ),
+        ) );
+
+        register_rest_route( self::API_NAMESPACE, '/admin/series', array(
+            'methods'             => 'GET',
+            'callback'            => array( $this, 'get_admin_series_list' ),
+            'permission_callback' => array( $this, 'booking_manager_permission' ),
+        ) );
+
+        register_rest_route( self::API_NAMESPACE, '/admin/series/(?P<series_id>[A-Z0-9\-]+)/approve', array(
+            'methods'             => 'POST',
+            'callback'            => array( $this, 'approve_admin_series' ),
+            'permission_callback' => array( $this, 'booking_manager_permission' ),
+        ) );
+
+        register_rest_route( self::API_NAMESPACE, '/admin/series/(?P<series_id>[A-Z0-9\-]+)/billing', array(
+            'methods'             => 'POST',
+            'callback'            => array( $this, 'configure_admin_series' ),
+            'permission_callback' => array( $this, 'booking_manager_permission' ),
+        ) );
+
+        register_rest_route( self::API_NAMESPACE, '/admin/series/(?P<series_id>[A-Z0-9\-]+)/state', array(
+            'methods'             => 'POST',
+            'callback'            => array( $this, 'update_admin_series_state' ),
+            'permission_callback' => array( $this, 'booking_manager_permission' ),
+        ) );
+
+        register_rest_route( self::API_NAMESPACE, '/admin/invoices', array(
+            'methods'             => 'GET',
+            'callback'            => array( $this, 'get_admin_invoices' ),
+            'permission_callback' => array( $this, 'booking_manager_permission' ),
+        ) );
+
+        register_rest_route( self::API_NAMESPACE, '/admin/invoices/(?P<invoice_ref>[A-Z0-9\-]+)', array(
+            'methods'             => 'GET',
+            'callback'            => array( $this, 'get_admin_invoice' ),
+            'permission_callback' => array( $this, 'booking_manager_permission' ),
+        ) );
+
+        register_rest_route( self::API_NAMESPACE, '/admin/invoices/(?P<invoice_ref>[A-Z0-9\-]+)/payments', array(
+            'methods'             => 'POST',
+            'callback'            => array( $this, 'record_admin_invoice_payment' ),
             'permission_callback' => array( $this, 'booking_manager_permission' ),
         ) );
 
@@ -331,6 +377,10 @@ class MBS_Rest_API {
     public function update_status( WP_REST_Request $request ) {
         $ref    = strtoupper( sanitize_text_field( $request->get_param('ref') ) );
         $status = sanitize_text_field( $request->get_param('status') );
+        $booking = MBS_Bookings::get( $ref );
+        if ( $booking && ! empty( $booking->series_id ) && MBS_Series::get( $booking->series_id ) ) {
+            return new WP_Error( 'series_operation_required', 'Change first-class recurring occurrences through the versioned series endpoint.', array( 'status' => 409 ) );
+        }
         $result = MBS_Bookings::update_status( $ref, $status );
         if ( $result === false ) {
             return new WP_Error( 'update_failed', 'Could not update status', array( 'status' => 500 ) );
@@ -346,6 +396,30 @@ class MBS_Rest_API {
         return current_user_can( 'manage_options' ) || current_user_can( 'mbs_manage_bookings' );
     }
 
+    private function integration_idempotency_transient( $scope, $key, $payload = array() ) {
+        $key = sanitize_text_field( $key );
+        if ( strlen( $key ) < 8 || strlen( $key ) > 128 ) {
+            return new WP_Error( 'invalid_idempotency_key', 'idempotency_key must be between 8 and 128 characters.', array( 'status' => 400 ) );
+        }
+        if ( is_array( $payload ) ) unset( $payload['idempotency_key'] );
+        $payload = self::canonical_idempotency_payload( $payload );
+        $request_hash = hash( 'sha256', sanitize_key( $scope ) . '|' . wp_json_encode( $payload ) );
+        $registry_key = 'mbs_api_idem_' . substr( hash( 'sha256', get_current_user_id() . ':' . $key ), 0, 40 );
+        $registered = get_transient( $registry_key );
+        if ( $registered && ! hash_equals( (string) $registered, $request_hash ) ) {
+            return new WP_Error( 'idempotency_conflict', 'This idempotency key was already used for a different operation, target or payload.', array( 'status' => 409 ) );
+        }
+        if ( ! $registered ) set_transient( $registry_key, $request_hash, DAY_IN_SECONDS );
+        return 'mbs_api_' . substr( hash( 'sha256', get_current_user_id() . ':' . sanitize_key( $scope ) . ':' . $key ), 0, 40 );
+    }
+
+    private static function canonical_idempotency_payload( $value ) {
+        if ( ! is_array( $value ) ) return $value;
+        if ( array_keys( $value ) !== range( 0, count( $value ) - 1 ) ) ksort( $value, SORT_STRING );
+        foreach ( $value as $key => $item ) $value[ $key ] = self::canonical_idempotency_payload( $item );
+        return $value;
+    }
+
     /**
      * Create a normal one-off booking from a trusted admin integration.
      *
@@ -355,11 +429,8 @@ class MBS_Rest_API {
      */
     public function create_admin_booking( WP_REST_Request $request ) {
         $idempotency_key = sanitize_text_field( $request->get_param( 'idempotency_key' ) ?? '' );
-        if ( strlen( $idempotency_key ) < 8 || strlen( $idempotency_key ) > 128 ) {
-            return new WP_Error( 'invalid_idempotency_key', 'idempotency_key must be between 8 and 128 characters.', array( 'status' => 400 ) );
-        }
-
-        $transient_key = 'mbs_admin_create_' . substr( hash( 'sha256', get_current_user_id() . ':' . $idempotency_key ), 0, 40 );
+        $transient_key = $this->integration_idempotency_transient( 'admin_create', $idempotency_key, $request->get_params() );
+        if ( is_wp_error( $transient_key ) ) return $transient_key;
         $existing_ref  = get_transient( $transient_key );
         if ( $existing_ref ) {
             if ( strpos( $existing_ref, 'SER-' ) === 0 ) {
@@ -419,14 +490,10 @@ class MBS_Rest_API {
             return new WP_Error( 'date_range_too_long', 'A booking cannot span more than 367 days.', array( 'status' => 400 ) );
         }
         if ( $repeat_until ) {
-            if ( ! $this->is_valid_date( $repeat_until ) || $repeat_until < $date_from ) {
-                return new WP_Error( 'invalid_repeat_until', 'repeat_until must be on or after booking_date and use YYYY-MM-DD.', array( 'status' => 400 ) );
-            }
-            if ( $date_to !== $date_from ) {
-                return new WP_Error( 'recurring_multi_day_unsupported', 'Weekly recurring creation cannot also use a multi-day booking_date_end.', array( 'status' => 400 ) );
-            }
-            if ( ( strtotime( $repeat_until ) - strtotime( $date_from ) ) > 364 * DAY_IN_SECONDS ) {
-                return new WP_Error( 'repeat_range_too_long', 'Weekly recurring creation is limited to 52 weeks.', array( 'status' => 400 ) );
+            $recurrence_check = MBS_Recurrence::weekly_dates( array( 'booking_date' => $date_from, 'booking_date_end' => $date_to ), $repeat_until );
+            if ( is_wp_error( $recurrence_check ) ) {
+                $recurrence_check->add_data( array( 'status' => 400 ) );
+                return $recurrence_check;
             }
         }
         if ( ! $purpose ) {
@@ -498,21 +565,21 @@ class MBS_Rest_API {
             $result = MBS_Bookings::create_recurring( $data, $repeat_until, true );
             if ( is_wp_error( $result ) ) return $result;
 
-            if ( $status === 'confirmed' && MBS_Bookings::update_series_status( $result['series_id'], 'confirmed' ) === false ) {
-                return new WP_Error( 'confirmation_failed', 'The booking series was created but could not be confirmed.', array( 'status' => 500, 'series_id' => $result['series_id'] ) );
+            if ( $status === 'confirmed' ) {
+                $approval = MBS_Series::approve(
+                    $result['series_id'],
+                    'pending',
+                    (int) $result['series']->version,
+                    (bool) $notify
+                );
+                if ( is_wp_error( $approval ) ) {
+                    return new WP_Error( 'confirmation_failed', $approval->get_error_message(), array( 'status' => 500, 'series_id' => $result['series_id'] ) );
+                }
             }
 
             $series_items = MBS_Bookings::get_series( $result['series_id'] );
-            if ( $notify ) {
-                MBS_Email::notify_recurring_summary(
-                    $result['series_id'],
-                    $result['refs'],
-                    $result['skipped'],
-                    $name,
-                    $email,
-                    $space,
-                    $all_day ? 'All day' : ( $start_time . ' – ' . $end_time )
-                );
+            if ( $notify && $status !== 'confirmed' ) {
+                MBS_Email::notify_recurring_summary( $result['series'], $result['occurrences'] );
             }
 
             set_transient( $transient_key, $result['series_id'], DAY_IN_SECONDS );
@@ -713,6 +780,13 @@ class MBS_Rest_API {
      * Idempotently change a booking status, optionally sending the normal hirer email.
      */
     public function update_admin_status( WP_REST_Request $request ) {
+        $transient_key = $this->integration_idempotency_transient( 'booking_status', $request->get_param( 'idempotency_key' ), $request->get_params() );
+        if ( is_wp_error( $transient_key ) ) return $transient_key;
+        $replay = get_transient( $transient_key );
+        if ( is_array( $replay ) ) {
+            $replay['idempotent_replay'] = true;
+            return rest_ensure_response( $replay );
+        }
         $booking = $this->find_booking( $request );
         if ( is_wp_error( $booking ) ) return $booking;
 
@@ -730,12 +804,20 @@ class MBS_Rest_API {
         }
 
         if ( $booking->status === $status ) {
-            return rest_ensure_response( array(
+            $response = array(
                 'success'        => true,
                 'changed'        => false,
                 'notified_hirer' => false,
+                'idempotent_replay' => false,
                 'booking'        => $this->format_admin_booking( $booking ),
-            ) );
+            );
+            set_transient( $transient_key, $response, DAY_IN_SECONDS );
+            return rest_ensure_response( $response );
+        }
+
+        $series = ! empty( $booking->series_id ) ? MBS_Series::get( $booking->series_id ) : null;
+        if ( $series ) {
+            return new WP_Error( 'series_operation_required', 'Change first-class recurring occurrences through the versioned series endpoint.', array( 'status' => 409 ) );
         }
 
         $allowed_transitions = array(
@@ -760,19 +842,23 @@ class MBS_Rest_API {
 
         $updated = MBS_Bookings::get( $booking->ref );
         if ( $notify_hirer && $updated ) {
-            if ( $status === 'confirmed' ) {
+            if ( $series && $status === 'cancelled' ) {
+                MBS_Email::notify_series_changed( MBS_Series::get( $series->series_ref ), MBS_Series::active_occurrences( $series->series_ref ) );
+            } elseif ( $status === 'confirmed' ) {
                 MBS_Email::notify_confirmed( $updated );
             } elseif ( $status === 'cancelled' ) {
                 MBS_Email::notify_cancelled( $updated, $reason );
             }
         }
-
-        return rest_ensure_response( array(
+        $response = array(
             'success'        => true,
             'changed'        => true,
             'notified_hirer' => (bool) ( $notify_hirer && in_array( $status, array( 'confirmed', 'cancelled' ), true ) ),
+            'idempotent_replay' => false,
             'booking'        => $this->format_admin_booking( $updated ),
-        ) );
+        );
+        set_transient( $transient_key, $response, DAY_IN_SECONDS );
+        return rest_ensure_response( $response );
     }
 
     /**
@@ -864,6 +950,13 @@ class MBS_Rest_API {
             'delete_blocked'        => array( 'MBS_Admin', 'ajax_delete_blocked' ),
             'clear_expired_blocks'  => array( 'MBS_Admin', 'ajax_clear_expired_blocks' ),
             'update_series_status'  => array( 'MBS_Admin', 'ajax_update_series_status' ),
+            'resend_series_confirmation' => array( 'MBS_Admin', 'ajax_resend_series_confirmation' ),
+            'record_invoice_manual_payment' => array( 'MBS_Admin', 'ajax_record_invoice_manual_payment' ),
+            'resolve_invoice_reconciliation' => array( 'MBS_Admin', 'ajax_resolve_invoice_reconciliation' ),
+            'configure_series_billing' => array( 'MBS_Admin', 'ajax_configure_series_billing' ),
+            'pause_series'          => array( 'MBS_Admin', 'ajax_pause_series' ),
+            'catch_up_series_billing' => array( 'MBS_Admin', 'ajax_catch_up_series_billing' ),
+            'extend_external_series' => array( 'MBS_Admin', 'ajax_extend_external_series' ),
             'cancel_scout_series'   => array( 'MBS_Admin', 'ajax_cancel_scout_series' ),
             'edit_scout_series'     => array( 'MBS_Admin', 'ajax_edit_scout_series' ),
             'extend_scout_series'   => array( 'MBS_Admin', 'ajax_extend_scout_series' ),
@@ -890,7 +983,7 @@ class MBS_Rest_API {
         $actions  = array_merge( array( 'create_booking' ), array_keys( $this->get_admin_action_handlers() ) );
         $reads    = array(
             'bookings', 'booking', 'availability', 'audit', 'global_audit',
-            'dashboard', 'blocked_dates', 'series', 'requests', 'analytics',
+            'dashboard', 'blocked_dates', 'series', 'series_list', 'invoices', 'invoice', 'requests', 'analytics',
         );
 
         if ( $is_admin ) {
@@ -899,7 +992,7 @@ class MBS_Rest_API {
             ) );
         } else {
             $admin_only_actions = array(
-                'delete_booking', 'save_settings', 'test_ha', 'check_update',
+                'delete_booking', 'resolve_invoice_reconciliation', 'save_settings', 'test_ha', 'check_update',
                 'delete_scout_series', 'save_email_settings', 'save_custom_fields',
                 'save_osm_settings', 'test_osm_connection', 'osm_get_sections',
                 'export_csv', 'export_accounting',
@@ -921,15 +1014,139 @@ class MBS_Rest_API {
 
     public function get_admin_series( WP_REST_Request $request ) {
         $series_id = strtoupper( sanitize_text_field( $request->get_param( 'series_id' ) ) );
-        $items     = MBS_Bookings::get_series( $series_id );
-        if ( empty( $items ) ) {
+        $series = MBS_Series::get( $series_id );
+        $items = MBS_Bookings::get_series( $series_id );
+        if ( ! $series && empty( $items ) ) {
             return new WP_Error( 'not_found', 'Booking series not found.', array( 'status' => 404 ) );
         }
+        if ( ! $series ) {
+            return rest_ensure_response( array(
+                'series' => array( 'series_ref' => $series_id, 'metadata_incomplete' => true, 'billing_mode' => 'legacy_per_occurrence', 'billing_treatment' => 'legacy_per_occurrence' ),
+                'occurrences' => array_map( array( $this, 'format_admin_booking' ), $items ),
+            ) );
+        }
+        $invoices = array_map( array( $this, 'format_admin_invoice' ), MBS_Series::invoices( $series_id ) );
+        $preview = MBS_Billing_Engine::preview( $series_id );
         return rest_ensure_response( array(
-            'series_id' => $series_id,
-            'count'     => count( $items ),
-            'items'     => array_map( array( $this, 'format_admin_booking' ), $items ),
+            'series' => $this->format_admin_series( $series ),
+            'occurrence_count' => count( $items ),
+            'occurrences' => array_map( array( $this, 'format_admin_booking' ), $items ),
+            'exceptions' => MBS_Series::exceptions( $series ),
+            'invoice_preview' => is_wp_error( $preview ) ? array( 'error' => $preview->get_error_message() ) : $preview,
+            'invoices' => $invoices,
+            'audit' => array_map( array( $this, 'format_audit_entry' ), MBS_Audit_Log::get_for_booking( $series_id ) ),
         ) );
+    }
+
+    public function get_admin_series_list( WP_REST_Request $request ) {
+        $rows = MBS_Series::get_all( array(
+            'status' => sanitize_key( $request->get_param( 'status' ) ?? '' ),
+            'search' => sanitize_text_field( $request->get_param( 'search' ) ?? '' ),
+            'limit' => min( 500, max( 1, absint( $request->get_param( 'limit' ) ?: 100 ) ) ),
+        ) );
+        return rest_ensure_response( array( 'items' => array_map( array( $this, 'format_admin_series' ), $rows ) ) );
+    }
+
+    public function approve_admin_series( WP_REST_Request $request ) {
+        $key = $this->integration_idempotency_transient( 'series_approve', $request->get_param( 'idempotency_key' ), $request->get_params() );
+        if ( is_wp_error( $key ) ) return $key;
+        $replay = get_transient( $key );
+        if ( is_array( $replay ) ) { $replay['idempotent_replay'] = true; return rest_ensure_response( $replay ); }
+        $series_ref = strtoupper( sanitize_text_field( $request->get_param( 'series_id' ) ) );
+        $result = MBS_Series::approve(
+            $series_ref,
+            sanitize_key( $request->get_param( 'expected_status' ) ),
+            absint( $request->get_param( 'expected_version' ) ),
+            rest_sanitize_boolean( $request->get_param( 'notify_hirer' ) )
+        );
+        if ( is_wp_error( $result ) ) return $result;
+        $response = array( 'series' => $this->format_admin_series( $result['series'] ), 'changed' => ! empty( $result['transitioned'] ), 'notified_hirer' => ! empty( $result['email_sent'] ), 'idempotent_replay' => false );
+        set_transient( $key, $response, DAY_IN_SECONDS );
+        return rest_ensure_response( $response );
+    }
+
+    public function configure_admin_series( WP_REST_Request $request ) {
+        $key = $this->integration_idempotency_transient( 'series_billing', $request->get_param( 'idempotency_key' ), $request->get_params() );
+        if ( is_wp_error( $key ) ) return $key;
+        $replay = get_transient( $key );
+        if ( is_array( $replay ) ) { $replay['idempotent_replay'] = true; return rest_ensure_response( $replay ); }
+        $series_ref = strtoupper( sanitize_text_field( $request->get_param( 'series_id' ) ) );
+        $schedule = $request->get_param( 'billing_schedule' );
+        if ( ! is_array( $schedule ) ) $schedule = array();
+        $result = MBS_Billing_Engine::configure_series( $series_ref, array(
+            'billing_mode' => sanitize_key( $request->get_param( 'billing_mode' ) ),
+            'billing_treatment' => sanitize_key( $request->get_param( 'billing_treatment' ) ),
+            'payment_method' => sanitize_key( $request->get_param( 'payment_method' ) ),
+            'deposit_policy' => 'none', 'invoice_lead_days' => absint( $request->get_param( 'invoice_lead_days' ) ),
+            'payment_terms_days' => absint( $request->get_param( 'payment_terms_days' ) ),
+            'billing_schedule' => $schedule, 'adopt_legacy' => rest_sanitize_boolean( $request->get_param( 'adopt_legacy' ) ),
+        ), absint( $request->get_param( 'expected_version' ) ) );
+        if ( is_wp_error( $result ) ) return $result;
+        $notified = false;
+        if ( rest_sanitize_boolean( $request->get_param( 'notify_hirer' ) ) ) $notified = MBS_Email::notify_series_changed( $result, MBS_Series::active_occurrences( $series_ref ) );
+        MBS_Audit_Log::log( $series_ref, 'series_billing_changed', 'Integration changed billing to ' . $result->billing_mode . ' / ' . $result->billing_treatment . '.' );
+        $response = array( 'series' => $this->format_admin_series( $result ), 'notified_hirer' => (bool) $notified, 'idempotent_replay' => false );
+        set_transient( $key, $response, DAY_IN_SECONDS );
+        return rest_ensure_response( $response );
+    }
+
+    public function update_admin_series_state( WP_REST_Request $request ) {
+        $key = $this->integration_idempotency_transient( 'series_state', $request->get_param( 'idempotency_key' ), $request->get_params() );
+        if ( is_wp_error( $key ) ) return $key;
+        $replay = get_transient( $key );
+        if ( is_array( $replay ) ) { $replay['idempotent_replay'] = true; return rest_ensure_response( $replay ); }
+        $series_ref = strtoupper( sanitize_text_field( $request->get_param( 'series_id' ) ) );
+        $operation = sanitize_key( $request->get_param( 'operation' ) );
+        $status = sanitize_key( $request->get_param( 'expected_status' ) );
+        $version = absint( $request->get_param( 'expected_version' ) );
+        if ( $operation === 'pause' || $operation === 'resume' ) {
+            $result = MBS_Series::set_paused( $series_ref, $operation === 'pause', $status, $version );
+        } elseif ( $operation === 'cancel' ) {
+            $result = MBS_Series::cancel( $series_ref, sanitize_key( $request->get_param( 'scope' ) ?: 'future' ), $status, $version, rest_sanitize_boolean( $request->get_param( 'notify_hirer' ) ) );
+        } elseif ( $operation === 'extend' ) {
+            $result = MBS_Series::extend( $series_ref, sanitize_text_field( $request->get_param( 'repeat_until' ) ), $version, rest_sanitize_boolean( $request->get_param( 'notify_hirer' ) ) );
+        } else {
+            return new WP_Error( 'invalid_series_operation', 'operation must be pause, resume, cancel or extend.', array( 'status' => 400 ) );
+        }
+        if ( is_wp_error( $result ) ) return $result;
+        $response = array( 'series' => $this->format_admin_series( $result['series'] ), 'changed' => empty( $result['no_op'] ), 'notified_hirer' => in_array( $operation, array( 'cancel', 'extend' ), true ) && rest_sanitize_boolean( $request->get_param( 'notify_hirer' ) ), 'idempotent_replay' => false );
+        set_transient( $key, $response, DAY_IN_SECONDS );
+        return rest_ensure_response( $response );
+    }
+
+    public function get_admin_invoices( WP_REST_Request $request ) {
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_INVOICE_TABLE;
+        $status = sanitize_key( $request->get_param( 'status' ) ?? '' );
+        $series_ref = strtoupper( sanitize_text_field( $request->get_param( 'series_ref' ) ?? '' ) );
+        $where = array( "document_type = 'invoice'" ); $params = array();
+        if ( $status ) { $where[] = 'status = %s'; $params[] = $status; }
+        if ( $series_ref ) { $where[] = 'series_ref = %s'; $params[] = $series_ref; }
+        $params[] = min( 500, max( 1, absint( $request->get_param( 'limit' ) ?: 100 ) ) );
+        $rows = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$table} WHERE " . implode( ' AND ', $where ) . ' ORDER BY created_at DESC LIMIT %d', $params ) );
+        return rest_ensure_response( array( 'items' => array_map( array( $this, 'format_admin_invoice' ), $rows ) ) );
+    }
+
+    public function get_admin_invoice( WP_REST_Request $request ) {
+        $invoice = MBS_Billing_Ledger::get_invoice( strtoupper( sanitize_text_field( $request->get_param( 'invoice_ref' ) ) ) );
+        if ( ! $invoice ) return new WP_Error( 'not_found', 'Invoice not found.', array( 'status' => 404 ) );
+        return rest_ensure_response( array(
+            'invoice' => $this->format_admin_invoice( $invoice ),
+            'items' => array_map( array( $this, 'format_admin_invoice_item' ), MBS_Billing_Ledger::get_items( $invoice->id ) ),
+            'transactions' => $this->get_safe_invoice_transactions( $invoice->id ),
+        ) );
+    }
+
+    public function record_admin_invoice_payment( WP_REST_Request $request ) {
+        $result = MBS_Invoice_Payment::record_manual_payment(
+            strtoupper( sanitize_text_field( $request->get_param( 'invoice_ref' ) ) ),
+            sanitize_text_field( $request->get_param( 'amount_minor' ) ),
+            sanitize_text_field( $request->get_param( 'idempotency_key' ) ),
+            absint( $request->get_param( 'expected_version' ) ),
+            sanitize_text_field( $request->get_param( 'note' ) )
+        );
+        if ( is_wp_error( $result ) ) return $result;
+        return rest_ensure_response( array( 'invoice' => $this->format_admin_invoice( $result['invoice'] ), 'transaction' => $this->format_admin_transaction( $result['transaction'] ), 'idempotent_replay' => ! empty( $result['idempotent_replay'] ) ) );
     }
 
     public function get_admin_requests( WP_REST_Request $request ) {
@@ -1044,6 +1261,70 @@ class MBS_Rest_API {
             if ( array_key_exists( $field, $safe ) && $safe[ $field ] !== null ) $safe[ $field ] = (int) $safe[ $field ];
         }
         return $safe;
+    }
+
+    public function format_admin_series( $series ) {
+        if ( ! $series ) return null;
+        $source = (array) $series;
+        $fields = array(
+            'series_ref', 'status', 'version', 'contact_name', 'contact_organisation', 'contact_email', 'contact_phone', 'contact_address',
+            'space', 'kitchen', 'all_day', 'scout_use', 'pricing_tier', 'start_time', 'end_time', 'attendees', 'purpose', 'notes',
+            'start_date', 'repeat_until', 'recurrence_rule', 'price_per_booking', 'estimated_total', 'requested_count', 'accepted_count',
+            'conflict_count', 'blocked_count', 'error_count', 'billing_mode', 'billing_treatment', 'deposit_policy', 'payment_method',
+            'automatic_reminders', 'invoice_lead_days', 'payment_terms_days', 'confirmation_sent_at', 'metadata_incomplete', 'adopted_at',
+            'adopted_by', 'adoption_state', 'adoption_version',
+            'created_at', 'updated_at',
+        );
+        $safe = array_intersect_key( $source, array_flip( $fields ) );
+        foreach ( array( 'kitchen', 'all_day', 'scout_use', 'automatic_reminders', 'metadata_incomplete' ) as $field ) if ( isset( $safe[ $field ] ) ) $safe[ $field ] = (bool) $safe[ $field ];
+        foreach ( array( 'version', 'attendees', 'requested_count', 'accepted_count', 'conflict_count', 'blocked_count', 'error_count', 'invoice_lead_days', 'payment_terms_days' ) as $field ) if ( isset( $safe[ $field ] ) ) $safe[ $field ] = (int) $safe[ $field ];
+        $safe['schedule'] = json_decode( (string) ( $series->schedule_json ?? '' ), true ) ?: array();
+        $safe['billing_schedule'] = json_decode( (string) ( $series->billing_schedule_json ?? '' ), true ) ?: array();
+        $safe['terms_accepted'] = ! empty( $series->terms_accepted_at );
+        $safe['terms_accepted_at'] = $series->terms_accepted_at ?: null;
+        return $safe;
+    }
+
+    public function format_admin_invoice( $invoice ) {
+        if ( ! $invoice ) return null;
+        $source = (array) $invoice;
+        $fields = array(
+            'invoice_ref', 'document_type', 'series_ref', 'status', 'version', 'contact_name', 'contact_organisation', 'contact_email',
+            'contact_address', 'billing_mode', 'period_start', 'period_end', 'currency', 'subtotal_minor', 'tax_minor', 'total_minor',
+            'paid_minor', 'credited_minor', 'issued_at', 'issued_email_sent_at', 'due_at', 'voided_at', 'void_reason', 'reminder_count',
+            'last_reminded_at', 'created_at', 'updated_at',
+        );
+        $safe = array_intersect_key( $source, array_flip( $fields ) );
+        foreach ( array( 'version', 'subtotal_minor', 'tax_minor', 'total_minor', 'paid_minor', 'credited_minor', 'reminder_count' ) as $field ) if ( isset( $safe[ $field ] ) ) $safe[ $field ] = (int) $safe[ $field ];
+        $safe['balance_minor'] = MBS_Billing_Ledger::balance_minor( $invoice );
+        return $safe;
+    }
+
+    public function format_admin_invoice_item( $item ) {
+        if ( ! $item ) return null;
+        $source = (array) $item;
+        $safe = array_intersect_key( $source, array_flip( array( 'item_ref', 'item_type', 'booking_ref', 'service_date', 'description', 'quantity_milli', 'unit_amount_minor', 'line_total_minor', 'created_at' ) ) );
+        foreach ( array( 'quantity_milli', 'unit_amount_minor', 'line_total_minor' ) as $field ) if ( isset( $safe[ $field ] ) ) $safe[ $field ] = (int) $safe[ $field ];
+        return $safe;
+    }
+
+    public function format_admin_transaction( $transaction ) {
+        if ( ! $transaction ) return null;
+        $source = (array) $transaction;
+        $safe = array_intersect_key( $source, array_flip( array( 'transaction_ref', 'provider', 'provider_transaction_id', 'transaction_type', 'status', 'amount_minor', 'currency', 'occurred_at', 'receipt_sent_at', 'created_at' ) ) );
+        if ( isset( $safe['amount_minor'] ) ) $safe['amount_minor'] = (int) $safe['amount_minor'];
+        return $safe;
+    }
+
+    public function format_audit_entry( $entry ) {
+        return array(
+            'ref' => $entry->ref, 'action' => $entry->action, 'label' => MBS_Audit_Log::action_label( $entry->action ),
+            'details' => $entry->details, 'user_name' => $entry->user_name, 'created_at' => $entry->created_at,
+        );
+    }
+
+    private function get_safe_invoice_transactions( $invoice_id ) {
+        return array_map( array( $this, 'format_admin_transaction' ), MBS_Hirer_Portal::invoice_transactions( $invoice_id ) );
     }
 
     private function is_valid_date( $value ) {

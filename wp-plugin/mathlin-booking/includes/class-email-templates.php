@@ -87,9 +87,39 @@ class MBS_Email_Templates {
                 'body'    => "Hi {name},\n\nYour booking has been updated. Here are the current details:\n\nSpace: {space}\nDate: {date}\nTime: {time}\nAmount: {amount}\n\nIf you have any questions, contact us at {admin_email}.",
             ),
             'recurring_summary' => array(
-                'label'   => 'Recurring Booking Summary (to booker)',
-                'subject' => 'Recurring Booking Submitted – {ref}',
-                'body'    => "Hi {name},\n\nYour recurring booking request has been submitted.\n\nSpace: {space}\nTime: {time}\n\nEach booking is pending confirmation. We will review and confirm them shortly.\n\nIf you have any questions, contact us at {admin_email} or call {phone}.",
+                'label'   => 'Recurring Request Receipt (to booker)',
+                'subject' => 'Recurring Request Received – {ref}',
+                'body'    => "Hi {name},\n\nThanks — we’ve received your recurring request for {space}. The available dates included in your request are listed below.\n\nNothing is due at submission. This estimate is not an invoice and we will contact you after reviewing the request.",
+            ),
+            'series_confirmed' => array(
+                'label'   => 'Recurring Series Confirmed (to booker)',
+                'subject' => 'Recurring Booking Approved – {ref}',
+                'body'    => "Hi {name},\n\nYour recurring booking series has been approved. The confirmed schedule and billing arrangement are shown below.",
+            ),
+            'invoice_issued' => array(
+                'label'   => 'Consolidated Invoice Issued (to booker)',
+                'subject' => 'Invoice {invoice} – {amount}',
+                'body'    => "Hi {name},\n\nYour consolidated invoice {invoice} is ready. It covers the booking dates listed below and is due by {due_date}.",
+            ),
+            'invoice_reminder' => array(
+                'label'   => 'Consolidated Invoice Reminder (to booker)',
+                'subject' => 'Invoice Reminder – {invoice}',
+                'body'    => "Hi {name},\n\nJust a friendly reminder that {balance} remains outstanding on invoice {invoice}.",
+            ),
+            'invoice_payment_received' => array(
+                'label'   => 'Consolidated Invoice Payment Receipt (to booker)',
+                'subject' => 'Payment Received – {invoice}',
+                'body'    => "Hi {name},\n\nThank you — we have received {payment_amount} for invoice {invoice}. The remaining balance is {balance}.",
+            ),
+            'series_changed' => array(
+                'label'   => 'Recurring Series Changed (to booker)',
+                'subject' => 'Recurring Booking Updated – {ref}',
+                'body'    => "Hi {name},\n\nYour recurring booking series has been updated. The current schedule is shown below.",
+            ),
+            'series_cancelled' => array(
+                'label'   => 'Recurring Series Cancelled (to booker)',
+                'subject' => 'Recurring Booking Cancelled – {ref}',
+                'body'    => "Hi {name},\n\nYour recurring booking series has been cancelled. Any invoice changes or credits will appear separately in your account.",
             ),
             'modification_approved' => array(
                 'label'   => 'Change Request Approved (to booker)',

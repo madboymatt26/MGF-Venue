@@ -33,7 +33,10 @@ class MBS_OSM_Integration {
         add_action( 'mbs_booking_status_changed', array( $this, 'on_status_change' ), 10, 3 );
 
         // Fallback: also hook directly into the places where status is set to paid
-        add_action( 'mbs_booking_paid', array( $this, 'push_payment_to_osm' ), 10, 2 );
+	        add_action( 'mbs_booking_paid', array( $this, 'push_payment_to_osm' ), 10, 2 );
+	        add_action( 'mbs_process_osm_outbox', array( __CLASS__, 'deliver_outbox_event' ) );
+	        add_action( 'init', array( __CLASS__, 'schedule_outbox_recovery' ) );
+	        add_action( 'admin_notices', array( __CLASS__, 'outbox_health_notice' ) );
 
         // Admin settings tab
         add_action( 'wp_ajax_mbs_save_osm_settings', array( $this, 'ajax_save_settings' ) );
@@ -238,7 +241,7 @@ class MBS_OSM_Integration {
 
         if ( $code >= 400 ) {
             error_log( '[MBS-OSM] API HTTP ' . $code . ': ' . wp_remote_retrieve_body( $response ) );
-            return new \WP_Error( 'api_error', 'OSM API returned HTTP ' . $code, $data );
+            return new \WP_Error( 'api_error', 'OSM API returned HTTP ' . $code, array( 'response_code' => $code, 'body' => $data ) );
         }
 
         return $data;
@@ -285,7 +288,7 @@ class MBS_OSM_Integration {
      * @param object $booking  The booking object
      * @param int    $order_id Optional WooCommerce order ID
      */
-    public function push_payment_to_osm( $booking, $order_id = 0 ) {
+	    public function push_payment_to_osm( $booking, $order_id = 0 ) {
         $settings = self::get_settings();
 
         if ( ! $settings['enabled'] ) return;
@@ -331,8 +334,128 @@ class MBS_OSM_Integration {
             'Payment pushed to OSM (Section: ' . $settings['section_id'] . ', £' . number_format( $booking->amount, 2 ) . ')'
         );
 
-        error_log( '[MBS-OSM] Successfully pushed payment for ' . $booking->ref . ' to OSM.' );
-    }
+	        error_log( '[MBS-OSM] Successfully pushed payment for ' . $booking->ref . ' to OSM.' );
+	    }
+
+	    /** Inserted while the caller's refund transaction is still open. */
+	    public static function queue_refund_reversal( $booking, $invoice_ref, $amount_minor, $order_id, $refund_id, $reversal_kind = '' ) {
+	        global $wpdb;
+	        $settings = self::get_settings();
+	        if ( ! $settings['enabled'] ) return 0;
+	        $amount = MBS_Money::decimal( (int) $amount_minor );
+	        if ( is_wp_error( $amount ) ) return $amount;
+	        $booking_minor = MBS_Money::from_decimal_string( (string) $booking->amount );
+	        $kind = in_array( $reversal_kind, array('partial','full'), true ) ? $reversal_kind : ( ! is_wp_error( $booking_minor ) && (int) $amount_minor >= (int) $booking_minor ? 'full' : 'partial' );
+	        $payload = self::build_payload( $booking );
+	        $payload['amount'] = $amount;
+	        $payload['type'] = 'expenditure';
+	        $payload['description'] = 'Refund: ' . $payload['description'];
+	        $payload['order_id'] = (int) $order_id;
+	        $payload['refund_id'] = (int) $refund_id;
+	        $payload['reversal_kind'] = $kind;
+	        $event_ref = 'osm-refund:' . sanitize_text_field( $invoice_ref ) . ':' . (int) $refund_id . ':' . sanitize_text_field( $booking->ref );
+	        $table = $wpdb->prefix . MBS_OSM_OUTBOX_TABLE;
+	        $inserted = $wpdb->insert( $table, array(
+	            'event_ref' => $event_ref, 'booking_ref' => $booking->ref, 'invoice_ref' => $invoice_ref,
+	            'order_id' => (int) $order_id, 'refund_id' => (int) $refund_id, 'amount_minor' => (int) $amount_minor,
+	            'reversal_kind' => $kind, 'payload_json' => wp_json_encode( $payload ), 'status' => 'pending',
+	            'attempts' => 0, 'created_at' => current_time( 'mysql' ), 'updated_at' => current_time( 'mysql' ),
+	        ) );
+	        if ( $inserted === false ) {
+	            $existing = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$table} WHERE event_ref=%s", $event_ref ) );
+	            if ( $existing && (int)$existing->amount_minor === (int)$amount_minor && (int)$existing->refund_id === (int)$refund_id ) return (int)$existing->id;
+	            return new WP_Error( 'osm_outbox_insert_failed', 'Could not durably queue the OSM reversal: ' . $wpdb->last_error );
+	        }
+	        return (int) $wpdb->insert_id;
+	    }
+
+	    public static function deliver_outbox_event( $event_id ) {
+	        global $wpdb;
+	        $table = $wpdb->prefix . MBS_OSM_OUTBOX_TABLE;
+	        $event = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$table} WHERE id=%d", (int)$event_id ) );
+	        if ( ! $event || ! in_array( $event->status, array( 'pending','retry' ), true ) ) return false;
+	        $claimed = $wpdb->query( $wpdb->prepare(
+	            "UPDATE {$table} SET status='processing',attempts=attempts+1,updated_at=%s WHERE id=%d AND status=%s",
+	            current_time('mysql'), (int)$event->id, $event->status
+	        ) );
+	        if ( $claimed !== 1 ) return false;
+	        $event = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$table} WHERE id=%d", (int)$event->id ) );
+	        $payload = json_decode( $event->payload_json, true );
+	        $settings = self::get_settings();
+	        if ( ! is_array( $payload ) || empty( $settings['section_id'] ) ) {
+	            return self::mark_manual_reconciliation( $event, 'OSM reversal payload or section configuration is missing.', null );
+	        }
+	        if ( $settings['sandbox_mode'] ) {
+	            $wpdb->update( $table, array( 'status'=>'delivered','delivered_at'=>current_time('mysql'),'updated_at'=>current_time('mysql'),'last_error'=>'' ), array( 'id'=>(int)$event->id ) );
+	            MBS_Audit_Log::log( $event->booking_ref, 'osm_sandbox_refund', 'OSM sandbox: refund reversal payload logged (' . MBS_Money::format((int)$event->amount_minor) . ').' );
+	            return true;
+	        }
+	        $result = self::api_call( 'POST', sprintf( self::OSM_FINANCE_ADD_RECORD, $settings['section_id'] ), $payload );
+	        if ( ! is_wp_error( $result ) ) {
+	            $wpdb->update( $table, array( 'status'=>'delivered','delivered_at'=>current_time('mysql'),'updated_at'=>current_time('mysql'),'last_error'=>'' ), array( 'id'=>(int)$event->id ) );
+	            MBS_Audit_Log::log( $event->booking_ref, 'osm_refund_synced', 'Refund reversal ' . $event->event_ref . ' pushed to OSM (' . MBS_Money::format((int)$event->amount_minor) . ').' );
+	            return true;
+	        }
+	        $data = $result->get_error_data();
+	        $code = is_array( $data ) && isset( $data['response_code'] ) ? (int)$data['response_code'] : 0;
+	        // Network errors and timeouts are ambiguous: without a remote
+	        // idempotency contract, blind retry could create duplicate spending.
+	        if ( $code === 0 || ( $code >= 400 && $code < 500 ) || (int)$event->attempts >= 5 ) {
+	            return self::mark_manual_reconciliation( $event, $result->get_error_message(), $code ?: null );
+	        }
+	        $backoff = array( 60, 300, 1800, 7200 );
+	        $delay = $backoff[min(count($backoff)-1,max(0,(int)$event->attempts-1))];
+	        $next = gmdate( 'Y-m-d H:i:s', time() + $delay );
+	        $wpdb->update( $table, array( 'status'=>'retry','next_attempt_at'=>$next,'last_error'=>$result->get_error_message(),'response_code'=>$code,'updated_at'=>current_time('mysql') ), array( 'id'=>(int)$event->id ) );
+	        wp_schedule_single_event( time()+$delay, 'mbs_process_osm_outbox', array( (int)$event->id ) );
+	        MBS_Audit_Log::log( $event->booking_ref, 'osm_refund_retry', 'OSM reversal ' . $event->event_ref . ' scheduled for bounded retry.' );
+	        return false;
+	    }
+
+	    private static function mark_manual_reconciliation( $event, $message, $response_code ) {
+	        global $wpdb;
+	        $wpdb->update( $wpdb->prefix.MBS_OSM_OUTBOX_TABLE, array(
+	            'status'=>'manual_reconciliation','last_error'=>sanitize_text_field($message),'response_code'=>$response_code,'updated_at'=>current_time('mysql')
+	        ), array( 'id'=>(int)$event->id ) );
+	        MBS_Audit_Log::log( $event->booking_ref, 'osm_refund_reconcile', 'OSM reversal ' . $event->event_ref . ' requires manual reconciliation: ' . sanitize_text_field($message) );
+	        return false;
+	    }
+
+	    public static function schedule_outbox_recovery() {
+	        global $wpdb;
+	        $table = $wpdb->prefix . MBS_OSM_OUTBOX_TABLE;
+	        if ( $wpdb->get_var( $wpdb->prepare('SHOW TABLES LIKE %s',$table) ) !== $table ) return;
+	        $ids = $wpdb->get_col( "SELECT id FROM {$table} WHERE status='pending' OR (status='retry' AND (next_attempt_at IS NULL OR next_attempt_at<=UTC_TIMESTAMP())) ORDER BY id ASC LIMIT 20" );
+	        foreach ( $ids as $id ) if ( ! wp_next_scheduled( 'mbs_process_osm_outbox', array((int)$id) ) ) wp_schedule_single_event( time()+5, 'mbs_process_osm_outbox', array((int)$id) );
+	    }
+
+	    public static function outbox_health_notice() {
+	        if ( ! current_user_can( 'manage_options' ) ) return;
+	        global $wpdb; $table=$wpdb->prefix.MBS_OSM_OUTBOX_TABLE;
+	        if ( $wpdb->get_var( $wpdb->prepare('SHOW TABLES LIKE %s',$table) ) !== $table ) return;
+	        $count=(int)$wpdb->get_var("SELECT COUNT(*) FROM {$table} WHERE status='manual_reconciliation'");
+	        if($count)echo '<div class="notice notice-error"><p><strong>MGF Venue OSM reconciliation required.</strong> '.esc_html($count).' refund reversal(s) need administrator review before another OSM entry is attempted.</p></div>';
+	    }
+
+	    public static function retry_outbox( $event_id ) {
+	        if ( ! current_user_can('manage_options') ) return new WP_Error('forbidden','Administrator permission is required.');
+	        global $wpdb; $table=$wpdb->prefix.MBS_OSM_OUTBOX_TABLE;
+	        $event=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$table} WHERE id=%d",(int)$event_id));
+	        if(!$event||$event->status!=='manual_reconciliation')return new WP_Error('invalid_outbox_state','Only reconciliation events can be retried explicitly.');
+	        $wpdb->update($table,array('status'=>'pending','next_attempt_at'=>null,'updated_at'=>current_time('mysql')),array('id'=>(int)$event->id));
+	        MBS_Audit_Log::log($event->booking_ref,'osm_refund_admin_retry','Administrator '.get_current_user_id().' retried '.$event->event_ref.'.');
+	        return self::deliver_outbox_event((int)$event->id);
+	    }
+
+	    public static function resolve_outbox( $event_id, $note ) {
+	        if ( ! current_user_can('manage_options') ) return new WP_Error('forbidden','Administrator permission is required.');
+	        global $wpdb; $table=$wpdb->prefix.MBS_OSM_OUTBOX_TABLE;
+	        $event=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$table} WHERE id=%d",(int)$event_id));
+	        if(!$event||$event->status!=='manual_reconciliation')return new WP_Error('invalid_outbox_state','Only reconciliation events can be resolved.');
+	        $wpdb->update($table,array('status'=>'resolved','resolved_at'=>current_time('mysql'),'resolved_by'=>get_current_user_id(),'last_error'=>sanitize_text_field($note),'updated_at'=>current_time('mysql')),array('id'=>(int)$event->id));
+	        MBS_Audit_Log::log($event->booking_ref,'osm_refund_resolved','Administrator '.get_current_user_id().' resolved '.$event->event_ref.': '.sanitize_text_field($note));
+	        return true;
+	    }
 
     /**
      * Hook: when any booking status changes, check if it's now PAID.

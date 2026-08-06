@@ -1,4 +1,4 @@
-# AI-CONTEXT.md — MGF Venue (v3.18.0)
+# AI-CONTEXT.md — MGF Venue (v3.21.0)
 
 This document is designed for LLMs and AI agents to read before modifying this codebase. It maps the architecture, file relationships, and critical business logic rules.
 
@@ -23,6 +23,12 @@ WordPress plugin using custom database tables (not custom post types). No extern
 | `wp_mathlin_audit_log` | Action history per booking |
 | `wp_mathlin_email_queue` | Failed emails queued for retry |
 | `wp_mathlin_mod_requests` | Modification/cancellation requests |
+| `wp_mathlin_booking_series` | First-class recurring-series snapshot, schedule, terms and billing policy |
+| `wp_mathlin_invoices` | Immutable consolidated invoice/credit documents; money is integer minor units |
+| `wp_mathlin_invoice_items` | Immutable invoice charge/credit lines and occurrence snapshots |
+| `wp_mathlin_payment_transactions` | Idempotent payment/refund ledger |
+| `wp_mathlin_payment_reservations` | Versioned invoice/order checkout ownership and reconciliation state |
+| `wp_mathlin_billing_allocations` | Canonical active/historic occurrence-to-invoice allocation |
 
 ### WordPress Options (wp_options)
 
@@ -539,6 +545,78 @@ File: `includes/class-woo-ux.php`
 
 ---
 
+## Recurring-Series and Consolidated-Billing Contracts (v3.21.0)
+
+### Remediated invariants (schema 9)
+
+- An invoice has one current reservation row and at most one authoritative Woo order owner per invoice-version balance generation. Only unbound active claims expire. Bound/reconciliation claims cannot be replaced; captured/refunded claims can be superseded only after a committed invoice-version change leaves a positive balance. Expiry is UTC.
+- Payability is centralized for issued, part-paid, and overdue positive balances. A normal online order must exactly equal its reservation amount/currency/generation and contain one immutable line with no coupon, discount or fee. Mismatched captures enter reconciliation without becoming partial ledger payments. Explicit manual/offline partial ledger payments remain separate.
+- Refunds use `woocommerce_order_refunded`, link to the original payment, replay without another note/event before allocation recalculation, reject conflicting allocation reuse, include released cancellation-credit allocations, and do not reopen cancelled or unaffected occurrences.
+- Recurring creation and cancellation plus required credits share database transactions. Email, Home Assistant, and other irreversible work follows commit.
+- Booking-domain mutation and deletion reject any occurrence with invoice items, allocations, or transactions. Closed-period additions use linked supplemental invoices.
+- Catch-up uses starvation-free keyset pagination. Financial and REST idempotency keys conflict on a different canonical operation, target, or payload.
+- Legacy registration means eligible, not adopted. Registration, migration and adoption share `MBS_Database`'s central predicate across paid/deposit/credited/refunded/cancelled/archived state, legacy paid amounts, invoice items, released/active allocations, payment/refund transactions and credit notes. Explicit adoption records timestamp, administrator and schema version/state without clearing that baseline.
+- Migration state is running, failed, or complete. A connection-owned advisory lock serializes workers; every material migration result is checked, then canonical temporary-table manifests verify every column definition and exact index semantics plus table collation/engine. Structural and financial-data verification must both pass before the marker advances. Failure retains the prior version, releases the lock, stays retryable and produces an administrator notice.
+
+- Occurrence rows remain authoritative for availability, calendar, Home
+  Assistant, heating/access control and occurrence-level changes.
+- `MBS_Series` is authoritative for recurring approval, schedule metadata,
+  skipped-date reasons, communication state and billing policy.
+- New external series start as `monthly` + `invoice_managed`, with
+  `deposit_policy=none`; administrators can pause or switch to manual billing.
+- Existing `series_id` groups are registered as `legacy_per_occurrence` with
+  `metadata_incomplete=1`. Never infer skipped dates, historic terms acceptance
+  or payment intent, and never re-invoice paid/deposit-paid legacy rows.
+- `MBS_Recurrence::weekly_dates()` is the only recurrence generator. It uses
+  local `DateTimeImmutable`, permits one calendar year inclusive/53 dates and
+  rejects recurring multi-day requests.
+- New invoice-domain money is always integer minor units. Never pass floats to
+  `MBS_Money`, `MBS_Billing_Ledger` or invoice-payment methods.
+- Issued invoice/item data is immutable. Use void, credit and additive payment
+  or refund transactions; never delete issued documents or rewrite history.
+- A billing-relevant edit or hard delete is rejected whenever the occurrence
+  has invoice items, allocations or transactions, including released/credited
+  history. Cancel it through the recurring-series service (which creates an
+	  immutable credit), then create an explicit corrected replacement.
+- Non-financial modification fields such as attendee count may be approved
+	  without recalculating price, status or issued financial history.
+- `mathlin_billing_allocations.active_booking_ref` is the canonical uniqueness
+  guard preventing an occurrence from being actively charged twice.
+- `mathlin_payment_reservations.invoice_owner` and `order_owner` are the SQL
+  uniqueness guards for checkout ownership. External gateways must still
+  provide provider-side idempotent capture; chargebacks are visible only when
+  the gateway maps them to WooCommerce refunds/hooks.
+- Financial reporting bases: legacy billed/collected values use occurrence
+  service date because legacy rows lack invoice/payment timestamps; first-class
+	  invoice lines use service date, credit notes use issue date, and
+	  payments/refunds use transaction date;
+  outstanding is a current all-date debtor balance. UI labels must preserve
+  those distinctions.
+- The Docker integration harness is authoritative for real MariaDB/Woo/process
+  behavior and the PHP 7.4/8.0/8.2 matrix. Local fake-database and source tests
+  are not substitutes; do not claim the harness passed unless it was run.
+- Online and offline payments operate at invoice level. Only occurrences on a
+  fully settled invoice become `paid` for access gating; uninvoiced future
+  occurrences stay `confirmed`.
+- Occurrence payment chasing applies only to one-offs and explicitly legacy
+  per-occurrence series. Consolidated series receive at most one reminder per
+  invoice.
+- Customer email is consolidated and customer-branded. REST/MCP
+  `notify_hirer` defaults to false. Never expose payment-token hashes,
+  idempotency hashes or bearer payment tokens in read responses.
+- Typed integration writes require the WordPress capability plus a stable
+  idempotency key and expected status/version. Read current state first.
+- Financial analytics/accounting exports must combine invoice records with
+	  only bookings that have no historic billing allocation, or values will be
+	  double counted.
+- OSM income is paired with partial/full refund expenditure events inserted into
+	  `mathlin_osm_outbox` in the same transaction as the refund. Each event has a
+	  stable identity and delivered/retry/manual-reconciliation lifecycle. Definite
+	  server failures use bounded backoff; ambiguous responses stop for audited
+	  administrator reconciliation rather than risking duplicate expenditure.
+
+---
+
 ## Common Modification Patterns
 
 ### Adding a new setting
@@ -580,7 +658,7 @@ File: `includes/class-woo-ux.php`
 
 ---
 
-## Database Schema (v3.12.1)
+## Database Schema (v3.21.0)
 
 ### wp_mathlin_bookings
 | Column | Type | Notes |
@@ -624,4 +702,10 @@ File: `includes/class-woo-ux.php`
 | created_at | DATETIME | |
 | updated_at | DATETIME | Auto-updated |
 
-> Migrations are additive and idempotent in `MBS_Database::maybe_run_migrations()` — each new column is guarded by a `SHOW COLUMNS LIKE` check, so they run safely on existing installs when `MBS_VERSION` changes.
+The first-class invoice, item, transaction, allocation, reservation and OSM
+outbox domains use integer minor units for every money column. The series table
+intentionally keeps legacy decimal price snapshots because booking occurrence
+amounts are a backward-compatibility contract. No new table uses foreign keys;
+dbDelta-compatible unique keys and transactional services enforce invariants.
+
+> Migrations are additive and idempotent in `MBS_Database::create_tables()` and are gated by `MBS_DB_VERSION`, which may advance independently of the public plugin version. The migration smoke harness runs the same schema creation twice.

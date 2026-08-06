@@ -22,3 +22,8 @@ wp-admin/
 gilbertweb-connector/
 gilbertweb-connector-waiting-list-manager/
 gilbertweb-ref
+
+# Disposable integration-test state and diagnostics
+tests/integration/.cache/
+tests/integration/.worker-*
+tests/integration/.exit-*

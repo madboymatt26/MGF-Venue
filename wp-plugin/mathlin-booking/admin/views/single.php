@@ -211,6 +211,10 @@ $kitchen_price = MBS_Bookings::get_tiered_kitchen_price( $pricing_tier );
         <div class="nms-card nms-actions-card">
             <div class="nms-card-header"><h2>Actions</h2></div>
             <div class="nms-action-list">
+                <?php
+                $billing_treatment = MBS_Series::billing_treatment_for_booking( $booking );
+                $uses_consolidated_billing = in_array( $billing_treatment, array( 'manual_consolidated', 'invoice_managed', 'none' ), true );
+                ?>
                 <?php if ( $booking->status === 'pending' ) : ?>
                     <button class="button button-primary nms-btn-confirm" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">✓ Confirm Booking</button>
                 <?php endif; ?>
@@ -220,6 +224,9 @@ $kitchen_price = MBS_Bookings::get_tiered_kitchen_price( $pricing_tier );
                     $dep_amount   = MBS_Bookings::calculate_deposit( (float) $booking->amount );
                     $bal_amount   = (float) $booking->amount - (float) ( $booking->deposit_paid ?? 0 );
                     ?>
+                    <?php if ( $uses_consolidated_billing ) : ?>
+                        <div class="notice notice-warning inline"><p>Occurrence payment actions and reminders are suspended for this series. <?php if ( ! empty( $booking->series_id ) ) : ?><a href="<?php echo esc_url( admin_url( 'admin.php?page=mathlin-series&ref=' . rawurlencode( $booking->series_id ) ) ); ?>">Manage its consolidated invoices</a>.<?php endif; ?></p></div>
+                    <?php else : ?>
                     <?php if ( $booking->status === 'confirmed' && $dep_settings['enabled'] && ! MBS_Bookings::requires_full_payment( $booking->booking_date ) ) : ?>
                         <button class="button nms-btn-deposit-paid" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1" style="background:#f59e0b;color:#fff;border-color:#d97706;">💰 Mark Deposit Paid (£<?php echo number_format( $dep_amount, 2 ); ?>)</button>
                     <?php endif; ?>
@@ -231,11 +238,12 @@ $kitchen_price = MBS_Bookings::get_tiered_kitchen_price( $pricing_tier );
                     <?php if ( $booking->status === 'deposit_paid' ) : ?>
                         <small class="nms-muted" style="display:block;margin-top:4px;">Deposit received: &pound;<?php echo number_format( (float) $booking->deposit_paid, 2 ); ?> — Balance outstanding: &pound;<?php echo number_format( (float) $booking->amount - (float) $booking->deposit_paid, 2 ); ?></small>
                     <?php endif; ?>
+                    <?php endif; ?>
                 <?php endif; ?>
-                <?php if ( $booking->status === 'paid' ) : ?>
+                <?php if ( $booking->status === 'paid' && ! $uses_consolidated_billing ) : ?>
                     <button class="button nms-btn-unpaid" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">↩ Undo Paid</button>
                 <?php endif; ?>
-                <?php if ( $booking->status === 'deposit_paid' ) : ?>
+                <?php if ( $booking->status === 'deposit_paid' && ! $uses_consolidated_billing ) : ?>
                     <button class="button nms-btn-undo-deposit" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">↩ Undo Deposit</button>
                 <?php endif; ?>
                 <?php if ( ! in_array( $booking->status, array( 'cancelled', 'archived', 'paid', 'deposit_paid' ) ) ) : ?>

@@ -9,6 +9,10 @@ if ( ! defined( 'ABSPATH' ) ) exit;
  */
 class MBS_Accounting_Export {
 
+    private static function write_csv( $output, $fields ) {
+        fputcsv( $output, $fields, ',', '"', '\\' );
+    }
+
     public function init() {
         add_action( 'wp_ajax_mbs_export_accounting', array( $this, 'handle_export' ) );
     }
@@ -34,10 +38,7 @@ class MBS_Accounting_Export {
             'exclude_archived' => false,
         ) );
 
-        // Filter to only invoiceable statuses
-        $bookings = array_filter( $bookings, function( $b ) {
-            return in_array( $b->status, array( 'confirmed', 'deposit_paid', 'paid', 'archived' ) );
-        } );
+        $records = self::normalise_records( $bookings, $date_from, $date_to );
 
         $filename = 'invoices-' . $format . '-' . date( 'Y-m-d' ) . '.csv';
 
@@ -50,13 +51,13 @@ class MBS_Accounting_Export {
 
         switch ( $format ) {
             case 'sage':
-                self::export_sage( $output, $bookings );
+                self::export_sage( $output, $records );
                 break;
             case 'quickbooks':
-                self::export_quickbooks( $output, $bookings );
+                self::export_quickbooks( $output, $records );
                 break;
             default:
-                self::export_xero( $output, $bookings );
+                self::export_xero( $output, $records );
                 break;
         }
 
@@ -64,34 +65,73 @@ class MBS_Accounting_Export {
         exit;
     }
 
+    /** Combine legacy unallocated bookings and the immutable invoice domain once. */
+    private static function normalise_records( $bookings, $date_from, $date_to ) {
+        global $wpdb;
+        $allocation_table = $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE;
+        $allocated = array_fill_keys( $wpdb->get_col( "SELECT DISTINCT booking_ref FROM {$allocation_table}" ), true );
+        $records = array();
+        $bank = MBS_Bookings::get_bank_details();
+        foreach ( $bookings as $booking ) {
+            if ( ! in_array( $booking->status, array( 'confirmed', 'deposit_paid', 'paid', 'archived' ), true ) || isset( $allocated[ $booking->ref ] ) ) continue;
+            $records[] = (object) array(
+                'contact_name' => $booking->organisation ?: $booking->name, 'email' => $booking->email,
+                'invoice_number' => $booking->invoice_number, 'invoice_date' => $booking->created_at,
+                'due_date' => wp_date( 'Y-m-d', strtotime( $booking->created_at . ' +' . (int) $bank['payment_days'] . ' days' ) ),
+                'total_decimal' => number_format( (float) $booking->amount, 2, '.', '' ),
+                'description' => $booking->space . ' hire – ' . wp_date( 'j M Y', strtotime( $booking->booking_date ) ),
+                'booking_ref' => $booking->ref, 'purpose' => $booking->purpose,
+                'document_type' => 'invoice', 'currency' => 'GBP',
+            );
+        }
+
+        $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
+        $item_table = $wpdb->prefix . MBS_INVOICE_ITEM_TABLE;
+        $where = array( "i.status NOT IN ('draft','void')" ); $params = array();
+	        $date_basis="CASE WHEN i.document_type='credit_note' THEN COALESCE(DATE(i.issued_at),DATE(i.created_at)) ELSE COALESCE(it.service_date,DATE(i.issued_at),DATE(i.created_at)) END";
+	        if ( $date_from ) { $where[] = $date_basis.' >= %s'; $params[] = $date_from; }
+	        if ( $date_to ) { $where[] = $date_basis.' <= %s'; $params[] = $date_to; }
+	        $sql = "SELECT i.*, it.item_ref, it.booking_ref, it.description, it.line_total_minor, it.service_date, {$date_basis} AS accounting_date
+	                FROM {$invoice_table} i INNER JOIN {$item_table} it ON it.invoice_id = i.id
+	                WHERE " . implode( ' AND ', $where ) . ' ORDER BY accounting_date ASC, i.id ASC, it.id ASC';
+        $rows = $params ? $wpdb->get_results( $wpdb->prepare( $sql, $params ) ) : $wpdb->get_results( $sql );
+        foreach ( $rows as $row ) {
+            $records[] = (object) array(
+                'contact_name' => $row->contact_organisation ?: $row->contact_name, 'email' => $row->contact_email,
+                'invoice_number' => $row->invoice_ref, 'invoice_date' => $row->issued_at ?: $row->created_at,
+                'due_date' => $row->due_at ?: $row->issued_at, 'total_decimal' => MBS_Money::decimal( (int) $row->line_total_minor ),
+                'description' => $row->description, 'booking_ref' => $row->booking_ref ?: $row->item_ref,
+                'purpose' => $row->document_type === 'credit_note' ? 'Credit note' : 'Venue hire',
+                'document_type' => $row->document_type, 'currency' => strtoupper( (string)$row->currency ),
+            );
+        }
+        return $records;
+    }
+
     /**
      * Xero CSV format.
      */
-    private static function export_xero( $output, $bookings ) {
-        $bank = MBS_Bookings::get_bank_details();
+    private static function export_xero( $output, $records ) {
 
-        fputcsv( $output, array(
+        self::write_csv( $output, array(
             '*ContactName', 'EmailAddress', '*InvoiceNumber', '*InvoiceDate',
             '*DueDate', 'Total', 'Description', 'Quantity', 'UnitAmount',
             'AccountCode', '*Currency', 'TaxType',
         ) );
 
-        foreach ( $bookings as $b ) {
-            $due_date = date( 'd/m/Y', strtotime( $b->created_at . ' +' . $bank['payment_days'] . ' days' ) );
-            $desc     = $b->space . ' hire – ' . date( 'j M Y', strtotime( $b->booking_date ) );
-
-            fputcsv( $output, array(
-                $b->organisation ?: $b->name,
-                $b->email,
-                $b->invoice_number,
-                date( 'd/m/Y', strtotime( $b->created_at ) ),
-                $due_date,
-                number_format( $b->amount, 2, '.', '' ),
-                $desc,
+        foreach ( $records as $record ) {
+            // Xero's invoice-shaped CSV represents a credit as a negative line.
+            $amount = $record->document_type === 'credit_note'
+                ? '-' . ltrim( $record->total_decimal, '-' )
+                : ltrim( $record->total_decimal, '-' );
+            self::write_csv( $output, array(
+                $record->contact_name, $record->email, $record->invoice_number,
+                date( 'd/m/Y', strtotime( $record->invoice_date ) ), date( 'd/m/Y', strtotime( $record->due_date ) ),
+                $amount, $record->description,
                 1,
-                number_format( $b->amount, 2, '.', '' ),
+                $amount,
                 '200', // Sales account code
-                'GBP',
+                isset( $record->currency ) && $record->currency ? $record->currency : 'GBP',
                 'No VAT',
             ) );
         }
@@ -100,23 +140,23 @@ class MBS_Accounting_Export {
     /**
      * Sage CSV format.
      */
-    private static function export_sage( $output, $bookings ) {
-        $bank = MBS_Bookings::get_bank_details();
+    private static function export_sage( $output, $records ) {
 
-        fputcsv( $output, array(
+        self::write_csv( $output, array(
             'Type', 'Account Reference', 'Nominal A/C Ref', 'Date',
             'Reference', 'Details', 'Net Amount', 'Tax Code', 'Tax Amount',
         ) );
 
-        foreach ( $bookings as $b ) {
-            fputcsv( $output, array(
-                'SI', // Sales Invoice
-                $b->invoice_number,
+        foreach ( $records as $record ) {
+            $is_credit = $record->document_type === 'credit_note';
+            self::write_csv( $output, array(
+                $is_credit ? 'SC' : 'SI', // Sales Credit / Sales Invoice
+                $record->invoice_number,
                 '4000', // Sales nominal code
-                date( 'd/m/Y', strtotime( $b->created_at ) ),
-                $b->ref,
-                $b->space . ' hire – ' . $b->name,
-                number_format( $b->amount, 2, '.', '' ),
+                date( 'd/m/Y', strtotime( $record->invoice_date ) ),
+                $record->booking_ref,
+                $record->description,
+                ltrim( $record->total_decimal, '-' ),
                 'T0', // Zero-rated (charity)
                 '0.00',
             ) );
@@ -126,29 +166,28 @@ class MBS_Accounting_Export {
     /**
      * QuickBooks CSV format.
      */
-    private static function export_quickbooks( $output, $bookings ) {
-        $bank = MBS_Bookings::get_bank_details();
+    private static function export_quickbooks( $output, $records ) {
 
-        fputcsv( $output, array(
-            'InvoiceNo', 'Customer', 'InvoiceDate', 'DueDate',
+        self::write_csv( $output, array(
+            'TransactionType', 'InvoiceNo', 'Customer', 'InvoiceDate', 'DueDate',
             'Item', 'ItemDescription', 'ItemQuantity', 'ItemRate',
             'ItemAmount', 'Memo',
         ) );
 
-        foreach ( $bookings as $b ) {
-            $due_date = date( 'm/d/Y', strtotime( $b->created_at . ' +' . $bank['payment_days'] . ' days' ) );
-
-            fputcsv( $output, array(
-                $b->invoice_number,
-                $b->organisation ?: $b->name,
-                date( 'm/d/Y', strtotime( $b->created_at ) ),
-                $due_date,
+        foreach ( $records as $record ) {
+            $is_credit = $record->document_type === 'credit_note';
+            self::write_csv( $output, array(
+                $is_credit ? 'Credit Memo' : 'Invoice',
+                $record->invoice_number,
+                $record->contact_name,
+                date( 'm/d/Y', strtotime( $record->invoice_date ) ),
+                date( 'm/d/Y', strtotime( $record->due_date ) ),
                 'Venue Hire',
-                $b->space . ' – ' . date( 'M j, Y', strtotime( $b->booking_date ) ),
+                $record->description,
                 1,
-                number_format( $b->amount, 2, '.', '' ),
-                number_format( $b->amount, 2, '.', '' ),
-                $b->purpose,
+                ltrim( $record->total_decimal, '-' ),
+                ltrim( $record->total_decimal, '-' ),
+                $record->purpose,
             ) );
         }
     }
