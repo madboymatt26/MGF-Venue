@@ -61,6 +61,7 @@ require_once MBS_PLUGIN_DIR . 'includes/class-hirer-portal.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-accounting-export.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-osm-integration.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-logo-asset.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-series-approval-service.php';
 require_once MBS_PLUGIN_DIR . 'includes/invoice/class-issued-invoice-snapshot.php';
 require_once MBS_PLUGIN_DIR . 'includes/invoice/class-current-account-state.php';
 require_once MBS_PLUGIN_DIR . 'includes/invoice/class-invoice-document-view-model.php';

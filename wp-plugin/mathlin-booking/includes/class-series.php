@@ -358,12 +358,54 @@ class MBS_Series {
      * Only pending occurrences transition; all financial/history statuses are
      * preserved exactly as they are.
      */
-    public static function approve( $series_ref, $expected_status, $expected_version, $notify_hirer = true ) {
+    public static function approve( $series_ref, $expected_status, $expected_version, $notify_hirer = true, $billing_config = null ) {
         global $wpdb;
         $series_table  = $wpdb->prefix . MBS_SERIES_TABLE;
         $booking_table = $wpdb->prefix . MBS_TABLE;
         $series_ref    = sanitize_text_field( $series_ref );
 
+        // Pre-flight: check if this is a chargeable series that requires reviewed billing
+        $preflight_series = self::get( $series_ref );
+        if ( $preflight_series && $preflight_series->status === 'pending' ) {
+            $is_chargeable = ! $preflight_series->scout_use
+                && $preflight_series->billing_mode !== 'none'
+                && ( $billing_config === null || $billing_config['billing_mode'] ?? '' ) !== 'none';
+
+            if ( $is_chargeable ) {
+                // If inline billing_config provided (MCP/REST), delegate to Approval_Service
+                if ( $billing_config !== null ) {
+                    return MBS_Series_Approval_Service::approve_with_billing(
+                        $series_ref, $billing_config, $expected_version, $notify_hirer
+                    );
+                }
+
+                // Otherwise, require a persisted billing review
+                $has_review = ! empty( $preflight_series->billing_reviewed_at )
+                    && (int) ( $preflight_series->billing_reviewed_version ?? 0 ) === (int) $preflight_series->version;
+
+                if ( ! $has_review ) {
+                    return new WP_Error(
+                        'billing_configuration_required',
+                        'A chargeable series requires explicit billing configuration review before approval. Use the review-and-approve workflow or provide billing_config.'
+                    );
+                }
+
+                // Has persisted review — delegate to Approval_Service with current config
+                $current_config = array(
+                    'billing_mode'      => $preflight_series->billing_mode,
+                    'billing_treatment' => $preflight_series->billing_treatment,
+                    'payment_method'    => $preflight_series->payment_method,
+                    'invoice_lead_days' => (int) $preflight_series->invoice_lead_days,
+                    'payment_terms_days' => (int) $preflight_series->payment_terms_days,
+                    'billing_schedule'  => json_decode( $preflight_series->billing_schedule_json ?: '[]', true ),
+                );
+                return MBS_Series_Approval_Service::approve_with_billing(
+                    $series_ref, $current_config, $expected_version, $notify_hirer
+                );
+            }
+        }
+
+        // ── No-charge / scout path (existing behaviour preserved) ──────────
         if ( $wpdb->query( 'START TRANSACTION' ) === false ) return new WP_Error( 'transaction_start_failed', 'Could not start the series-approval transaction.' );
         $series = $wpdb->get_row( $wpdb->prepare(
             "SELECT * FROM {$series_table} WHERE series_ref = %s FOR UPDATE",
