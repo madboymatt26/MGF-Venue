@@ -901,3 +901,105 @@ jQuery(function ($) {
         });
     }
 });
+
+// ── Review & Approve Modal ─────────────────────────────────────────────────
+(function($) {
+    'use strict';
+
+    // Open the review modal
+    $(document).on('click', '.nms-btn-review-approve', function() {
+        var isScout = $(this).data('scout') === 1 || $(this).data('scout') === '1';
+        if (isScout) {
+            // Scout/no-charge: approve directly without billing review
+            var series = $(this).data('series');
+            var version = $(this).data('expected-version');
+            if (!confirm('Approve this no-charge Scout series?')) return;
+            $.post(MBS_Admin.ajax_url, {
+                action: 'mbs_approve_series_with_billing',
+                nonce: MBS_Admin.nonce,
+                series_ref: series,
+                expected_version: version,
+                billing_mode: 'none',
+                billing_treatment: 'none',
+                payment_method: 'none'
+            }, function(res) {
+                if (res.success) location.reload();
+                else alert(res.data || 'Approval failed.');
+            });
+            return;
+        }
+        $('#mbs-approval-modal').show();
+    });
+
+    // Close modal
+    $(document).on('click', '#mbs-cancel-approval', function() {
+        $('#mbs-approval-modal').hide();
+    });
+
+    // Show/hide term dates based on billing mode
+    $(document).on('change', '#mbs-approval-form [name="billing_mode"]', function() {
+        var showTerms = $(this).val() === 'termly';
+        $('.mbs-term-dates-row').toggle(showTerms);
+    });
+
+    // Add term row
+    $(document).on('click', '#mbs-add-term', function() {
+        var idx = $('#mbs-term-list .mbs-term-row').length + 1;
+        var html = '<div class="mbs-term-row" style="display:flex;gap:8px;align-items:center;margin:6px 0;">' +
+            '<input type="text" name="term_name_' + idx + '" placeholder="Term name" style="width:120px;">' +
+            '<input type="date" name="term_start_' + idx + '">' +
+            '<span>to</span>' +
+            '<input type="date" name="term_end_' + idx + '">' +
+            '<button type="button" class="button mbs-remove-term" style="color:#dc3545;">&times;</button>' +
+            '</div>';
+        $('#mbs-term-list').append(html);
+    });
+    $(document).on('click', '.mbs-remove-term', function() { $(this).closest('.mbs-term-row').remove(); });
+
+    // Submit approval
+    $(document).on('submit', '#mbs-approval-form', function(event) {
+        event.preventDefault();
+        var $form = $(this);
+        var $btn = $form.find('[type="submit"]');
+        var $msg = $form.find('.mbs-approval-message');
+        $btn.prop('disabled', true);
+        $msg.text('Approving...').css('color', '#666');
+
+        // Collect billing schedule for termly
+        var billingSchedule = [];
+        if ($form.find('[name="billing_mode"]').val() === 'termly') {
+            $form.find('.mbs-term-row').each(function(i) {
+                var name = $(this).find('[name^="term_name"]').val();
+                var start = $(this).find('[name^="term_start"]').val();
+                var end = $(this).find('[name^="term_end"]').val();
+                if (name && start && end) {
+                    billingSchedule.push({key: 'term_' + (i+1), label: name, start: start, end: end});
+                }
+            });
+        }
+
+        $.post(MBS_Admin.ajax_url, {
+            action: 'mbs_approve_series_with_billing',
+            nonce: MBS_Admin.nonce,
+            series_ref: $form.find('[name="series_ref"]').val(),
+            expected_version: $form.find('[name="expected_version"]').val(),
+            billing_mode: $form.find('[name="billing_mode"]').val(),
+            billing_treatment: $form.find('[name="billing_treatment"]').val(),
+            payment_method: $form.find('[name="payment_method"]').val(),
+            invoice_lead_days: $form.find('[name="invoice_lead_days"]').val(),
+            payment_terms_days: $form.find('[name="payment_terms_days"]').val(),
+            billing_schedule: JSON.stringify(billingSchedule)
+        }, function(res) {
+            if (res.success) {
+                $msg.text('Approved!').css('color', '#065f46');
+                setTimeout(function() { location.reload(); }, 1000);
+            } else {
+                $msg.text(res.data || 'Approval failed.').css('color', '#991b1b');
+                $btn.prop('disabled', false);
+            }
+        }).fail(function() {
+            $msg.text('Request failed.').css('color', '#991b1b');
+            $btn.prop('disabled', false);
+        });
+    });
+})(jQuery);

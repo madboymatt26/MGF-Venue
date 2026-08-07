@@ -29,6 +29,7 @@ class MBS_Admin {
         add_action( 'wp_ajax_mbs_record_invoice_manual_payment', array( $this, 'ajax_record_invoice_manual_payment' ) );
         add_action( 'wp_ajax_mbs_resolve_invoice_reconciliation', array( $this, 'ajax_resolve_invoice_reconciliation' ) );
         add_action( 'wp_ajax_mbs_configure_series_billing', array( $this, 'ajax_configure_series_billing' ) );
+        add_action( 'wp_ajax_mbs_approve_series_with_billing', array( $this, 'ajax_approve_series_with_billing' ) );
         add_action( 'wp_ajax_mbs_pause_series', array( $this, 'ajax_pause_series' ) );
         add_action( 'wp_ajax_mbs_catch_up_series_billing', array( $this, 'ajax_catch_up_series_billing' ) );
         add_action( 'wp_ajax_mbs_extend_external_series', array( $this, 'ajax_extend_external_series' ) );
@@ -1032,6 +1033,38 @@ class MBS_Admin {
         }
         MBS_Audit_Log::log( $invoice_ref, 'payment_reconciliation_resolved', 'Order #' . $order_id . ' resolved as ' . $resolution . ' by administrator.' );
         wp_send_json_success( array( 'invoice_ref' => $invoice_ref, 'order_id' => $order_id, 'status' => $requested_resolution ) );
+    }
+
+    public function ajax_approve_series_with_billing() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to approve series.', 403 );
+
+        $series_ref = sanitize_text_field( $_POST['series_ref'] ?? '' );
+        $expected_version = absint( $_POST['expected_version'] ?? 0 );
+        if ( ! $series_ref || $expected_version < 1 ) wp_send_json_error( 'Series reference and version are required.', 400 );
+
+        $billing_schedule = array();
+        $schedule_raw = wp_unslash( $_POST['billing_schedule'] ?? '' );
+        if ( $schedule_raw ) {
+            $billing_schedule = json_decode( $schedule_raw, true );
+            if ( ! is_array( $billing_schedule ) ) $billing_schedule = array();
+        }
+
+        $billing_config = array(
+            'billing_mode'      => sanitize_key( $_POST['billing_mode'] ?? '' ),
+            'billing_treatment' => sanitize_key( $_POST['billing_treatment'] ?? '' ),
+            'payment_method'    => sanitize_key( $_POST['payment_method'] ?? '' ),
+            'invoice_lead_days' => absint( $_POST['invoice_lead_days'] ?? 28 ),
+            'payment_terms_days' => absint( $_POST['payment_terms_days'] ?? 14 ),
+            'billing_schedule'  => $billing_schedule,
+        );
+
+        $result = MBS_Series::approve( $series_ref, 'pending', $expected_version, true, $billing_config );
+        if ( is_wp_error( $result ) ) {
+            $status = $result->get_error_code() === 'series_precondition_failed' ? 409 : 400;
+            wp_send_json_error( $result->get_error_message(), $status );
+        }
+        wp_send_json_success( array( 'series_ref' => $series_ref, 'status' => 'confirmed' ) );
     }
 
     public function ajax_configure_series_billing() {
