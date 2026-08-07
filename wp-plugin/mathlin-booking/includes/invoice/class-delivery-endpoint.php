@@ -284,22 +284,21 @@ class MBS_Invoice_Delivery_Endpoint {
     }
 
     private static function serve_pdf( $view_model, $document_id ) {
-        // Generate HTML first
-        $html = MBS_HTML_Renderer::render( $view_model );
-        if ( is_wp_error( $html ) ) {
-            wp_send_json_error( $html->get_error_message(), 500 );
+        // Generate PDF
+        $pdf = MBS_PDF_Renderer::render( $view_model );
+        if ( is_wp_error( $pdf ) ) {
+            wp_send_json_error( $pdf->get_error_message(), 500 );
         }
 
-        // PDF rendering — placeholder until Stage 6 Dompdf integration
-        // For now, serve the HTML as a downloadable file
         $invoice_number = $view_model->snapshot->invoice_number ?? 'invoice';
-        $filename = sanitize_file_name( 'invoice-' . $invoice_number . '.html' );
+        $filename = sanitize_file_name( 'invoice-' . $invoice_number . '.pdf' );
 
-        header( 'Content-Type: text/html; charset=UTF-8' );
+        header( 'Content-Type: application/pdf' );
         header( 'Content-Disposition: attachment; filename="' . $filename . '"' );
+        header( 'Content-Length: ' . strlen( $pdf ) );
         header( 'Cache-Control: private, no-cache, no-store' );
         header( 'X-Content-Type-Options: nosniff' );
-        echo $html;
+        echo $pdf;
         exit;
     }
 

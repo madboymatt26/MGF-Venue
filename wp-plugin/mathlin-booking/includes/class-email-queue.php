@@ -335,14 +335,19 @@ class MBS_Email_Queue {
      * @return string|null Temp file path or null.
      */
     private static function render_attachment_from_meta( $meta ) {
-        // This will be implemented in Stage 6/7 when the PDF renderer exists.
-        // For now, return null (email sends without attachment — graceful degradation).
         $document_id = (int) ( $meta['document_id'] ?? 0 );
         if ( $document_id < 1 ) return null;
 
-        // Placeholder: will call MBS_PDF_Renderer::render_to_temp_file($document_id)
-        // when that class is implemented.
-        return null;
+        $format = $meta['format'] ?? 'pdf';
+        if ( $format !== 'pdf' ) return null;
+
+        $result = MBS_PDF_Renderer::render_to_temp_file( $document_id );
+        if ( is_wp_error( $result ) ) {
+            error_log( '[MGF Venue] Email attachment render failed for document ' . $document_id . ': ' . $result->get_error_message() );
+            return null; // Graceful degradation: send without attachment
+        }
+
+        return $result;
     }
 
     /**
@@ -440,6 +445,9 @@ class MBS_Email_Queue {
 
         // Recover stale processing leases
         self::recover_stale_leases();
+
+        // Clean up orphaned PDF render files
+        MBS_PDF_Renderer::cleanup_orphans();
 
         // Clean sent/failed entries older than 30 days
         $cutoff_30 = wp_date( 'Y-m-d H:i:s', strtotime( '-30 days' ) );
