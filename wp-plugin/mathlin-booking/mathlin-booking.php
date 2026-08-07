@@ -60,6 +60,7 @@ require_once MBS_PLUGIN_DIR . 'includes/class-modification.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-hirer-portal.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-accounting-export.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-osm-integration.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-logo-asset.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-woo-ux.php';
 require_once MBS_PLUGIN_DIR . 'admin/class-admin.php';
 require_once MBS_PLUGIN_DIR . 'public/class-public.php';
