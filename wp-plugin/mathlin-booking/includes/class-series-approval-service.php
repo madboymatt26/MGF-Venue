@@ -182,38 +182,8 @@ class MBS_Series_Approval_Service {
             }
         }
 
-        // ── Queue invoice emails (inside transaction) ──────────────────────
-        foreach ( $created_documents as $doc ) {
-            $inv_key = 'invoice_issued:' . $doc['invoice_ref'] . ':doc' . $doc['document_id'];
-            $inv_body = self::build_invoice_email_body( $doc );
-            $inv_subject = 'Invoice ' . $doc['invoice_ref'] . ' — ' . $series_ref;
-            $inv_headers = self::build_email_headers();
-
-            $inv_meta = array( 'document_id' => (int) $doc['document_id'], 'format' => 'pdf' );
-            $inv_hash = MBS_Email_Queue::compute_payload_hash(
-                $series->contact_email, $inv_subject, $inv_body, $inv_headers, $inv_meta
-            );
-
-            $inv_enqueued = MBS_Email_Queue::enqueue(
-                $series->contact_email,
-                $inv_subject,
-                $inv_body,
-                $inv_headers,
-                $inv_key,
-                $inv_hash,
-                $inv_meta,
-                array(
-                    'message_type'   => 'invoice_issued',
-                    'reference_type' => 'invoice',
-                    'reference_id'   => (int) $doc['invoice_id'],
-                )
-            );
-
-            if ( is_wp_error( $inv_enqueued ) ) {
-                $wpdb->query( 'ROLLBACK' );
-                return new WP_Error( 'queue_insert_failed', 'Could not queue an invoice email: ' . $inv_enqueued->get_error_message() );
-            }
-        }
+        // Invoice emails are already enqueued by MBS_Series_Issuance_Service::issue_within_transaction()
+        // (Issue 2: exactly one outbox owner per invoice — the issuance service)
 
         // ── COMMIT ─────────────────────────────────────────────────────────
         if ( $wpdb->query( 'COMMIT' ) === false ) {
@@ -297,14 +267,12 @@ class MBS_Series_Approval_Service {
      * Returns array of created document metadata.
      */
     private static function create_due_invoices_within_transaction( $series_ref, $series, $billing_config, $logo_ref, $occurrences ) {
-        // Determine which periods are already due
-        $lead_days = absint( $billing_config['invoice_lead_days'] ?? 28 );
         $today = wp_date( 'Y-m-d' );
 
-        // Use the billing engine's period calculator to find due periods
+        // Use the billing engine's canonical period calculator
         if ( ! class_exists( 'MBS_Billing_Engine' ) ) return array();
 
-        $preview = MBS_Billing_Engine::invoice_preview( $series_ref );
+        $preview = MBS_Billing_Engine::preview( $series_ref );
         if ( is_wp_error( $preview ) || empty( $preview['periods'] ) ) return array();
 
         $created_documents = array();
@@ -312,7 +280,7 @@ class MBS_Series_Approval_Service {
             $issue_on = $period['issue_on'] ?? '';
             if ( ! $issue_on || $issue_on > $today ) continue; // Not yet due
 
-            // Build occurrence data for the issuance service
+            // Build occurrence data from the canonical period object
             $period_occurrences = array();
             foreach ( $period['items'] ?? array() as $item ) {
                 $period_occurrences[] = array(
@@ -326,11 +294,16 @@ class MBS_Series_Approval_Service {
             if ( empty( $period_occurrences ) ) continue;
 
             // Issue within this transaction (no nested transactions)
+            // The issuance service owns document + audit + outbox for this invoice.
+            // Approval_Service does NOT separately enqueue — Issue 2 resolved.
             $fresh_series = MBS_Series::get( $series_ref );
             $result = MBS_Series_Issuance_Service::issue_within_transaction( $fresh_series, array(
-                'period_start' => $period['period_start'],
-                'period_end'   => $period['period_end'],
-                'occurrences'  => $period_occurrences,
+                'period_start'  => $period['period_start'],
+                'period_end'    => $period['period_end'],
+                'period_key'    => $period['period_key'] ?? '',
+                'issue_on'      => $issue_on,
+                'due_on'        => $period['due_on'] ?? '',
+                'occurrences'   => $period_occurrences,
             ), $logo_ref );
 
             if ( is_wp_error( $result ) ) return $result;

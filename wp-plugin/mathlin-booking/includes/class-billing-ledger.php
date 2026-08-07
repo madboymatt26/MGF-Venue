@@ -112,9 +112,9 @@ class MBS_Billing_Ledger {
             "SELECT * FROM {$invoice_table} WHERE invoice_ref = %s FOR UPDATE",
             sanitize_text_field( $invoice_ref )
         ) );
-        if ( ! $invoice ) return self::rollback_error( 'invoice_not_found', 'Invoice not found.' );
-        if ( $invoice->status !== 'draft' ) return self::rollback_error( 'issued_invoice_immutable', 'Items cannot be added after an invoice is issued.' );
-        if ( (int) $invoice->version !== (int) $expected_version ) return self::rollback_error( 'invoice_precondition_failed', 'The invoice changed since it was loaded.' );
+        if ( ! $invoice ) return self::transaction_error( 'invoice_not_found', 'Invoice not found.', $manage_transaction );
+        if ( $invoice->status !== 'draft' ) return self::transaction_error( 'issued_invoice_immutable', 'Items cannot be added after an invoice is issued.' , $manage_transaction );
+        if ( (int) $invoice->version !== (int) $expected_version ) return self::transaction_error( 'invoice_precondition_failed', 'The invoice changed since it was loaded.' , $manage_transaction );
 
         $booking_ref = ! empty( $item['booking_ref'] ) ? sanitize_text_field( $item['booking_ref'] ) : null;
         if ( $booking_ref ) {
@@ -123,7 +123,7 @@ class MBS_Billing_Ledger {
                 $booking_ref
             ) );
             if ( $allocation && (int) $allocation->invoice_id !== (int) $invoice->id ) {
-                return self::rollback_error( 'booking_already_allocated', 'This booking is already actively allocated to another invoice.' );
+                return self::transaction_error( 'booking_already_allocated', 'This booking is already actively allocated to another invoice.' , $manage_transaction );
             }
         }
 
@@ -141,7 +141,7 @@ class MBS_Billing_Ledger {
             'pricing_snapshot_json' => wp_json_encode( $item['pricing_snapshot'] ?? array() ),
             'created_at'            => current_time( 'mysql' ),
         ) );
-        if ( $inserted === false ) return self::rollback_error( 'invoice_item_create_failed', 'Could not create the invoice item.' );
+        if ( $inserted === false ) return self::transaction_error( 'invoice_item_create_failed', 'Could not create the invoice item.' , $manage_transaction );
 
         if ( $booking_ref && ! $allocation ) {
             $allocated = $wpdb->insert( $allocation_table, array(
@@ -153,13 +153,13 @@ class MBS_Billing_Ledger {
                 'created_at'         => current_time( 'mysql' ),
                 'updated_at'         => current_time( 'mysql' ),
             ) );
-            if ( $allocated === false ) return self::rollback_error( 'booking_allocation_failed', 'Could not reserve the booking for this invoice.' );
+            if ( $allocated === false ) return self::transaction_error( 'booking_allocation_failed', 'Could not reserve the booking for this invoice.' , $manage_transaction );
         } elseif ( $booking_ref ) {
             $allocation_updated = $wpdb->query( $wpdb->prepare(
                 "UPDATE {$allocation_table} SET allocated_minor = allocated_minor + %d, updated_at = %s WHERE id = %d",
                 $line_total, current_time( 'mysql' ), (int) $allocation->id
             ) );
-            if ( $allocation_updated !== 1 ) return self::rollback_error( 'booking_allocation_update_failed', 'Could not update the booking allocation.' );
+            if ( $allocation_updated !== 1 ) return self::transaction_error( 'booking_allocation_update_failed', 'Could not update the booking allocation.' , $manage_transaction );
         }
 
         $version_updated = $wpdb->query( $wpdb->prepare(
@@ -183,12 +183,12 @@ class MBS_Billing_Ledger {
             if ( $manage_transaction ) $wpdb->query( 'ROLLBACK' );
             return array( 'invoice' => $invoice, 'issued' => false, 'no_op' => true );
         }
-        if ( (int) $invoice->version !== (int) $expected_version ) return self::rollback_error( 'invoice_precondition_failed', 'The invoice changed since it was loaded.' );
+        if ( (int) $invoice->version !== (int) $expected_version ) return self::transaction_error( 'invoice_precondition_failed', 'The invoice changed since it was loaded.' , $manage_transaction );
         $summary = $wpdb->get_row( $wpdb->prepare(
             "SELECT COUNT(*) AS item_count, COALESCE(SUM(line_total_minor), 0) AS subtotal_minor FROM {$item_table} WHERE invoice_id = %d",
             (int) $invoice->id
         ) );
-        if ( ! $summary || (int) $summary->item_count < 1 ) return self::rollback_error( 'invoice_empty', 'An invoice must contain at least one item before issue.' );
+        if ( ! $summary || (int) $summary->item_count < 1 ) return self::transaction_error( 'invoice_empty', 'An invoice must contain at least one item before issue.' , $manage_transaction );
         $subtotal = (int) $summary->subtotal_minor;
         $issued_at = current_time( 'mysql' );
         $updated = $wpdb->query( $wpdb->prepare(
@@ -209,14 +209,14 @@ class MBS_Billing_Ledger {
         $allocation_table = $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE;
         if ( $wpdb->query( 'START TRANSACTION' ) === false ) return new WP_Error( 'transaction_start_failed', 'Could not start the invoice-void transaction.' );
         $invoice = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$invoice_table} WHERE invoice_ref = %s FOR UPDATE", sanitize_text_field( $invoice_ref ) ) );
-        if ( ! $invoice ) return self::rollback_error( 'invoice_not_found', 'Invoice not found.' );
+        if ( ! $invoice ) return self::transaction_error( 'invoice_not_found', 'Invoice not found.', $manage_transaction );
         if ( $invoice->status === 'void' ) {
             $wpdb->query( 'ROLLBACK' );
             return array( 'invoice' => $invoice, 'voided' => false, 'no_op' => true );
         }
         if ( $invoice->document_type !== 'invoice' || ! in_array( $invoice->status, array( 'issued', 'part_paid', 'overdue' ), true ) ) return self::rollback_error( 'invoice_cannot_void', 'Only an issued invoice can be voided.' );
         if ( (int) $invoice->paid_minor !== 0 ) return self::rollback_error( 'paid_invoice_requires_credit', 'A paid invoice cannot be voided; create a credit/refund adjustment.' );
-        if ( (int) $invoice->version !== (int) $expected_version ) return self::rollback_error( 'invoice_precondition_failed', 'The invoice changed since it was loaded.' );
+        if ( (int) $invoice->version !== (int) $expected_version ) return self::transaction_error( 'invoice_precondition_failed', 'The invoice changed since it was loaded.' , $manage_transaction );
         $now = current_time( 'mysql' );
         $updated = $wpdb->query( $wpdb->prepare(
             "UPDATE {$invoice_table} SET status = 'void', voided_at = %s, void_reason = %s, version = version + 1, updated_at = %s WHERE id = %d AND version = %d",
@@ -332,7 +332,7 @@ class MBS_Billing_Ledger {
         $invoice = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$invoice_table} WHERE invoice_ref = %s FOR UPDATE", sanitize_text_field( $invoice_ref ) ) );
         if ( ! $invoice ) return self::transaction_error( 'invoice_not_found', 'Invoice not found.', $manage_transaction );
         if ( $invoice->document_type !== 'invoice' || in_array( $invoice->status, array( 'draft', 'void' ), true ) ) return self::transaction_error( 'invoice_not_payable', 'This invoice cannot accept a payment transaction.', $manage_transaction );
-        if ( isset( $data['expected_version'] ) && (int) $data['expected_version'] !== (int) $invoice->version ) return self::transaction_error( 'invoice_precondition_failed', 'The invoice changed since it was loaded.', $manage_transaction );
+        if ( isset( $data['expected_version'] ) && (int) $data['expected_version'] !== (int) $invoice->version ) return self::transaction_error( 'invoice_precondition_failed', 'The invoice changed since it was loaded.', $manage_transaction , $manage_transaction );
         $current_balance = self::balance_minor( $invoice );
         if ( $type === 'payment' && $amount > $current_balance ) return self::transaction_error( 'payment_exceeds_balance', 'Payment exceeds the current invoice balance.', $manage_transaction );
         if ( $type === 'refund' && $amount > (int) $invoice->paid_minor ) return self::transaction_error( 'refund_exceeds_paid', 'Refund exceeds payments recorded against this invoice.', $manage_transaction );

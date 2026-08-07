@@ -140,7 +140,9 @@ class MBS_Invoice_Document_Service {
         }
 
         // Enqueue confirmation email (if applicable and chargeable)
-        if ( $notify_hirer && (float) $booking->amount > 0 ) {
+        $amount_minor_check = MBS_Money::from_decimal_string( (string) $booking->amount );
+        if ( is_wp_error( $amount_minor_check ) ) $amount_minor_check = 0;
+        if ( $notify_hirer && $amount_minor_check > 0 ) {
             $message_key = 'booking_confirmed:' . $booking->ref . ':doc' . $document_id;
             $email_body = self::build_confirmation_placeholder( $booking );
             $subject = 'Booking Confirmed — ' . $booking->ref;
@@ -403,15 +405,15 @@ class MBS_Invoice_Document_Service {
             return array( 'immediate' => true );
         }
         if ( $deposit_settings['enabled'] ) {
-            $deposit_decimal = (string) MBS_Bookings::calculate_deposit( (float) $booking->amount );
-            $deposit_minor = MBS_Money::from_decimal_string( $deposit_decimal );
-            if ( is_wp_error( $deposit_minor ) ) $deposit_minor = $total_minor;
+            // Integer deposit calculation: total_minor * percentage / 100, rounded
+            $percentage = (int) $deposit_settings['percentage'];
+            $deposit_minor = (int) intdiv( $total_minor * $percentage + 50, 100 ); // Round half-up
             $balance_minor = $total_minor - $deposit_minor;
             $balance_days = $deposit_settings['balance_days'];
             return array(
-                'deposit_minor'    => (int) $deposit_minor,
+                'deposit_minor'    => $deposit_minor,
                 'deposit_due_date' => wp_date( 'Y-m-d' ),
-                'balance_minor'    => (int) $balance_minor,
+                'balance_minor'    => $balance_minor,
                 'balance_due_date' => wp_date( 'Y-m-d', strtotime( $booking->booking_date . " -{$balance_days} days" ) ),
             );
         }

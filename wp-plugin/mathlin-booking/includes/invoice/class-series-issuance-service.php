@@ -77,11 +77,14 @@ class MBS_Series_Issuance_Service {
             return new WP_Error( 'no_occurrences', 'No occurrences to invoice in this period.' );
         }
 
-        // Idempotency key for this period
-        $idempotency_key = 'series_invoice:' . $series->series_ref . ':' . $period['period_start'] . ':' . $period['period_end'];
+        // Idempotency key includes period_key for stable identity
+        $period_key = $period['period_key'] ?? ( $period['period_start'] . ':' . $period['period_end'] );
+        $idempotency_key = 'series_invoice:' . $series->series_ref . ':' . $period_key;
 
-        // Calculate payment terms
-        $due_date = wp_date( 'Y-m-d H:i:s', strtotime( '+' . (int) $series->payment_terms_days . ' days' ) );
+        // Use canonical due date from the billing engine (not recalculated)
+        $due_date = ! empty( $period['due_on'] )
+            ? $period['due_on'] . ' 23:59:59'
+            : wp_date( 'Y-m-d H:i:s', strtotime( '+' . (int) $series->payment_terms_days . ' days' ) );
 
         // 1. Create draft invoice (using ledger primitives without own transaction)
         $draft_result = MBS_Billing_Ledger::create_draft_invoice( array(
