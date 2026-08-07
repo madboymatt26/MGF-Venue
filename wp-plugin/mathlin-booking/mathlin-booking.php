@@ -66,6 +66,7 @@ require_once MBS_PLUGIN_DIR . 'includes/invoice/class-issued-invoice-snapshot.ph
 require_once MBS_PLUGIN_DIR . 'includes/invoice/class-current-account-state.php';
 require_once MBS_PLUGIN_DIR . 'includes/invoice/class-invoice-document-view-model.php';
 require_once MBS_PLUGIN_DIR . 'includes/invoice/class-invoice-builder.php';
+require_once MBS_PLUGIN_DIR . 'includes/invoice/class-document-service.php';
 require_once MBS_PLUGIN_DIR . 'includes/invoice/class-html-renderer.php';
 require_once MBS_PLUGIN_DIR . 'includes/invoice/class-pdf-renderer.php';
 require_once MBS_PLUGIN_DIR . 'includes/invoice/class-delivery-endpoint.php';
