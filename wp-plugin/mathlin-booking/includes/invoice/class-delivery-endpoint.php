@@ -173,10 +173,14 @@ class MBS_Invoice_Delivery_Endpoint {
             if ( $booking ) {
                 // Primary: user_id match
                 if ( (int) $booking->user_id === $user_id ) return true;
-                // Legacy fallback: email match (audited)
+                // If user_id exists but doesn't match, deny (no email fallback)
+                if ( ! empty( $booking->user_id ) ) {
+                    return new WP_Error( 'not_authorised', 'You do not have permission to access this document.' );
+                }
+                // Legacy fallback: ONLY for records lacking a user_id
                 $user = get_userdata( $user_id );
                 if ( $user && strtolower( $user->user_email ) === strtolower( $booking->email ) ) {
-                    error_log( "[MGF Venue] Invoice access via email fallback: user {$user_id}, doc {$document_id}" );
+                    MBS_Audit_Log::log( $document->booking_ref ?: "doc:{$document_id}", 'invoice_access_email_fallback', "User {$user_id} authorised by email match (legacy record without user_id)." );
                     return true;
                 }
             }
@@ -196,14 +200,18 @@ class MBS_Invoice_Delivery_Endpoint {
                 if ( $occurrence_user_id && (int) $occurrence_user_id === $user_id ) {
                     return true;
                 }
+                // If user_id exists on occurrences but doesn't match, deny
+                if ( $occurrence_user_id ) {
+                    return new WP_Error( 'not_authorised', 'You do not have permission to access this document.' );
+                }
 
-                // Legacy fallback: email match (audited)
+                // Legacy fallback: ONLY for series without any user_id on occurrences
                 $series_table = $wpdb->prefix . MBS_SERIES_TABLE;
                 $series = $wpdb->get_row( $wpdb->prepare( "SELECT contact_email FROM {$series_table} WHERE series_ref = %s", $invoice->series_ref ) );
                 if ( $series ) {
                     $user = get_userdata( $user_id );
                     if ( $user && strtolower( $user->user_email ) === strtolower( $series->contact_email ) ) {
-                        error_log( "[MGF Venue] Invoice access via email fallback (ledger): user {$user_id}, doc {$document_id}, series {$invoice->series_ref}" );
+                        MBS_Audit_Log::log( $invoice->series_ref, 'invoice_access_email_fallback', "User {$user_id} authorised by email match (legacy series without user_id on occurrences)." );
                         return true;
                     }
                 }

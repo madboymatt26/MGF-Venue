@@ -1057,6 +1057,12 @@ class MBS_Admin {
             if ( is_array( $schedule ) ) $overrides['billing_schedule_json'] = wp_json_encode( $schedule );
         }
 
+        // For pending series, include pending occurrences in preview
+        $series = MBS_Series::get( $series_ref );
+        if ( $series && $series->status === 'pending' ) {
+            $overrides['_include_pending'] = true;
+        }
+
         $preview = MBS_Billing_Engine::preview( $series_ref, $overrides );
         if ( is_wp_error( $preview ) ) wp_send_json_error( $preview->get_error_message(), 400 );
 

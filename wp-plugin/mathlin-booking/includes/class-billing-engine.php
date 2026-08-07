@@ -56,6 +56,15 @@ class MBS_Billing_Engine {
         $schedule = $configuration['billing_schedule'] ?? array();
         if ( ! is_array( $schedule ) ) return new WP_Error( 'invalid_billing_schedule', 'Billing schedule must be structured data.' );
 
+        // Validate term schedules for termly billing (Issue 10)
+        if ( $mode === 'termly' && class_exists( 'MBS_Invoice_Document_Security' ) ) {
+            $terms = isset( $schedule['terms'] ) ? $schedule['terms'] : $schedule;
+            if ( ! empty( $terms ) ) {
+                $term_valid = MBS_Invoice_Document_Security::validate_term_schedule( $terms, $current->start_date, $current->repeat_until );
+                if ( is_wp_error( $term_valid ) ) return $term_valid;
+            }
+        }
+
 	        $adopting = ! empty( $current->metadata_incomplete ) && $current->billing_treatment === 'legacy_per_occurrence'
 	            && $treatment === 'invoice_managed' && ! empty( $configuration['adopt_legacy'] );
 	        if($adopting){
@@ -97,7 +106,13 @@ class MBS_Billing_Engine {
         if ( $overrides ) {
             $series = (object) array_merge( (array) $series, $overrides );
         }
-        $bookings = self::billable_occurrences( $series_ref );
+        // For pending series (pre-approval preview), include pending occurrences
+        // that would become billable upon approval. Normal production billing
+        // still uses the standard billable_occurrences() which excludes pending.
+        $include_pending = isset( $overrides['_include_pending'] ) && $overrides['_include_pending'];
+        $bookings = $include_pending
+            ? self::pending_preview_occurrences( $series_ref )
+            : self::billable_occurrences( $series_ref );
         $periods = self::build_periods( $series, $bookings );
         if ( is_wp_error( $periods ) ) return $periods;
         return array(
@@ -107,6 +122,21 @@ class MBS_Billing_Engine {
             'currency'          => 'GBP',
             'periods'           => $periods,
         );
+    }
+
+    /**
+     * Include pending occurrences for pre-approval billing preview.
+     * These are the bookings that WILL become billable upon series approval.
+     */
+    private static function pending_preview_occurrences( $series_ref ) {
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_TABLE;
+        return $wpdb->get_results( $wpdb->prepare(
+            "SELECT * FROM {$table}
+             WHERE series_id = %s AND status IN ('pending','confirmed','deposit_paid','paid') AND legacy_billing_excluded = 0
+             ORDER BY booking_date ASC, id ASC",
+            sanitize_text_field( $series_ref )
+        ) );
     }
 
     /** Build deterministic billing periods; exposed for dependency-free tests. */
