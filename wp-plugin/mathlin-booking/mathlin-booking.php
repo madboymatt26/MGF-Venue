@@ -67,6 +67,7 @@ require_once MBS_PLUGIN_DIR . 'includes/invoice/class-current-account-state.php'
 require_once MBS_PLUGIN_DIR . 'includes/invoice/class-invoice-document-view-model.php';
 require_once MBS_PLUGIN_DIR . 'includes/invoice/class-invoice-builder.php';
 require_once MBS_PLUGIN_DIR . 'includes/invoice/class-html-renderer.php';
+require_once MBS_PLUGIN_DIR . 'includes/invoice/class-delivery-endpoint.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-woo-ux.php';
 require_once MBS_PLUGIN_DIR . 'admin/class-admin.php';
 require_once MBS_PLUGIN_DIR . 'public/class-public.php';
@@ -159,6 +160,9 @@ function mbs_init() {
     $accounting->init();
     $osm_integration->init();
     $woo_ux->init();
+
+    $invoice_delivery = new MBS_Invoice_Delivery_Endpoint();
+    $invoice_delivery->init();
 
     // User profile: Pricing Tier field
     add_action( 'show_user_profile', 'mbs_user_pricing_tier_field' );
