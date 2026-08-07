@@ -65,7 +65,27 @@
                     <tr><th>Payment</th><td><select name="payment_method"><option value="online" <?php selected( $series->payment_method, 'online' ); ?>>Online card payment</option><option value="offline_bacs" <?php selected( $series->payment_method, 'offline_bacs' ); ?>>Offline invoice (BACS/PO)</option><option value="none" <?php selected( $series->payment_method, 'none' ); ?>>No payment</option></select></td></tr>
                     <tr><th>Invoice lead time</th><td><input type="number" min="0" max="365" name="invoice_lead_days" value="<?php echo (int) $series->invoice_lead_days; ?>"> days</td></tr>
                     <tr><th>Payment terms</th><td><input type="number" min="0" max="365" name="payment_terms_days" value="<?php echo (int) $series->payment_terms_days; ?>"> days</td></tr>
-                    <tr class="nms-term-schedule"><th>Term dates</th><td><textarea name="billing_schedule_json" rows="4" class="large-text code"><?php echo esc_textarea( $series->billing_schedule_json === '[]' ? '' : $series->billing_schedule_json ); ?></textarea><p class="description">Only required for termly billing. Store explicit named term start/end dates; dates are never guessed.</p></td></tr>
+                    <tr class="nms-term-schedule"><th>Term dates</th><td>
+                        <div class="mbs-billing-term-editor">
+                            <p class="description">Only for termly billing. Add named term periods with start/end dates.</p>
+                            <div class="mbs-billing-term-list">
+                            <?php
+                            $terms = json_decode( $series->billing_schedule_json ?: '[]', true );
+                            if ( is_array( $terms ) ) :
+                                foreach ( $terms as $idx => $term ) :
+                            ?>
+                                <div class="mbs-term-row" style="display:flex;gap:8px;align-items:center;margin:6px 0;">
+                                    <input type="text" name="billing_term_label[]" value="<?php echo esc_attr( $term['label'] ?? '' ); ?>" placeholder="Term name" style="width:140px;">
+                                    <input type="date" name="billing_term_start[]" value="<?php echo esc_attr( $term['start'] ?? '' ); ?>">
+                                    <span>to</span>
+                                    <input type="date" name="billing_term_end[]" value="<?php echo esc_attr( $term['end'] ?? '' ); ?>">
+                                    <button type="button" class="button mbs-remove-term" style="color:#dc3545;">&times;</button>
+                                </div>
+                            <?php endforeach; endif; ?>
+                            </div>
+                            <button type="button" class="button mbs-add-billing-term">+ Add term</button>
+                        </div>
+                    </td></tr>
                     <?php if ( ! empty( $series->metadata_incomplete ) && $series->billing_treatment === 'legacy_per_occurrence' ) : ?><tr><th>Adopt legacy series</th><td><label><input type="checkbox" name="adopt_legacy" value="1"> I have reviewed the preview and want future unpaid occurrences moved to consolidated billing.</label><p class="description">Historic paid/deposit-paid occurrences stay in the legacy system and are never invoiced again.</p></td></tr><?php endif; ?>
                     </tbody></table>
                     <button class="button button-primary" type="submit">Save billing arrangement</button> <span class="nms-series-billing-message"></span>

@@ -386,11 +386,6 @@ class MBS_Database {
         ) {$charset};";
         dbDelta( $sql2 );
 
-        // Run migrations for existing installs. A migration result is a hard
-        // gate: no success-only finalisation or version marker follows errors.
-        $migrated = self::maybe_run_migrations();
-        if ( $migrated !== true ) return self::fail_migration( $migrated, 'Database migration operations failed.' );
-
         // Audit log table
         $audit_table = $wpdb->prefix . 'mathlin_audit_log';
         $sql3 = "CREATE TABLE IF NOT EXISTS {$audit_table} (
@@ -458,6 +453,12 @@ class MBS_Database {
             KEY idx_status (status)
         ) {$charset};";
         dbDelta( $sql5 );
+
+        // Run migrations for existing installs AFTER all canonical tables
+        // exist. Fresh installs get the complete schema from dbDelta above;
+        // migrations handle ALTER/backfill for existing installations only.
+        $migrated = self::maybe_run_migrations();
+        if ( $migrated !== true ) return self::fail_migration( $migrated, 'Database migration operations failed.' );
 
         $schema_sql = array(
             $table => $sql,

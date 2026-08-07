@@ -87,27 +87,55 @@ class MBS_Invoice_Delivery_Endpoint {
         }
         set_transient( $rate_key, $attempts + 1, 300 ); // 20 requests per 5 minutes
 
-        // Atomic token validation (consumes one use)
-        $valid = self::validate_guest_token( $token, $document_id );
-        if ( is_wp_error( $valid ) ) {
+        // Validate token EXISTS and is eligible (but do NOT consume yet)
+        $token_valid = self::validate_guest_token_eligibility( $token, $document_id );
+        if ( is_wp_error( $token_valid ) ) {
             self::log_access( 0, "doc:{$document_id}", $format, 'denied_token' );
             wp_die( 'This download link has expired or is invalid.', 'Access Denied', array( 'response' => 403 ) );
         }
 
-        // Build (always issued mode for guest access)
+        // Build document
         $view_model = MBS_Invoice_Document_Builder::build_from_document( $document_id, 'issued' );
         if ( is_wp_error( $view_model ) ) {
-            // Refund the token use since we consumed it but couldn't render
-            self::refund_token_use( $token, $document_id );
+            // Don't consume token — generation failed
             wp_die( 'Document could not be generated.', 'Error', array( 'response' => 500 ) );
+        }
+
+        // Render document
+        if ( $format === 'pdf' ) {
+            $output = MBS_PDF_Renderer::render( $view_model );
+        } else {
+            $output = MBS_HTML_Renderer::render( $view_model );
+        }
+
+        if ( is_wp_error( $output ) ) {
+            // Don't consume token — render failed
+            wp_die( 'Document rendering failed.', 'Error', array( 'response' => 500 ) );
+        }
+
+        // SUCCESS: now atomically consume the token
+        $consumed = self::consume_guest_token( $token, $document_id );
+        if ( is_wp_error( $consumed ) ) {
+            // Token was consumed by another request between validation and here
+            self::log_access( 0, "doc:{$document_id}", $format, 'denied_token_race' );
+            wp_die( 'This download link is no longer valid.', 'Access Denied', array( 'response' => 403 ) );
         }
 
         self::log_access( 0, "doc:{$document_id}", $format, 'success_guest' );
 
+        // Serve the already-rendered document
         if ( $format === 'pdf' ) {
-            self::serve_pdf( $view_model, $document_id );
+            $invoice_number = $view_model->snapshot->invoice_number ?? 'invoice';
+            $filename = sanitize_file_name( 'invoice-' . $invoice_number . '.pdf' );
+            header( 'Content-Type: application/pdf' );
+            header( 'Content-Disposition: attachment; filename="' . $filename . '"' );
+            header( 'Content-Length: ' . strlen( $output ) );
+            header( 'Cache-Control: private, no-cache, no-store' );
+            header( 'X-Content-Type-Options: nosniff' );
+            echo $output;
+            exit;
         } else {
-            self::serve_html( $view_model );
+            wp_send_json_success( array( 'html' => $output ) );
         }
     }
 
@@ -225,39 +253,7 @@ class MBS_Invoice_Delivery_Endpoint {
     /**
      * Validate a guest download token.
      */
-    private static function validate_guest_token( $raw_token, $document_id ) {
-        global $wpdb;
-        $table = $wpdb->prefix . MBS_DOWNLOAD_TOKENS_TABLE;
-        $token_hash = hash( 'sha256', $raw_token );
-        $now = current_time( 'mysql' );
-
-        // Atomic conditional UPDATE: consume one use only if all conditions met
-        $consumed = $wpdb->query( $wpdb->prepare(
-            "UPDATE {$table}
-             SET use_count = use_count + 1
-             WHERE token_hash = %s AND document_id = %d
-               AND revoked_at IS NULL
-               AND expires_at > %s
-               AND (max_uses IS NULL OR use_count < max_uses)",
-            $token_hash, (int) $document_id, $now
-        ) );
-
-        if ( $consumed === 1 ) {
-            return true;
-        }
-
-        // Determine specific failure reason for logging
-        $token = $wpdb->get_row( $wpdb->prepare(
-            "SELECT * FROM {$table} WHERE token_hash = %s AND document_id = %d",
-            $token_hash, (int) $document_id
-        ) );
-
-        if ( ! $token ) return new WP_Error( 'token_invalid', 'Token not found.' );
-        if ( $token->revoked_at ) return new WP_Error( 'token_revoked', 'This download link has been revoked.' );
-        if ( strtotime( $token->expires_at ) < time() ) return new WP_Error( 'token_expired', 'This download link has expired.' );
-        if ( $token->max_uses && (int) $token->use_count >= (int) $token->max_uses ) return new WP_Error( 'token_exhausted', 'Max uses reached.' );
-        return new WP_Error( 'token_invalid', 'Token validation failed.' );
-    }
+    // (validate_guest_token replaced by validate_guest_token_eligibility + consume_guest_token)
 
     // ── Serve Documents ────────────────────────────────────────────────────────
 
@@ -272,6 +268,49 @@ class MBS_Invoice_Delivery_Endpoint {
             "UPDATE {$table} SET use_count = GREATEST(0, use_count - 1) WHERE token_hash = %s AND document_id = %d",
             $token_hash, (int) $document_id
         ) );
+    }
+
+    /**
+     * Check token eligibility WITHOUT consuming a use.
+     */
+    private static function validate_guest_token_eligibility( $raw_token, $document_id ) {
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_DOWNLOAD_TOKENS_TABLE;
+        $token_hash = hash( 'sha256', $raw_token );
+        $now = current_time( 'mysql' );
+
+        $token = $wpdb->get_row( $wpdb->prepare(
+            "SELECT * FROM {$table} WHERE token_hash = %s AND document_id = %d",
+            $token_hash, (int) $document_id
+        ) );
+
+        if ( ! $token ) return new WP_Error( 'token_invalid', 'Token not found.' );
+        if ( $token->revoked_at ) return new WP_Error( 'token_revoked', 'Revoked.' );
+        if ( strtotime( $token->expires_at ) < time() ) return new WP_Error( 'token_expired', 'Expired.' );
+        if ( $token->max_uses && (int) $token->use_count >= (int) $token->max_uses ) return new WP_Error( 'token_exhausted', 'Max uses.' );
+        return true;
+    }
+
+    /**
+     * Atomically consume one token use. Call ONLY after successful render.
+     */
+    private static function consume_guest_token( $raw_token, $document_id ) {
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_DOWNLOAD_TOKENS_TABLE;
+        $token_hash = hash( 'sha256', $raw_token );
+        $now = current_time( 'mysql' );
+
+        $consumed = $wpdb->query( $wpdb->prepare(
+            "UPDATE {$table}
+             SET use_count = use_count + 1
+             WHERE token_hash = %s AND document_id = %d
+               AND revoked_at IS NULL
+               AND expires_at > %s
+               AND (max_uses IS NULL OR use_count < max_uses)",
+            $token_hash, (int) $document_id, $now
+        ) );
+
+        return $consumed === 1 ? true : new WP_Error( 'token_consumed_elsewhere', 'Token no longer available.' );
     }
 
     private static function serve_html( $view_model ) {

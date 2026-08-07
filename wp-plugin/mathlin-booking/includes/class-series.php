@@ -367,13 +367,13 @@ class MBS_Series {
         // Pre-flight: check if this is a chargeable series that requires reviewed billing
         $preflight_series = self::get( $series_ref );
         if ( $preflight_series && $preflight_series->status === 'pending' ) {
-            $requested_mode = is_array( $billing_config ) ? ( $billing_config['billing_mode'] ?? '' ) : '';
-            $is_chargeable = ! $preflight_series->scout_use
-                && $preflight_series->billing_mode !== 'none'
-                && $requested_mode !== 'none';
+            // Only genuine Scout/internal-use series may bypass the Approval_Service.
+            // Every normal pending series — including one being set to no-charge by an
+            // administrator — must go through Approval_Service for atomic billing save.
+            $is_genuine_scout = (bool) $preflight_series->scout_use;
 
-            if ( $is_chargeable ) {
-                // If inline billing_config provided (MCP/REST), delegate to Approval_Service
+            if ( ! $is_genuine_scout ) {
+                // If inline billing_config provided (MCP/REST/admin), delegate to Approval_Service
                 if ( $billing_config !== null ) {
                     return MBS_Series_Approval_Service::approve_with_billing(
                         $series_ref, $billing_config, $expected_version, $notify_hirer
@@ -387,7 +387,7 @@ class MBS_Series {
                 if ( ! $has_review ) {
                     return new WP_Error(
                         'billing_configuration_required',
-                        'A chargeable series requires explicit billing configuration review before approval. Use the review-and-approve workflow or provide billing_config.'
+                        'A non-Scout series requires explicit billing configuration review before approval. Use the review-and-approve workflow or provide billing_config.'
                     );
                 }
 
