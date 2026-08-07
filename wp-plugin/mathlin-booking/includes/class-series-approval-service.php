@@ -299,27 +299,51 @@ class MBS_Series_Approval_Service {
     private static function create_due_invoices_within_transaction( $series_ref, $series, $billing_config, $logo_ref, $occurrences ) {
         // Determine which periods are already due
         $lead_days = absint( $billing_config['invoice_lead_days'] ?? 28 );
-        $terms_days = absint( $billing_config['payment_terms_days'] ?? 14 );
         $today = wp_date( 'Y-m-d' );
 
-        // For now, the billing engine's period calculation handles this.
-        // This method creates invoices for periods whose issue_on date <= today.
-        // The full catch-up logic already exists in MBS_Billing_Engine.
-        // Here we just trigger it for the first applicable period if due.
+        // Use the billing engine's period calculator to find due periods
+        if ( ! class_exists( 'MBS_Billing_Engine' ) ) return array();
 
-        // Simplified: if the series start_date is within lead_days of today,
-        // the first period is immediately due.
-        $first_period_issue = wp_date( 'Y-m-d', strtotime( $series->start_date . " -{$lead_days} days" ) );
-        if ( $first_period_issue > $today ) {
-            return array(); // No period due yet
+        $preview = MBS_Billing_Engine::invoice_preview( $series_ref );
+        if ( is_wp_error( $preview ) || empty( $preview['periods'] ) ) return array();
+
+        $created_documents = array();
+        foreach ( $preview['periods'] as $period ) {
+            $issue_on = $period['issue_on'] ?? '';
+            if ( ! $issue_on || $issue_on > $today ) continue; // Not yet due
+
+            // Build occurrence data for the issuance service
+            $period_occurrences = array();
+            foreach ( $period['items'] ?? array() as $item ) {
+                $period_occurrences[] = array(
+                    'ref'          => $item['booking_ref'] ?? null,
+                    'date'         => $item['service_date'] ?? '',
+                    'amount_minor' => (int) ( $item['amount_minor'] ?? 0 ),
+                    'description'  => $item['description'] ?? '',
+                );
+            }
+
+            if ( empty( $period_occurrences ) ) continue;
+
+            // Issue within this transaction (no nested transactions)
+            $fresh_series = MBS_Series::get( $series_ref );
+            $result = MBS_Series_Issuance_Service::issue_within_transaction( $fresh_series, array(
+                'period_start' => $period['period_start'],
+                'period_end'   => $period['period_end'],
+                'occurrences'  => $period_occurrences,
+            ), $logo_ref );
+
+            if ( is_wp_error( $result ) ) return $result;
+            if ( empty( $result['no_op'] ) ) {
+                $created_documents[] = array(
+                    'invoice_ref'  => $result['invoice_ref'],
+                    'invoice_id'   => $result['invoice_id'],
+                    'document_id'  => $result['document_id'],
+                );
+            }
         }
 
-        // Delegate to billing engine for proper period calculation
-        // The engine will create invoices and we capture the result
-        // NOTE: This is a simplified implementation. The full integration
-        // with MBS_Billing_Engine::generate_invoice_for_period() happens
-        // in Stage 8 when series invoice integration is complete.
-        return array();
+        return $created_documents;
     }
 
     // ── Email Building ─────────────────────────────────────────────────────────
