@@ -70,6 +70,7 @@ $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/res
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/woocommerce-callbacks.php --allow-root
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/financial-flows.php --allow-root
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/invoice-document-flows.php --allow-root
+$compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/invoice-document-extended.php --allow-root
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/legacy-adoption.php --allow-root
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/mutation-matrix.php --allow-root
 sh tests/integration/run-migrations.sh
