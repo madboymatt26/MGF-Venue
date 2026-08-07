@@ -249,10 +249,28 @@ class MBS_Billing_Engine {
                 }
                 foreach ( $preview['periods'] as $period ) {
                     if ( $period['issue_on'] > $as_of ) continue;
-                    $generated = self::generate_period_invoice( $series, $period );
+                    // Use the new atomic issuance service (Issue 3):
+                    // ledger + document + audit + outbox in one transaction
+                    $period_occurrences = array();
+                    foreach ( $period['items'] ?? array() as $item ) {
+                        $period_occurrences[] = array(
+                            'ref'          => $item['booking_ref'] ?? null,
+                            'date'         => $item['service_date'] ?? '',
+                            'amount_minor' => (int) ( $item['amount_minor'] ?? 0 ),
+                            'description'  => $item['description'] ?? '',
+                        );
+                    }
+                    $generated = MBS_Series_Issuance_Service::issue_period_invoice( $series->series_ref, array(
+                        'period_start'  => $period['period_start'],
+                        'period_end'    => $period['period_end'],
+                        'period_key'    => $period['period_key'] ?? '',
+                        'issue_on'      => $period['issue_on'] ?? '',
+                        'due_on'        => $period['due_on'] ?? '',
+                        'occurrences'   => $period_occurrences,
+                    ) );
                     $results[] = is_wp_error( $generated )
                         ? array( 'series_ref' => $series->series_ref, 'period_key' => $period['period_key'], 'status' => 'error', 'message' => $generated->get_error_message() )
-                        : $generated;
+                        : array( 'series_ref' => $series->series_ref, 'period_key' => $period['period_key'], 'status' => 'issued', 'invoice_ref' => $generated['invoice_ref'] ?? '', 'no_op' => ! empty( $generated['no_op'] ) );
                 }
             }
         } while ( count( $series_rows ) === 100 );
