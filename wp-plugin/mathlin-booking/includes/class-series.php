@@ -367,9 +367,10 @@ class MBS_Series {
         // Pre-flight: check if this is a chargeable series that requires reviewed billing
         $preflight_series = self::get( $series_ref );
         if ( $preflight_series && $preflight_series->status === 'pending' ) {
+            $requested_mode = is_array( $billing_config ) ? ( $billing_config['billing_mode'] ?? '' ) : '';
             $is_chargeable = ! $preflight_series->scout_use
                 && $preflight_series->billing_mode !== 'none'
-                && ( $billing_config === null || $billing_config['billing_mode'] ?? '' ) !== 'none';
+                && $requested_mode !== 'none';
 
             if ( $is_chargeable ) {
                 // If inline billing_config provided (MCP/REST), delegate to Approval_Service

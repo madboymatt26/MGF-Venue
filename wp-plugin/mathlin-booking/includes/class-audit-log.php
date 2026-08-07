@@ -36,7 +36,7 @@ class MBS_Audit_Log {
             $user_name = 'System';
         }
 
-        $wpdb->insert( self::table(), array(
+        $result = $wpdb->insert( self::table(), array(
             'ref'        => $ref,
             'action'     => $action,
             'details'    => $details,
@@ -45,6 +45,8 @@ class MBS_Audit_Log {
             'ip_address' => self::get_ip(),
             'created_at' => current_time( 'mysql' ),
         ) );
+
+        return $result !== false;
     }
 
     /**

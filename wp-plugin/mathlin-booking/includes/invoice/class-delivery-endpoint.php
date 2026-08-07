@@ -78,7 +78,16 @@ class MBS_Invoice_Delivery_Endpoint {
             wp_die( 'Invalid download link.', 'Access Denied', array( 'response' => 400 ) );
         }
 
-        // Validate token
+        // Rate limiting: simple IP-based throttle
+        $rate_key = 'mbs_guest_dl_' . md5( $_SERVER['REMOTE_ADDR'] ?? '' );
+        $attempts = (int) get_transient( $rate_key );
+        if ( $attempts > 20 ) {
+            self::log_access( 0, "doc:{$document_id}", $format, 'rate_limited' );
+            wp_die( 'Too many requests. Please try again later.', 'Rate Limited', array( 'response' => 429 ) );
+        }
+        set_transient( $rate_key, $attempts + 1, 300 ); // 20 requests per 5 minutes
+
+        // Atomic token validation (consumes one use)
         $valid = self::validate_guest_token( $token, $document_id );
         if ( is_wp_error( $valid ) ) {
             self::log_access( 0, "doc:{$document_id}", $format, 'denied_token' );
@@ -88,6 +97,8 @@ class MBS_Invoice_Delivery_Endpoint {
         // Build (always issued mode for guest access)
         $view_model = MBS_Invoice_Document_Builder::build_from_document( $document_id, 'issued' );
         if ( is_wp_error( $view_model ) ) {
+            // Refund the token use since we consumed it but couldn't render
+            self::refund_token_use( $token, $document_id );
             wp_die( 'Document could not be generated.', 'Error', array( 'response' => 500 ) );
         }
 
@@ -143,16 +154,28 @@ class MBS_Invoice_Delivery_Endpoint {
             }
         }
 
-        // Check ownership via ledger invoice → series
+        // Check ownership via ledger invoice → series → occurrences (user_id first)
         if ( $document->invoice_id ) {
             $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
             $invoice = $wpdb->get_row( $wpdb->prepare( "SELECT series_ref, contact_email FROM {$invoice_table} WHERE id = %d", (int) $document->invoice_id ) );
             if ( $invoice && $invoice->series_ref ) {
+                // Try user_id from series occurrences (strongest ownership signal)
+                $booking_table = $wpdb->prefix . MBS_TABLE;
+                $occurrence_user_id = $wpdb->get_var( $wpdb->prepare(
+                    "SELECT user_id FROM {$booking_table} WHERE series_id = %s AND user_id IS NOT NULL LIMIT 1",
+                    $invoice->series_ref
+                ) );
+                if ( $occurrence_user_id && (int) $occurrence_user_id === $user_id ) {
+                    return true;
+                }
+
+                // Legacy fallback: email match (audited)
                 $series_table = $wpdb->prefix . MBS_SERIES_TABLE;
                 $series = $wpdb->get_row( $wpdb->prepare( "SELECT contact_email FROM {$series_table} WHERE series_ref = %s", $invoice->series_ref ) );
                 if ( $series ) {
                     $user = get_userdata( $user_id );
                     if ( $user && strtolower( $user->user_email ) === strtolower( $series->contact_email ) ) {
+                        error_log( "[MGF Venue] Invoice access via email fallback (ledger): user {$user_id}, doc {$document_id}, series {$invoice->series_ref}" );
                         return true;
                     }
                 }
@@ -206,38 +229,50 @@ class MBS_Invoice_Delivery_Endpoint {
         global $wpdb;
         $table = $wpdb->prefix . MBS_DOWNLOAD_TOKENS_TABLE;
         $token_hash = hash( 'sha256', $raw_token );
+        $now = current_time( 'mysql' );
 
+        // Atomic conditional UPDATE: consume one use only if all conditions met
+        $consumed = $wpdb->query( $wpdb->prepare(
+            "UPDATE {$table}
+             SET use_count = use_count + 1
+             WHERE token_hash = %s AND document_id = %d
+               AND revoked_at IS NULL
+               AND expires_at > %s
+               AND (max_uses IS NULL OR use_count < max_uses)",
+            $token_hash, (int) $document_id, $now
+        ) );
+
+        if ( $consumed === 1 ) {
+            return true;
+        }
+
+        // Determine specific failure reason for logging
         $token = $wpdb->get_row( $wpdb->prepare(
             "SELECT * FROM {$table} WHERE token_hash = %s AND document_id = %d",
             $token_hash, (int) $document_id
         ) );
 
-        if ( ! $token ) {
-            return new WP_Error( 'token_invalid', 'Token not found.' );
-        }
-
-        if ( $token->revoked_at ) {
-            return new WP_Error( 'token_revoked', 'This download link has been revoked.' );
-        }
-
-        if ( strtotime( $token->expires_at ) < time() ) {
-            return new WP_Error( 'token_expired', 'This download link has expired.' );
-        }
-
-        if ( $token->max_uses && (int) $token->use_count >= (int) $token->max_uses ) {
-            return new WP_Error( 'token_exhausted', 'This download link has reached its maximum use count.' );
-        }
-
-        // Increment use count
-        $wpdb->query( $wpdb->prepare(
-            "UPDATE {$table} SET use_count = use_count + 1 WHERE id = %d",
-            (int) $token->id
-        ) );
-
-        return true;
+        if ( ! $token ) return new WP_Error( 'token_invalid', 'Token not found.' );
+        if ( $token->revoked_at ) return new WP_Error( 'token_revoked', 'This download link has been revoked.' );
+        if ( strtotime( $token->expires_at ) < time() ) return new WP_Error( 'token_expired', 'This download link has expired.' );
+        if ( $token->max_uses && (int) $token->use_count >= (int) $token->max_uses ) return new WP_Error( 'token_exhausted', 'Max uses reached.' );
+        return new WP_Error( 'token_invalid', 'Token validation failed.' );
     }
 
     // ── Serve Documents ────────────────────────────────────────────────────────
+
+    /**
+     * Refund a token use when document generation fails after validation.
+     */
+    private static function refund_token_use( $raw_token, $document_id ) {
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_DOWNLOAD_TOKENS_TABLE;
+        $token_hash = hash( 'sha256', $raw_token );
+        $wpdb->query( $wpdb->prepare(
+            "UPDATE {$table} SET use_count = GREATEST(0, use_count - 1) WHERE token_hash = %s AND document_id = %d",
+            $token_hash, (int) $document_id
+        ) );
+    }
 
     private static function serve_html( $view_model ) {
         $html = MBS_HTML_Renderer::render( $view_model );

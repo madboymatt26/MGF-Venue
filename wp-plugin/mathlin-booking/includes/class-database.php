@@ -53,6 +53,7 @@ class MBS_Database {
             modification_token VARCHAR(64) DEFAULT NULL,
             is_public       TINYINT(1)   NOT NULL DEFAULT 0,
             user_id         BIGINT(20)   DEFAULT NULL,
+            current_invoice_document_id BIGINT(20) UNSIGNED DEFAULT NULL,
             created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             PRIMARY KEY (id),
@@ -123,6 +124,9 @@ class MBS_Database {
             adopted_by            BIGINT(20) UNSIGNED DEFAULT NULL,
             adoption_state        VARCHAR(20)  NOT NULL DEFAULT 'not_required',
             adoption_version      VARCHAR(40)  DEFAULT NULL,
+            billing_reviewed_at   DATETIME     DEFAULT NULL,
+            billing_reviewed_by   BIGINT(20) UNSIGNED DEFAULT NULL,
+            billing_reviewed_version BIGINT(20) UNSIGNED DEFAULT NULL,
             created_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             PRIMARY KEY (id),
@@ -405,21 +409,34 @@ class MBS_Database {
         ) {$charset};";
         dbDelta( $sql3 );
 
-        // Email queue table
+        // Email queue table (transactional outbox)
         $queue_table = $wpdb->prefix . 'mathlin_email_queue';
         $sql4 = "CREATE TABLE IF NOT EXISTS {$queue_table} (
-            id          BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
-            to_email    VARCHAR(150) NOT NULL,
-            subject     VARCHAR(255) NOT NULL,
-            body        LONGTEXT     NOT NULL,
-            headers     TEXT         DEFAULT '',
-            attachments TEXT         DEFAULT '',
-            attempts    SMALLINT     NOT NULL DEFAULT 0,
-            status      VARCHAR(20)  NOT NULL DEFAULT 'pending',
-            next_retry  DATETIME     DEFAULT NULL,
-            created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            id              BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            to_email        VARCHAR(150) NOT NULL,
+            subject         VARCHAR(255) NOT NULL,
+            body            LONGTEXT     NOT NULL,
+            headers         TEXT         DEFAULT '',
+            attachments     TEXT         DEFAULT '',
+            attempts        SMALLINT     NOT NULL DEFAULT 0,
+            status          VARCHAR(20)  NOT NULL DEFAULT 'pending',
+            next_retry      DATETIME     DEFAULT NULL,
+            message_key     VARCHAR(100) DEFAULT NULL,
+            payload_hash    CHAR(64)     DEFAULT NULL,
+            attachment_meta LONGTEXT     DEFAULT NULL,
+            claimed_at      DATETIME     DEFAULT NULL,
+            lease_expires_at DATETIME    DEFAULT NULL,
+            worker_id       VARCHAR(50)  DEFAULT NULL,
+            accepted_at     DATETIME     DEFAULT NULL,
+            last_error      TEXT         DEFAULT '',
+            message_type    VARCHAR(50)  DEFAULT NULL,
+            reference_type  VARCHAR(50)  DEFAULT NULL,
+            reference_id    BIGINT(20) UNSIGNED DEFAULT NULL,
+            created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (id),
-            KEY idx_status (status, next_retry)
+            UNIQUE KEY message_key (message_key),
+            KEY idx_status (status, next_retry),
+            KEY idx_queue_processing (status, claimed_at)
         ) {$charset};";
         dbDelta( $sql4 );
 

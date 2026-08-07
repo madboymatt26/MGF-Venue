@@ -135,12 +135,16 @@ class MBS_Series_Approval_Service {
             $created_documents = $invoice_result;
         }
 
-        // ── Audit record (inside transaction) ──────────────────────────────
+        // ── Audit record (inside transaction — fail-closed) ──────────────────
         $audit_details = 'Approved with billing: ' . $billing_config['billing_mode']
             . ' / ' . $billing_config['billing_treatment']
             . ' / ' . $billing_config['payment_method']
             . '. Confirmed ' . (int) $confirmed_count . ' occurrence(s).';
-        MBS_Audit_Log::log( $series_ref, 'series_approved_with_billing', $audit_details );
+        $audit_ok = MBS_Audit_Log::log( $series_ref, 'series_approved_with_billing', $audit_details );
+        if ( ! $audit_ok ) {
+            $wpdb->query( 'ROLLBACK' );
+            return new WP_Error( 'audit_insert_failed', 'Could not record the approval audit entry. Approval rolled back.' );
+        }
 
         // ── Queue confirmation email (inside transaction) ──────────────────
         if ( $notify_hirer ) {
