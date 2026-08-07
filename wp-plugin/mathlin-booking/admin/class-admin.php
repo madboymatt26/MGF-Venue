@@ -30,6 +30,7 @@ class MBS_Admin {
         add_action( 'wp_ajax_mbs_resolve_invoice_reconciliation', array( $this, 'ajax_resolve_invoice_reconciliation' ) );
         add_action( 'wp_ajax_mbs_configure_series_billing', array( $this, 'ajax_configure_series_billing' ) );
         add_action( 'wp_ajax_mbs_approve_series_with_billing', array( $this, 'ajax_approve_series_with_billing' ) );
+        add_action( 'wp_ajax_mbs_billing_preview', array( $this, 'ajax_billing_preview' ) );
         add_action( 'wp_ajax_mbs_pause_series', array( $this, 'ajax_pause_series' ) );
         add_action( 'wp_ajax_mbs_catch_up_series_billing', array( $this, 'ajax_catch_up_series_billing' ) );
         add_action( 'wp_ajax_mbs_extend_external_series', array( $this, 'ajax_extend_external_series' ) );
@@ -1033,6 +1034,45 @@ class MBS_Admin {
         }
         MBS_Audit_Log::log( $invoice_ref, 'payment_reconciliation_resolved', 'Order #' . $order_id . ' resolved as ' . $resolution . ' by administrator.' );
         wp_send_json_success( array( 'invoice_ref' => $invoice_ref, 'order_id' => $order_id, 'status' => $requested_resolution ) );
+    }
+
+    /**
+     * AJAX: Return the canonical billing period preview for a series.
+     * Uses the same period calculator as the billing engine.
+     */
+    public function ajax_billing_preview() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'Permission denied.', 403 );
+
+        $series_ref = sanitize_text_field( $_POST['series_ref'] ?? '' );
+        if ( ! $series_ref ) wp_send_json_error( 'Series reference required.', 400 );
+
+        // Build overrides from the proposed billing config
+        $overrides = array();
+        if ( ! empty( $_POST['billing_mode'] ) ) $overrides['billing_mode'] = sanitize_key( $_POST['billing_mode'] );
+        if ( ! empty( $_POST['invoice_lead_days'] ) ) $overrides['invoice_lead_days'] = absint( $_POST['invoice_lead_days'] );
+        if ( ! empty( $_POST['payment_terms_days'] ) ) $overrides['payment_terms_days'] = absint( $_POST['payment_terms_days'] );
+        if ( ! empty( $_POST['billing_schedule'] ) ) {
+            $schedule = json_decode( wp_unslash( $_POST['billing_schedule'] ), true );
+            if ( is_array( $schedule ) ) $overrides['billing_schedule_json'] = wp_json_encode( $schedule );
+        }
+
+        $preview = MBS_Billing_Engine::preview( $series_ref, $overrides );
+        if ( is_wp_error( $preview ) ) wp_send_json_error( $preview->get_error_message(), 400 );
+
+        // Format for the admin UI
+        $formatted_periods = array();
+        foreach ( $preview['periods'] ?? array() as $period ) {
+            $formatted_periods[] = array(
+                'period'     => $period['label'] ?? $period['period_key'] ?? '',
+                'issue_date' => ! empty( $period['issue_on'] ) ? wp_date( 'j M Y', strtotime( $period['issue_on'] ) ) : '',
+                'due_date'   => ! empty( $period['due_on'] ) ? wp_date( 'j M Y', strtotime( $period['due_on'] ) ) : '',
+                'sessions'   => (int) ( $period['occurrence_count'] ?? count( $period['items'] ?? array() ) ),
+                'total'      => MBS_Money::format( (int) ( $period['total_minor'] ?? 0 ) ),
+            );
+        }
+
+        wp_send_json_success( array( 'periods' => $formatted_periods ) );
     }
 
     public function ajax_approve_series_with_billing() {

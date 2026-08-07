@@ -38,6 +38,13 @@ jobs:
           coverage: none
       - name: Run PHP lint and dependency-free programs
         run: sh tests/integration/run-php-suite.sh
+      - name: Run invoice document unit tests
+        run: php tests/php-invoice-document-unit.php
+      - name: Validate Composer dependencies
+        run: |
+          cd wp-plugin/mathlin-booking
+          composer validate --no-check-publish
+          composer audit --locked || true
       - name: Check admin handler parity
         run: php mcp-server/tests/php-admin-parity-smoke.php
       - name: Validate MCP schemas

@@ -1018,3 +1018,62 @@ jQuery(function ($) {
         });
     });
 })(jQuery);
+
+// ── Live Billing Preview ───────────────────────────────────────────────────
+(function($) {
+    'use strict';
+    var previewTimer = null;
+
+    function refreshBillingPreview() {
+        var $form = $('#mbs-approval-form');
+        if (!$form.length) return;
+
+        var series_ref = $form.find('[name="series_ref"]').val();
+        var mode = $form.find('[name="billing_mode"]').val();
+        if (!series_ref || mode === 'none') {
+            $('#mbs-billing-preview-section').html('<strong>No billing — no invoices will be generated.</strong>');
+            return;
+        }
+
+        var terms = [];
+        $form.find('.mbs-term-row').each(function(i) {
+            var label = $(this).find('[name^="term_name"]').val();
+            var start = $(this).find('[name^="term_start"]').val();
+            var end = $(this).find('[name^="term_end"]').val();
+            if (label && start && end) terms.push({key:'term_'+(i+1), label:label, start:start, end:end});
+        });
+
+        $.post(MBS_Admin.ajax_url, {
+            action: 'mbs_billing_preview',
+            nonce: MBS_Admin.nonce,
+            series_ref: series_ref,
+            billing_mode: mode,
+            invoice_lead_days: $form.find('[name="invoice_lead_days"]').val(),
+            payment_terms_days: $form.find('[name="payment_terms_days"]').val(),
+            billing_schedule: JSON.stringify({terms: terms})
+        }, function(res) {
+            if (!res.success || !res.data.periods || !res.data.periods.length) {
+                $('#mbs-billing-preview-section').html('<strong>Billing preview:</strong> No periods calculated.');
+                return;
+            }
+            var html = '<strong>Billing preview:</strong><table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:13px;">';
+            html += '<tr style="background:#e0d0f0;"><th style="padding:6px;">Period</th><th>Issue</th><th>Due</th><th>Sessions</th><th>Total</th></tr>';
+            res.data.periods.forEach(function(p) {
+                html += '<tr><td style="padding:4px 6px;">' + p.period + '</td><td>' + p.issue_date + '</td><td>' + p.due_date + '</td><td>' + p.sessions + '</td><td>' + p.total + '</td></tr>';
+            });
+            html += '</table>';
+            $('#mbs-billing-preview-section').html(html);
+        });
+    }
+
+    // Trigger preview when billing config changes in the approval modal
+    $(document).on('change', '#mbs-approval-form select, #mbs-approval-form input[type="number"]', function() {
+        clearTimeout(previewTimer);
+        previewTimer = setTimeout(refreshBillingPreview, 500);
+    });
+
+    // Initial load when modal opens
+    $(document).on('click', '.nms-btn-review-approve', function() {
+        setTimeout(refreshBillingPreview, 200);
+    });
+})(jQuery);
