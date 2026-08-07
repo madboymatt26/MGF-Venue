@@ -47,11 +47,17 @@ class MBS_PDF_Renderer {
             return new WP_Error( 'pdf_library_unavailable', 'Dompdf class not found after autoloading.' );
         }
 
-        // Set resource limits
+        // Set resource limits (only INCREASE, never reduce existing higher limits)
         $prev_memory = ini_get( 'memory_limit' );
         $prev_time = ini_get( 'max_execution_time' );
-        @ini_set( 'memory_limit', self::RENDER_MEMORY_LIMIT );
-        @set_time_limit( self::RENDER_TIMEOUT );
+        $current_bytes = wp_convert_hr_to_bytes( $prev_memory );
+        $target_bytes = wp_convert_hr_to_bytes( self::RENDER_MEMORY_LIMIT );
+        if ( $current_bytes > 0 && $current_bytes < $target_bytes ) {
+            @ini_set( 'memory_limit', self::RENDER_MEMORY_LIMIT );
+        }
+        if ( (int) $prev_time > 0 && (int) $prev_time < self::RENDER_TIMEOUT ) {
+            @set_time_limit( self::RENDER_TIMEOUT );
+        }
 
         try {
             // Defensive Dompdf configuration — new instance per document
@@ -60,7 +66,7 @@ class MBS_PDF_Renderer {
             $options->setIsPhpEnabled( false );          // No PHP in HTML
             $options->setIsJavascriptEnabled( false );   // No JS
             $options->setIsFontSubsettingEnabled( true );
-            $options->setDefaultFont( 'sans-serif' );
+            $options->setDefaultFont( 'DejaVu Sans' );  // Unicode-capable packaged font
 
             // Temp/cache paths
             $temp_dir = self::get_render_temp_dir();
@@ -81,30 +87,27 @@ class MBS_PDF_Renderer {
             $dompdf->setPaper( 'A4', 'portrait' );
             $dompdf->render();
 
-            // Page count check
+            // Page count monitoring (warning only — do NOT block legitimate downloads)
             $page_count = $dompdf->getCanvas()->get_page_count();
             if ( $page_count > self::MAX_PAGES ) {
-                return new WP_Error( 'pdf_too_many_pages', sprintf(
-                    'Rendered PDF has %d pages (maximum %d). Consider splitting the invoice.',
-                    $page_count, self::MAX_PAGES
-                ) );
+                error_log( '[MGF Venue] PDF invoice exceeded ' . self::MAX_PAGES . ' pages (' . $page_count . ' pages). Consider splitting.' );
             }
 
             $pdf_binary = $dompdf->output();
 
-            // Size check
+            // Size monitoring (for email attachment threshold — NOT a download block)
             $pdf_size = strlen( $pdf_binary );
             if ( $pdf_size > self::MAX_PDF_BYTES ) {
-                return new WP_Error( 'pdf_too_large', sprintf(
-                    'Rendered PDF is %s (maximum %s).',
-                    size_format( $pdf_size ), size_format( self::MAX_PDF_BYTES )
-                ) );
+                error_log( '[MGF Venue] PDF invoice exceeds email attachment threshold (' . size_format( $pdf_size ) . ').' );
+                // PDF is still valid and downloadable — the email worker handles the fallback
             }
 
             return $pdf_binary;
 
-        } catch ( \Exception $e ) {
-            return new WP_Error( 'pdf_render_failed', 'PDF rendering failed: ' . $e->getMessage() );
+        } catch ( \Throwable $e ) {
+            // Log detailed error internally; return generic message to user
+            error_log( '[MGF Venue] PDF render error: ' . get_class( $e ) . ': ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine() );
+            return new WP_Error( 'pdf_render_failed', 'PDF rendering encountered an error. The administrator has been notified.' );
         } finally {
             // Restore resource limits
             @ini_set( 'memory_limit', $prev_memory );
