@@ -282,6 +282,7 @@ class MBS_Email_Queue {
             $headers = json_decode( $email->headers, true ) ?: array();
             $attachments = array();
             $temp_file = null;
+            $download_link_appended = false;
 
             // Determine attachment source
             if ( ! empty( $email->attachment_meta ) ) {
@@ -289,9 +290,43 @@ class MBS_Email_Queue {
                 if ( is_array( $meta ) && ! empty( $meta['document_id'] ) ) {
                     $temp_file = self::render_attachment_from_meta( $meta );
                     if ( $temp_file && file_exists( $temp_file ) ) {
-                        $attachments = array( $temp_file );
+                        // Check size against email attachment limit
+                        $file_size = filesize( $temp_file );
+                        $max_attach = (int) get_option( 'mbs_email_attachment_max_bytes', 5242880 );
+                        if ( $file_size <= $max_attach ) {
+                            $attachments = array( $temp_file );
+                        } else {
+                            // Oversized: create secure download token and append link to body
+                            @unlink( $temp_file );
+                            $temp_file = null;
+                            $token = MBS_Invoice_Delivery_Endpoint::create_guest_token( (int) $meta['document_id'] );
+                            if ( ! is_wp_error( $token ) ) {
+                                $download_url = add_query_arg( array(
+                                    'action'      => 'mbs_invoice_document',
+                                    'token'       => $token,
+                                    'document_id' => (int) $meta['document_id'],
+                                    'format'      => 'pdf',
+                                ), admin_url( 'admin-ajax.php' ) );
+                                $email->body .= '<p style="margin-top:16px;padding:12px;background:#f5f0ff;border-radius:6px;"><strong>Your invoice is available for download:</strong><br><a href="' . esc_url( $download_url ) . '">' . esc_url( $download_url ) . '</a><br><small>This link expires in 72 hours.</small></p>';
+                                $download_link_appended = true;
+                            }
+                            error_log( '[MGF Venue] Invoice PDF oversized (' . size_format( $file_size ) . '); sent with download link instead.' );
+                        }
+                    } else {
+                        // Render failed: also provide secure download link as fallback
+                        $token = MBS_Invoice_Delivery_Endpoint::create_guest_token( (int) $meta['document_id'] );
+                        if ( ! is_wp_error( $token ) ) {
+                            $download_url = add_query_arg( array(
+                                'action'      => 'mbs_invoice_document',
+                                'token'       => $token,
+                                'document_id' => (int) $meta['document_id'],
+                                'format'      => 'pdf',
+                            ), admin_url( 'admin-ajax.php' ) );
+                            $email->body .= '<p style="margin-top:16px;padding:12px;background:#fee2e2;border-radius:6px;"><strong>Invoice attachment could not be generated.</strong> Download your invoice here:<br><a href="' . esc_url( $download_url ) . '">' . esc_url( $download_url ) . '</a></p>';
+                            $download_link_appended = true;
+                        }
+                        error_log( '[MGF Venue] Invoice PDF render failed for document ' . $meta['document_id'] . '; sent with download link fallback.' );
                     }
-                    // If render failed, send without attachment (graceful degradation)
                 }
             } else {
                 // Legacy: use stored file paths

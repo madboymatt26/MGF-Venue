@@ -718,6 +718,21 @@ jQuery(function ($) {
         var $button = $form.find('button[type="submit"]');
         var $message = $form.find('.nms-series-billing-message');
         var data = $form.serializeArray();
+
+        // Collect structured term data into canonical {"terms":[...]} format
+        var terms = [];
+        $form.find('.mbs-term-row').each(function(i) {
+            var label = $(this).find('[name="billing_term_label[]"]').val();
+            var start = $(this).find('[name="billing_term_start[]"]').val();
+            var end = $(this).find('[name="billing_term_end[]"]').val();
+            if (label && start && end) {
+                terms.push({key: 'term_' + (i+1), label: label, start: start, end: end});
+            }
+        });
+        // Remove raw term inputs from serialized data and replace with canonical JSON
+        data = data.filter(function(item) { return item.name.indexOf('billing_term_') === -1; });
+        data.push({name: 'billing_schedule_json', value: JSON.stringify({terms: terms})});
+
         data.push({name: 'action', value: 'mbs_configure_series_billing'});
         data.push({name: 'nonce', value: MBS_Admin.nonce});
         $button.prop('disabled', true).text('Saving…');
@@ -988,7 +1003,7 @@ jQuery(function ($) {
             payment_method: $form.find('[name="payment_method"]').val(),
             invoice_lead_days: $form.find('[name="invoice_lead_days"]').val(),
             payment_terms_days: $form.find('[name="payment_terms_days"]').val(),
-            billing_schedule: JSON.stringify(billingSchedule)
+            billing_schedule: JSON.stringify({terms: billingSchedule})
         }, function(res) {
             if (res.success) {
                 $msg.text('Approved!').css('color', '#065f46');

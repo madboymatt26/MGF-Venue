@@ -703,16 +703,30 @@ class MBS_Bookings {
         if ( $result !== false && $status === 'confirmed' ) {
             $booking = self::get( $ref );
             if ( $booking ) {
-                // Issue immutable invoice document (if not already present)
-                if ( empty( $booking->current_invoice_document_id ) && ! $booking->series_id ) {
-                    MBS_Invoice_Document_Service::issue_booking_document( $booking );
+                // Chargeable non-series bookings: use atomic confirmation service
+                $amount_check = MBS_Money::from_decimal_string( (string) $booking->amount );
+                $is_chargeable = ! is_wp_error( $amount_check ) && $amount_check > 0
+                    && empty( $booking->series_id )
+                    && empty( $booking->current_invoice_document_id );
+
+                if ( $is_chargeable ) {
+                    // Attempt atomic document issuance (the booking is already confirmed
+                    // by the update above, but issue_booking_document will lock and verify)
+                    $doc_result = MBS_Invoice_Document_Service::issue_booking_document( $booking );
+                    if ( is_wp_error( $doc_result ) ) {
+                        // Roll back the confirmation — cannot confirm without document
+                        $wpdb->update( $table, array( 'status' => $current->status ), array( 'ref' => $ref ) );
+                        MBS_Audit_Log::log( $ref, 'confirm_rolled_back', 'Confirmation rolled back: invoice document could not be issued. ' . $doc_result->get_error_message() );
+                        return false;
+                    }
                 }
 
                 MBS_HomeAssistant::notify( $booking );
                 $wpdb->update( $table, array( 'ha_notified' => 1 ), array( 'ref' => $ref ) );
 
                 // Auto-promote £0 bookings (scout use / free) straight to paid
-                if ( (float) $booking->amount <= 0 ) {
+                $total_minor = MBS_Money::from_decimal_string( (string) $booking->amount );
+                if ( ! is_wp_error( $total_minor ) && $total_minor <= 0 ) {
                     $wpdb->update( $table, array( 'status' => 'paid' ), array( 'ref' => $ref ) );
                     MBS_Audit_Log::log( $ref, 'paid', 'Auto-marked as Paid (£0 booking — no payment required)' );
                     do_action( 'mbs_booking_paid', self::get( $ref ), 0 );

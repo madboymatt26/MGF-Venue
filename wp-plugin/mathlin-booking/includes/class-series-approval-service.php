@@ -36,8 +36,14 @@ class MBS_Series_Approval_Service {
         $logo_ref = MBS_Logo_Asset::resolve_current_org_logo();
 
         // ── Validate billing configuration ─────────────────────────────────
+        $preflight = MBS_Series::get( $series_ref );
+        if ( $preflight ) {
+            $billing_config['_series_start_date'] = $preflight->start_date;
+            $billing_config['_series_repeat_until'] = $preflight->repeat_until;
+        }
         $billing_validation = self::validate_billing_config( $billing_config );
         if ( is_wp_error( $billing_validation ) ) return $billing_validation;
+        unset( $billing_config['_series_start_date'], $billing_config['_series_repeat_until'] );
 
         // ── BEGIN TRANSACTION ──────────────────────────────────────────────
         if ( $wpdb->query( 'START TRANSACTION' ) === false ) {
@@ -244,11 +250,23 @@ class MBS_Series_Approval_Service {
             return new WP_Error( 'billing_config_invalid', 'Invalid payment method.' );
         }
 
-        // Termly requires billing_schedule
+        // Termly requires billing_schedule with valid term dates
         if ( $config['billing_mode'] === 'termly' ) {
             $schedule = $config['billing_schedule'] ?? array();
             if ( empty( $schedule ) || ! is_array( $schedule ) ) {
                 return new WP_Error( 'billing_config_incomplete', 'Termly billing requires at least one term date range.' );
+            }
+            // Extract terms from canonical structure {"terms":[...]}
+            $terms = isset( $schedule['terms'] ) ? $schedule['terms'] : $schedule;
+            if ( ! is_array( $terms ) || empty( $terms ) ) {
+                return new WP_Error( 'billing_config_incomplete', 'Termly billing requires structured term date ranges.' );
+            }
+            // Invoke canonical term validator (Issue 7)
+            if ( class_exists( 'MBS_Invoice_Document_Security' ) ) {
+                $series_start = $config['_series_start_date'] ?? '';
+                $series_end = $config['_series_repeat_until'] ?? '';
+                $term_valid = MBS_Invoice_Document_Security::validate_term_schedule( $terms, $series_start, $series_end );
+                if ( is_wp_error( $term_valid ) ) return $term_valid;
             }
         }
 
