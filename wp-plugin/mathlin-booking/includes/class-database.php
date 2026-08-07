@@ -307,6 +307,67 @@ class MBS_Database {
         ) ENGINE=InnoDB {$charset};";
         dbDelta( $osm_outbox_sql );
 
+        // Immutable invoice document snapshots (append-only history)
+        $documents_table = $wpdb->prefix . MBS_INVOICE_DOCUMENTS_TABLE;
+        $documents_sql = "CREATE TABLE {$documents_table} (
+            id                     BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            booking_id             BIGINT(20) UNSIGNED DEFAULT NULL,
+            invoice_id             BIGINT(20) UNSIGNED DEFAULT NULL,
+            booking_ref            VARCHAR(20) DEFAULT NULL,
+            invoice_number         VARCHAR(30) NOT NULL,
+            revision               SMALLINT UNSIGNED NOT NULL DEFAULT 1,
+            document_type          VARCHAR(20) NOT NULL DEFAULT 'invoice',
+            snapshot_json          LONGTEXT NOT NULL,
+            snapshot_version       SMALLINT UNSIGNED NOT NULL DEFAULT 1,
+            logo_asset_id          BIGINT(20) UNSIGNED DEFAULT NULL,
+            logo_content_hash      CHAR(64) DEFAULT NULL,
+            status                 VARCHAR(20) NOT NULL DEFAULT 'issued',
+            supersedes_document_id BIGINT(20) UNSIGNED DEFAULT NULL,
+            issued_at              DATETIME NOT NULL,
+            created_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY booking_revision (booking_id, revision),
+            UNIQUE KEY invoice_revision (invoice_id, revision),
+            KEY idx_booking_ref (booking_ref),
+            KEY idx_doc_status (status),
+            KEY idx_supersedes (supersedes_document_id)
+        ) ENGINE=InnoDB {$charset};";
+        dbDelta( $documents_sql );
+
+        // Content-addressed immutable logo/document assets
+        $assets_table = $wpdb->prefix . MBS_DOCUMENT_ASSETS_TABLE;
+        $assets_sql = "CREATE TABLE {$assets_table} (
+            id             BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            content_hash   CHAR(64) NOT NULL,
+            mime_type      VARCHAR(30) NOT NULL,
+            width          SMALLINT UNSIGNED NOT NULL,
+            height         SMALLINT UNSIGNED NOT NULL,
+            file_size      INT UNSIGNED NOT NULL,
+            content        LONGBLOB NOT NULL,
+            created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY asset_hash (content_hash)
+        ) ENGINE=InnoDB {$charset};";
+        dbDelta( $assets_sql );
+
+        // Opaque guest download tokens for invoice documents
+        $tokens_table = $wpdb->prefix . MBS_DOWNLOAD_TOKENS_TABLE;
+        $tokens_sql = "CREATE TABLE {$tokens_table} (
+            id               BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            token_hash       CHAR(64) NOT NULL,
+            document_id      BIGINT(20) UNSIGNED NOT NULL,
+            expires_at       DATETIME NOT NULL,
+            max_uses         SMALLINT UNSIGNED DEFAULT NULL,
+            use_count        SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            revoked_at       DATETIME DEFAULT NULL,
+            created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY token_hash (token_hash),
+            KEY idx_document (document_id),
+            KEY idx_expiry (expires_at)
+        ) ENGINE=InnoDB {$charset};";
+        dbDelta( $tokens_sql );
+
         // Blocked dates table
         $blocked_table = $wpdb->prefix . 'mathlin_blocked_dates';
         $sql2 = "CREATE TABLE IF NOT EXISTS {$blocked_table} (
@@ -390,6 +451,9 @@ class MBS_Database {
             $allocation_table => $allocation_sql,
             $reservation_table => $reservation_sql,
             $osm_outbox_table => $osm_outbox_sql,
+            $documents_table => $documents_sql,
+            $assets_table => $assets_sql,
+            $tokens_table => $tokens_sql,
             $blocked_table => $sql2,
             $audit_table => $sql3,
             $queue_table => $sql4,
@@ -433,7 +497,9 @@ class MBS_Database {
             $wpdb->prefix.MBS_TABLE, $wpdb->prefix.MBS_SERIES_TABLE, $wpdb->prefix.MBS_INVOICE_TABLE,
             $wpdb->prefix.MBS_INVOICE_ITEM_TABLE, $wpdb->prefix.MBS_PAYMENT_TRANSACTION_TABLE,
             $wpdb->prefix.MBS_BILLING_ALLOCATION_TABLE, $wpdb->prefix.MBS_PAYMENT_RESERVATION_TABLE,
-            $wpdb->prefix.MBS_OSM_OUTBOX_TABLE, $wpdb->prefix.'mathlin_blocked_dates',
+            $wpdb->prefix.MBS_OSM_OUTBOX_TABLE, $wpdb->prefix.MBS_INVOICE_DOCUMENTS_TABLE,
+            $wpdb->prefix.MBS_DOCUMENT_ASSETS_TABLE, $wpdb->prefix.MBS_DOWNLOAD_TOKENS_TABLE,
+            $wpdb->prefix.'mathlin_blocked_dates',
             $wpdb->prefix.'mathlin_audit_log', $wpdb->prefix.'mathlin_email_queue',
             $wpdb->prefix.'mathlin_mod_requests',
         );
@@ -892,6 +958,63 @@ class MBS_Database {
             }
 	            update_option( 'mbs_woo_product_renamed', true );
 	        }
+
+        // v3.22.0: Add current_invoice_document_id to bookings
+        $col = $wpdb->get_results( "SHOW COLUMNS FROM {$table} LIKE 'current_invoice_document_id'" );
+        if ( empty( $col ) ) {
+            $result = self::migration_query( "ALTER TABLE {$table} ADD COLUMN current_invoice_document_id BIGINT(20) UNSIGNED DEFAULT NULL", 'current_invoice_document_id addition' );
+            if ( is_wp_error( $result ) ) return $result;
+        }
+
+        // v3.22.0: Add billing review fields to series
+        $series_table_name = $wpdb->prefix . MBS_SERIES_TABLE;
+        $col = $wpdb->get_results( "SHOW COLUMNS FROM {$series_table_name} LIKE 'billing_reviewed_at'" );
+        if ( empty( $col ) ) {
+            $result = self::migration_query( "ALTER TABLE {$series_table_name} ADD COLUMN billing_reviewed_at DATETIME DEFAULT NULL", 'billing_reviewed_at addition' );
+            if ( is_wp_error( $result ) ) return $result;
+            $result = self::migration_query( "ALTER TABLE {$series_table_name} ADD COLUMN billing_reviewed_by BIGINT(20) UNSIGNED DEFAULT NULL AFTER billing_reviewed_at", 'billing_reviewed_by addition' );
+            if ( is_wp_error( $result ) ) return $result;
+            $result = self::migration_query( "ALTER TABLE {$series_table_name} ADD COLUMN billing_reviewed_version BIGINT(20) UNSIGNED DEFAULT NULL AFTER billing_reviewed_by", 'billing_reviewed_version addition' );
+            if ( is_wp_error( $result ) ) return $result;
+        }
+
+        // v3.22.0: Extend email queue for transactional outbox
+        $queue_table_name = $wpdb->prefix . 'mathlin_email_queue';
+        $col = $wpdb->get_results( "SHOW COLUMNS FROM {$queue_table_name} LIKE 'message_key'" );
+        if ( empty( $col ) ) {
+            $result = self::migration_query( "ALTER TABLE {$queue_table_name} ADD COLUMN message_key VARCHAR(100) DEFAULT NULL", 'queue message_key addition' );
+            if ( is_wp_error( $result ) ) return $result;
+            $result = self::migration_query( "ALTER TABLE {$queue_table_name} ADD COLUMN payload_hash CHAR(64) DEFAULT NULL AFTER message_key", 'queue payload_hash addition' );
+            if ( is_wp_error( $result ) ) return $result;
+            $result = self::migration_query( "ALTER TABLE {$queue_table_name} ADD COLUMN attachment_meta LONGTEXT DEFAULT NULL AFTER payload_hash", 'queue attachment_meta addition' );
+            if ( is_wp_error( $result ) ) return $result;
+            $result = self::migration_query( "ALTER TABLE {$queue_table_name} ADD COLUMN claimed_at DATETIME DEFAULT NULL AFTER attachment_meta", 'queue claimed_at addition' );
+            if ( is_wp_error( $result ) ) return $result;
+            $result = self::migration_query( "ALTER TABLE {$queue_table_name} ADD COLUMN lease_expires_at DATETIME DEFAULT NULL AFTER claimed_at", 'queue lease_expires_at addition' );
+            if ( is_wp_error( $result ) ) return $result;
+            $result = self::migration_query( "ALTER TABLE {$queue_table_name} ADD COLUMN worker_id VARCHAR(50) DEFAULT NULL AFTER lease_expires_at", 'queue worker_id addition' );
+            if ( is_wp_error( $result ) ) return $result;
+            $result = self::migration_query( "ALTER TABLE {$queue_table_name} ADD COLUMN accepted_at DATETIME DEFAULT NULL AFTER worker_id", 'queue accepted_at addition' );
+            if ( is_wp_error( $result ) ) return $result;
+            $result = self::migration_query( "ALTER TABLE {$queue_table_name} ADD COLUMN last_error TEXT DEFAULT '' AFTER accepted_at", 'queue last_error addition' );
+            if ( is_wp_error( $result ) ) return $result;
+            $result = self::migration_query( "ALTER TABLE {$queue_table_name} ADD COLUMN message_type VARCHAR(50) DEFAULT NULL AFTER last_error", 'queue message_type addition' );
+            if ( is_wp_error( $result ) ) return $result;
+            $result = self::migration_query( "ALTER TABLE {$queue_table_name} ADD COLUMN reference_type VARCHAR(50) DEFAULT NULL AFTER message_type", 'queue reference_type addition' );
+            if ( is_wp_error( $result ) ) return $result;
+            $result = self::migration_query( "ALTER TABLE {$queue_table_name} ADD COLUMN reference_id BIGINT(20) UNSIGNED DEFAULT NULL AFTER reference_type", 'queue reference_id addition' );
+            if ( is_wp_error( $result ) ) return $result;
+            $indexes = $wpdb->get_results( "SHOW INDEX FROM {$queue_table_name} WHERE Key_name = 'message_key'" );
+            if ( empty( $indexes ) ) {
+                $result = self::migration_query( "ALTER TABLE {$queue_table_name} ADD UNIQUE KEY message_key (message_key)", 'queue message_key index' );
+                if ( is_wp_error( $result ) ) return $result;
+            }
+            $indexes = $wpdb->get_results( "SHOW INDEX FROM {$queue_table_name} WHERE Key_name = 'idx_queue_processing'" );
+            if ( empty( $indexes ) ) {
+                $result = self::migration_query( "ALTER TABLE {$queue_table_name} ADD KEY idx_queue_processing (status, next_retry)", 'queue processing index' );
+                if ( is_wp_error( $result ) ) return $result;
+            }
+        }
 
 	        // Run only after every historical payment column above is present.
 	        $backfilled = self::backfill_legacy_financial_history();
