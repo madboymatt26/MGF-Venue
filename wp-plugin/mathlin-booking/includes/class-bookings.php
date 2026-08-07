@@ -703,6 +703,11 @@ class MBS_Bookings {
         if ( $result !== false && $status === 'confirmed' ) {
             $booking = self::get( $ref );
             if ( $booking ) {
+                // Issue immutable invoice document (if not already present)
+                if ( empty( $booking->current_invoice_document_id ) && ! $booking->series_id ) {
+                    MBS_Invoice_Document_Service::issue_booking_document( $booking );
+                }
+
                 MBS_HomeAssistant::notify( $booking );
                 $wpdb->update( $table, array( 'ha_notified' => 1 ), array( 'ref' => $ref ) );
 

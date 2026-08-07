@@ -491,4 +491,70 @@ class MBS_Invoice_Document_Service {
             'Reply-To: ' . MBS_Bookings::get_admin_email(),
         );
     }
+
+    /**
+     * Simple document issuance for already-confirmed bookings (legacy path).
+     * Used when update_status('confirmed') is called outside the full
+     * confirm_and_issue() flow. Creates the document without re-confirming.
+     *
+     * @param object $booking  Already-confirmed booking row.
+     * @return int|WP_Error  Document ID.
+     */
+    public static function issue_booking_document( $booking ) {
+        global $wpdb;
+        $doc_table = $wpdb->prefix . MBS_INVOICE_DOCUMENTS_TABLE;
+        $booking_table = $wpdb->prefix . MBS_TABLE;
+
+        // Skip if already has a document
+        if ( ! empty( $booking->current_invoice_document_id ) ) {
+            return (int) $booking->current_invoice_document_id;
+        }
+
+        $logo_ref = MBS_Logo_Asset::resolve_current_org_logo();
+
+        if ( $wpdb->query( 'START TRANSACTION' ) === false ) {
+            return new WP_Error( 'transaction_start_failed', 'Could not start document issuance.' );
+        }
+
+        // Lock the booking
+        $locked = $wpdb->get_row( $wpdb->prepare(
+            "SELECT * FROM {$booking_table} WHERE id = %d FOR UPDATE",
+            (int) $booking->id
+        ) );
+        if ( ! $locked ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'lock_failed', 'Could not lock booking.' ); }
+
+        // Double-check no document was created by a concurrent request
+        if ( ! empty( $locked->current_invoice_document_id ) ) {
+            $wpdb->query( 'ROLLBACK' );
+            return (int) $locked->current_invoice_document_id;
+        }
+
+        $max_revision = (int) $wpdb->get_var( $wpdb->prepare(
+            "SELECT COALESCE(MAX(revision), 0) FROM {$doc_table} WHERE booking_id = %d", (int) $booking->id
+        ) );
+        $next_revision = $max_revision + 1;
+        $invoice_number = $booking->invoice_number ?: ( 'INV-' . $booking->ref );
+        if ( $next_revision > 1 ) $invoice_number .= '-R' . $next_revision;
+
+        $snapshot = self::build_booking_snapshot( $locked, $logo_ref, $invoice_number, $next_revision );
+
+        $inserted = $wpdb->insert( $doc_table, array(
+            'booking_id' => (int) $booking->id, 'invoice_id' => null,
+            'booking_ref' => $booking->ref, 'invoice_number' => $invoice_number,
+            'revision' => $next_revision, 'document_type' => 'invoice',
+            'snapshot_json' => $snapshot->to_json(), 'snapshot_version' => 1,
+            'logo_asset_id' => $logo_ref ? (int) $logo_ref['asset_id'] : null,
+            'logo_content_hash' => $logo_ref ? $logo_ref['content_hash'] : null,
+            'status' => 'issued', 'supersedes_document_id' => null,
+            'issued_at' => current_time( 'mysql' ), 'created_at' => current_time( 'mysql' ),
+        ) );
+        if ( $inserted === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'insert_failed', 'Could not create document.' ); }
+
+        $document_id = (int) $wpdb->insert_id;
+        $wpdb->update( $booking_table, array( 'current_invoice_document_id' => $document_id ), array( 'id' => (int) $booking->id ) );
+        MBS_Audit_Log::log( $booking->ref, 'invoice_document_issued', 'Document ' . $invoice_number . ' issued.' );
+
+        if ( $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'commit_failed', 'Could not commit.' ); }
+        return $document_id;
+    }
 }
