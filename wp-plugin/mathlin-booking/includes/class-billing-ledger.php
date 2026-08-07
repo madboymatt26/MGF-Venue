@@ -94,7 +94,7 @@ class MBS_Billing_Ledger {
     }
 
     /** Add an item to a draft invoice and reserve its booking allocation. */
-    public static function add_item( $invoice_ref, $item, $expected_version ) {
+    public static function add_item( $invoice_ref, $item, $expected_version, $manage_transaction = true ) {
         global $wpdb;
         $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
         $item_table = $wpdb->prefix . MBS_INVOICE_ITEM_TABLE;
@@ -107,7 +107,7 @@ class MBS_Billing_Ledger {
         $line_total = MBS_Money::line_total( $unit_minor, $quantity_milli );
         if ( is_wp_error( $line_total ) ) return $line_total;
 
-        if ( $wpdb->query( 'START TRANSACTION' ) === false ) return new WP_Error( 'transaction_start_failed', 'Could not start the invoice-item transaction.' );
+        if ( $manage_transaction && $wpdb->query( 'START TRANSACTION' ) === false ) return new WP_Error( 'transaction_start_failed', 'Could not start the invoice-item transaction.' );
         $invoice = $wpdb->get_row( $wpdb->prepare(
             "SELECT * FROM {$invoice_table} WHERE invoice_ref = %s FOR UPDATE",
             sanitize_text_field( $invoice_ref )
@@ -166,21 +166,21 @@ class MBS_Billing_Ledger {
             "UPDATE {$invoice_table} SET version = version + 1, updated_at = %s WHERE id = %d AND status = 'draft' AND version = %d",
             current_time( 'mysql' ), (int) $invoice->id, (int) $expected_version
         ) );
-        if ( $version_updated !== 1 ) return self::rollback_error( 'invoice_concurrent_update', 'The invoice was updated by another request.' );
-        if ( $wpdb->query( 'COMMIT' ) === false ) return self::rollback_error( 'transaction_commit_failed', 'Could not commit the invoice-item transaction.' );
+        if ( $version_updated !== 1 ) return $manage_transaction ? self::rollback_error( 'invoice_concurrent_update', 'The invoice was updated by another request.' ) : new WP_Error( 'invoice_concurrent_update', 'The invoice was updated by another request.' );
+        if ( $manage_transaction && $wpdb->query( 'COMMIT' ) === false ) return self::rollback_error( 'transaction_commit_failed', 'Could not commit the invoice-item transaction.' );
         return array( 'item_ref' => $item_ref, 'line_total_minor' => $line_total, 'invoice' => self::get_invoice( $invoice_ref ) );
     }
 
     /** Freeze item totals and issue a draft invoice. */
-    public static function issue_invoice( $invoice_ref, $expected_version ) {
+    public static function issue_invoice( $invoice_ref, $expected_version, $manage_transaction = true ) {
         global $wpdb;
         $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
         $item_table = $wpdb->prefix . MBS_INVOICE_ITEM_TABLE;
-        if ( $wpdb->query( 'START TRANSACTION' ) === false ) return new WP_Error( 'transaction_start_failed', 'Could not start the invoice-issue transaction.' );
+        if ( $manage_transaction && $wpdb->query( 'START TRANSACTION' ) === false ) return new WP_Error( 'transaction_start_failed', 'Could not start the invoice-issue transaction.' );
         $invoice = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$invoice_table} WHERE invoice_ref = %s FOR UPDATE", sanitize_text_field( $invoice_ref ) ) );
-        if ( ! $invoice ) return self::rollback_error( 'invoice_not_found', 'Invoice not found.' );
+        if ( ! $invoice ) return $manage_transaction ? self::rollback_error( 'invoice_not_found', 'Invoice not found.' ) : new WP_Error( 'invoice_not_found', 'Invoice not found.' );
         if ( $invoice->status !== 'draft' ) {
-            $wpdb->query( 'ROLLBACK' );
+            if ( $manage_transaction ) $wpdb->query( 'ROLLBACK' );
             return array( 'invoice' => $invoice, 'issued' => false, 'no_op' => true );
         }
         if ( (int) $invoice->version !== (int) $expected_version ) return self::rollback_error( 'invoice_precondition_failed', 'The invoice changed since it was loaded.' );
@@ -197,8 +197,8 @@ class MBS_Billing_Ledger {
              WHERE id = %d AND status = 'draft' AND version = %d",
             $subtotal, $subtotal, $issued_at, $issued_at, (int) $invoice->id, (int) $expected_version
         ) );
-        if ( $updated !== 1 ) return self::rollback_error( 'invoice_concurrent_update', 'The invoice was updated by another request.' );
-        if ( $wpdb->query( 'COMMIT' ) === false ) return self::rollback_error( 'transaction_commit_failed', 'Could not commit invoice issue.' );
+        if ( $updated !== 1 ) return $manage_transaction ? self::rollback_error( 'invoice_concurrent_update', 'The invoice was updated by another request.' ) : new WP_Error( 'invoice_concurrent_update', 'The invoice was updated by another request.' );
+        if ( $manage_transaction && $wpdb->query( 'COMMIT' ) === false ) return self::rollback_error( 'transaction_commit_failed', 'Could not commit invoice issue.' );
         return array( 'invoice' => self::get_invoice( $invoice_ref ), 'issued' => true, 'no_op' => false );
     }
 
