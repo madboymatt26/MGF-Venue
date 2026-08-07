@@ -44,7 +44,7 @@ jobs:
         run: |
           cd wp-plugin/mathlin-booking
           composer validate --no-check-publish
-          composer audit --locked || true
+          composer audit --locked
       - name: Check admin handler parity
         run: php mcp-server/tests/php-admin-parity-smoke.php
       - name: Validate MCP schemas

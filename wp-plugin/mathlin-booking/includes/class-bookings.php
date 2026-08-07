@@ -688,6 +688,27 @@ class MBS_Bookings {
         $current = self::get( $ref );
         if ( $current && $current->status !== $status && self::has_financial_history( $ref ) ) return false;
 
+        // Issue 1: Chargeable non-series pending→confirmed MUST delegate to
+        // confirm_and_issue() for one atomic transaction. Do NOT confirm first
+        // and compensate — that has a crash window.
+        if ( $status === 'confirmed' && $current && $current->status === 'pending' ) {
+            $amount_check = MBS_Money::from_decimal_string( (string) $current->amount );
+            if ( is_wp_error( $amount_check ) ) {
+                // Malformed monetary data → fail closed
+                return false;
+            }
+            $is_chargeable = $amount_check > 0
+                && empty( $current->series_id )
+                && empty( $current->current_invoice_document_id );
+
+            if ( $is_chargeable ) {
+                // Delegate to the atomic confirmation service
+                $atomic_result = MBS_Invoice_Document_Service::confirm_and_issue( $ref );
+                if ( is_wp_error( $atomic_result ) ) return false;
+                return $atomic_result['no_op'] ? $result : true;
+            }
+        }
+
         $result = $wpdb->update(
             $table,
             array( 'status' => $status ),
@@ -703,24 +724,6 @@ class MBS_Bookings {
         if ( $result !== false && $status === 'confirmed' ) {
             $booking = self::get( $ref );
             if ( $booking ) {
-                // Chargeable non-series bookings: use atomic confirmation service
-                $amount_check = MBS_Money::from_decimal_string( (string) $booking->amount );
-                $is_chargeable = ! is_wp_error( $amount_check ) && $amount_check > 0
-                    && empty( $booking->series_id )
-                    && empty( $booking->current_invoice_document_id );
-
-                if ( $is_chargeable ) {
-                    // Attempt atomic document issuance (the booking is already confirmed
-                    // by the update above, but issue_booking_document will lock and verify)
-                    $doc_result = MBS_Invoice_Document_Service::issue_booking_document( $booking );
-                    if ( is_wp_error( $doc_result ) ) {
-                        // Roll back the confirmation — cannot confirm without document
-                        $wpdb->update( $table, array( 'status' => $current->status ), array( 'ref' => $ref ) );
-                        MBS_Audit_Log::log( $ref, 'confirm_rolled_back', 'Confirmation rolled back: invoice document could not be issued. ' . $doc_result->get_error_message() );
-                        return false;
-                    }
-                }
-
                 MBS_HomeAssistant::notify( $booking );
                 $wpdb->update( $table, array( 'ha_notified' => 1 ), array( 'ref' => $ref ) );
 

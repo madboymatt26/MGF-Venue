@@ -288,10 +288,13 @@ class MBS_Series_Approval_Service {
         $today = wp_date( 'Y-m-d' );
 
         // Use the billing engine's canonical period calculator
-        if ( ! class_exists( 'MBS_Billing_Engine' ) ) return array();
+        if ( ! class_exists( 'MBS_Billing_Engine' ) ) {
+            return new WP_Error( 'billing_engine_missing', 'The billing engine is required for invoice-managed series.' );
+        }
 
         $preview = MBS_Billing_Engine::preview( $series_ref );
-        if ( is_wp_error( $preview ) || empty( $preview['periods'] ) ) return array();
+        if ( is_wp_error( $preview ) ) return $preview; // Propagate error — rolls back approval
+        if ( empty( $preview['periods'] ) ) return array(); // Genuinely no periods due
 
         $created_documents = array();
         foreach ( $preview['periods'] as $period ) {

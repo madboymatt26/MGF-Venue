@@ -88,6 +88,10 @@ class MBS_Invoice_Document_Service {
 
         // Build snapshot FROM THE LOCKED ROW (integer minor units only)
         $snapshot = self::build_booking_snapshot( $booking, $logo_ref, $invoice_number, $next_revision );
+        if ( is_wp_error( $snapshot ) ) {
+            $wpdb->query( 'ROLLBACK' );
+            return $snapshot;
+        }
 
         // Insert immutable document
         $inserted = $wpdb->insert( $doc_table, array(
@@ -313,13 +317,13 @@ class MBS_Invoice_Document_Service {
 
         // Convert booking amount to minor units using MBS_Money (no floats)
         $total_minor = MBS_Money::from_decimal_string( (string) $booking->amount );
-        if ( is_wp_error( $total_minor ) ) $total_minor = 0;
+        if ( is_wp_error( $total_minor ) ) return $total_minor; // Fail closed on malformed money
 
         $kitchen_price_decimal = $booking->kitchen
             ? (string) MBS_Bookings::get_tiered_kitchen_price( MBS_Bookings::get_booking_tier( $booking ) )
             : '0';
         $kitchen_minor = MBS_Money::from_decimal_string( $kitchen_price_decimal );
-        if ( is_wp_error( $kitchen_minor ) ) $kitchen_minor = 0;
+        if ( is_wp_error( $kitchen_minor ) ) return $kitchen_minor; // Fail closed
 
         $space_minor = $total_minor - $kitchen_minor;
 

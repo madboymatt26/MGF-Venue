@@ -77,14 +77,19 @@ class MBS_Series_Issuance_Service {
             return new WP_Error( 'no_occurrences', 'No occurrences to invoice in this period.' );
         }
 
-        // Idempotency key includes period_key for stable identity
+        // Idempotency key — use the established canonical format from the billing engine
+        // (compatible with existing v3.21 invoices: "series:{ref}:period:{key}:v1")
         $period_key = $period['period_key'] ?? ( $period['period_start'] . ':' . $period['period_end'] );
-        $idempotency_key = 'series_invoice:' . $series->series_ref . ':' . $period_key;
+        $idempotency_key = 'series:' . $series->series_ref . ':period:' . $period_key . ':v1';
 
-        // Use canonical due date from the billing engine (not recalculated)
-        $due_date = ! empty( $period['due_on'] )
-            ? $period['due_on'] . ' 23:59:59'
-            : wp_date( 'Y-m-d H:i:s', strtotime( '+' . (int) $series->payment_terms_days . ' days' ) );
+        // Use canonical due date from the billing engine (REQUIRED — no fallback)
+        if ( empty( $period['due_on'] ) ) {
+            return new WP_Error( 'period_due_on_required', 'Canonical due_on date is required for invoice issuance.' );
+        }
+        if ( empty( $period['period_key'] ) ) {
+            return new WP_Error( 'period_key_required', 'period_key is required for idempotent invoice issuance.' );
+        }
+        $due_date = $period['due_on'] . ' 23:59:59';
 
         // 1. Create draft invoice (using ledger primitives without own transaction)
         $draft_result = MBS_Billing_Ledger::create_draft_invoice( array(
