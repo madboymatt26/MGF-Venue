@@ -398,7 +398,13 @@ class MBS_Modification {
 
         $body .= '</div></body></html>';
 
-        // Generate updated invoice attachment (reflects new amount)
+        // Create a new immutable invoice document revision (reissue)
+        $reissue_result = MBS_Invoice_Document_Service::reissue_booking_document( $booking->ref );
+        if ( is_wp_error( $reissue_result ) ) {
+            error_log( '[MGF Venue] Modification reissue failed for ' . $booking->ref . ': ' . $reissue_result->get_error_message() );
+        }
+
+        // Generate updated invoice attachment (now uses PDF from the new document)
         $attachments = MBS_Email::generate_invoice_attachment_for( $booking );
 
         MBS_Email_Queue::send( $booking->email, $subject, $body, array(
