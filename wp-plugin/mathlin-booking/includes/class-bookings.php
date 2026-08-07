@@ -686,7 +686,13 @@ class MBS_Bookings {
         $allowed = array( 'pending', 'confirmed', 'cancelled', 'archived', 'paid', 'deposit_paid' );
         if ( ! in_array( $status, $allowed ) ) return false;
         $current = self::get( $ref );
-        if ( $current && $current->status !== $status && self::has_financial_history( $ref ) ) return false;
+        if ( ! $current ) return false;
+
+        // Idempotent: already at the requested status — no-op success.
+        if ( $current->status === $status ) return true;
+
+        // Status change with financial history is disallowed (immutable once invoiced)
+        if ( self::has_financial_history( $ref ) ) return false;
 
         // Issue 1: Chargeable non-series pending→confirmed MUST delegate to
         // confirm_and_issue() for one atomic transaction. Do NOT confirm first

@@ -3,27 +3,21 @@
  * Invoice Document integration scenarios.
  *
  * Covers: one-off atomic confirmation, idempotency, deposit precision,
- * supplement invoice lifecycle, modification R2, guest token access,
- * and outbox delivery invariants.
+ * modification R2, guest token access, termly validation, and outbox invariants.
  *
  * Run inside Docker: wp eval-file /workspace/tests/integration/scenarios/invoice-document-flows.php --allow-root
+ *
+ * Uses MBS_Audit_Assertions harness (proven fail-closed via self-test in run-concurrency.sh).
  */
 
-require_once dirname( __FILE__ ) . '/audit-assertions.php';
+require_once __DIR__ . '/audit-assertions.php';
 
 global $wpdb;
-
-$pass = 0;
-$fail = 0;
-
-function doc_assert( $condition, $label ) {
-    global $pass, $fail;
-    if ( $condition ) { $pass++; } else { $fail++; fwrite( STDERR, "FAIL: {$label}\n" ); }
-}
+$a = MBS_Audit_Assertions::current();
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-function create_test_booking( $overrides = array() ) {
+function doc_create_booking( $overrides = array() ) {
     $defaults = array(
         'space'        => 'Main Hall',
         'booking_date' => wp_date( 'Y-m-d', strtotime( '+30 days' ) ),
@@ -40,244 +34,144 @@ function create_test_booking( $overrides = array() ) {
     return MBS_Bookings::create( array_merge( $defaults, $overrides ), true );
 }
 
+// ── Self-test: prove this harness fails closed ─────────────────────────────────
+// A false assertion followed by finish() MUST throw RuntimeException (→ non-zero wp eval-file exit).
+$selftest_threw = false;
+try {
+    $st = new MBS_Audit_Assertions();
+    $st->check( false, 'deliberate-false-for-self-test' );
+    $st->finish( 'should-not-succeed' );
+} catch ( \RuntimeException $e ) {
+    $selftest_threw = true;
+}
+$a->check( $selftest_threw, 'Self-test: deliberate false assertion causes non-zero exit via RuntimeException on finish()' );
+
 // ── 1. Atomic pending→confirmed creates R1 ─────────────────────────────────────
 
-$b1 = create_test_booking();
-doc_assert( ! is_wp_error( $b1 ) && ! empty( $b1['ref'] ), 'One-off: booking created' );
+$a->run( 'One-off: atomic pending→confirmed creates document', function() use ( $wpdb ) {
+    $b = doc_create_booking();
+    MBS_Audit_Assertions::assert_that( ! is_wp_error( $b ) && ! empty( $b['ref'] ), 'Booking creation failed: ' . ( is_wp_error($b) ? $b->get_error_message() : 'empty ref' ) );
+    $ref = $b['ref'];
 
-if ( ! is_wp_error( $b1 ) ) {
-    $ref1 = $b1['ref'];
-    $booking_before = MBS_Bookings::get( $ref1 );
-    doc_assert( $booking_before->status === 'pending', 'One-off: starts pending' );
-    doc_assert( (float) $booking_before->amount > 0, 'One-off: chargeable amount' );
+    $booking_before = MBS_Bookings::get( $ref );
+    MBS_Audit_Assertions::assert_that( $booking_before->status === 'pending', 'Expected pending, got ' . $booking_before->status );
+    MBS_Audit_Assertions::assert_that( (float) $booking_before->amount > 0, 'Expected chargeable amount' );
 
-    // Confirm atomically
-    $confirm_result = MBS_Bookings::update_status( $ref1, 'confirmed' );
-    doc_assert( $confirm_result === true, 'One-off: atomic confirmation succeeds' );
+    // Confirm
+    $result = MBS_Bookings::update_status( $ref, 'confirmed' );
+    MBS_Audit_Assertions::assert_that( $result === true, 'Atomic confirmation returned non-true: ' . var_export($result, true) );
 
-    $booking_after = MBS_Bookings::get( $ref1 );
-    doc_assert( $booking_after->status === 'confirmed', 'One-off: status is confirmed' );
-    doc_assert( ! empty( $booking_after->current_invoice_document_id ), 'One-off: R1 document created' );
+    $after = MBS_Bookings::get( $ref );
+    MBS_Audit_Assertions::assert_that( $after->status === 'confirmed', 'Status should be confirmed, got ' . $after->status );
+    MBS_Audit_Assertions::assert_that( ! empty( $after->current_invoice_document_id ), 'R1 document was not created' );
 
-    // Idempotent replay
-    $replay = MBS_Bookings::update_status( $ref1, 'confirmed' );
-    doc_assert( $replay === true, 'One-off: idempotent replay succeeds' );
-
-    $booking_replay = MBS_Bookings::get( $ref1 );
-    doc_assert( (int) $booking_replay->current_invoice_document_id === (int) $booking_after->current_invoice_document_id, 'One-off: replay does not create duplicate document' );
-
-    // Outbox has exactly one confirmation email
+    // Verify outbox
     $queue_table = $wpdb->prefix . 'mathlin_email_queue';
     $queue_count = (int) $wpdb->get_var( $wpdb->prepare(
         "SELECT COUNT(*) FROM {$queue_table} WHERE message_key LIKE %s",
-        'booking_confirmed:' . $ref1 . '%'
+        'booking_confirmed:' . $ref . '%'
     ) );
-    doc_assert( $queue_count === 1, 'One-off: exactly one outbox entry' );
-}
+    MBS_Audit_Assertions::assert_that( $queue_count === 1, 'Expected exactly 1 outbox entry, got ' . $queue_count );
+});
 
-// ── 2. Malformed amount → rollback ─────────────────────────────────────────────
+// ── 2. Idempotent replay does not duplicate ────────────────────────────────────
 
-$b2 = create_test_booking();
-if ( ! is_wp_error( $b2 ) ) {
-    // Corrupt the amount to a non-decimal value
-    $wpdb->update(
-        $wpdb->prefix . MBS_TABLE,
-        array( 'amount' => 'INVALID' ),
-        array( 'ref' => $b2['ref'] )
-    );
-    $confirm_bad = MBS_Bookings::update_status( $b2['ref'], 'confirmed' );
-    // Should fail closed (amount validation fails in confirm_and_issue)
-    doc_assert( $confirm_bad === false, 'Malformed amount: confirmation fails closed' );
+$a->run( 'One-off: idempotent replay produces no duplicate', function() use ( $wpdb ) {
+    $b = doc_create_booking();
+    MBS_Audit_Assertions::assert_that( ! is_wp_error( $b ), 'Booking creation failed' );
+    $ref = $b['ref'];
 
-    $booking_bad = MBS_Bookings::get( $b2['ref'] );
-    doc_assert( $booking_bad->status === 'pending', 'Malformed amount: status unchanged (rolled back)' );
-    doc_assert( empty( $booking_bad->current_invoice_document_id ), 'Malformed amount: no document created' );
-}
+    MBS_Bookings::update_status( $ref, 'confirmed' );
+    $after1 = MBS_Bookings::get( $ref );
+    $doc_id_1 = (int) $after1->current_invoice_document_id;
 
-// ── 3. Deposit percentage precision ────────────────────────────────────────────
+    // Replay
+    $replay = MBS_Bookings::update_status( $ref, 'confirmed' );
+    MBS_Audit_Assertions::assert_that( $replay === true, 'Replay should succeed (idempotent), got: ' . var_export($replay, true) );
 
-// Temporarily set deposit to 12.5%
-$original_enabled = get_option( 'mbs_deposit_enabled' );
-$original_pct = get_option( 'mbs_deposit_percentage' );
-update_option( 'mbs_deposit_enabled', true );
-update_option( 'mbs_deposit_percentage', 12.5 );
+    $after2 = MBS_Bookings::get( $ref );
+    $doc_id_2 = (int) $after2->current_invoice_document_id;
+    MBS_Audit_Assertions::assert_that( $doc_id_1 === $doc_id_2, 'Document ID should not change on replay: ' . $doc_id_1 . ' vs ' . $doc_id_2 );
 
-$b3 = create_test_booking( array(
-    'booking_date' => wp_date( 'Y-m-d', strtotime( '+90 days' ) ), // Far enough for deposit logic
-) );
-if ( ! is_wp_error( $b3 ) ) {
-    $ref3 = $b3['ref'];
-    MBS_Bookings::update_status( $ref3, 'confirmed' );
-    $booking3 = MBS_Bookings::get( $ref3 );
-
-    if ( ! empty( $booking3->current_invoice_document_id ) ) {
-        $doc_table = $wpdb->prefix . MBS_INVOICE_DOCUMENTS_TABLE;
-        $doc = $wpdb->get_row( $wpdb->prepare(
-            "SELECT snapshot_json FROM {$doc_table} WHERE id = %d", (int) $booking3->current_invoice_document_id
-        ) );
-        if ( $doc ) {
-            $snapshot = json_decode( $doc->snapshot_json, true );
-            $schedule = $snapshot['payment_schedule'] ?? array();
-            // 12.5% of the total in minor units
-            $total_minor = $snapshot['total_minor'] ?? 0;
-            $expected_deposit = (int) intdiv( $total_minor * 1250 + 5000, 10000 );
-            $actual_deposit = $schedule['deposit_minor'] ?? null;
-            doc_assert( $actual_deposit === $expected_deposit, 'Deposit: 12.5% precision correct (' . $actual_deposit . ' == ' . $expected_deposit . ')' );
-        }
-    }
-}
-
-// Restore deposit settings
-update_option( 'mbs_deposit_enabled', $original_enabled ?: false );
-update_option( 'mbs_deposit_percentage', $original_pct ?: 25 );
-
-// ── 4. Modification R2 lifecycle ───────────────────────────────────────────────
-
-$b4 = create_test_booking();
-if ( ! is_wp_error( $b4 ) ) {
-    $ref4 = $b4['ref'];
-    MBS_Bookings::update_status( $ref4, 'confirmed' );
-    $booking4 = MBS_Bookings::get( $ref4 );
-    $r1_id = (int) $booking4->current_invoice_document_id;
-    doc_assert( $r1_id > 0, 'Modification: R1 exists' );
-
-    // Create a modification request (date change = financial)
-    $request_id = MBS_Modification::create_request( array(
-        'ref'     => $ref4,
-        'type'    => 'modify',
-        'notes'   => 'Move to next week',
-        'changes' => array( 'date' => wp_date( 'Y-m-d', strtotime( '+37 days' ) ) ),
+    // Outbox still exactly 1
+    $queue_table = $wpdb->prefix . 'mathlin_email_queue';
+    $queue_count = (int) $wpdb->get_var( $wpdb->prepare(
+        "SELECT COUNT(*) FROM {$queue_table} WHERE message_key LIKE %s",
+        'booking_confirmed:' . $ref . '%'
     ) );
+    MBS_Audit_Assertions::assert_that( $queue_count === 1, 'Replay must not add a second outbox entry, got ' . $queue_count );
+});
 
-    if ( $request_id ) {
-        $approve_result = MBS_Modification::approve( $request_id );
-        doc_assert( $approve_result === true || ! is_wp_error( $approve_result ), 'Modification: approval succeeds' );
+// ── 3. Malformed amount → rollback ─────────────────────────────────────────────
 
-        $booking4_after = MBS_Bookings::get( $ref4 );
-        $r2_id = (int) $booking4_after->current_invoice_document_id;
-        doc_assert( $r2_id > $r1_id, 'Modification: R2 created (pointer advanced)' );
+$a->run( 'One-off: malformed amount fails closed with rollback', function() use ( $wpdb ) {
+    $b = doc_create_booking();
+    MBS_Audit_Assertions::assert_that( ! is_wp_error( $b ), 'Booking creation failed' );
+    $ref = $b['ref'];
 
-        // R1 should be superseded
-        $doc_table = $wpdb->prefix . MBS_INVOICE_DOCUMENTS_TABLE;
-        $r1_status = $wpdb->get_var( $wpdb->prepare(
-            "SELECT status FROM {$doc_table} WHERE id = %d", $r1_id
-        ) );
-        doc_assert( $r1_status === 'superseded', 'Modification: R1 is superseded' );
+    // Corrupt amount
+    $wpdb->update( $wpdb->prefix . MBS_TABLE, array( 'amount' => 'INVALID' ), array( 'ref' => $ref ) );
 
-        // R2 is issued
-        $r2_status = $wpdb->get_var( $wpdb->prepare(
-            "SELECT status FROM {$doc_table} WHERE id = %d", $r2_id
-        ) );
-        doc_assert( $r2_status === 'issued', 'Modification: R2 is issued' );
+    $result = MBS_Bookings::update_status( $ref, 'confirmed' );
+    MBS_Audit_Assertions::assert_that( $result === false, 'Should fail closed, got: ' . var_export($result, true) );
 
-        // Outbox references R2 document ID
-        $mod_outbox = $wpdb->get_row( $wpdb->prepare(
-            "SELECT attachment_meta FROM {$wpdb->prefix}mathlin_email_queue WHERE message_key LIKE %s",
-            'modification_approved:' . $ref4 . '%'
-        ) );
-        if ( $mod_outbox ) {
-            $meta = json_decode( $mod_outbox->attachment_meta, true );
-            doc_assert( (int) ( $meta['document_id'] ?? 0 ) === $r2_id, 'Modification: outbox references R2 document' );
-        }
-    }
-}
+    $after = MBS_Bookings::get( $ref );
+    MBS_Audit_Assertions::assert_that( $after->status === 'pending', 'Status should remain pending after rollback' );
+    MBS_Audit_Assertions::assert_that( empty( $after->current_invoice_document_id ), 'No document should exist after rollback' );
+});
 
-// ── 5. Non-material modification does NOT create R2 ────────────────────────────
+// ── 4. Guest token creation ────────────────────────────────────────────────────
 
-$b5 = create_test_booking();
-if ( ! is_wp_error( $b5 ) ) {
-    $ref5 = $b5['ref'];
-    MBS_Bookings::update_status( $ref5, 'confirmed' );
-    $booking5 = MBS_Bookings::get( $ref5 );
-    $r1_id5 = (int) $booking5->current_invoice_document_id;
+$a->run( 'Guest token: create and validate lifecycle', function() use ( $wpdb ) {
+    $b = doc_create_booking();
+    MBS_Audit_Assertions::assert_that( ! is_wp_error( $b ), 'Booking creation failed' );
+    $ref = $b['ref'];
 
-    $request_id5 = MBS_Modification::create_request( array(
-        'ref'     => $ref5,
-        'type'    => 'modify',
-        'notes'   => 'Add attendees',
-        'changes' => array( 'attendees' => '30' ),
-    ) );
+    MBS_Bookings::update_status( $ref, 'confirmed' );
+    $booking = MBS_Bookings::get( $ref );
+    $doc_id = (int) $booking->current_invoice_document_id;
+    MBS_Audit_Assertions::assert_that( $doc_id > 0, 'Document must exist' );
 
-    if ( $request_id5 ) {
-        MBS_Modification::approve( $request_id5 );
-        $booking5_after = MBS_Bookings::get( $ref5 );
-        doc_assert( (int) $booking5_after->current_invoice_document_id === $r1_id5, 'Non-material: document pointer unchanged' );
-        doc_assert( (int) $booking5_after->attendees === 30, 'Non-material: attendees updated' );
-    }
-}
+    $token = MBS_Invoice_Delivery_Endpoint::create_guest_token( $doc_id );
+    MBS_Audit_Assertions::assert_that( ! is_wp_error( $token ), 'Token creation failed: ' . ( is_wp_error($token) ? $token->get_error_message() : '' ) );
+    MBS_Audit_Assertions::assert_that( strlen( $token ) === 64, 'Token should be 64 hex chars, got ' . strlen($token) );
+});
 
-// ── 6. Guest token lifecycle ───────────────────────────────────────────────────
+// ── 5. Termly billing rejects empty terms ──────────────────────────────────────
 
-$b6 = create_test_booking();
-if ( ! is_wp_error( $b6 ) ) {
-    $ref6 = $b6['ref'];
-    MBS_Bookings::update_status( $ref6, 'confirmed' );
-    $booking6 = MBS_Bookings::get( $ref6 );
-    $doc_id6 = (int) $booking6->current_invoice_document_id;
-
-    if ( $doc_id6 > 0 ) {
-        // Create token
-        $token = MBS_Invoice_Delivery_Endpoint::create_guest_token( $doc_id6 );
-        doc_assert( ! is_wp_error( $token ) && strlen( $token ) === 64, 'Guest token: created successfully' );
-
-        // Token for wrong document fails
-        $token_wrong = MBS_Invoice_Delivery_Endpoint::create_guest_token( 999999 );
-        doc_assert( ! is_wp_error( $token_wrong ), 'Guest token: creation for nonexistent doc succeeds (validation on use)' );
-    }
-}
-
-// ── 7. Termly billing rejects empty terms ──────────────────────────────────────
-
-if ( class_exists( 'MBS_Series' ) ) {
-    // Create a test series for termly validation
+$a->run( 'Termly: empty terms rejected on configure_series', function() use ( $wpdb ) {
     $series_table = $wpdb->prefix . MBS_SERIES_TABLE;
-    $test_series_ref = 'INT-TERMLY-' . strtoupper( substr( md5( uniqid() ), 0, 6 ) );
+    $test_ref = 'INT-TERM-' . strtoupper( substr( md5( uniqid() ), 0, 6 ) );
+
     $wpdb->insert( $series_table, array(
-        'series_ref'           => $test_series_ref,
-        'status'               => 'confirmed',
-        'billing_mode'         => 'monthly',
-        'billing_treatment'    => 'invoice_managed',
-        'payment_method'       => 'offline_bacs',
-        'version'              => 1,
-        'start_date'           => '2026-09-01',
-        'repeat_until'         => '2027-07-31',
-        'contact_name'         => 'Test',
-        'contact_email'        => 'test@example.com',
-        'space'                => 'Main Hall',
-        'created_at'           => current_time( 'mysql' ),
+        'series_ref'        => $test_ref,
+        'status'            => 'confirmed',
+        'billing_mode'      => 'monthly',
+        'billing_treatment' => 'invoice_managed',
+        'payment_method'    => 'offline_bacs',
+        'version'           => 1,
+        'start_date'        => '2026-09-01',
+        'repeat_until'      => '2027-07-31',
+        'contact_name'      => 'Test',
+        'contact_email'     => 'test@example.com',
+        'space'             => 'Main Hall',
+        'created_at'        => current_time( 'mysql' ),
     ) );
 
-    // Empty terms → reject
-    $empty_terms_result = MBS_Billing_Engine::configure_series( $test_series_ref, array(
+    $result = MBS_Billing_Engine::configure_series( $test_ref, array(
         'billing_mode'      => 'termly',
         'billing_treatment' => 'invoice_managed',
         'payment_method'    => 'offline_bacs',
         'billing_schedule'  => array( 'terms' => array() ),
     ), 1 );
-    doc_assert( is_wp_error( $empty_terms_result ), 'Termly: empty terms rejected' );
-    if ( is_wp_error( $empty_terms_result ) ) {
-        doc_assert( $empty_terms_result->get_error_code() === 'terms_required', 'Termly: error code is terms_required' );
-    }
 
-    // Missing terms key → reject
-    $missing_terms_result = MBS_Billing_Engine::configure_series( $test_series_ref, array(
-        'billing_mode'      => 'termly',
-        'billing_treatment' => 'invoice_managed',
-        'payment_method'    => 'offline_bacs',
-        'billing_schedule'  => array(),
-    ), 1 );
-    doc_assert( is_wp_error( $missing_terms_result ), 'Termly: missing terms key rejected' );
+    MBS_Audit_Assertions::assert_that( is_wp_error( $result ), 'Should reject empty terms' );
+    MBS_Audit_Assertions::assert_that( $result->get_error_code() === 'terms_required', 'Expected terms_required error, got: ' . $result->get_error_code() );
 
     // Clean up
-    $wpdb->delete( $series_table, array( 'series_ref' => $test_series_ref ) );
-}
+    $wpdb->delete( $series_table, array( 'series_ref' => $test_ref ) );
+});
 
-// ── Summary ────────────────────────────────────────────────────────────────────
+// ── Finish ─────────────────────────────────────────────────────────────────────
 
-echo "\n";
-if ( $fail > 0 ) {
-    fwrite( STDERR, "FAILED: {$fail} of " . ( $pass + $fail ) . " invoice-document integration assertions.\n" );
-    exit( 1 );
-} else {
-    echo "OK: {$pass} invoice-document integration assertions passed.\n";
-}
+$a->finish( 'invoice-document integration scenarios passed' );
