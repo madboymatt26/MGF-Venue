@@ -215,6 +215,31 @@ class MBS_Invoice_Document_Service {
         ) );
         if ( ! $booking ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'booking_not_found', 'Booking not found.' ); }
 
+        $document_id = self::reissue_booking_document_within_transaction( $booking, $logo_ref );
+        if ( is_wp_error( $document_id ) ) {
+            $wpdb->query( 'ROLLBACK' );
+            return $document_id;
+        }
+
+        if ( $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'commit_failed', 'Could not commit the reissue.' ); }
+
+        return $document_id;
+    }
+
+    /**
+     * Reissue an individual invoice WITHIN an existing transaction.
+     * Caller owns START TRANSACTION / COMMIT / ROLLBACK.
+     * Assumes the booking row is already locked.
+     *
+     * @param object $booking   The locked booking row (caller must have FOR UPDATE'd it).
+     * @param array  $logo_ref  Pre-resolved logo or null.
+     * @return int|WP_Error     New document ID on success.
+     */
+    public static function reissue_booking_document_within_transaction( $booking, $logo_ref = null ) {
+        global $wpdb;
+        $booking_table = $wpdb->prefix . MBS_TABLE;
+        $doc_table = $wpdb->prefix . MBS_INVOICE_DOCUMENTS_TABLE;
+
         $max_revision = (int) $wpdb->get_var( $wpdb->prepare(
             "SELECT COALESCE(MAX(revision), 0) FROM {$doc_table} WHERE booking_id = %d",
             (int) $booking->id
@@ -225,6 +250,7 @@ class MBS_Invoice_Document_Service {
         $invoice_number = $base_invoice_number . '-R' . $next_revision;
 
         $snapshot = self::build_booking_snapshot( $booking, $logo_ref, $invoice_number, $next_revision );
+        if ( is_wp_error( $snapshot ) ) return $snapshot;
 
         $inserted = $wpdb->insert( $doc_table, array(
             'booking_id'             => (int) $booking->id,
@@ -243,7 +269,7 @@ class MBS_Invoice_Document_Service {
             'created_at'             => current_time( 'mysql' ),
         ) );
 
-        if ( $inserted === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'document_insert_failed', 'Could not create the reissued document.' ); }
+        if ( $inserted === false ) return new WP_Error( 'document_insert_failed', 'Could not create the reissued document.' );
         $document_id = (int) $wpdb->insert_id;
 
         if ( $booking->current_invoice_document_id ) {
@@ -252,9 +278,7 @@ class MBS_Invoice_Document_Service {
         $wpdb->update( $booking_table, array( 'current_invoice_document_id' => $document_id ), array( 'id' => (int) $booking->id ) );
 
         $audit_ok = MBS_Audit_Log::log( $booking->ref, 'invoice_document_reissued', 'Reissued as ' . $invoice_number );
-        if ( ! $audit_ok ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'audit_failed', 'Could not record reissue audit.' ); }
-
-        if ( $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'commit_failed', 'Could not commit the reissue.' ); }
+        if ( ! $audit_ok ) return new WP_Error( 'audit_failed', 'Could not record reissue audit.' );
 
         return $document_id;
     }
@@ -328,19 +352,30 @@ class MBS_Invoice_Document_Service {
         $space_minor = $total_minor - $kitchen_minor;
 
         $line_items = array();
-        $line_items[] = array(
-            'date'         => $booking->booking_date,
-            'space'        => $booking->space,
-            'description'  => $booking->space . ' hire' . ( $booking->purpose ? ' — ' . $booking->purpose : '' ),
-            'amount_minor' => (int) $space_minor,
-        );
-        if ( $booking->kitchen && $kitchen_minor > 0 ) {
+        // If reconstructed component split is negative (prices have changed since booking),
+        // use the locked agreed total as a single line rather than inventing historical prices.
+        if ( $space_minor < 0 || ( $booking->kitchen && $kitchen_minor <= 0 && $total_minor > 0 ) ) {
             $line_items[] = array(
                 'date'         => $booking->booking_date,
-                'space'        => '',
-                'description'  => 'Kitchen facilities add-on',
-                'amount_minor' => (int) $kitchen_minor,
+                'space'        => $booking->space,
+                'description'  => $booking->space . ' hire' . ( $booking->kitchen ? ' (including kitchen facilities)' : '' ) . ( $booking->purpose ? ' — ' . $booking->purpose : '' ),
+                'amount_minor' => (int) $total_minor,
             );
+        } else {
+            $line_items[] = array(
+                'date'         => $booking->booking_date,
+                'space'        => $booking->space,
+                'description'  => $booking->space . ' hire' . ( $booking->purpose ? ' — ' . $booking->purpose : '' ),
+                'amount_minor' => (int) $space_minor,
+            );
+            if ( $booking->kitchen && $kitchen_minor > 0 ) {
+                $line_items[] = array(
+                    'date'         => $booking->booking_date,
+                    'space'        => '',
+                    'description'  => 'Kitchen facilities add-on',
+                    'amount_minor' => (int) $kitchen_minor,
+                );
+            }
         }
 
         // Tax calculation (integer arithmetic)
@@ -409,9 +444,11 @@ class MBS_Invoice_Document_Service {
             return array( 'immediate' => true );
         }
         if ( $deposit_settings['enabled'] ) {
-            // Integer deposit calculation: total_minor * percentage / 100, rounded
-            $percentage = (int) $deposit_settings['percentage'];
-            $deposit_minor = (int) intdiv( $total_minor * $percentage + 50, 100 ); // Round half-up
+            // Fixed-point deposit calculation using basis points (hundredths of a percent)
+            // to avoid floating-point truncation. E.g. 12.5% = 1250 bps, 33.33% = 3333 bps.
+            $percentage_bps = (int) round( (float) $deposit_settings['percentage'] * 100 );
+            // deposit = total_minor * percentage_bps / 10000, with explicit banker's rounding
+            $deposit_minor = (int) intdiv( $total_minor * $percentage_bps + 5000, 10000 );
             $balance_minor = $total_minor - $deposit_minor;
             $balance_days = $deposit_settings['balance_days'];
             return array(

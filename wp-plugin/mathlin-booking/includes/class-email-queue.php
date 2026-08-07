@@ -300,16 +300,20 @@ class MBS_Email_Queue {
                             @unlink( $temp_file );
                             $temp_file = null;
                             $token = MBS_Invoice_Delivery_Endpoint::create_guest_token( (int) $meta['document_id'] );
-                            if ( ! is_wp_error( $token ) ) {
-                                $download_url = add_query_arg( array(
-                                    'action'      => 'mbs_invoice_document',
-                                    'token'       => $token,
-                                    'document_id' => (int) $meta['document_id'],
-                                    'format'      => 'pdf',
-                                ), admin_url( 'admin-ajax.php' ) );
-                                $email->body .= '<p style="margin-top:16px;padding:12px;background:#f5f0ff;border-radius:6px;"><strong>Your invoice is available for download:</strong><br><a href="' . esc_url( $download_url ) . '">' . esc_url( $download_url ) . '</a><br><small>This link expires in 72 hours.</small></p>';
-                                $download_link_appended = true;
+                            if ( is_wp_error( $token ) ) {
+                                // Token creation failed — release for retry, do NOT send without attachment or link
+                                self::release_for_retry( $email->id, $worker_id, 'Oversized PDF and token creation failed: ' . $token->get_error_message() );
+                                $failed++;
+                                continue;
                             }
+                            $download_url = add_query_arg( array(
+                                'action'      => 'mbs_invoice_document',
+                                'token'       => $token,
+                                'document_id' => (int) $meta['document_id'],
+                                'format'      => 'pdf',
+                            ), admin_url( 'admin-ajax.php' ) );
+                            $email->body .= '<p style="margin-top:16px;padding:12px;background:#f5f0ff;border-radius:6px;"><strong>Your invoice is available for download:</strong><br><a href="' . esc_url( $download_url ) . '">' . esc_url( $download_url ) . '</a><br><small>This link expires in 72 hours.</small></p>';
+                            $download_link_appended = true;
                             error_log( '[MGF Venue] Invoice PDF oversized (' . size_format( $file_size ) . '); sent with download link instead.' );
                         }
                     } else {

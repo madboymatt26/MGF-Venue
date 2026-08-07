@@ -135,7 +135,12 @@ class MBS_Invoice_Delivery_Endpoint {
             echo $output;
             exit;
         } else {
-            wp_send_json_success( array( 'html' => $output ) );
+            // Serve rendered HTML directly as a human-readable page (not JSON)
+            header( 'Content-Type: text/html; charset=UTF-8' );
+            header( 'Cache-Control: private, no-cache, no-store, must-revalidate' );
+            header( 'X-Content-Type-Options: nosniff' );
+            echo $output;
+            exit;
         }
     }
 
@@ -180,7 +185,10 @@ class MBS_Invoice_Delivery_Endpoint {
                 // Legacy fallback: ONLY for records lacking a user_id
                 $user = get_userdata( $user_id );
                 if ( $user && strtolower( $user->user_email ) === strtolower( $booking->email ) ) {
-                    MBS_Audit_Log::log( $document->booking_ref ?: "doc:{$document_id}", 'invoice_access_email_fallback', "User {$user_id} authorised by email match (legacy record without user_id)." );
+                    $audit_ok = MBS_Audit_Log::log( $document->booking_ref ?: "doc:{$document_id}", 'invoice_access_email_fallback', "User {$user_id} authorised by email match (legacy record without user_id)." );
+                    if ( ! $audit_ok ) {
+                        return new WP_Error( 'audit_failed', 'Access denied: could not record the email-fallback authorisation audit.' );
+                    }
                     return true;
                 }
             }
@@ -211,7 +219,10 @@ class MBS_Invoice_Delivery_Endpoint {
                 if ( $series ) {
                     $user = get_userdata( $user_id );
                     if ( $user && strtolower( $user->user_email ) === strtolower( $series->contact_email ) ) {
-                        MBS_Audit_Log::log( $invoice->series_ref, 'invoice_access_email_fallback', "User {$user_id} authorised by email match (legacy series without user_id on occurrences)." );
+                        $audit_ok = MBS_Audit_Log::log( $invoice->series_ref, 'invoice_access_email_fallback', "User {$user_id} authorised by email match (legacy series without user_id on occurrences)." );
+                        if ( ! $audit_ok ) {
+                            return new WP_Error( 'audit_failed', 'Access denied: could not record the email-fallback authorisation audit.' );
+                        }
                         return true;
                     }
                 }

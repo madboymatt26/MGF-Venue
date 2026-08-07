@@ -206,23 +206,85 @@ class MBS_Modification {
                     }
 
 	                    }
-	                    $booking_updated = $wpdb->update( $table, $update, array( 'ref' => $request->booking_ref ) );
-	                    if ( $booking_updated === false ) {
-	                        MBS_Audit_Log::log( $request->booking_ref, 'modification_update_failed', 'Permitted modification remains pending because the booking update failed: ' . $wpdb->last_error );
-	                        return new WP_Error( 'modification_update_failed', 'The booking change could not be saved. The request remains pending and can be retried safely.' );
-	                    }
 
-	                    if ( $financial_change ) {
-	                    MBS_Audit_Log::log( $request->booking_ref, 'status_changed',
-                        sprintf( 'Modification approved: status set to %s (was %s, cost %s → %s, amount_paid: £%s)',
-                            $update['status'], $booking->status,
-                            '£' . number_format( (float) $booking->amount, 2 ),
-                            '£' . number_format( (float) $new_amount, 2 ),
-                            number_format( $amount_paid, 2 )
-                        )
-	                    );
+	                    // MATERIAL modifications: wrap booking update + R2 creation atomically
+	                    if ( $financial_change && ! empty( $booking->current_invoice_document_id ) ) {
+	                        // Pre-transaction: resolve logo
+	                        $logo_ref = MBS_Logo_Asset::resolve_current_org_logo();
+
+	                        if ( $wpdb->query( 'START TRANSACTION' ) === false ) {
+	                            return new WP_Error( 'transaction_start_failed', 'Could not start the modification transaction.' );
+	                        }
+
+	                        // Lock booking row
+	                        $locked_booking = $wpdb->get_row( $wpdb->prepare(
+	                            "SELECT * FROM {$table} WHERE ref = %s FOR UPDATE",
+	                            $request->booking_ref
+	                        ) );
+	                        if ( ! $locked_booking ) {
+	                            $wpdb->query( 'ROLLBACK' );
+	                            return new WP_Error( 'booking_lock_failed', 'Could not lock the booking for modification.' );
+	                        }
+
+	                        // Apply material booking changes
+	                        $booking_updated = $wpdb->update( $table, $update, array( 'ref' => $request->booking_ref ) );
+	                        if ( $booking_updated === false ) {
+	                            $wpdb->query( 'ROLLBACK' );
+	                            MBS_Audit_Log::log( $request->booking_ref, 'modification_update_failed', 'Permitted modification remains pending because the booking update failed: ' . $wpdb->last_error );
+	                            return new WP_Error( 'modification_update_failed', 'The booking change could not be saved. The request remains pending and can be retried safely.' );
+	                        }
+
+	                        // Re-read the updated booking within the transaction for snapshot
+	                        $updated_locked = $wpdb->get_row( $wpdb->prepare(
+	                            "SELECT * FROM {$table} WHERE ref = %s",
+	                            $request->booking_ref
+	                        ) );
+
+	                        // Create R2 within this transaction
+	                        $r2_id = MBS_Invoice_Document_Service::reissue_booking_document_within_transaction( $updated_locked, $logo_ref );
+	                        if ( is_wp_error( $r2_id ) ) {
+	                            $wpdb->query( 'ROLLBACK' );
+	                            return $r2_id;
+	                        }
+
+	                        // Audit
+	                        $audit_ok = MBS_Audit_Log::log( $request->booking_ref, 'status_changed',
+	                            sprintf( 'Modification approved: status set to %s (was %s, cost %s → %s, amount_paid: £%s)',
+	                                $update['status'], $booking->status,
+	                                '£' . number_format( (float) $booking->amount, 2 ),
+	                                '£' . number_format( (float) $new_amount, 2 ),
+	                                number_format( $amount_paid, 2 )
+	                            )
+	                        );
+	                        if ( ! $audit_ok ) {
+	                            $wpdb->query( 'ROLLBACK' );
+	                            return new WP_Error( 'audit_failed', 'Could not record modification audit.' );
+	                        }
+
+	                        if ( $wpdb->query( 'COMMIT' ) === false ) {
+	                            $wpdb->query( 'ROLLBACK' );
+	                            return new WP_Error( 'commit_failed', 'Could not commit the modification.' );
+	                        }
 	                    } else {
-	                        MBS_Audit_Log::log( $request->booking_ref, 'modification_approved', 'Approved non-financial fields without changing issued financial history.' );
+	                        // Non-material or no existing document: simple update (no R2 needed)
+	                        $booking_updated = $wpdb->update( $table, $update, array( 'ref' => $request->booking_ref ) );
+	                        if ( $booking_updated === false ) {
+	                            MBS_Audit_Log::log( $request->booking_ref, 'modification_update_failed', 'Permitted modification remains pending because the booking update failed: ' . $wpdb->last_error );
+	                            return new WP_Error( 'modification_update_failed', 'The booking change could not be saved. The request remains pending and can be retried safely.' );
+	                        }
+
+	                        if ( $financial_change ) {
+	                            MBS_Audit_Log::log( $request->booking_ref, 'status_changed',
+	                                sprintf( 'Modification approved: status set to %s (was %s, cost %s → %s, amount_paid: £%s)',
+	                                    $update['status'], $booking->status,
+	                                    '£' . number_format( (float) $booking->amount, 2 ),
+	                                    '£' . number_format( (float) $new_amount, 2 ),
+	                                    number_format( $amount_paid, 2 )
+	                                )
+	                            );
+	                        } else {
+	                            MBS_Audit_Log::log( $request->booking_ref, 'modification_approved', 'Approved non-financial fields without changing issued financial history.' );
+	                        }
 	                    }
                 }
             }
@@ -398,20 +460,35 @@ class MBS_Modification {
 
         $body .= '</div></body></html>';
 
-        // Create a new immutable invoice document revision (reissue)
-        $reissue_result = MBS_Invoice_Document_Service::reissue_booking_document( $booking->ref );
-        if ( is_wp_error( $reissue_result ) ) {
-            error_log( '[MGF Venue] Modification reissue failed for ' . $booking->ref . ': ' . $reissue_result->get_error_message() );
+        // Determine whether this is a MATERIAL (financial) change requiring R2
+        $is_material = abs( $diff ) > 0.01;
+        $document_id = $booking->current_invoice_document_id ? (int) $booking->current_invoice_document_id : null;
+
+        if ( $is_material && $document_id ) {
+            // Material change: R2 was already created within the approve() transaction.
+            // Queue the revised invoice via the transactional outbox referencing R2.
+            $message_key = 'modification_approved:' . $booking->ref . ':doc' . $document_id;
+            $headers = array(
+                'Content-Type: text/html; charset=UTF-8',
+                'From: ' . $org['name'] . ' <' . get_option( 'admin_email', $admin_email ) . '>',
+                'Reply-To: ' . $admin_email,
+            );
+            $attachment_meta = array( 'document_id' => $document_id, 'format' => 'pdf' );
+            $payload_hash = MBS_Email_Queue::compute_payload_hash( $booking->email, $subject, $body, $headers, $attachment_meta );
+
+            MBS_Email_Queue::enqueue(
+                $booking->email, $subject, $body, $headers,
+                $message_key, $payload_hash, $attachment_meta,
+                array( 'message_type' => 'modification_approved', 'reference_type' => 'booking', 'reference_id' => (int) $booking->id )
+            );
+        } else {
+            // Non-material change: no R2, send notification without invoice attachment
+            MBS_Email_Queue::send( $booking->email, $subject, $body, array(
+                'Content-Type: text/html; charset=UTF-8',
+                'From: ' . $org['name'] . ' <' . get_option( 'admin_email', $admin_email ) . '>',
+                'Reply-To: ' . $admin_email,
+            ) );
         }
-
-        // Generate updated invoice attachment (now uses PDF from the new document)
-        $attachments = MBS_Email::generate_invoice_attachment_for( $booking );
-
-        MBS_Email_Queue::send( $booking->email, $subject, $body, array(
-            'Content-Type: text/html; charset=UTF-8',
-            'From: ' . $org['name'] . ' <' . get_option( 'admin_email', $admin_email ) . '>',
-            'Reply-To: ' . $admin_email,
-        ), $attachments );
     }
 
     private static function notify_booker_rejected( $booking, $type, $reason ) {

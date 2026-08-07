@@ -57,12 +57,21 @@ class MBS_Billing_Engine {
         if ( ! is_array( $schedule ) ) return new WP_Error( 'invalid_billing_schedule', 'Billing schedule must be structured data.' );
 
         // Validate term schedules for termly billing (Issue 10)
-        if ( $mode === 'termly' && class_exists( 'MBS_Invoice_Document_Security' ) ) {
-            $terms = isset( $schedule['terms'] ) ? $schedule['terms'] : $schedule;
-            if ( ! empty( $terms ) ) {
-                $term_valid = MBS_Invoice_Document_Security::validate_term_schedule( $terms, $current->start_date, $current->repeat_until );
-                if ( is_wp_error( $term_valid ) ) return $term_valid;
+        if ( $mode === 'termly' ) {
+            if ( ! class_exists( 'MBS_Invoice_Document_Security' ) ) {
+                return new WP_Error( 'security_unavailable', 'Invoice document security module is required for termly billing configuration.' );
             }
+            $terms = isset( $schedule['terms'] ) ? $schedule['terms'] : null;
+            // Fail closed: termly billing REQUIRES an explicit valid term schedule
+            if ( ! is_array( $terms ) || empty( $terms ) ) {
+                return new WP_Error( 'terms_required', 'Termly billing requires at least one term with start and end dates in the billing schedule.' );
+            }
+            // Validate canonical structure: {"terms":[{"key":"...","label":"...","start":"YYYY-MM-DD","end":"YYYY-MM-DD"}]}
+            if ( ! isset( $schedule['terms'] ) || ! is_array( $schedule['terms'] ) ) {
+                return new WP_Error( 'terms_malformed_structure', 'Billing schedule must contain a "terms" array.' );
+            }
+            $term_valid = MBS_Invoice_Document_Security::validate_term_schedule( $terms, $current->start_date, $current->repeat_until );
+            if ( is_wp_error( $term_valid ) ) return $term_valid;
         }
 
 	        $adopting = ! empty( $current->metadata_incomplete ) && $current->billing_treatment === 'legacy_per_occurrence'

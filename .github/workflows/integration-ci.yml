@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - feature/recurring-series-billing
+      - feature/invoice-documents
   pull_request:
 
 permissions:
@@ -40,6 +41,8 @@ jobs:
         run: sh tests/integration/run-php-suite.sh
       - name: Run invoice document unit tests
         run: php tests/php-invoice-document-unit.php
+      - name: Run correctness regression tests
+        run: php tests/php-correctness-regression.php
       - name: Validate Composer dependencies
         run: |
           cd wp-plugin/mathlin-booking

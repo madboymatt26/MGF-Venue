@@ -705,7 +705,7 @@ class MBS_Bookings {
                 // Delegate to the atomic confirmation service
                 $atomic_result = MBS_Invoice_Document_Service::confirm_and_issue( $ref );
                 if ( is_wp_error( $atomic_result ) ) return false;
-                return $atomic_result['no_op'] ? $result : true;
+                return true; // Both fresh-issue and idempotent no-op are successful
             }
         }
 
