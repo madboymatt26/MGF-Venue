@@ -16,10 +16,15 @@ $a = MBS_Audit_Assertions::current();
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
+$ext_test_offset = 100;
+
 function ext_create_booking( $overrides = array() ) {
+    global $ext_test_offset;
+    $ext_test_offset++;
+    // Each booking uses a unique date to avoid conflicts
     $defaults = array(
         'space'        => 'Main Hall',
-        'booking_date' => wp_date( 'Y-m-d', strtotime( '+30 days' ) ),
+        'booking_date' => wp_date( 'Y-m-d', strtotime( '+' . ( 60 + $ext_test_offset ) . ' days' ) ),
         'name'         => 'Extended Test User',
         'email'        => 'ext-test@example.com',
         'phone'        => '07700900001',
@@ -27,7 +32,7 @@ function ext_create_booking( $overrides = array() ) {
         'start_time'   => '10:00',
         'end_time'     => '14:00',
         'attendees'    => 10,
-        'purpose'      => 'Extended integration test',
+        'purpose'      => 'Extended integration test ' . $ext_test_offset,
         'kitchen'      => false,
     );
     return MBS_Bookings::create( array_merge( $defaults, $overrides ), true );

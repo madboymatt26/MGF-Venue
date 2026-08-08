@@ -17,10 +17,15 @@ $a = MBS_Audit_Assertions::current();
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
+$doc_test_offset = 0;
+
 function doc_create_booking( $overrides = array() ) {
+    global $doc_test_offset;
+    $doc_test_offset++;
+    // Each booking uses a unique date to avoid conflicts
     $defaults = array(
         'space'        => 'Main Hall',
-        'booking_date' => wp_date( 'Y-m-d', strtotime( '+30 days' ) ),
+        'booking_date' => wp_date( 'Y-m-d', strtotime( '+' . ( 30 + $doc_test_offset ) . ' days' ) ),
         'name'         => 'Invoice Test User',
         'email'        => 'invoice-test@example.com',
         'phone'        => '07700900000',
@@ -28,7 +33,7 @@ function doc_create_booking( $overrides = array() ) {
         'start_time'   => '10:00',
         'end_time'     => '14:00',
         'attendees'    => 20,
-        'purpose'      => 'Integration test',
+        'purpose'      => 'Integration test ' . $doc_test_offset,
         'kitchen'      => false,
     );
     return MBS_Bookings::create( array_merge( $defaults, $overrides ), true );
