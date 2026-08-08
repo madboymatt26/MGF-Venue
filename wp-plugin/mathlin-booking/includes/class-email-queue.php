@@ -346,8 +346,18 @@ class MBS_Email_Queue {
                 $result = wp_mail( $email->to_email, $email->subject, $email->body, $headers, $attachments );
 
                 if ( $result ) {
-                    self::mark_accepted( $email->id, $worker_id );
-                    self::perform_domain_bookkeeping( $email );
+                    $accepted = self::mark_accepted( $email->id, $worker_id );
+                    if ( $accepted ) {
+                        // Only perform domain bookkeeping if the outbox row
+                        // successfully transitioned to 'sent'. This prevents
+                        // setting confirmation_sent_at / issued_email_sent_at
+                        // when the row was claimed by another worker.
+                        self::perform_domain_bookkeeping( $email );
+                    }
+                    // Note: at-least-once delivery semantics. If the process dies
+                    // after wp_mail() accepts but before mark_accepted() succeeds,
+                    // the stale-lease recovery will re-deliver the email. This is
+                    // an unavoidable edge documented by design.
                     $sent++;
                 } else {
                     self::release_for_retry( $email->id, $worker_id, 'wp_mail() returned false.' );

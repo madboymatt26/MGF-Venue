@@ -308,6 +308,7 @@ class MBS_Invoice_Document_Service {
         if ( $next_revision > 1 ) $invoice_number .= '-R' . $next_revision;
 
         $snapshot = self::build_ledger_snapshot( $invoice, $items, $series, $logo_ref, $invoice_number, $next_revision );
+        if ( is_wp_error( $snapshot ) ) return $snapshot;
 
         $inserted = $wpdb->insert( $doc_table, array(
             'booking_id'             => null,
@@ -343,56 +344,33 @@ class MBS_Invoice_Document_Service {
         $total_minor = MBS_Money::from_decimal_string( (string) $booking->amount );
         if ( is_wp_error( $total_minor ) ) return $total_minor; // Fail closed on malformed money
 
-        $kitchen_price_decimal = $booking->kitchen
-            ? (string) MBS_Bookings::get_tiered_kitchen_price( MBS_Bookings::get_booking_tier( $booking ) )
-            : '0';
-        $kitchen_minor = MBS_Money::from_decimal_string( $kitchen_price_decimal );
-        if ( is_wp_error( $kitchen_minor ) ) return $kitchen_minor; // Fail closed
-
-        $space_minor = $total_minor - $kitchen_minor;
-
+        // Line items: NEVER reconstruct historical kitchen component from current tariff.
+        // The booking row stores only the agreed total, not per-component prices at booking time.
+        // Always use a single immutable line reflecting the locked agreed total.
         $line_items = array();
-        // If reconstructed component split is negative (prices have changed since booking),
-        // use the locked agreed total as a single line rather than inventing historical prices.
-        if ( $space_minor < 0 || ( $booking->kitchen && $kitchen_minor <= 0 && $total_minor > 0 ) ) {
-            $line_items[] = array(
-                'date'         => $booking->booking_date,
-                'space'        => $booking->space,
-                'description'  => $booking->space . ' hire' . ( $booking->kitchen ? ' (including kitchen facilities)' : '' ) . ( $booking->purpose ? ' — ' . $booking->purpose : '' ),
-                'amount_minor' => (int) $total_minor,
-            );
-        } else {
-            $line_items[] = array(
-                'date'         => $booking->booking_date,
-                'space'        => $booking->space,
-                'description'  => $booking->space . ' hire' . ( $booking->purpose ? ' — ' . $booking->purpose : '' ),
-                'amount_minor' => (int) $space_minor,
-            );
-            if ( $booking->kitchen && $kitchen_minor > 0 ) {
-                $line_items[] = array(
-                    'date'         => $booking->booking_date,
-                    'space'        => '',
-                    'description'  => 'Kitchen facilities add-on',
-                    'amount_minor' => (int) $kitchen_minor,
-                );
-            }
+        $description = $booking->space . ' hire';
+        if ( $booking->kitchen ) {
+            $description .= ' (including kitchen facilities)';
         }
+        if ( $booking->purpose ) {
+            $description .= ' — ' . $booking->purpose;
+        }
+        $line_items[] = array(
+            'date'         => $booking->booking_date,
+            'space'        => $booking->space,
+            'description'  => $description,
+            'amount_minor' => (int) $total_minor,
+        );
 
-        // Tax calculation (integer arithmetic)
+        // Tax: for this release, only 0% tax is supported for individual invoice issuance.
+        // Non-zero mbs_tax_rate_bps is rejected to prevent inconsistent tax treatment.
         $tax_rate_bps = (int) get_option( 'mbs_tax_rate_bps', 0 );
+        if ( $tax_rate_bps !== 0 ) {
+            return new WP_Error( 'nonzero_tax_unsupported', 'Individual invoice issuance currently supports 0% tax only. Configure mbs_tax_rate_bps = 0 or contact support.' );
+        }
         $tax_label = get_option( 'mbs_tax_label', 'Charity exempt — not registered for VAT' );
-
-        // Prices assumed tax-inclusive at 0% (charity default). For non-zero rates,
-        // subtotal = total / (1 + rate), tax = total - subtotal.
-        // At 0%: subtotal = total, tax = 0.
         $subtotal_minor = $total_minor;
         $tax_amount_minor = 0;
-        if ( $tax_rate_bps > 0 && $total_minor > 0 ) {
-            // Tax-inclusive calculation: total = subtotal + tax
-            // subtotal = total * 10000 / (10000 + rate_bps)
-            $subtotal_minor = (int) intdiv( $total_minor * 10000, 10000 + $tax_rate_bps );
-            $tax_amount_minor = $total_minor - $subtotal_minor;
-        }
 
         // Payment schedule (complete — never null for chargeable bookings)
         $payment_schedule = self::compute_payment_schedule( $booking, $total_minor, $deposit_settings, $bank );
@@ -444,10 +422,13 @@ class MBS_Invoice_Document_Service {
             return array( 'immediate' => true );
         }
         if ( $deposit_settings['enabled'] ) {
-            // Fixed-point deposit calculation using basis points (hundredths of a percent)
-            // to avoid floating-point truncation. E.g. 12.5% = 1250 bps, 33.33% = 3333 bps.
-            $percentage_bps = (int) round( (float) $deposit_settings['percentage'] * 100 );
-            // deposit = total_minor * percentage_bps / 10000, with explicit banker's rounding
+            // Exact deposit calculation: parse the percentage as a decimal string
+            // and convert to integer basis points (hundredths of a percent).
+            // "12.5" → 1250, "25" → 2500, "33.33" → 3333.
+            // Then integer arithmetic: deposit = total * bps / 10000, round half-up.
+            $pct_str = trim( (string) $deposit_settings['percentage'] );
+            $percentage_bps = self::decimal_string_to_bps( $pct_str );
+            // deposit = total_minor * percentage_bps / 10000, round half-up
             $deposit_minor = (int) intdiv( $total_minor * $percentage_bps + 5000, 10000 );
             $balance_minor = $total_minor - $deposit_minor;
             $balance_days = $deposit_settings['balance_days'];
@@ -468,7 +449,14 @@ class MBS_Invoice_Document_Service {
 
     private static function build_ledger_snapshot( $invoice, $items, $series, $logo_ref, $invoice_number, $revision ) {
         $bank = MBS_Bookings::get_bank_details();
+
+        // Tax policy: for this release only 0% tax is supported.
+        // Reject non-zero configuration to prevent inconsistent tax treatment
+        // between individual and consolidated invoices.
         $tax_rate_bps = (int) get_option( 'mbs_tax_rate_bps', 0 );
+        if ( $tax_rate_bps !== 0 ) {
+            return new WP_Error( 'nonzero_tax_unsupported', 'Consolidated invoice issuance currently supports 0% tax only.' );
+        }
         $tax_label = get_option( 'mbs_tax_label', 'Charity exempt — not registered for VAT' );
 
         $line_items = array();
@@ -580,6 +568,7 @@ class MBS_Invoice_Document_Service {
         if ( $next_revision > 1 ) $invoice_number .= '-R' . $next_revision;
 
         $snapshot = self::build_booking_snapshot( $locked, $logo_ref, $invoice_number, $next_revision );
+        if ( is_wp_error( $snapshot ) ) { $wpdb->query( 'ROLLBACK' ); return $snapshot; }
 
         $inserted = $wpdb->insert( $doc_table, array(
             'booking_id' => (int) $booking->id, 'invoice_id' => null,
@@ -594,10 +583,38 @@ class MBS_Invoice_Document_Service {
         if ( $inserted === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'insert_failed', 'Could not create document.' ); }
 
         $document_id = (int) $wpdb->insert_id;
-        $wpdb->update( $booking_table, array( 'current_invoice_document_id' => $document_id ), array( 'id' => (int) $booking->id ) );
-        MBS_Audit_Log::log( $booking->ref, 'invoice_document_issued', 'Document ' . $invoice_number . ' issued.' );
+        $ptr_updated = $wpdb->update( $booking_table, array( 'current_invoice_document_id' => $document_id ), array( 'id' => (int) $booking->id ) );
+        if ( $ptr_updated === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'pointer_update_failed', 'Could not link document to booking.' ); }
+
+        $audit_ok = MBS_Audit_Log::log( $booking->ref, 'invoice_document_issued', 'Document ' . $invoice_number . ' issued.' );
+        if ( ! $audit_ok ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'audit_failed', 'Could not record issuance audit.' ); }
 
         if ( $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'commit_failed', 'Could not commit.' ); }
         return $document_id;
+    }
+
+    /**
+     * Parse a decimal percentage string into integer basis points (hundredths of a percent).
+     * "12.5" → 1250, "25" → 2500, "33.33" → 3333.
+     * No floating-point intermediate: string manipulation only.
+     *
+     * @param string $decimal_str  Percentage as a decimal string (e.g. "12.5").
+     * @return int  Basis points (hundredths of a percent).
+     */
+    private static function decimal_string_to_bps( $decimal_str ) {
+        // Normalise: strip leading/trailing whitespace
+        $decimal_str = trim( (string) $decimal_str );
+        if ( $decimal_str === '' ) return 0;
+
+        // Split on decimal point
+        $parts = explode( '.', $decimal_str, 2 );
+        $integer_part = ltrim( $parts[0], '0' ) ?: '0';
+        $fractional_part = isset( $parts[1] ) ? $parts[1] : '';
+
+        // Pad or truncate fractional to exactly 2 digits (hundredths of a percent)
+        $fractional_part = str_pad( substr( $fractional_part, 0, 2 ), 2, '0' );
+
+        // Result in basis points: integer_part * 100 + fractional_part
+        return (int) $integer_part * 100 + (int) $fractional_part;
     }
 }

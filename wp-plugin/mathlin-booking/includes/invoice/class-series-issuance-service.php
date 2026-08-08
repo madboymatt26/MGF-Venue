@@ -42,7 +42,18 @@ class MBS_Series_Issuance_Service {
             return new WP_Error( 'transaction_start_failed', 'Could not start invoice issuance.' );
         }
 
-        $result = self::issue_within_transaction( $series, $period, $logo_ref );
+        // Lock and re-verify series state inside the transaction
+        $series_table = $wpdb->prefix . MBS_SERIES_TABLE;
+        $locked_series = $wpdb->get_row( $wpdb->prepare(
+            "SELECT * FROM {$series_table} WHERE series_ref = %s FOR UPDATE",
+            sanitize_text_field( $series_ref )
+        ) );
+        if ( ! $locked_series || $locked_series->status !== 'confirmed' || $locked_series->billing_treatment !== 'invoice_managed' ) {
+            $wpdb->query( 'ROLLBACK' );
+            return new WP_Error( 'series_not_billable', 'Series is not in a billable state.' );
+        }
+
+        $result = self::issue_within_transaction( $locked_series, $period, $logo_ref );
         if ( is_wp_error( $result ) ) {
             $wpdb->query( 'ROLLBACK' );
             return $result;
@@ -145,8 +156,45 @@ class MBS_Series_Issuance_Service {
         $invoice = $draft_result['invoice'];
         $version = (int) $invoice->version;
 
-        // 2. Add line items (without own transaction)
+        // 2. Lock and revalidate each occurrence from authoritative DB state.
+        // Do NOT freeze stale preview values — derive amounts from locked rows.
+        $booking_table = $wpdb->prefix . MBS_TABLE;
+        $validated_occurrences = array();
         foreach ( $occurrences as $occurrence ) {
+            $occ_ref = $occurrence['ref'] ?? null;
+            if ( ! $occ_ref ) continue;
+
+            $locked_occ = $wpdb->get_row( $wpdb->prepare(
+                "SELECT * FROM {$booking_table} WHERE ref = %s FOR UPDATE",
+                sanitize_text_field( $occ_ref )
+            ) );
+            if ( ! $locked_occ ) continue; // Occurrence was deleted
+            if ( $locked_occ->series_id !== $series->series_ref ) continue; // No longer belongs to this series
+            if ( ! in_array( $locked_occ->status, array( 'confirmed', 'deposit_paid', 'paid' ), true ) ) continue; // Not billable
+            if ( ! empty( $locked_occ->legacy_billing_excluded ) ) continue; // Excluded from billing
+            // Verify service date is within intended period
+            if ( $locked_occ->booking_date < $period['period_start'] || $locked_occ->booking_date > $period['period_end'] ) continue;
+
+            // Derive amount from the authoritative locked row (not the stale preview)
+            $occ_amount = MBS_Money::from_decimal_string( (string) $locked_occ->amount );
+            if ( is_wp_error( $occ_amount ) ) {
+                return new WP_Error( 'invalid_occurrence_amount', 'Occurrence ' . $occ_ref . ' has an invalid amount.' );
+            }
+
+            $validated_occurrences[] = array(
+                'ref'          => $occ_ref,
+                'date'         => $locked_occ->booking_date,
+                'amount_minor' => (int) $occ_amount,
+                'description'  => $locked_occ->space . ' hire on ' . wp_date( 'j F Y', strtotime( $locked_occ->booking_date ) ) . ( ! empty( $locked_occ->kitchen ) ? ' (including kitchen)' : '' ),
+            );
+        }
+
+        if ( empty( $validated_occurrences ) ) {
+            return new WP_Error( 'no_valid_occurrences', 'No valid billable occurrences remain after revalidation.' );
+        }
+
+        // 3. Add line items (without own transaction)
+        foreach ( $validated_occurrences as $occurrence ) {
             $item_result = MBS_Billing_Ledger::add_item( $invoice->invoice_ref, array(
                 'booking_ref'      => $occurrence['ref'] ?? null,
                 'service_date'     => $occurrence['date'],

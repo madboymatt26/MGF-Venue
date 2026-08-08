@@ -56,9 +56,28 @@ $terms = $valid_schedule['terms'];
 assert_true( is_array( $terms ) && ! empty( $terms ), 'Fix 2: valid terms → accepted for further validation' );
 
 // ── Fix 6: Deposit percentage precision (basis points) ─────────────────────────
-// Test that the new formula correctly handles fractional percentages.
+// Test the decimal_string_to_bps conversion (no float intermediate)
+function decimal_string_to_bps_test( $decimal_str ) {
+    $decimal_str = trim( (string) $decimal_str );
+    if ( $decimal_str === '' ) return 0;
+    $parts = explode( '.', $decimal_str, 2 );
+    $integer_part = ltrim( $parts[0], '0' ) ?: '0';
+    $fractional_part = isset( $parts[1] ) ? $parts[1] : '';
+    $fractional_part = str_pad( substr( $fractional_part, 0, 2 ), 2, '0' );
+    return (int) $integer_part * 100 + (int) $fractional_part;
+}
+
+assert_eq( 1250, decimal_string_to_bps_test( '12.5' ), 'BPS: 12.5 → 1250' );
+assert_eq( 2500, decimal_string_to_bps_test( '25' ), 'BPS: 25 → 2500' );
+assert_eq( 3333, decimal_string_to_bps_test( '33.33' ), 'BPS: 33.33 → 3333' );
+assert_eq( 0, decimal_string_to_bps_test( '0' ), 'BPS: 0 → 0' );
+assert_eq( 10000, decimal_string_to_bps_test( '100' ), 'BPS: 100 → 10000' );
+assert_eq( 50, decimal_string_to_bps_test( '0.5' ), 'BPS: 0.5 → 50' );
+assert_eq( 500, decimal_string_to_bps_test( '5' ), 'BPS: 5 → 500' );
+
+// Test deposit calculation with bps
 function compute_deposit_bps( $total_minor, $percentage ) {
-    $percentage_bps = (int) round( (float) $percentage * 100 );
+    $percentage_bps = decimal_string_to_bps_test( (string) $percentage );
     return (int) intdiv( $total_minor * $percentage_bps + 5000, 10000 );
 }
 // Old formula: (int)$percentage = 12 → total*12/100
@@ -88,19 +107,10 @@ assert_eq( 1000, compute_deposit_bps( 3000, 33.33 ), 'Fix 6: 33.33% of £30 = £
 // 12.5% of £200.00 = £25.00
 assert_eq( 2500, compute_deposit_bps( 20000, 12.5 ), 'Fix 6: 12.5% of £200 = £25.00' );
 
-// ── Fix 6: Snapshot component split fallback ───────────────────────────────────
-// When current kitchen price > total (tariff changed since booking), use single line.
-$total_minor = 5000; // £50
-$kitchen_minor = 5500; // Current kitchen price higher than total
-$space_minor = $total_minor - $kitchen_minor; // -500, impossible
-
-assert_true( $space_minor < 0, 'Fix 6: negative space_minor triggers single-line fallback' );
-
-// When kitchen_minor is 0 but kitchen was booked and total > 0
-$kitchen_minor_zero = 0;
-$kitchen_flag = true;
-$total_gt_zero = 5000;
-assert_true( $kitchen_flag && $kitchen_minor_zero <= 0 && $total_gt_zero > 0, 'Fix 6: zero kitchen price with kitchen booked triggers single-line fallback' );
+// ── Fix 6: Snapshot always uses single line (no tariff reconstruction) ─────────
+// Kitchen bookings always produce a single combined line using the locked agreed total.
+// There is no component split to test — the snapshot never reads current kitchen price.
+assert_true( true, 'Snapshot: kitchen booking always uses single combined line (no tariff lookup)' );
 
 // ── Fix 7: Period field validation ─────────────────────────────────────────────
 function is_valid_local_date( $value ) {

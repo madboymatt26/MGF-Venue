@@ -261,13 +261,14 @@ class MBS_Series_Approval_Service {
             if ( ! is_array( $terms ) || empty( $terms ) ) {
                 return new WP_Error( 'billing_config_incomplete', 'Termly billing requires structured term date ranges.' );
             }
-            // Invoke canonical term validator (Issue 7)
-            if ( class_exists( 'MBS_Invoice_Document_Security' ) ) {
-                $series_start = $config['_series_start_date'] ?? '';
-                $series_end = $config['_series_repeat_until'] ?? '';
-                $term_valid = MBS_Invoice_Document_Security::validate_term_schedule( $terms, $series_start, $series_end );
-                if ( is_wp_error( $term_valid ) ) return $term_valid;
+            // Invoke canonical term validator — REQUIRED for termly billing (fail closed)
+            if ( ! class_exists( 'MBS_Invoice_Document_Security' ) ) {
+                return new WP_Error( 'security_unavailable', 'Term schedule validator (MBS_Invoice_Document_Security) is required for termly billing approval but is not available.' );
             }
+            $series_start = $config['_series_start_date'] ?? '';
+            $series_end = $config['_series_repeat_until'] ?? '';
+            $term_valid = MBS_Invoice_Document_Security::validate_term_schedule( $terms, $series_start, $series_end );
+            if ( is_wp_error( $term_valid ) ) return $term_valid;
         }
 
         // Online payment requires WooCommerce
