@@ -48,10 +48,9 @@ function md_test_deposit_pct( $percentage, $label ) {
         update_option( 'mbs_deposit_enabled', true );
         update_option( 'mbs_deposit_percentage', $percentage );
 
-        $b = md_create_booking( array(
-            'booking_date' => wp_date( 'Y-m-d', strtotime( '+180 days' ) ),
-        ) );
-        MBS_Audit_Assertions::assert_that( ! is_wp_error( $b ), 'Create' );
+        // Use default unique date from md_create_booking (far enough out for deposit logic)
+        $b = md_create_booking();
+        MBS_Audit_Assertions::assert_that( ! is_wp_error( $b ), 'Create: ' . ( is_wp_error($b) ? $b->get_error_message() : '' ) );
         MBS_Bookings::update_status( $b['ref'], 'confirmed' );
         $booking = MBS_Bookings::get( $b['ref'] );
 
