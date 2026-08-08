@@ -111,6 +111,8 @@ jobs:
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli sh /workspace/tests/integration/setup.sh
       - name: Show exact runtime versions
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/runtime-smoke.php --allow-root
+      - name: Run invoice lifecycle matrix
+        run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/invoice-lifecycle-matrix.php --allow-root
       - name: Collect service diagnostics
         if: always()
         run: docker compose -f tests/integration/docker-compose.yml logs --no-color > integration-services.log
