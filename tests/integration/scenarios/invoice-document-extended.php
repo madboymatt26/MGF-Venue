@@ -126,17 +126,18 @@ $a->run( 'V3.21 compat: existing issued period treated as no-op', function() use
     $series = MBS_Series::get( $setup['series_ref'] );
     MBS_Audit_Assertions::assert_that( $series !== null, 'Series must exist' );
 
-    // Manually insert an invoice with the v3.21 canonical idempotency key
+    // Manually insert an invoice with the v3.21 canonical idempotency key (hashed, as the ledger stores it)
     $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
     $period_key = 'month-' . substr( $setup['occurrences'][0]['date'], 0, 7 );
-    $idem_key = 'series:' . $setup['series_ref'] . ':period:' . $period_key . ':v1';
+    $raw_idem_key = 'series:' . $setup['series_ref'] . ':period:' . $period_key . ':v1';
+    $hashed_idem_key = hash( 'sha256', $raw_idem_key );
 
     $wpdb->insert( $invoice_table, array(
-        'invoice_ref'      => 'INV-COMPAT-' . strtoupper( substr( md5( $idem_key ), 0, 6 ) ),
+        'invoice_ref'      => 'INV-COMPAT-' . strtoupper( substr( md5( $raw_idem_key ), 0, 6 ) ),
         'series_ref'       => $setup['series_ref'],
         'document_type'    => 'invoice',
         'status'           => 'issued',
-        'idempotency_key'  => $idem_key,
+        'idempotency_key'  => $hashed_idem_key,
         'contact_name'     => 'Series Test',
         'contact_email'    => 'series-test@example.com',
         'billing_mode'     => 'monthly',
@@ -293,20 +294,21 @@ $a->run( 'Modification: attendees-only change preserves document pointer', funct
     MBS_Audit_Assertions::assert_that( $r1 > 0, 'R1 must exist' );
 
     // Non-financial modification
-    $req_id = MBS_Modification::create_request( array(
+    MBS_Modification::create_request( array(
         'ref'     => $ref,
         'type'    => 'modify',
         'notes'   => 'More attendees',
         'changes' => array( 'attendees' => '50' ),
     ) );
-    MBS_Audit_Assertions::assert_that( ! empty( $req_id ), 'Request should be created' );
+    $req_id = $wpdb->insert_id;
+    MBS_Audit_Assertions::assert_that( $req_id > 0, 'Modification request should be created' );
 
     $approve_result = MBS_Modification::approve( $req_id );
-    MBS_Audit_Assertions::assert_that( $approve_result === true || ! is_wp_error( $approve_result ), 'Approval should succeed' );
+    MBS_Audit_Assertions::assert_that( $approve_result === true || ! is_wp_error( $approve_result ), 'Approval should succeed: ' . ( is_wp_error($approve_result) ? $approve_result->get_error_message() : var_export($approve_result, true) ) );
 
     $after_mod = MBS_Bookings::get( $ref );
     MBS_Audit_Assertions::assert_that( (int) $after_mod->current_invoice_document_id === $r1, 'Document pointer must NOT change for non-financial mod' );
-    MBS_Audit_Assertions::assert_that( (int) $after_mod->attendees === 50, 'Attendees should be updated' );
+    MBS_Audit_Assertions::assert_that( (int) $after_mod->attendees === 50, 'Attendees should be updated to 50, got: ' . $after_mod->attendees );
 });
 
 // ── Outbox invariants ──────────────────────────────────────────────────────────

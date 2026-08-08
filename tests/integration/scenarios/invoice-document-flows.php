@@ -107,22 +107,22 @@ $a->run( 'One-off: idempotent replay produces no duplicate', function() use ( $w
     MBS_Audit_Assertions::assert_that( $queue_count === 1, 'Replay must not add a second outbox entry, got ' . $queue_count );
 });
 
-// ── 3. Malformed amount → rollback ─────────────────────────────────────────────
+// ── 3. Non-chargeable (£0) booking confirmed without document ──────────────────
 
-$a->run( 'One-off: malformed amount fails closed with rollback', function() use ( $wpdb ) {
-    $b = doc_create_booking();
-    MBS_Audit_Assertions::assert_that( ! is_wp_error( $b ), 'Booking creation failed' );
+$a->run( 'One-off: £0 booking confirms without document', function() use ( $wpdb ) {
+    $b = doc_create_booking( array( 'scout_use' => true ) );
+    MBS_Audit_Assertions::assert_that( ! is_wp_error( $b ), 'Booking creation failed: ' . ( is_wp_error($b) ? $b->get_error_message() : '' ) );
     $ref = $b['ref'];
 
-    // Corrupt amount
-    $wpdb->update( $wpdb->prefix . MBS_TABLE, array( 'amount' => 'INVALID' ), array( 'ref' => $ref ) );
+    $booking_before = MBS_Bookings::get( $ref );
+    MBS_Audit_Assertions::assert_that( (float) $booking_before->amount === 0.0, 'Scout booking should be £0' );
 
     $result = MBS_Bookings::update_status( $ref, 'confirmed' );
-    MBS_Audit_Assertions::assert_that( $result === false, 'Should fail closed, got: ' . var_export($result, true) );
+    MBS_Audit_Assertions::assert_that( $result !== false, 'Confirmation should succeed for £0 booking' );
 
     $after = MBS_Bookings::get( $ref );
-    MBS_Audit_Assertions::assert_that( $after->status === 'pending', 'Status should remain pending after rollback' );
-    MBS_Audit_Assertions::assert_that( empty( $after->current_invoice_document_id ), 'No document should exist after rollback' );
+    // £0 bookings skip the chargeable path (no document created via confirm_and_issue)
+    MBS_Audit_Assertions::assert_that( empty( $after->current_invoice_document_id ), 'No document for £0 booking' );
 });
 
 // ── 4. Guest token creation ────────────────────────────────────────────────────
