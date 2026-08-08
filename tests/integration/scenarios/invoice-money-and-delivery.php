@@ -16,7 +16,7 @@ $a = MBS_Audit_Assertions::current();
 // Early diagnostic: confirm the file is executing
 fwrite( STDERR, "[invoice-money-and-delivery] Starting, PHP " . PHP_VERSION . "\n" );
 
-$GLOBALS['md_offset'] = 400;
+$GLOBALS['md_offset'] = 900;
 
 function md_create_booking( $overrides = array() ) {
     $GLOBALS['md_offset']++;
