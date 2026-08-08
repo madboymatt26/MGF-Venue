@@ -73,9 +73,7 @@ $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/inv
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/invoice-document-extended.php --allow-root || audit_failed=1
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/invoice-supplement-lifecycle.php --allow-root || audit_failed=1
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/invoice-transaction-failures.php --allow-root || audit_failed=1
-# invoice-money-and-delivery.php: runs deposit/token/outbox tests.
-# Non-fatal: the lifecycle-matrix (WP runtime jobs) already covers these paths on all PHP versions.
-$compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/invoice-money-and-delivery.php --allow-root || echo "WARN: money-and-delivery scenario failed (non-blocking)."
+$compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/invoice-money-and-delivery.php --allow-root || audit_failed=1
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/legacy-adoption.php --allow-root || audit_failed=1
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/mutation-matrix.php --allow-root || audit_failed=1
 sh tests/integration/run-migrations.sh || audit_failed=1

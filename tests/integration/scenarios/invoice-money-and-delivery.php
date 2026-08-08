@@ -13,14 +13,17 @@ require_once __DIR__ . '/audit-assertions.php';
 global $wpdb;
 $a = MBS_Audit_Assertions::current();
 
-$md_offset = 400;
+// Early diagnostic: confirm the file is executing
+fwrite( STDERR, "[invoice-money-and-delivery] Starting, PHP " . PHP_VERSION . "\n" );
+
+$GLOBALS['md_offset'] = 400;
 
 function md_create_booking( $overrides = array() ) {
-    global $md_offset;
-    $md_offset++;
+    $GLOBALS['md_offset']++;
+    $offset = $GLOBALS['md_offset'];
     $defaults = array(
         'space'        => 'Main Hall',
-        'booking_date' => wp_date( 'Y-m-d', strtotime( '+' . ( 120 + $md_offset ) . ' days' ) ),
+        'booking_date' => wp_date( 'Y-m-d', strtotime( '+' . ( 120 + $offset ) . ' days' ) ),
         'name'         => 'Money/Delivery Test',
         'email'        => 'md-test@example.com',
         'phone'        => '07700900020',
@@ -28,7 +31,7 @@ function md_create_booking( $overrides = array() ) {
         'start_time'   => '10:00',
         'end_time'     => '14:00',
         'attendees'    => 10,
-        'purpose'      => 'Money test ' . $md_offset,
+        'purpose'      => 'Money test ' . $offset,
         'kitchen'      => false,
     );
     return MBS_Bookings::create( array_merge( $defaults, $overrides ), true );
@@ -37,7 +40,8 @@ function md_create_booking( $overrides = array() ) {
 // ── Deposit precision tests ────────────────────────────────────────────────────
 
 function md_test_deposit_pct( $percentage, $label ) {
-    global $a, $wpdb;
+    $wpdb = $GLOBALS['wpdb'];
+    $a = MBS_Audit_Assertions::current();
     $a->run( 'Deposit: ' . $label . ' precision', function() use ( $wpdb, $percentage ) {
         $orig_enabled = get_option( 'mbs_deposit_enabled' );
         $orig_pct = get_option( 'mbs_deposit_percentage' );
