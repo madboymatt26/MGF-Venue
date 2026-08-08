@@ -66,18 +66,18 @@ for iteration in 1 2 3; do
   run_race "INT-RES-SAME-${iteration}" shared "same-${iteration}" "$((2000+iteration*10+1))" "$((2000+iteration*10+2))" || audit_failed=1
 done
 run_guard_mutation_control || audit_failed=1
-$compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/reservation-state-machine.php --allow-root
-$compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/woocommerce-callbacks.php --allow-root
-$compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/financial-flows.php --allow-root
+$compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/reservation-state-machine.php --allow-root || audit_failed=1
+$compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/woocommerce-callbacks.php --allow-root || audit_failed=1
+$compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/financial-flows.php --allow-root || audit_failed=1
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/invoice-document-flows.php --allow-root || audit_failed=1
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/invoice-document-extended.php --allow-root || audit_failed=1
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/invoice-supplement-lifecycle.php --allow-root || audit_failed=1
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/invoice-transaction-failures.php --allow-root || audit_failed=1
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/invoice-money-and-delivery.php --allow-root || audit_failed=1
-$compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/legacy-adoption.php --allow-root
-$compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/mutation-matrix.php --allow-root
-sh tests/integration/run-migrations.sh
-sh tests/integration/run-catch-up.sh
+$compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/legacy-adoption.php --allow-root || audit_failed=1
+$compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/mutation-matrix.php --allow-root || audit_failed=1
+sh tests/integration/run-migrations.sh || audit_failed=1
+sh tests/integration/run-catch-up.sh || audit_failed=1
 if [ "$audit_failed" -ne 0 ]; then
   echo "One or more adversarial regression scenarios failed." >&2
   exit 1
