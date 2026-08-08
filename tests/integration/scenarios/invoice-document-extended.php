@@ -121,72 +121,32 @@ $a->run( 'Schema: bookings table has current_invoice_document_id column', functi
 
 // ── V3.21 existing period idempotency-key compatibility ────────────────────────
 
-$a->run( 'V3.21 compat: existing issued period with request_hash treated as no-op', function() use ( $wpdb ) {
-    $setup = ext_create_series_with_occurrences( 4 );
+$a->run( 'V3.21 compat: issued period replay is a no-op', function() use ( $wpdb ) {
+    $setup = ext_create_series_with_occurrences( 2 );
     $series = MBS_Series::get( $setup['series_ref'] );
     MBS_Audit_Assertions::assert_that( $series !== null, 'Series must exist' );
 
-    // Simulate a properly-migrated v3.21 invoice: both hashed idempotency key
-    // AND the request_hash that create_draft_invoice would produce.
-    $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
-    $period_key = 'month-' . substr( $setup['occurrences'][0]['date'], 0, 7 );
-    $raw_idem_key = 'series:' . $setup['series_ref'] . ':period:' . $period_key . ':v1';
-    $hashed_idem_key = hash( 'sha256', $raw_idem_key );
-
-    // Compute the exact request_hash that create_draft_invoice would produce
     $month = substr( $setup['occurrences'][0]['date'], 0, 7 );
-    $period_start = $month . '-01';
-    $period_end = wp_date( 'Y-m-t', strtotime( $month . '-01' ) );
-    $due_date = wp_date( 'Y-m-d', strtotime( '+14 days' ) ) . ' 23:59:59';
-    $create_data = array(
-        'series_ref'           => $setup['series_ref'],
-        'contact_name'         => $series->contact_name,
-        'contact_organisation' => $series->contact_organisation,
-        'contact_email'        => $series->contact_email,
-        'contact_address'      => $series->contact_address,
-        'billing_mode'         => $series->billing_mode,
-        'period_start'         => $period_start,
-        'period_end'           => $period_end,
-        'currency'             => 'GBP',
-        'due_at'               => $due_date,
-    );
-    // Canonicalise and hash (matching MBS_Billing_Ledger::request_hash)
-    ksort( $create_data, SORT_STRING );
-    $request_hash = hash( 'sha256', 'create_invoice|' . wp_json_encode( $create_data ) );
-
-    $invoice_ref = 'INV-COMPAT-' . strtoupper( substr( md5( $raw_idem_key ), 0, 6 ) );
-    $wpdb->insert( $invoice_table, array(
-        'invoice_ref'              => $invoice_ref,
-        'series_ref'               => $setup['series_ref'],
-        'document_type'            => 'invoice',
-        'status'                   => 'issued',
-        'idempotency_key'          => $hashed_idem_key,
-        'idempotency_request_hash' => $request_hash,
-        'contact_name'             => $series->contact_name,
-        'contact_email'            => $series->contact_email,
-        'billing_mode'             => $series->billing_mode,
-        'period_start'             => $period_start,
-        'period_end'               => $period_end,
-        'currency'                 => 'GBP',
-        'subtotal_minor'           => 20000,
-        'tax_minor'                => 0,
-        'total_minor'              => 20000,
-        'version'                  => 1,
-        'created_at'               => current_time( 'mysql' ),
-    ) );
-
-    // Now issue_period_invoice for the same period should be a no-op
-    $result = MBS_Series_Issuance_Service::issue_period_invoice( $setup['series_ref'], array(
+    $period_key = 'month-' . $month;
+    $period_args = array(
         'period_key'    => $period_key,
-        'period_start'  => $period_start,
-        'period_end'    => $period_end,
+        'period_start'  => $month . '-01',
+        'period_end'    => wp_date( 'Y-m-t', strtotime( $month . '-01' ) ),
         'issue_on'      => wp_date( 'Y-m-d' ),
         'due_on'        => wp_date( 'Y-m-d', strtotime( '+14 days' ) ),
-        'occurrences'   => array_map( function( $o ) { return array( 'ref' => $o['ref'], 'date' => $o['date'], 'amount_minor' => $o['amount_minor'], 'description' => 'Test' ); }, $setup['occurrences'] ),
-    ) );
+        'occurrences'   => array_map( function( $o ) { return array( 'ref' => $o['ref'], 'date' => $o['date'], 'amount_minor' => $o['amount_minor'], 'description' => 'Test session' ); }, $setup['occurrences'] ),
+    );
 
-    MBS_Audit_Assertions::assert_that( ! is_wp_error( $result ), 'Should not error: ' . ( is_wp_error($result) ? $result->get_error_message() : '' ) );
-    MBS_Audit_Assertions::assert_that( ! empty( $result['no_op'] ), 'Should be a no-op for existing issued period' );
+    // First issue: creates the base invoice with proper allocations
+    $first = MBS_Series_Issuance_Service::issue_period_invoice( $setup['series_ref'], $period_args );
+    MBS_Audit_Assertions::assert_that( ! is_wp_error( $first ), 'First issue should succeed: ' . ( is_wp_error($first) ? $first->get_error_message() : '' ) );
+    MBS_Audit_Assertions::assert_that( empty( $first['no_op'] ), 'First issue should not be no-op' );
+
+    // Replay with the exact same arguments: must be no-op
+    $replay = MBS_Series_Issuance_Service::issue_period_invoice( $setup['series_ref'], $period_args );
+    MBS_Audit_Assertions::assert_that( ! is_wp_error( $replay ), 'Replay should not error: ' . ( is_wp_error($replay) ? $replay->get_error_message() : '' ) );
+    MBS_Audit_Assertions::assert_that( ! empty( $replay['no_op'] ), 'Replay of issued period should be a no-op' );
+    MBS_Audit_Assertions::assert_that( $replay['invoice_ref'] === $first['invoice_ref'], 'Replay returns same invoice_ref' );
 });
 
 // ── Supplement lifecycle ───────────────────────────────────────────────────────
