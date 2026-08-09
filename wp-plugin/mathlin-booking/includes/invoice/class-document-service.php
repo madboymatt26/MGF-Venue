@@ -131,7 +131,7 @@ class MBS_Invoice_Document_Service {
             array( 'current_invoice_document_id' => $document_id ),
             array( 'id' => (int) $booking->id )
         );
-        if ( $ptr_updated === false ) {
+        if ( $ptr_updated !== 1 ) {
             $wpdb->query( 'ROLLBACK' );
             return new WP_Error( 'pointer_update_failed', 'Could not link the document to the booking.' );
         }
@@ -280,9 +280,9 @@ class MBS_Invoice_Document_Service {
             }
         }
 
-        // Update booking pointer — require success
+        // Update booking pointer — require exactly one row affected
         $ptr_updated = $wpdb->update( $booking_table, array( 'current_invoice_document_id' => $document_id ), array( 'id' => (int) $booking->id ) );
-        if ( $ptr_updated === false ) {
+        if ( $ptr_updated !== 1 ) {
             return new WP_Error( 'pointer_update_failed', 'Could not link the new document to the booking.' );
         }
 
@@ -593,7 +593,7 @@ class MBS_Invoice_Document_Service {
 
         $document_id = (int) $wpdb->insert_id;
         $ptr_updated = $wpdb->update( $booking_table, array( 'current_invoice_document_id' => $document_id ), array( 'id' => (int) $booking->id ) );
-        if ( $ptr_updated === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'pointer_update_failed', 'Could not link document to booking.' ); }
+        if ( $ptr_updated !== 1 ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'pointer_update_failed', 'Could not link document to booking.' ); }
 
         $audit_ok = MBS_Audit_Log::log( $booking->ref, 'invoice_document_issued', 'Document ' . $invoice_number . ' issued.' );
         if ( ! $audit_ok ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'audit_failed', 'Could not record issuance audit.' ); }
