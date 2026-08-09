@@ -272,10 +272,19 @@ class MBS_Invoice_Document_Service {
         if ( $inserted === false ) return new WP_Error( 'document_insert_failed', 'Could not create the reissued document.' );
         $document_id = (int) $wpdb->insert_id;
 
+        // Supersede previous document — require exactly 1 row affected
         if ( $booking->current_invoice_document_id ) {
-            $wpdb->update( $doc_table, array( 'status' => 'superseded' ), array( 'id' => (int) $booking->current_invoice_document_id, 'status' => 'issued' ) );
+            $superseded = $wpdb->update( $doc_table, array( 'status' => 'superseded' ), array( 'id' => (int) $booking->current_invoice_document_id, 'status' => 'issued' ) );
+            if ( $superseded !== 1 ) {
+                return new WP_Error( 'supersede_failed', 'Could not mark the previous document as superseded (expected 1 row, got ' . var_export( $superseded, true ) . ').' );
+            }
         }
-        $wpdb->update( $booking_table, array( 'current_invoice_document_id' => $document_id ), array( 'id' => (int) $booking->id ) );
+
+        // Update booking pointer — require success
+        $ptr_updated = $wpdb->update( $booking_table, array( 'current_invoice_document_id' => $document_id ), array( 'id' => (int) $booking->id ) );
+        if ( $ptr_updated === false ) {
+            return new WP_Error( 'pointer_update_failed', 'Could not link the new document to the booking.' );
+        }
 
         $audit_ok = MBS_Audit_Log::log( $booking->ref, 'invoice_document_reissued', 'Reissued as ' . $invoice_number );
         if ( ! $audit_ok ) return new WP_Error( 'audit_failed', 'Could not record reissue audit.' );

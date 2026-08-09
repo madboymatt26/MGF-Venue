@@ -239,6 +239,51 @@ class MBS_Modification {
 	                        }
 
 	                        // Apply material booking changes
+	                        // Re-derive all preconditions from LOCKED state
+	                        $lk_changes = json_decode( $locked_request->requested_data, true ) ?: array();
+	                        $update = array();
+	                        if ( ! empty( $lk_changes['space'] ) )      $update['space']            = sanitize_text_field( $lk_changes['space'] );
+	                        if ( ! empty( $lk_changes['date'] ) )       $update['booking_date']     = sanitize_text_field( $lk_changes['date'] );
+	                        if ( ! empty( $lk_changes['date_end'] ) )   $update['booking_date_end'] = sanitize_text_field( $lk_changes['date_end'] );
+	                        if ( ! empty( $lk_changes['start_time'] ) ) $update['start_time']       = sanitize_text_field( $lk_changes['start_time'] );
+	                        if ( ! empty( $lk_changes['end_time'] ) )   $update['end_time']         = sanitize_text_field( $lk_changes['end_time'] );
+	                        if ( isset( $lk_changes['kitchen'] ) )      $update['kitchen']          = (int) $lk_changes['kitchen'];
+	                        if ( isset( $lk_changes['attendees'] ) )    $update['attendees']        = absint( $lk_changes['attendees'] );
+	                        if ( isset( $lk_changes['booking_type'] ) ) $update['all_day']          = $lk_changes['booking_type'] === 'fullday' ? 1 : 0;
+	                        
+	                        if ( MBS_Bookings::has_financial_history( $locked_booking->ref ) ) {
+	                            $wpdb->query( 'ROLLBACK' );
+	                            return new WP_Error( 'billed_occurrence_immutable', 'Financial history appeared after lock.' );
+	                        }
+	                        
+	                        $ck_space = $update['space'] ?? $locked_booking->space;
+	                        $ck_date  = $update['booking_date'] ?? $locked_booking->booking_date;
+	                        $ck_start = $update['start_time'] ?? $locked_booking->start_time;
+	                        $ck_end   = $update['end_time'] ?? $locked_booking->end_time;
+	                        $ck_allday = isset( $update['all_day'] ) ? (bool) $update['all_day'] : (bool) $locked_booking->all_day;
+	                        if ( $ck_space !== $locked_booking->space || $ck_date !== $locked_booking->booking_date || $ck_start !== $locked_booking->start_time || $ck_end !== $locked_booking->end_time ) {
+	                            $conflicts = MBS_Bookings::check_conflicts( $ck_space, $ck_date, $ck_allday ? null : $ck_start, $ck_allday ? null : $ck_end, $ck_allday, $locked_booking->ref );
+	                            if ( ! empty( $conflicts ) ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'conflict_on_locked_state', 'Conflict detected after locking.' ); }
+	                            $md_to = $update['booking_date_end'] ?? $locked_booking->booking_date_end ?? $ck_date;
+	                            $md_days = max( 1, (int) round( ( strtotime( $md_to ) - strtotime( $ck_date ) ) / 86400 ) + 1 );
+	                            $dur = MBS_Bookings::validate_min_duration( $ck_start, $ck_end, $ck_allday, $md_days, (bool) $locked_booking->scout_use );
+	                            if ( is_wp_error( $dur ) ) { $wpdb->query( 'ROLLBACK' ); return $dur; }
+	                        }
+	                        
+	                        // Recalculate amount from locked state
+	                        $rc_space = $update['space'] ?? $locked_booking->space;
+	                        $rc_start = $update['start_time'] ?? $locked_booking->start_time;
+	                        $rc_end   = $update['end_time'] ?? $locked_booking->end_time;
+	                        $rc_kitchen = isset( $update['kitchen'] ) ? $update['kitchen'] : $locked_booking->kitchen;
+	                        $rc_allday  = isset( $update['all_day'] ) ? $update['all_day'] : $locked_booking->all_day;
+	                        $rc_from = $update['booking_date'] ?? $locked_booking->booking_date;
+	                        $rc_to   = $update['booking_date_end'] ?? $locked_booking->booking_date_end ?? $rc_from;
+	                        $rc_days = max( 1, (int) round( ( strtotime( $rc_to ) - strtotime( $rc_from ) ) / 86400 ) + 1 );
+	                        $new_amount = MBS_Bookings::calculate_cost( $rc_space, $rc_start, $rc_end, (bool) $rc_kitchen, (bool) $rc_allday, $rc_days, (bool) $locked_booking->scout_use, MBS_Bookings::get_booking_tier( $locked_booking ) );
+	                        $update['amount'] = $new_amount;
+	                        $lk_paid = (float) ( $locked_booking->amount_paid ?? 0 );
+	                        $update['status'] = ( $lk_paid >= (float) $new_amount ) ? 'paid' : 'confirmed';
+	                        
 	                        $booking_updated = $wpdb->update( $table, $update, array( 'ref' => $request->booking_ref ) );
 	                        if ( $booking_updated === false ) {
 	                            $wpdb->query( 'ROLLBACK' );
