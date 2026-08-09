@@ -250,12 +250,12 @@ class MBS_Modification {
 	                        if ( isset( $lk_changes['kitchen'] ) )      $update['kitchen']          = (int) $lk_changes['kitchen'];
 	                        if ( isset( $lk_changes['attendees'] ) )    $update['attendees']        = absint( $lk_changes['attendees'] );
 	                        if ( isset( $lk_changes['booking_type'] ) ) $update['all_day']          = $lk_changes['booking_type'] === 'fullday' ? 1 : 0;
-	                        
+
 	                        if ( MBS_Bookings::has_financial_history( $locked_booking->ref ) ) {
 	                            $wpdb->query( 'ROLLBACK' );
 	                            return new WP_Error( 'billed_occurrence_immutable', 'Financial history appeared after lock.' );
 	                        }
-	                        
+
 	                        $ck_space = $update['space'] ?? $locked_booking->space;
 	                        $ck_date  = $update['booking_date'] ?? $locked_booking->booking_date;
 	                        $ck_start = $update['start_time'] ?? $locked_booking->start_time;
@@ -269,7 +269,7 @@ class MBS_Modification {
 	                            $dur = MBS_Bookings::validate_min_duration( $ck_start, $ck_end, $ck_allday, $md_days, (bool) $locked_booking->scout_use );
 	                            if ( is_wp_error( $dur ) ) { $wpdb->query( 'ROLLBACK' ); return $dur; }
 	                        }
-	                        
+
 	                        // Recalculate amount from locked state
 	                        $rc_space = $update['space'] ?? $locked_booking->space;
 	                        $rc_start = $update['start_time'] ?? $locked_booking->start_time;
@@ -283,7 +283,7 @@ class MBS_Modification {
 	                        $update['amount'] = $new_amount;
 	                        $lk_paid = (float) ( $locked_booking->amount_paid ?? 0 );
 	                        $update['status'] = ( $lk_paid >= (float) $new_amount ) ? 'paid' : 'confirmed';
-	                        
+
 	                        $booking_updated = $wpdb->update( $table, $update, array( 'ref' => $request->booking_ref ) );
 	                        if ( $booking_updated === false ) {
 	                            $wpdb->query( 'ROLLBACK' );
