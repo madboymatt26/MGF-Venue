@@ -3,7 +3,7 @@
  * Plugin Name: MGF Venue
  * Plugin URI:  https://github.com/madboymatt26/MGF-Venue
  * Description: Venue booking and management system with Home Assistant integration.
- * Version:     3.21.0
+ * Version:     3.22.0
  * Author:      MGF Venue
  * License:     GPL-2.0+
  * Text Domain: mathlin-booking
@@ -11,8 +11,8 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'MBS_VERSION',    '3.21.0' );
-define( 'MBS_DB_VERSION', '3.21.0-schema-9' );
+define( 'MBS_VERSION',    '3.22.0' );
+define( 'MBS_DB_VERSION', '3.22.0-schema-10' );
 define( 'MBS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MBS_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'MBS_TABLE',      'mathlin_bookings' );
@@ -23,6 +23,9 @@ define( 'MBS_PAYMENT_TRANSACTION_TABLE', 'mathlin_payment_transactions' );
 define( 'MBS_BILLING_ALLOCATION_TABLE', 'mathlin_billing_allocations' );
 define( 'MBS_PAYMENT_RESERVATION_TABLE', 'mathlin_payment_reservations' );
 define( 'MBS_OSM_OUTBOX_TABLE', 'mathlin_osm_outbox' );
+define( 'MBS_INVOICE_DOCUMENTS_TABLE', 'mathlin_invoice_documents' );
+define( 'MBS_DOCUMENT_ASSETS_TABLE', 'mathlin_document_assets' );
+define( 'MBS_DOWNLOAD_TOKENS_TABLE', 'mathlin_download_tokens' );
 
 // ── Load includes ──────────────────────────────────────────────────────────────
 require_once MBS_PLUGIN_DIR . 'includes/class-database.php';
@@ -57,6 +60,18 @@ require_once MBS_PLUGIN_DIR . 'includes/class-modification.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-hirer-portal.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-accounting-export.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-osm-integration.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-logo-asset.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-series-approval-service.php';
+require_once MBS_PLUGIN_DIR . 'includes/invoice/class-issued-invoice-snapshot.php';
+require_once MBS_PLUGIN_DIR . 'includes/invoice/class-current-account-state.php';
+require_once MBS_PLUGIN_DIR . 'includes/invoice/class-invoice-document-view-model.php';
+require_once MBS_PLUGIN_DIR . 'includes/invoice/class-invoice-builder.php';
+require_once MBS_PLUGIN_DIR . 'includes/invoice/class-document-service.php';
+require_once MBS_PLUGIN_DIR . 'includes/invoice/class-series-issuance-service.php';
+require_once MBS_PLUGIN_DIR . 'includes/invoice/class-document-security.php';
+require_once MBS_PLUGIN_DIR . 'includes/invoice/class-html-renderer.php';
+require_once MBS_PLUGIN_DIR . 'includes/invoice/class-pdf-renderer.php';
+require_once MBS_PLUGIN_DIR . 'includes/invoice/class-delivery-endpoint.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-woo-ux.php';
 require_once MBS_PLUGIN_DIR . 'admin/class-admin.php';
 require_once MBS_PLUGIN_DIR . 'public/class-public.php';
@@ -149,6 +164,9 @@ function mbs_init() {
     $accounting->init();
     $osm_integration->init();
     $woo_ux->init();
+
+    $invoice_delivery = new MBS_Invoice_Delivery_Endpoint();
+    $invoice_delivery->init();
 
     // User profile: Pricing Tier field
     add_action( 'show_user_profile', 'mbs_user_pricing_tier_field' );

@@ -43,7 +43,7 @@
                 <p><strong>Deposit:</strong> <?php echo esc_html( $series->deposit_policy === 'none' ? 'None' : ucfirst( str_replace( '_', ' ', $series->deposit_policy ) ) ); ?> · <strong>Terms accepted:</strong> <?php echo $series->terms_accepted_at ? esc_html( wp_date( 'j M Y H:i', strtotime( $series->terms_accepted_at ) ) ) : 'Not recorded'; ?></p>
                 <?php if ( ! empty( $series->metadata_incomplete ) ) : ?><div class="notice notice-warning inline"><p>This series was registered from older occurrence records. Skipped dates, original terms acceptance and historic billing intent are unknown and have not been inferred.</p></div><?php endif; ?>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                    <?php if ( $series->status === 'pending' ) : ?><button class="button button-primary nms-btn-series-status" data-series="<?php echo esc_attr( $series->series_ref ); ?>" data-status="confirmed" data-expected-status="pending" data-expected-version="<?php echo (int) $series->version; ?>">Approve series</button><?php endif; ?>
+                    <?php if ( $series->status === 'pending' ) : ?><button class="button button-primary nms-btn-review-approve" data-series="<?php echo esc_attr( $series->series_ref ); ?>" data-expected-version="<?php echo (int) $series->version; ?>" data-scout="<?php echo $series->scout_use ? '1' : '0'; ?>">Review &amp; Approve</button><?php endif; ?>
                     <?php if ( $series->status === 'confirmed' ) : ?><button class="button nms-btn-series-pause" data-series="<?php echo esc_attr( $series->series_ref ); ?>" data-paused="1" data-expected-status="confirmed" data-expected-version="<?php echo (int) $series->version; ?>">Pause billing</button><?php endif; ?>
                     <?php if ( $series->status === 'paused' ) : ?><button class="button button-primary nms-btn-series-pause" data-series="<?php echo esc_attr( $series->series_ref ); ?>" data-paused="0" data-expected-status="paused" data-expected-version="<?php echo (int) $series->version; ?>">Resume billing</button><?php endif; ?>
                     <?php if ( $series->status === 'confirmed' ) : ?><button class="button nms-btn-resend-series" data-series="<?php echo esc_attr( $series->series_ref ); ?>">Resend confirmation</button><?php endif; ?>
@@ -65,7 +65,27 @@
                     <tr><th>Payment</th><td><select name="payment_method"><option value="online" <?php selected( $series->payment_method, 'online' ); ?>>Online card payment</option><option value="offline_bacs" <?php selected( $series->payment_method, 'offline_bacs' ); ?>>Offline invoice (BACS/PO)</option><option value="none" <?php selected( $series->payment_method, 'none' ); ?>>No payment</option></select></td></tr>
                     <tr><th>Invoice lead time</th><td><input type="number" min="0" max="365" name="invoice_lead_days" value="<?php echo (int) $series->invoice_lead_days; ?>"> days</td></tr>
                     <tr><th>Payment terms</th><td><input type="number" min="0" max="365" name="payment_terms_days" value="<?php echo (int) $series->payment_terms_days; ?>"> days</td></tr>
-                    <tr class="nms-term-schedule"><th>Term dates</th><td><textarea name="billing_schedule_json" rows="4" class="large-text code"><?php echo esc_textarea( $series->billing_schedule_json === '[]' ? '' : $series->billing_schedule_json ); ?></textarea><p class="description">Only required for termly billing. Store explicit named term start/end dates; dates are never guessed.</p></td></tr>
+                    <tr class="nms-term-schedule"><th>Term dates</th><td>
+                        <div class="mbs-billing-term-editor">
+                            <p class="description">Only for termly billing. Add named term periods with start/end dates.</p>
+                            <div class="mbs-billing-term-list">
+                            <?php
+                            $terms = json_decode( $series->billing_schedule_json ?: '[]', true );
+                            if ( is_array( $terms ) ) :
+                                foreach ( $terms as $idx => $term ) :
+                            ?>
+                                <div class="mbs-term-row" style="display:flex;gap:8px;align-items:center;margin:6px 0;">
+                                    <input type="text" name="billing_term_label[]" value="<?php echo esc_attr( $term['label'] ?? '' ); ?>" placeholder="Term name" style="width:140px;">
+                                    <input type="date" name="billing_term_start[]" value="<?php echo esc_attr( $term['start'] ?? '' ); ?>">
+                                    <span>to</span>
+                                    <input type="date" name="billing_term_end[]" value="<?php echo esc_attr( $term['end'] ?? '' ); ?>">
+                                    <button type="button" class="button mbs-remove-term" style="color:#dc3545;">&times;</button>
+                                </div>
+                            <?php endforeach; endif; ?>
+                            </div>
+                            <button type="button" class="button mbs-add-billing-term">+ Add term</button>
+                        </div>
+                    </td></tr>
                     <?php if ( ! empty( $series->metadata_incomplete ) && $series->billing_treatment === 'legacy_per_occurrence' ) : ?><tr><th>Adopt legacy series</th><td><label><input type="checkbox" name="adopt_legacy" value="1"> I have reviewed the preview and want future unpaid occurrences moved to consolidated billing.</label><p class="description">Historic paid/deposit-paid occurrences stay in the legacy system and are never invoiced again.</p></td></tr><?php endif; ?>
                     </tbody></table>
                     <button class="button button-primary" type="submit">Save billing arrangement</button> <span class="nms-series-billing-message"></span>
@@ -98,3 +118,51 @@
         </div>
     <?php endif; ?>
 </div>
+
+<?php // ── Review & Approve Modal ───────────────────────────────────────── ?>
+<?php if ( ! empty( $series ) && $series->status === 'pending' ) : ?>
+<div id="mbs-approval-modal" style="display:none;position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.5);overflow:auto;">
+    <div style="max-width:700px;margin:60px auto;background:#fff;border-radius:12px;padding:32px;box-shadow:0 8px 32px rgba(0,0,0,.2);">
+        <h2 style="color:#7413DC;margin-top:0;">Review &amp; Approve Series</h2>
+        <p>Confirm billing configuration before approving <strong><?php echo esc_html( $series->series_ref ); ?></strong>.</p>
+        <table class="form-table" style="margin:16px 0;">
+            <tr><th>Space</th><td><?php echo esc_html( $series->space ); ?></td></tr>
+            <tr><th>Price per occurrence</th><td>&pound;<?php echo esc_html( number_format( (float) $series->price_per_booking, 2 ) ); ?></td></tr>
+            <tr><th>Estimated total</th><td>&pound;<?php echo esc_html( number_format( (float) $series->estimated_total, 2 ) ); ?></td></tr>
+            <tr><th>Accepted dates</th><td><?php echo (int) $series->accepted_count; ?> of <?php echo (int) $series->requested_count; ?> requested</td></tr>
+        </table>
+        <form id="mbs-approval-form">
+            <input type="hidden" name="series_ref" value="<?php echo esc_attr( $series->series_ref ); ?>">
+            <input type="hidden" name="expected_version" value="<?php echo (int) $series->version; ?>">
+            <table class="form-table"><tbody>
+                <tr><th><label>Billing frequency</label></th><td><select name="billing_mode">
+                    <option value="monthly" <?php selected( $series->billing_mode, 'monthly' ); ?>>Monthly in advance</option>
+                    <option value="termly" <?php selected( $series->billing_mode, 'termly' ); ?>>Termly</option>
+                    <option value="upfront" <?php selected( $series->billing_mode, 'upfront' ); ?>>Whole series upfront</option>
+                    <option value="none" <?php selected( $series->billing_mode, 'none' ); ?>>No charge</option>
+                </select></td></tr>
+                <tr><th><label>Billing treatment</label></th><td><select name="billing_treatment">
+                    <option value="invoice_managed" <?php selected( $series->billing_treatment, 'invoice_managed' ); ?>>Generate consolidated invoices automatically</option>
+                    <option value="manual_consolidated" <?php selected( $series->billing_treatment, 'manual_consolidated' ); ?>>Manage billing manually</option>
+                    <option value="none" <?php selected( $series->billing_treatment, 'none' ); ?>>No billing</option>
+                </select></td></tr>
+                <tr><th><label>Payment method</label></th><td><select name="payment_method">
+                    <option value="online" <?php selected( $series->payment_method, 'online' ); ?>>Online card payment</option>
+                    <option value="offline_bacs" <?php selected( $series->payment_method, 'offline_bacs' ); ?>>BACS / Purchase Order</option>
+                    <option value="none" <?php selected( $series->payment_method, 'none' ); ?>>No payment</option>
+                </select></td></tr>
+                <tr><th>Invoice lead time</th><td><input type="number" name="invoice_lead_days" min="0" max="365" value="<?php echo (int) $series->invoice_lead_days; ?>"> days</td></tr>
+                <tr><th>Payment terms</th><td><input type="number" name="payment_terms_days" min="0" max="365" value="<?php echo (int) $series->payment_terms_days; ?>"> days</td></tr>
+                <tr class="mbs-term-dates-row" style="display:none;"><th>Term dates</th><td>
+                    <div id="mbs-term-editor"><p class="description">Add named term periods.</p><div id="mbs-term-list"></div><button type="button" class="button" id="mbs-add-term">+ Add term</button></div>
+                </td></tr>
+            </tbody></table>
+            <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:24px;">
+                <button type="button" class="button" id="mbs-cancel-approval">Cancel</button>
+                <button type="submit" class="button button-primary">Confirm &amp; Approve</button>
+            </div>
+            <p class="mbs-approval-message" style="margin-top:12px;"></p>
+        </form>
+    </div>
+</div>
+<?php endif; ?>

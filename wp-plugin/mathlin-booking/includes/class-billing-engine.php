@@ -56,6 +56,24 @@ class MBS_Billing_Engine {
         $schedule = $configuration['billing_schedule'] ?? array();
         if ( ! is_array( $schedule ) ) return new WP_Error( 'invalid_billing_schedule', 'Billing schedule must be structured data.' );
 
+        // Validate term schedules for termly billing (Issue 10)
+        if ( $mode === 'termly' ) {
+            if ( ! class_exists( 'MBS_Invoice_Document_Security' ) ) {
+                return new WP_Error( 'security_unavailable', 'Invoice document security module is required for termly billing configuration.' );
+            }
+            $terms = isset( $schedule['terms'] ) ? $schedule['terms'] : null;
+            // Fail closed: termly billing REQUIRES an explicit valid term schedule
+            if ( ! is_array( $terms ) || empty( $terms ) ) {
+                return new WP_Error( 'terms_required', 'Termly billing requires at least one term with start and end dates in the billing schedule.' );
+            }
+            // Validate canonical structure: {"terms":[{"key":"...","label":"...","start":"YYYY-MM-DD","end":"YYYY-MM-DD"}]}
+            if ( ! isset( $schedule['terms'] ) || ! is_array( $schedule['terms'] ) ) {
+                return new WP_Error( 'terms_malformed_structure', 'Billing schedule must contain a "terms" array.' );
+            }
+            $term_valid = MBS_Invoice_Document_Security::validate_term_schedule( $terms, $current->start_date, $current->repeat_until );
+            if ( is_wp_error( $term_valid ) ) return $term_valid;
+        }
+
 	        $adopting = ! empty( $current->metadata_incomplete ) && $current->billing_treatment === 'legacy_per_occurrence'
 	            && $treatment === 'invoice_managed' && ! empty( $configuration['adopt_legacy'] );
 	        if($adopting){
@@ -97,7 +115,13 @@ class MBS_Billing_Engine {
         if ( $overrides ) {
             $series = (object) array_merge( (array) $series, $overrides );
         }
-        $bookings = self::billable_occurrences( $series_ref );
+        // For pending series (pre-approval preview), include pending occurrences
+        // that would become billable upon approval. Normal production billing
+        // still uses the standard billable_occurrences() which excludes pending.
+        $include_pending = isset( $overrides['_include_pending'] ) && $overrides['_include_pending'];
+        $bookings = $include_pending
+            ? self::pending_preview_occurrences( $series_ref )
+            : self::billable_occurrences( $series_ref );
         $periods = self::build_periods( $series, $bookings );
         if ( is_wp_error( $periods ) ) return $periods;
         return array(
@@ -107,6 +131,21 @@ class MBS_Billing_Engine {
             'currency'          => 'GBP',
             'periods'           => $periods,
         );
+    }
+
+    /**
+     * Include pending occurrences for pre-approval billing preview.
+     * These are the bookings that WILL become billable upon series approval.
+     */
+    private static function pending_preview_occurrences( $series_ref ) {
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_TABLE;
+        return $wpdb->get_results( $wpdb->prepare(
+            "SELECT * FROM {$table}
+             WHERE series_id = %s AND status IN ('pending','confirmed','deposit_paid','paid') AND legacy_billing_excluded = 0
+             ORDER BY booking_date ASC, id ASC",
+            sanitize_text_field( $series_ref )
+        ) );
     }
 
     /** Build deterministic billing periods; exposed for dependency-free tests. */
@@ -249,10 +288,28 @@ class MBS_Billing_Engine {
                 }
                 foreach ( $preview['periods'] as $period ) {
                     if ( $period['issue_on'] > $as_of ) continue;
-                    $generated = self::generate_period_invoice( $series, $period );
+                    // Use the new atomic issuance service (Issue 3):
+                    // ledger + document + audit + outbox in one transaction
+                    $period_occurrences = array();
+                    foreach ( $period['items'] ?? array() as $item ) {
+                        $period_occurrences[] = array(
+                            'ref'          => $item['booking_ref'] ?? null,
+                            'date'         => $item['service_date'] ?? '',
+                            'amount_minor' => (int) ( $item['amount_minor'] ?? 0 ),
+                            'description'  => $item['description'] ?? '',
+                        );
+                    }
+                    $generated = MBS_Series_Issuance_Service::issue_period_invoice( $series->series_ref, array(
+                        'period_start'  => $period['period_start'],
+                        'period_end'    => $period['period_end'],
+                        'period_key'    => $period['period_key'] ?? '',
+                        'issue_on'      => $period['issue_on'] ?? '',
+                        'due_on'        => $period['due_on'] ?? '',
+                        'occurrences'   => $period_occurrences,
+                    ) );
                     $results[] = is_wp_error( $generated )
                         ? array( 'series_ref' => $series->series_ref, 'period_key' => $period['period_key'], 'status' => 'error', 'message' => $generated->get_error_message() )
-                        : $generated;
+                        : array( 'series_ref' => $series->series_ref, 'period_key' => $period['period_key'], 'status' => 'issued', 'invoice_ref' => $generated['invoice_ref'] ?? '', 'no_op' => ! empty( $generated['no_op'] ) );
                 }
             }
         } while ( count( $series_rows ) === 100 );

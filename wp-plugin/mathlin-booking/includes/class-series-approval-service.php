@@ -1,0 +1,386 @@
+<?php
+if ( ! defined( 'ABSPATH' ) ) exit;
+
+/**
+ * Atomic series approval with billing configuration.
+ *
+ * Owns the single transaction boundary for chargeable series approval.
+ * Ensures billing configuration is validated and saved in the same
+ * transaction that confirms the series — no separate before/after operation.
+ *
+ * Transaction scope:
+ *   lock series → validate → save billing → confirm occurrences →
+ *   create due invoices + snapshots → audit → queue emails → COMMIT
+ *
+ * Pre-transaction: logo asset resolution (only file I/O phase).
+ * Post-commit: HA notifications, optional cron spawn.
+ */
+class MBS_Series_Approval_Service {
+
+    /**
+     * Approve a chargeable series with explicit billing configuration.
+     *
+     * @param string $series_ref       Series reference.
+     * @param array  $billing_config   Reviewed billing configuration.
+     * @param int    $expected_version Expected series version for optimistic concurrency.
+     * @param bool   $notify_hirer     Whether to queue confirmation email.
+     * @return array|WP_Error Result array with series, updated count, etc.
+     */
+    public static function approve_with_billing( $series_ref, $billing_config, $expected_version, $notify_hirer = true ) {
+        global $wpdb;
+        $series_table  = $wpdb->prefix . MBS_SERIES_TABLE;
+        $booking_table = $wpdb->prefix . MBS_TABLE;
+        $series_ref    = sanitize_text_field( $series_ref );
+
+        // ── Pre-transaction: resolve logo asset (file I/O) ─────────────────
+        $logo_ref = MBS_Logo_Asset::resolve_current_org_logo();
+
+        // ── Validate billing configuration ─────────────────────────────────
+        $preflight = MBS_Series::get( $series_ref );
+        if ( $preflight ) {
+            $billing_config['_series_start_date'] = $preflight->start_date;
+            $billing_config['_series_repeat_until'] = $preflight->repeat_until;
+        }
+        $billing_validation = self::validate_billing_config( $billing_config );
+        if ( is_wp_error( $billing_validation ) ) return $billing_validation;
+        unset( $billing_config['_series_start_date'], $billing_config['_series_repeat_until'] );
+
+        // ── BEGIN TRANSACTION ──────────────────────────────────────────────
+        if ( $wpdb->query( 'START TRANSACTION' ) === false ) {
+            return new WP_Error( 'transaction_start_failed', 'Could not start the approval transaction.' );
+        }
+
+        // Lock and validate series
+        $series = $wpdb->get_row( $wpdb->prepare(
+            "SELECT * FROM {$series_table} WHERE series_ref = %s FOR UPDATE",
+            $series_ref
+        ) );
+
+        if ( ! $series ) {
+            $wpdb->query( 'ROLLBACK' );
+            return new WP_Error( 'series_not_found', 'Recurring series not found.' );
+        }
+
+        // Idempotent retry: already confirmed
+        if ( $series->status === 'confirmed' ) {
+            $wpdb->query( 'ROLLBACK' );
+            return array(
+                'series'       => $series,
+                'transitioned' => false,
+                'no_op'        => true,
+                'updated'      => 0,
+                'email_sent'   => ! empty( $series->confirmation_sent_at ),
+            );
+        }
+
+        if ( $series->status !== 'pending' ) {
+            $wpdb->query( 'ROLLBACK' );
+            return new WP_Error( 'invalid_series_transition', 'Only a pending recurring series can be approved.' );
+        }
+
+        if ( (int) $expected_version !== (int) $series->version ) {
+            $wpdb->query( 'ROLLBACK' );
+            return new WP_Error( 'series_precondition_failed', 'The recurring series changed since it was loaded. Refresh and try again.' );
+        }
+
+        // ── Save billing configuration ─────────────────────────────────────
+        $now = current_time( 'mysql' );
+        $billing_update = array(
+            'billing_mode'              => sanitize_key( $billing_config['billing_mode'] ),
+            'billing_treatment'         => sanitize_key( $billing_config['billing_treatment'] ),
+            'payment_method'            => sanitize_key( $billing_config['payment_method'] ),
+            'invoice_lead_days'         => absint( $billing_config['invoice_lead_days'] ?? 28 ),
+            'payment_terms_days'        => absint( $billing_config['payment_terms_days'] ?? 14 ),
+            'billing_schedule_json'     => ! empty( $billing_config['billing_schedule'] )
+                ? wp_json_encode( $billing_config['billing_schedule'] ) : '[]',
+            'billing_reviewed_at'       => $now,
+            'billing_reviewed_by'       => (int) get_current_user_id(),
+            'billing_reviewed_version'  => (int) $series->version,
+            'status'                    => 'confirmed',
+            'version'                   => (int) $series->version + 1,
+            'updated_at'               => $now,
+        );
+
+        $series_updated = $wpdb->update( $series_table, $billing_update, array(
+            'series_ref' => $series_ref,
+            'status'     => 'pending',
+            'version'    => (int) $series->version,
+        ) );
+
+        if ( $series_updated !== 1 ) {
+            $wpdb->query( 'ROLLBACK' );
+            return new WP_Error( 'series_concurrent_update', 'The series was updated by another request.' );
+        }
+
+        // ── Confirm pending occurrences ────────────────────────────────────
+        $affected = $wpdb->get_results( $wpdb->prepare(
+            "SELECT * FROM {$booking_table} WHERE series_id = %s AND status = 'pending' FOR UPDATE",
+            $series_ref
+        ) );
+
+        $confirmed_count = $wpdb->query( $wpdb->prepare(
+            "UPDATE {$booking_table} SET status = 'confirmed' WHERE series_id = %s AND status = 'pending'",
+            $series_ref
+        ) );
+
+        if ( $confirmed_count === false ) {
+            $wpdb->query( 'ROLLBACK' );
+            return new WP_Error( 'series_occurrence_update_failed', 'Could not confirm pending occurrences.' );
+        }
+
+        // ── Create immediately-due invoices (if billing_treatment = invoice_managed) ──
+        $created_documents = array();
+        if ( $billing_config['billing_treatment'] === 'invoice_managed' ) {
+            $invoice_result = self::create_due_invoices_within_transaction(
+                $series_ref, $series, $billing_config, $logo_ref, $affected
+            );
+            if ( is_wp_error( $invoice_result ) ) {
+                $wpdb->query( 'ROLLBACK' );
+                return $invoice_result;
+            }
+            $created_documents = $invoice_result;
+        }
+
+        // ── Audit record (inside transaction — fail-closed) ──────────────────
+        $audit_details = 'Approved with billing: ' . $billing_config['billing_mode']
+            . ' / ' . $billing_config['billing_treatment']
+            . ' / ' . $billing_config['payment_method']
+            . '. Confirmed ' . (int) $confirmed_count . ' occurrence(s).';
+        $audit_ok = MBS_Audit_Log::log( $series_ref, 'series_approved_with_billing', $audit_details );
+        if ( ! $audit_ok ) {
+            $wpdb->query( 'ROLLBACK' );
+            return new WP_Error( 'audit_insert_failed', 'Could not record the approval audit entry. Approval rolled back.' );
+        }
+
+        // ── Queue confirmation email (inside transaction) ──────────────────
+        if ( $notify_hirer ) {
+            $fresh_series = $wpdb->get_row( $wpdb->prepare(
+                "SELECT * FROM {$series_table} WHERE series_ref = %s", $series_ref
+            ) );
+
+            $message_key = 'series_confirmation:' . $series_ref . ':v' . ( (int) $series->version + 1 );
+            $email_body = self::build_confirmation_email_body( $fresh_series, $affected );
+            $subject = 'Your recurring booking is approved — ' . $series_ref;
+            $headers = self::build_email_headers();
+
+            $payload_hash = MBS_Email_Queue::compute_payload_hash(
+                $fresh_series->contact_email, $subject, $email_body, $headers, null
+            );
+
+            $enqueued = MBS_Email_Queue::enqueue(
+                $fresh_series->contact_email,
+                $subject,
+                $email_body,
+                $headers,
+                $message_key,
+                $payload_hash,
+                null, // No attachment for confirmation email
+                array(
+                    'message_type'   => 'series_confirmation',
+                    'reference_type' => 'series',
+                    'reference_id'   => (int) $fresh_series->id,
+                )
+            );
+
+            if ( is_wp_error( $enqueued ) ) {
+                $wpdb->query( 'ROLLBACK' );
+                return new WP_Error( 'queue_insert_failed', 'Could not queue the confirmation email: ' . $enqueued->get_error_message() );
+            }
+        }
+
+        // Invoice emails are already enqueued by MBS_Series_Issuance_Service::issue_within_transaction()
+        // (Issue 2: exactly one outbox owner per invoice — the issuance service)
+
+        // ── COMMIT ─────────────────────────────────────────────────────────
+        if ( $wpdb->query( 'COMMIT' ) === false ) {
+            $wpdb->query( 'ROLLBACK' );
+            return new WP_Error( 'transaction_commit_failed', 'Could not commit the approval.' );
+        }
+
+        // ── Post-commit: HA notifications ──────────────────────────────────
+        foreach ( $affected as $booking ) {
+            $booking->status = 'confirmed';
+            MBS_HomeAssistant::notify( $booking );
+            $wpdb->update( $booking_table, array( 'ha_notified' => 1 ), array( 'ref' => $booking->ref ) );
+        }
+
+        // Optionally trigger cron for immediate email processing
+        if ( function_exists( 'spawn_cron' ) ) {
+            spawn_cron();
+        }
+
+        $final_series = MBS_Series::get( $series_ref );
+        return array(
+            'series'       => $final_series,
+            'transitioned' => true,
+            'no_op'        => false,
+            'updated'      => (int) $confirmed_count,
+            'documents'    => $created_documents,
+        );
+    }
+
+    // ── Validation ─────────────────────────────────────────────────────────────
+
+    /**
+     * Validate billing configuration is complete and internally consistent.
+     *
+     * @param array $config
+     * @return true|WP_Error
+     */
+    private static function validate_billing_config( $config ) {
+        $required = array( 'billing_mode', 'billing_treatment', 'payment_method' );
+        foreach ( $required as $field ) {
+            if ( empty( $config[ $field ] ) ) {
+                return new WP_Error( 'billing_config_incomplete', "Missing required billing field: {$field}" );
+            }
+        }
+
+        $valid_modes = array( 'monthly', 'termly', 'upfront', 'none' );
+        if ( ! in_array( $config['billing_mode'], $valid_modes, true ) ) {
+            return new WP_Error( 'billing_config_invalid', 'Invalid billing mode.' );
+        }
+
+        $valid_treatments = array( 'invoice_managed', 'manual_consolidated', 'none' );
+        if ( ! in_array( $config['billing_treatment'], $valid_treatments, true ) ) {
+            return new WP_Error( 'billing_config_invalid', 'Invalid billing treatment.' );
+        }
+
+        $valid_methods = array( 'online', 'offline_bacs', 'none' );
+        if ( ! in_array( $config['payment_method'], $valid_methods, true ) ) {
+            return new WP_Error( 'billing_config_invalid', 'Invalid payment method.' );
+        }
+
+        // Termly requires billing_schedule with valid term dates
+        if ( $config['billing_mode'] === 'termly' ) {
+            $schedule = $config['billing_schedule'] ?? array();
+            if ( empty( $schedule ) || ! is_array( $schedule ) ) {
+                return new WP_Error( 'billing_config_incomplete', 'Termly billing requires at least one term date range.' );
+            }
+            // Extract terms from canonical structure {"terms":[...]}
+            $terms = isset( $schedule['terms'] ) ? $schedule['terms'] : $schedule;
+            if ( ! is_array( $terms ) || empty( $terms ) ) {
+                return new WP_Error( 'billing_config_incomplete', 'Termly billing requires structured term date ranges.' );
+            }
+            // Invoke canonical term validator — REQUIRED for termly billing (fail closed)
+            if ( ! class_exists( 'MBS_Invoice_Document_Security' ) ) {
+                return new WP_Error( 'security_unavailable', 'Term schedule validator (MBS_Invoice_Document_Security) is required for termly billing approval but is not available.' );
+            }
+            $series_start = $config['_series_start_date'] ?? '';
+            $series_end = $config['_series_repeat_until'] ?? '';
+            $term_valid = MBS_Invoice_Document_Security::validate_term_schedule( $terms, $series_start, $series_end );
+            if ( is_wp_error( $term_valid ) ) return $term_valid;
+        }
+
+        // Online payment requires WooCommerce
+        if ( $config['payment_method'] === 'online' && ! class_exists( 'WooCommerce' ) ) {
+            return new WP_Error( 'billing_config_invalid', 'Online payment requires WooCommerce to be active.' );
+        }
+
+        return true;
+    }
+
+    // ── Invoice Creation (within transaction) ──────────────────────────────────
+
+    /**
+     * Create any immediately-due invoices within the approval transaction.
+     * Returns array of created document metadata.
+     */
+    private static function create_due_invoices_within_transaction( $series_ref, $series, $billing_config, $logo_ref, $occurrences ) {
+        $today = wp_date( 'Y-m-d' );
+
+        // Use the billing engine's canonical period calculator
+        if ( ! class_exists( 'MBS_Billing_Engine' ) ) {
+            return new WP_Error( 'billing_engine_missing', 'The billing engine is required for invoice-managed series.' );
+        }
+
+        $preview = MBS_Billing_Engine::preview( $series_ref );
+        if ( is_wp_error( $preview ) ) return $preview; // Propagate error — rolls back approval
+        if ( empty( $preview['periods'] ) ) return array(); // Genuinely no periods due
+
+        $created_documents = array();
+        foreach ( $preview['periods'] as $period ) {
+            $issue_on = $period['issue_on'] ?? '';
+            if ( ! $issue_on || $issue_on > $today ) continue; // Not yet due
+
+            // Build occurrence data from the canonical period object
+            $period_occurrences = array();
+            foreach ( $period['items'] ?? array() as $item ) {
+                $period_occurrences[] = array(
+                    'ref'          => $item['booking_ref'] ?? null,
+                    'date'         => $item['service_date'] ?? '',
+                    'amount_minor' => (int) ( $item['amount_minor'] ?? 0 ),
+                    'description'  => $item['description'] ?? '',
+                );
+            }
+
+            if ( empty( $period_occurrences ) ) continue;
+
+            // Issue within this transaction (no nested transactions)
+            // The issuance service owns document + audit + outbox for this invoice.
+            // Approval_Service does NOT separately enqueue — Issue 2 resolved.
+            $fresh_series = MBS_Series::get( $series_ref );
+            $result = MBS_Series_Issuance_Service::issue_within_transaction( $fresh_series, array(
+                'period_start'  => $period['period_start'],
+                'period_end'    => $period['period_end'],
+                'period_key'    => $period['period_key'] ?? '',
+                'issue_on'      => $issue_on,
+                'due_on'        => $period['due_on'] ?? '',
+                'occurrences'   => $period_occurrences,
+            ), $logo_ref );
+
+            if ( is_wp_error( $result ) ) return $result;
+            if ( empty( $result['no_op'] ) ) {
+                $created_documents[] = array(
+                    'invoice_ref'  => $result['invoice_ref'],
+                    'invoice_id'   => $result['invoice_id'],
+                    'document_id'  => $result['document_id'],
+                );
+            }
+        }
+
+        return $created_documents;
+    }
+
+    // ── Email Building ─────────────────────────────────────────────────────────
+
+    private static function build_confirmation_email_body( $series, $occurrences ) {
+        $org = class_exists( 'MBS_Email_Templates' ) ? MBS_Email_Templates::get_org_settings() : array();
+        $org_name = $org['name'] ?: get_bloginfo( 'name' );
+
+        $body = '<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;color:#1a1a2e;max-width:600px;margin:0 auto;">';
+        $body .= '<div style="background:#7413DC;padding:24px 32px;border-radius:8px 8px 0 0;text-align:center;">';
+        $body .= '<h1 style="color:#fff;margin:0;font-size:20px;">' . esc_html( $org_name ) . '</h1></div>';
+        $body .= '<div style="padding:32px;border:1px solid #e0d0f0;border-top:none;border-radius:0 0 8px 8px;">';
+        $body .= '<h2 style="color:#7413DC;">Your recurring booking is approved</h2>';
+        $body .= '<p>Hi ' . esc_html( $series->contact_name ) . ',</p>';
+        $body .= '<p>Your recurring booking for <strong>' . esc_html( $series->space ) . '</strong> has been approved.</p>';
+        $body .= '<p><strong>Schedule:</strong> Weekly, ' . esc_html( substr( $series->start_time, 0, 5 ) . '–' . substr( $series->end_time, 0, 5 ) ) . '</p>';
+        $body .= '<p><strong>Dates:</strong> ' . count( $occurrences ) . ' sessions confirmed</p>';
+        $body .= '<p><strong>Billing:</strong> ' . esc_html( ucfirst( str_replace( '_', ' ', $series->billing_mode ) ) ) . ' in advance</p>';
+
+        if ( $series->billing_treatment === 'invoice_managed' ) {
+            $body .= '<p>We will issue consolidated invoices covering each billing period. No annual lump sum or per-occurrence payment is required at this time.</p>';
+        }
+
+        $body .= '<p>If you have any questions, just reply to this email.</p>';
+        $body .= '</div></body></html>';
+
+        return $body;
+    }
+
+    private static function build_invoice_email_body( $doc ) {
+        // Placeholder — will use the template system in Stage 8
+        return '<p>Your invoice ' . esc_html( $doc['invoice_ref'] ) . ' is attached.</p>';
+    }
+
+    private static function build_email_headers() {
+        $org = class_exists( 'MBS_Email_Templates' ) ? MBS_Email_Templates::get_org_settings() : array();
+        $from_email = get_option( 'admin_email' );
+        $org_name = $org['name'] ?: get_bloginfo( 'name' );
+        return array(
+            'Content-Type: text/html; charset=UTF-8',
+            'From: ' . $org_name . ' <' . $from_email . '>',
+            'Reply-To: ' . MBS_Bookings::get_admin_email(),
+        );
+    }
+}

@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - feature/recurring-series-billing
+      - feature/invoice-documents
   pull_request:
 
 permissions:
@@ -38,6 +39,15 @@ jobs:
           coverage: none
       - name: Run PHP lint and dependency-free programs
         run: sh tests/integration/run-php-suite.sh
+      - name: Run invoice document unit tests
+        run: php tests/php-invoice-document-unit.php
+      - name: Run correctness regression tests
+        run: php tests/php-correctness-regression.php
+      - name: Validate Composer dependencies
+        run: |
+          cd wp-plugin/mathlin-booking
+          composer validate --no-check-publish
+          composer audit --locked
       - name: Check admin handler parity
         run: php mcp-server/tests/php-admin-parity-smoke.php
       - name: Validate MCP schemas
@@ -101,6 +111,8 @@ jobs:
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli sh /workspace/tests/integration/setup.sh
       - name: Show exact runtime versions
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/runtime-smoke.php --allow-root
+      - name: Run invoice lifecycle matrix
+        run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/invoice-lifecycle-matrix.php --allow-root
       - name: Collect service diagnostics
         if: always()
         run: docker compose -f tests/integration/docker-compose.yml logs --no-color > integration-services.log

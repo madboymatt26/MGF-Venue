@@ -1,0 +1,403 @@
+<?php
+if ( ! defined( 'ABSPATH' ) ) exit;
+
+/**
+ * Series Invoice Issuance Service.
+ *
+ * Owns the single transaction for consolidated invoice creation.
+ * Used by both:
+ *   - MBS_Series_Approval_Service (within its approval transaction, via primitives)
+ *   - MBS_Billing_Engine cron/catch-up (owns its own transaction)
+ *
+ * Transaction scope:
+ *   create draft invoice → add line items → issue invoice →
+ *   create immutable document → audit → enqueue email → COMMIT
+ *
+ * Issue J: issued_email_sent_at is NOT set during issuance.
+ * The outbox worker sets it ONLY after successful wp_mail() acceptance.
+ */
+class MBS_Series_Issuance_Service {
+
+    /**
+     * Issue one consolidated invoice for a billing period.
+     * Owns the full transaction (for cron/catch-up callers).
+     *
+     * @param string $series_ref    Series reference.
+     * @param array  $period        Period data {period_start, period_end, occurrences[]}.
+     * @param array  $logo_ref      Pre-resolved logo {asset_id, content_hash} or null.
+     * @return array|WP_Error  {invoice_ref, document_id, invoice} on success.
+     */
+    public static function issue_period_invoice( $series_ref, $period, $logo_ref = null ) {
+        global $wpdb;
+
+        // Pre-transaction: resolve logo
+        if ( $logo_ref === null ) {
+            $logo_ref = MBS_Logo_Asset::resolve_current_org_logo();
+        }
+
+        $series = MBS_Series::get( $series_ref );
+        if ( ! $series ) return new WP_Error( 'series_not_found', 'Series not found.' );
+
+        if ( $wpdb->query( 'START TRANSACTION' ) === false ) {
+            return new WP_Error( 'transaction_start_failed', 'Could not start invoice issuance.' );
+        }
+
+        // Lock and re-verify series state inside the transaction
+        $series_table = $wpdb->prefix . MBS_SERIES_TABLE;
+        $locked_series = $wpdb->get_row( $wpdb->prepare(
+            "SELECT * FROM {$series_table} WHERE series_ref = %s FOR UPDATE",
+            sanitize_text_field( $series_ref )
+        ) );
+        if ( ! $locked_series || $locked_series->status !== 'confirmed' || $locked_series->billing_treatment !== 'invoice_managed' ) {
+            $wpdb->query( 'ROLLBACK' );
+            return new WP_Error( 'series_not_billable', 'Series is not in a billable state.' );
+        }
+
+        $result = self::issue_within_transaction( $locked_series, $period, $logo_ref );
+        if ( is_wp_error( $result ) ) {
+            $wpdb->query( 'ROLLBACK' );
+            return $result;
+        }
+
+        if ( $wpdb->query( 'COMMIT' ) === false ) {
+            $wpdb->query( 'ROLLBACK' );
+            return new WP_Error( 'commit_failed', 'Could not commit invoice issuance.' );
+        }
+
+        // Post-commit: spawn cron for immediate email delivery
+        if ( function_exists( 'spawn_cron' ) ) spawn_cron();
+
+        return $result;
+    }
+
+    /**
+     * Issue within an EXISTING transaction (called by Approval_Service).
+     * Does NOT own START TRANSACTION / COMMIT.
+     * Uses $manage_transaction=false for ledger primitives.
+     *
+     * @param object $series    Locked series row.
+     * @param array  $period    {period_start, period_end, occurrences[{ref, date, amount_minor, description}]}.
+     * @param array  $logo_ref  Pre-resolved logo.
+     * @return array|WP_Error  {invoice_ref, document_id, invoice_id} on success.
+     */
+    public static function issue_within_transaction( $series, $period, $logo_ref = null ) {
+        global $wpdb;
+
+        $occurrences = $period['occurrences'] ?? array();
+        if ( empty( $occurrences ) ) {
+            return new WP_Error( 'no_occurrences', 'No occurrences to invoice in this period.' );
+        }
+
+        // Validate all canonical period fields (fail closed — no fallback reconstruction)
+        if ( empty( $period['period_key'] ) || ! is_string( $period['period_key'] ) ) {
+            return new WP_Error( 'period_key_required', 'period_key is required for idempotent invoice issuance.' );
+        }
+        if ( empty( $period['period_start'] ) || ! self::is_valid_local_date( $period['period_start'] ) ) {
+            return new WP_Error( 'period_start_invalid', 'period_start must be a genuine YYYY-MM-DD local date.' );
+        }
+        if ( empty( $period['period_end'] ) || ! self::is_valid_local_date( $period['period_end'] ) ) {
+            return new WP_Error( 'period_end_invalid', 'period_end must be a genuine YYYY-MM-DD local date.' );
+        }
+        if ( empty( $period['issue_on'] ) || ! self::is_valid_local_date( $period['issue_on'] ) ) {
+            return new WP_Error( 'issue_on_invalid', 'issue_on must be a genuine YYYY-MM-DD local date.' );
+        }
+        if ( empty( $period['due_on'] ) || ! self::is_valid_local_date( $period['due_on'] ) ) {
+            return new WP_Error( 'due_on_invalid', 'due_on must be a genuine YYYY-MM-DD local date.' );
+        }
+        // Sensible ordering
+        if ( $period['period_end'] < $period['period_start'] ) {
+            return new WP_Error( 'period_dates_reversed', 'period_end must not be before period_start.' );
+        }
+        if ( $period['due_on'] < $period['issue_on'] ) {
+            // due_on before issue_on is nonsensical
+            return new WP_Error( 'due_before_issue', 'due_on must not be before issue_on.' );
+        }
+
+        // Idempotency key — use the established canonical format from the billing engine
+        // (compatible with existing v3.21 invoices: "series:{ref}:period:{key}:v1")
+        $idempotency_key = 'series:' . $series->series_ref . ':period:' . $period['period_key'] . ':v1';
+        $due_date = $period['due_on'] . ' 23:59:59';
+
+        // 1. Create draft invoice (using ledger primitives without own transaction)
+        $draft_result = MBS_Billing_Ledger::create_draft_invoice( array(
+            'series_ref'           => $series->series_ref,
+            'contact_name'         => $series->contact_name,
+            'contact_organisation' => $series->contact_organisation,
+            'contact_email'        => $series->contact_email,
+            'contact_address'      => $series->contact_address,
+            'billing_mode'         => $series->billing_mode,
+            'period_start'         => $period['period_start'],
+            'period_end'           => $period['period_end'],
+            'currency'             => 'GBP',
+            'due_at'               => $due_date,
+        ), $idempotency_key );
+
+        if ( is_wp_error( $draft_result ) ) return $draft_result;
+
+        // Idempotent replay — invoice already exists for this period
+        if ( ! empty( $draft_result['idempotent_replay'] ) && ! empty( $draft_result['invoice'] ) ) {
+            $existing_invoice = $draft_result['invoice'];
+            if ( $existing_invoice->status !== 'draft' ) {
+                // Already issued — check for supplement (late-added occurrences)
+                $supplement = self::try_supplement_within_transaction( $series, $period, $existing_invoice, $idempotency_key, $logo_ref );
+                if ( $supplement !== null ) {
+                    return $supplement; // Either a supplement result or a WP_Error
+                }
+                // No new occurrences — idempotent no-op
+                return array(
+                    'invoice_ref'  => $existing_invoice->invoice_ref,
+                    'invoice_id'   => (int) $existing_invoice->id,
+                    'document_id'  => null, // Already created
+                    'no_op'        => true,
+                );
+            }
+        }
+
+        $invoice = $draft_result['invoice'];
+        $version = (int) $invoice->version;
+
+        // 2. Lock and revalidate each occurrence from authoritative DB state.
+        // Do NOT freeze stale preview values — derive amounts from locked rows.
+        $booking_table = $wpdb->prefix . MBS_TABLE;
+        $validated_occurrences = array();
+        foreach ( $occurrences as $occurrence ) {
+            $occ_ref = $occurrence['ref'] ?? null;
+            if ( ! $occ_ref ) continue;
+
+            $locked_occ = $wpdb->get_row( $wpdb->prepare(
+                "SELECT * FROM {$booking_table} WHERE ref = %s FOR UPDATE",
+                sanitize_text_field( $occ_ref )
+            ) );
+            if ( ! $locked_occ ) continue; // Occurrence was deleted
+            if ( $locked_occ->series_id !== $series->series_ref ) continue; // No longer belongs to this series
+            if ( ! in_array( $locked_occ->status, array( 'confirmed', 'deposit_paid', 'paid' ), true ) ) continue; // Not billable
+            if ( ! empty( $locked_occ->legacy_billing_excluded ) ) continue; // Excluded from billing
+            // Verify service date is within intended period
+            if ( $locked_occ->booking_date < $period['period_start'] || $locked_occ->booking_date > $period['period_end'] ) continue;
+
+            // Derive amount from the authoritative locked row (not the stale preview)
+            $occ_amount = MBS_Money::from_decimal_string( (string) $locked_occ->amount );
+            if ( is_wp_error( $occ_amount ) ) {
+                return new WP_Error( 'invalid_occurrence_amount', 'Occurrence ' . $occ_ref . ' has an invalid amount.' );
+            }
+
+            $validated_occurrences[] = array(
+                'ref'          => $occ_ref,
+                'date'         => $locked_occ->booking_date,
+                'amount_minor' => (int) $occ_amount,
+                'description'  => $locked_occ->space . ' hire on ' . wp_date( 'j F Y', strtotime( $locked_occ->booking_date ) ) . ( ! empty( $locked_occ->kitchen ) ? ' (including kitchen)' : '' ),
+            );
+        }
+
+        if ( empty( $validated_occurrences ) ) {
+            return new WP_Error( 'no_valid_occurrences', 'No valid billable occurrences remain after revalidation.' );
+        }
+
+        // 3. Add line items (without own transaction)
+        foreach ( $validated_occurrences as $occurrence ) {
+            $item_result = MBS_Billing_Ledger::add_item( $invoice->invoice_ref, array(
+                'booking_ref'      => $occurrence['ref'] ?? null,
+                'service_date'     => $occurrence['date'],
+                'description'      => $occurrence['description'] ?? ( $series->space . ' hire on ' . wp_date( 'j F Y', strtotime( $occurrence['date'] ) ) ),
+                'unit_amount_minor' => (int) $occurrence['amount_minor'],
+                'quantity_milli'   => 1000,
+                'item_type'        => 'hire',
+            ), $version, false ); // $manage_transaction = false
+
+            if ( is_wp_error( $item_result ) ) return $item_result;
+            $version = (int) $item_result['invoice']->version;
+        }
+
+        // 3. Issue the invoice (without own transaction)
+        $issued_result = MBS_Billing_Ledger::issue_invoice( $invoice->invoice_ref, $version, false );
+        if ( is_wp_error( $issued_result ) ) return $issued_result;
+
+        $issued_invoice = $issued_result['invoice'];
+        $items = MBS_Billing_Ledger::get_items( $issued_invoice->id );
+
+        // 4. Create immutable document (within this transaction)
+        $document_id = MBS_Invoice_Document_Service::create_ledger_document_within_transaction(
+            $issued_invoice, $items, $series, $logo_ref
+        );
+        if ( is_wp_error( $document_id ) ) return $document_id;
+
+        // 5. Audit
+        $audit_ok = MBS_Audit_Log::log(
+            $issued_invoice->invoice_ref,
+            'invoice_issued',
+            'Consolidated invoice issued for ' . $period['period_start'] . ' to ' . $period['period_end'] . ' (' . count( $occurrences ) . ' sessions, ' . MBS_Money::format( (int) $issued_invoice->total_minor ) . ').'
+        );
+        if ( ! $audit_ok ) return new WP_Error( 'audit_failed', 'Could not record issuance audit.' );
+
+        // 6. Enqueue invoice email (Issue J: do NOT set issued_email_sent_at here)
+        $message_key = 'invoice_issued:' . $issued_invoice->invoice_ref . ':doc' . $document_id;
+        $subject = 'Invoice ' . $issued_invoice->invoice_ref . ' — ' . $series->series_ref;
+        $body = '<p>Your invoice for ' . esc_html( $series->space ) . ' (' . esc_html( wp_date( 'F Y', strtotime( $period['period_start'] ) ) ) . ') is attached.</p>';
+        $headers = array(
+            'Content-Type: text/html; charset=UTF-8',
+            'From: ' . ( class_exists( 'MBS_Email_Templates' ) ? MBS_Email_Templates::get_org_settings()['name'] : get_bloginfo( 'name' ) ) . ' <' . get_option( 'admin_email' ) . '>',
+            'Reply-To: ' . MBS_Bookings::get_admin_email(),
+        );
+        $attachment_meta = array( 'document_id' => (int) $document_id, 'format' => 'pdf' );
+        $payload_hash = MBS_Email_Queue::compute_payload_hash( $series->contact_email, $subject, $body, $headers, $attachment_meta );
+
+        $enqueued = MBS_Email_Queue::enqueue(
+            $series->contact_email, $subject, $body, $headers,
+            $message_key, $payload_hash, $attachment_meta,
+            array( 'message_type' => 'invoice_issued', 'reference_type' => 'invoice', 'reference_id' => (int) $issued_invoice->id )
+        );
+        if ( is_wp_error( $enqueued ) ) return $enqueued;
+
+        return array(
+            'invoice_ref'  => $issued_invoice->invoice_ref,
+            'invoice_id'   => (int) $issued_invoice->id,
+            'document_id'  => (int) $document_id,
+            'no_op'        => false,
+        );
+    }
+
+    /**
+     * Validate that a value is a genuine YYYY-MM-DD local date.
+     *
+     * @param string $value
+     * @return bool
+     */
+    private static function is_valid_local_date( $value ) {
+        if ( ! is_string( $value ) || strlen( $value ) !== 10 ) return false;
+        $date = \DateTimeImmutable::createFromFormat( '!Y-m-d', $value );
+        return $date && $date->format( 'Y-m-d' ) === $value;
+    }
+
+    /**
+     * Check for and create a supplement invoice for late-added occurrences.
+     *
+     * Returns:
+     *   - array (supplement result) on success
+     *   - WP_Error on failure
+     *   - null if no supplement is needed (all occurrences already invoiced)
+     *
+     * Called WITHIN an existing transaction.
+     */
+    private static function try_supplement_within_transaction( $series, $period, $base_invoice, $base_idempotency_key, $logo_ref ) {
+        $occurrences = $period['occurrences'] ?? array();
+        if ( empty( $occurrences ) ) return null;
+
+        // Identify occurrences that do NOT already have an active financial allocation
+        $new_occurrences = array();
+        foreach ( $occurrences as $occurrence ) {
+            $ref = $occurrence['ref'] ?? null;
+            if ( $ref && MBS_Billing_Ledger::get_active_booking_allocation( $ref ) ) {
+                continue; // Already allocated
+            }
+            $new_occurrences[] = $occurrence;
+        }
+
+        if ( empty( $new_occurrences ) ) {
+            return null; // All occurrences covered — idempotent no-op
+        }
+
+        // Build deterministic supplement idempotency key from the sorted new occurrence refs
+        $refs = array_filter( array_column( $new_occurrences, 'ref' ) );
+        sort( $refs, SORT_STRING );
+        $supplement_key = $base_idempotency_key . ':supplement:' . substr( hash( 'sha256', implode( '|', $refs ) ), 0, 16 );
+
+        $due_date = $period['due_on'] . ' 23:59:59';
+
+        // Create supplement invoice (idempotent via the deterministic supplement key)
+        $supplement_draft = MBS_Billing_Ledger::create_draft_invoice( array(
+            'parent_invoice_id'    => (int) $base_invoice->id,
+            'series_ref'           => $series->series_ref,
+            'contact_name'         => $series->contact_name,
+            'contact_organisation' => $series->contact_organisation,
+            'contact_email'        => $series->contact_email,
+            'contact_address'      => $series->contact_address,
+            'billing_mode'         => $series->billing_mode,
+            'period_start'         => $period['period_start'],
+            'period_end'           => $period['period_end'],
+            'currency'             => 'GBP',
+            'due_at'               => $due_date,
+        ), $supplement_key );
+
+        if ( is_wp_error( $supplement_draft ) ) return $supplement_draft;
+
+        // If supplement already fully issued — idempotent replay
+        if ( ! empty( $supplement_draft['idempotent_replay'] ) && ! empty( $supplement_draft['invoice'] ) ) {
+            $existing_supp = $supplement_draft['invoice'];
+            if ( $existing_supp->status !== 'draft' ) {
+                return array(
+                    'invoice_ref'  => $existing_supp->invoice_ref,
+                    'invoice_id'   => (int) $existing_supp->id,
+                    'document_id'  => null,
+                    'no_op'        => true,
+                    'supplement'   => true,
+                );
+            }
+        }
+
+        $invoice = $supplement_draft['invoice'];
+        $version = (int) $invoice->version;
+
+        // Add line items
+        foreach ( $new_occurrences as $occurrence ) {
+            $item_result = MBS_Billing_Ledger::add_item( $invoice->invoice_ref, array(
+                'booking_ref'       => $occurrence['ref'] ?? null,
+                'service_date'      => $occurrence['date'],
+                'description'       => $occurrence['description'] ?? ( $series->space . ' hire on ' . wp_date( 'j F Y', strtotime( $occurrence['date'] ) ) ),
+                'unit_amount_minor' => (int) $occurrence['amount_minor'],
+                'quantity_milli'    => 1000,
+                'item_type'         => 'hire',
+            ), $version, false );
+
+            if ( is_wp_error( $item_result ) ) return $item_result;
+            $version = (int) $item_result['invoice']->version;
+        }
+
+        // Issue
+        $issued_result = MBS_Billing_Ledger::issue_invoice( $invoice->invoice_ref, $version, false );
+        if ( is_wp_error( $issued_result ) ) return $issued_result;
+
+        $issued_invoice = $issued_result['invoice'];
+        $items = MBS_Billing_Ledger::get_items( $issued_invoice->id );
+
+        // Create immutable document
+        $document_id = MBS_Invoice_Document_Service::create_ledger_document_within_transaction(
+            $issued_invoice, $items, $series, $logo_ref
+        );
+        if ( is_wp_error( $document_id ) ) return $document_id;
+
+        // Audit
+        $audit_ok = MBS_Audit_Log::log(
+            $issued_invoice->invoice_ref,
+            'supplement_invoice_issued',
+            'Supplement invoice issued for ' . count( $new_occurrences ) . ' late-added occurrence(s) in period ' . $period['period_start'] . ' to ' . $period['period_end'] . ' (' . MBS_Money::format( (int) $issued_invoice->total_minor ) . ').'
+        );
+        if ( ! $audit_ok ) return new WP_Error( 'audit_failed', 'Could not record supplement issuance audit.' );
+
+        // Enqueue supplement email
+        $message_key = 'invoice_issued:' . $issued_invoice->invoice_ref . ':doc' . $document_id;
+        $subject = 'Supplementary Invoice ' . $issued_invoice->invoice_ref . ' — ' . $series->series_ref;
+        $body = '<p>A supplementary invoice for additional ' . esc_html( $series->space ) . ' sessions (' . esc_html( wp_date( 'F Y', strtotime( $period['period_start'] ) ) ) . ') is attached.</p>';
+        $headers = array(
+            'Content-Type: text/html; charset=UTF-8',
+            'From: ' . ( class_exists( 'MBS_Email_Templates' ) ? MBS_Email_Templates::get_org_settings()['name'] : get_bloginfo( 'name' ) ) . ' <' . get_option( 'admin_email' ) . '>',
+            'Reply-To: ' . MBS_Bookings::get_admin_email(),
+        );
+        $attachment_meta = array( 'document_id' => (int) $document_id, 'format' => 'pdf' );
+        $payload_hash = MBS_Email_Queue::compute_payload_hash( $series->contact_email, $subject, $body, $headers, $attachment_meta );
+
+        $enqueued = MBS_Email_Queue::enqueue(
+            $series->contact_email, $subject, $body, $headers,
+            $message_key, $payload_hash, $attachment_meta,
+            array( 'message_type' => 'invoice_issued', 'reference_type' => 'invoice', 'reference_id' => (int) $issued_invoice->id )
+        );
+        if ( is_wp_error( $enqueued ) ) return $enqueued;
+
+        return array(
+            'invoice_ref'  => $issued_invoice->invoice_ref,
+            'invoice_id'   => (int) $issued_invoice->id,
+            'document_id'  => (int) $document_id,
+            'no_op'        => false,
+            'supplement'   => true,
+        );
+    }
+}

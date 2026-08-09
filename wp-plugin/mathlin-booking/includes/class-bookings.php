@@ -686,7 +686,34 @@ class MBS_Bookings {
         $allowed = array( 'pending', 'confirmed', 'cancelled', 'archived', 'paid', 'deposit_paid' );
         if ( ! in_array( $status, $allowed ) ) return false;
         $current = self::get( $ref );
-        if ( $current && $current->status !== $status && self::has_financial_history( $ref ) ) return false;
+        if ( ! $current ) return false;
+
+        // Idempotent: already at the requested status — no-op success.
+        if ( $current->status === $status ) return true;
+
+        // Status change with financial history is disallowed (immutable once invoiced)
+        if ( self::has_financial_history( $ref ) ) return false;
+
+        // Issue 1: Chargeable non-series pending→confirmed MUST delegate to
+        // confirm_and_issue() for one atomic transaction. Do NOT confirm first
+        // and compensate — that has a crash window.
+        if ( $status === 'confirmed' && $current && $current->status === 'pending' ) {
+            $amount_check = MBS_Money::from_decimal_string( (string) $current->amount );
+            if ( is_wp_error( $amount_check ) ) {
+                // Malformed monetary data → fail closed
+                return false;
+            }
+            $is_chargeable = $amount_check > 0
+                && empty( $current->series_id )
+                && empty( $current->current_invoice_document_id );
+
+            if ( $is_chargeable ) {
+                // Delegate to the atomic confirmation service
+                $atomic_result = MBS_Invoice_Document_Service::confirm_and_issue( $ref );
+                if ( is_wp_error( $atomic_result ) ) return false;
+                return true; // Both fresh-issue and idempotent no-op are successful
+            }
+        }
 
         $result = $wpdb->update(
             $table,
@@ -707,7 +734,8 @@ class MBS_Bookings {
                 $wpdb->update( $table, array( 'ha_notified' => 1 ), array( 'ref' => $ref ) );
 
                 // Auto-promote £0 bookings (scout use / free) straight to paid
-                if ( (float) $booking->amount <= 0 ) {
+                $total_minor = MBS_Money::from_decimal_string( (string) $booking->amount );
+                if ( ! is_wp_error( $total_minor ) && $total_minor <= 0 ) {
                     $wpdb->update( $table, array( 'status' => 'paid' ), array( 'ref' => $ref ) );
                     MBS_Audit_Log::log( $ref, 'paid', 'Auto-marked as Paid (£0 booking — no payment required)' );
                     do_action( 'mbs_booking_paid', self::get( $ref ), 0 );
