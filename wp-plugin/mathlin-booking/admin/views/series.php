@@ -97,18 +97,57 @@
             <h2 style="margin-top:0;">Invoice preview</h2>
             <?php if ( is_wp_error( $preview ) ) : ?><div class="notice notice-error inline"><p><?php echo esc_html( $preview->get_error_message() ); ?></p></div>
             <?php elseif ( empty( $preview['periods'] ) ) : ?><p>No invoice periods apply.</p>
-            <?php else : ?><table class="widefat striped"><thead><tr><th>Period</th><th>Issue</th><th>Due</th><th>Dates</th><th>Total</th></tr></thead><tbody><?php foreach ( $preview['periods'] as $period ) : ?><tr><td><?php echo esc_html( $period['label'] ); ?></td><td><?php echo esc_html( wp_date( 'j M Y', strtotime( $period['issue_on'] ) ) ); ?></td><td><?php echo esc_html( wp_date( 'j M Y', strtotime( $period['due_on'] ) ) ); ?></td><td><?php echo (int) $period['occurrence_count']; ?></td><td><?php echo esc_html( MBS_Money::format( $period['total_minor'] ) ); ?></td></tr><?php endforeach; ?></tbody></table><?php endif; ?>
+            <?php else : ?><div class="mbs-preview-table-wrap"><table class="widefat striped mbs-preview-table"><thead><tr><th>Period</th><th>Issue</th><th>Due</th><th>Dates</th><th>Total</th></tr></thead><tbody><?php foreach ( $preview['periods'] as $period ) : ?><tr><td data-label="Period"><?php echo esc_html( $period['label'] ); ?></td><td data-label="Issue"><?php echo esc_html( wp_date( 'j M Y', strtotime( $period['issue_on'] ) ) ); ?></td><td data-label="Due"><?php echo esc_html( wp_date( 'j M Y', strtotime( $period['due_on'] ) ) ); ?></td><td data-label="Dates"><?php echo (int) $period['occurrence_count']; ?></td><td data-label="Total"><?php echo esc_html( MBS_Money::format( $period['total_minor'] ) ); ?></td></tr><?php endforeach; ?></tbody></table></div><?php endif; ?>
             <?php if ( $series->status === 'confirmed' && $series->billing_treatment === 'invoice_managed' ) : ?><p><button class="button nms-series-catch-up">Generate all invoices due today</button></p><?php endif; ?>
         </section>
 
         <section class="postbox" style="padding:16px;">
             <h2 style="margin-top:0;">Invoices &amp; payments</h2>
             <?php if ( ! $invoices ) : ?><p>No consolidated invoices yet.</p><?php endif; ?>
-            <?php foreach ( $invoices as $invoice ) : $balance = MBS_Billing_Ledger::balance_minor( $invoice ); ?>
-                <details style="border-top:1px solid #ddd;padding:10px 0;" <?php echo $balance > 0 ? 'open' : ''; ?>><summary><strong><?php echo esc_html( $invoice->invoice_ref ); ?></strong> · <?php echo esc_html( ucfirst( str_replace( '_', ' ', $invoice->status ) ) ); ?> · <?php echo esc_html( MBS_Money::format( $balance, $invoice->currency ) ); ?> outstanding</summary>
-                    <p><?php echo esc_html( wp_date( 'j M Y', strtotime( $invoice->period_start ) ) . '–' . wp_date( 'j M Y', strtotime( $invoice->period_end ) ) ); ?> · Total <?php echo esc_html( MBS_Money::format( (int) $invoice->total_minor, $invoice->currency ) ); ?> · Paid <?php echo esc_html( MBS_Money::format( (int) $invoice->paid_minor, $invoice->currency ) ); ?></p>
-                    <?php if ( $balance > 0 && in_array( $invoice->status, array( 'issued', 'part_paid', 'overdue' ), true ) ) : ?><form class="nms-manual-invoice-payment" style="display:flex;gap:8px;align-items:center;"><input type="hidden" name="invoice_ref" value="<?php echo esc_attr( $invoice->invoice_ref ); ?>"><input type="hidden" name="expected_version" value="<?php echo (int) $invoice->version; ?>"><label>Record offline payment £<input name="amount" inputmode="decimal" value="<?php echo esc_attr( MBS_Money::decimal( $balance ) ); ?>" size="8"></label><input name="note" placeholder="Bank/PO note"><button class="button">Record payment</button></form><?php endif; ?>
-                </details>
+            <?php foreach ( $invoices as $invoice ) : $balance = MBS_Billing_Ledger::balance_minor( $invoice ); $doc_id = $invoice_documents[ (int) $invoice->id ] ?? null; ?>
+                <div class="mbs-invoice-card">
+                    <div class="mbs-invoice-card__header">
+                        <?php if ( $doc_id ) : ?>
+                            <button type="button" class="mbs-invoice-card__ref mbs-view-invoice-btn" data-document-id="<?php echo (int) $doc_id; ?>"><?php echo esc_html( $invoice->invoice_ref ); ?></button>
+                        <?php else : ?>
+                            <span class="mbs-invoice-card__ref"><?php echo esc_html( $invoice->invoice_ref ); ?></span>
+                        <?php endif; ?>
+                        <span class="mbs-invoice-status mbs-invoice-status--<?php echo esc_attr( $invoice->status ); ?>"><?php echo esc_html( ucfirst( str_replace( '_', ' ', $invoice->status ) ) ); ?></span>
+                    </div>
+                    <div class="mbs-invoice-card__period"><?php echo esc_html( wp_date( 'j M Y', strtotime( $invoice->period_start ) ) . ' – ' . wp_date( 'j M Y', strtotime( $invoice->period_end ) ) ); ?></div>
+                    <div class="mbs-invoice-card__figures">
+                        <div class="mbs-invoice-figure"><span class="mbs-invoice-figure__label">Total</span><span class="mbs-invoice-figure__value"><?php echo esc_html( MBS_Money::format( (int) $invoice->total_minor, $invoice->currency ) ); ?></span></div>
+                        <div class="mbs-invoice-figure"><span class="mbs-invoice-figure__label">Paid</span><span class="mbs-invoice-figure__value"><?php echo esc_html( MBS_Money::format( (int) $invoice->paid_minor, $invoice->currency ) ); ?></span></div>
+                        <div class="mbs-invoice-figure"><span class="mbs-invoice-figure__label">Outstanding</span><span class="mbs-invoice-figure__value"><?php echo esc_html( MBS_Money::format( $balance, $invoice->currency ) ); ?></span></div>
+                    </div>
+                    <div class="mbs-invoice-card__actions">
+                        <?php if ( $doc_id ) : ?>
+                            <button type="button" class="button mbs-view-invoice-btn" data-document-id="<?php echo (int) $doc_id; ?>">View invoice</button>
+                            <a href="<?php echo esc_url( admin_url( 'admin-ajax.php?action=mbs_invoice_document&document_id=' . (int) $doc_id . '&format=pdf&mode=issued&nonce=' . wp_create_nonce( 'mbs_invoice_document_nonce' ) ) ); ?>" class="button" target="_blank">Download PDF</a>
+                        <?php else : ?>
+                            <span class="mbs-invoice-card__no-doc">Historical invoice — document unavailable</span>
+                        <?php endif; ?>
+                        <?php if ( $balance > 0 && in_array( $invoice->status, array( 'issued', 'part_paid', 'overdue' ), true ) ) : ?>
+                            <button type="button" class="button mbs-record-payment-toggle">Record payment</button>
+                        <?php endif; ?>
+                    </div>
+                    <?php if ( $balance > 0 && in_array( $invoice->status, array( 'issued', 'part_paid', 'overdue' ), true ) ) : ?>
+                        <div class="mbs-payment-panel" style="display:none;">
+                            <form class="nms-manual-invoice-payment mbs-payment-form">
+                                <input type="hidden" name="invoice_ref" value="<?php echo esc_attr( $invoice->invoice_ref ); ?>">
+                                <input type="hidden" name="expected_version" value="<?php echo (int) $invoice->version; ?>">
+                                <div class="mbs-payment-form__fields">
+                                    <label class="mbs-payment-form__amount">£<input name="amount" inputmode="decimal" value="<?php echo esc_attr( MBS_Money::decimal( $balance ) ); ?>" size="8"></label>
+                                    <input name="note" placeholder="Bank/PO note" class="mbs-payment-form__note">
+                                </div>
+                                <div class="mbs-payment-form__buttons">
+                                    <button type="submit" class="button button-primary">Record payment</button>
+                                    <button type="button" class="button mbs-record-payment-cancel">Cancel</button>
+                                </div>
+                            </form>
+                        </div>
+                    <?php endif; ?>
+                </div>
             <?php endforeach; ?>
         </section>
 
@@ -117,6 +156,22 @@
             <section class="postbox" style="padding:16px;"><h2 style="margin-top:0;">Audit history</h2><?php if ( ! $audit ) : ?><p>No series audit events yet.</p><?php else : ?><ul><?php foreach ( $audit as $event ) : ?><li><strong><?php echo esc_html( MBS_Audit_Log::action_label( $event->action ) ); ?></strong> · <?php echo esc_html( wp_date( 'j M Y H:i', strtotime( $event->created_at ) ) ); ?><br><small><?php echo esc_html( $event->details ); ?></small></li><?php endforeach; ?></ul><?php endif; ?></section>
         </div>
     <?php endif; ?>
+</div>
+
+<?php // ── Invoice Document Modal ─────────────────────────────────────── ?>
+<div id="mbs-invoice-modal" class="mbs-modal" style="display:none;" role="dialog" aria-modal="true" aria-label="Invoice document">
+    <div class="mbs-modal__backdrop"></div>
+    <div class="mbs-modal__content">
+        <div class="mbs-modal__header">
+            <h2 class="mbs-modal__title">Invoice</h2>
+            <button type="button" class="mbs-modal__close" aria-label="Close">&times;</button>
+        </div>
+        <div class="mbs-modal__body"><p class="mbs-modal__loading">Loading invoice…</p></div>
+        <div class="mbs-modal__footer">
+            <a href="#" class="button mbs-modal__download" target="_blank">Download PDF</a>
+            <button type="button" class="button mbs-modal__close-btn">Close</button>
+        </div>
+    </div>
 </div>
 
 <?php // ── Review & Approve Modal ───────────────────────────────────────── ?>
