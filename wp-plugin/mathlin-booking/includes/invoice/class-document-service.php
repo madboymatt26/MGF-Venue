@@ -280,9 +280,9 @@ class MBS_Invoice_Document_Service {
             }
         }
 
-        // Update booking pointer — require success
+        // Update booking pointer — require exactly one row affected
         $ptr_updated = $wpdb->update( $booking_table, array( 'current_invoice_document_id' => $document_id ), array( 'id' => (int) $booking->id ) );
-        if ( $ptr_updated === false ) {
+        if ( $ptr_updated !== 1 ) {
             return new WP_Error( 'pointer_update_failed', 'Could not link the new document to the booking.' );
         }
 
