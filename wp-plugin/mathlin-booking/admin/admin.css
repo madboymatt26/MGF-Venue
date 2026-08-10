@@ -507,3 +507,61 @@
         margin-bottom: 2px;
     }
 }
+
+/* ── Invoice cards (series admin) ───────────────────────────────────────── */
+.mbs-invoice-card { border: 1px solid #e0d0f0; border-radius: 8px; padding: 16px; margin-bottom: 12px; background: #fff; }
+.mbs-invoice-card__header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.mbs-invoice-card__ref { font-weight: 700; font-size: 14px; color: #1d2327; background: none; border: none; padding: 0; cursor: default; }
+button.mbs-invoice-card__ref { cursor: pointer; color: #7413DC; text-decoration: underline; }
+button.mbs-invoice-card__ref:hover { color: #5a0fb0; }
+.mbs-invoice-status { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; text-transform: capitalize; }
+.mbs-invoice-status--issued { background: #e8f0fe; color: #1a73e8; }
+.mbs-invoice-status--part_paid { background: #fef3cd; color: #856404; }
+.mbs-invoice-status--paid { background: #d4edda; color: #155724; }
+.mbs-invoice-status--overdue { background: #f8d7da; color: #721c24; }
+.mbs-invoice-status--void, .mbs-invoice-status--superseded { background: #e9ecef; color: #6c757d; }
+.mbs-invoice-card__period { font-size: 13px; color: #50575e; margin-bottom: 10px; }
+.mbs-invoice-card__figures { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+.mbs-invoice-figure { display: flex; flex-direction: column; }
+.mbs-invoice-figure__label { font-size: 11px; color: #757575; text-transform: uppercase; letter-spacing: 0.5px; }
+.mbs-invoice-figure__value { font-size: 15px; font-weight: 600; }
+.mbs-invoice-card__actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.mbs-invoice-card__no-doc { font-size: 12px; color: #999; font-style: italic; }
+.mbs-payment-panel { margin-top: 12px; padding-top: 12px; border-top: 1px solid #eee; }
+.mbs-payment-form__fields { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+.mbs-payment-form__amount input { width: 90px; }
+.mbs-payment-form__note { flex: 1; min-width: 120px; display: flex; flex-direction: column; }
+.mbs-payment-form__note-input { width: 100%; }
+.mbs-payment-form__buttons { display: flex; gap: 8px; }
+
+/* ── Invoice modal ──────────────────────────────────────────────────────── */
+.mbs-modal { position: fixed; inset: 0; z-index: 100001; display: flex; align-items: flex-start; justify-content: center; overflow: auto; }
+.mbs-modal__backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.5); }
+.mbs-modal__content { position: relative; width: 90%; max-width: 800px; margin: 40px auto; background: #fff; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,.2); display: flex; flex-direction: column; max-height: calc(100vh - 80px); }
+.mbs-modal__header { display: flex; justify-content: space-between; align-items: center; padding: 16px 24px; border-bottom: 1px solid #eee; }
+.mbs-modal__title { margin: 0; font-size: 18px; }
+.mbs-modal__close { background: none; border: none; font-size: 28px; cursor: pointer; color: #666; line-height: 1; }
+.mbs-modal__body { flex: 1; overflow: auto; padding: 24px; }
+.mbs-modal__loading { text-align: center; color: #666; }
+.mbs-modal__footer { display: flex; gap: 8px; justify-content: flex-end; padding: 16px 24px; border-top: 1px solid #eee; }
+
+/* ── Responsive invoice preview table ───────────────────────────────────── */
+.mbs-preview-table-wrap { overflow-x: auto; }
+
+/* ── Mobile (≤ 782px) ───────────────────────────────────────────────────── */
+@media (max-width: 782px) {
+    .mbs-invoice-card__figures { gap: 12px; }
+    .mbs-invoice-card__actions { flex-direction: column; align-items: stretch; }
+    .mbs-invoice-card__actions .button { text-align: center; }
+    .mbs-payment-form__fields { flex-direction: column; }
+    .mbs-payment-form__amount input { width: 100%; }
+    .mbs-payment-form__note { min-width: 100%; }
+    .mbs-modal__content { width: 95%; margin: 20px auto; max-height: calc(100vh - 40px); }
+    .mbs-modal__body { padding: 16px; }
+
+    /* Responsive preview table → stacked cards */
+    .mbs-preview-table thead { display: none; }
+    .mbs-preview-table tbody tr { display: block; border: 1px solid #e0d0f0; border-radius: 6px; padding: 10px; margin-bottom: 8px; }
+    .mbs-preview-table tbody td { display: flex; justify-content: space-between; padding: 3px 0; border: none; }
+    .mbs-preview-table tbody td::before { content: attr(data-label); font-weight: 600; color: #555; margin-right: 8px; }
+}

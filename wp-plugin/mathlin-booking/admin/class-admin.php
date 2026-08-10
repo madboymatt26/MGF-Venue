@@ -166,6 +166,7 @@ class MBS_Admin {
         wp_localize_script( 'mbs-admin', 'MBS_Admin', array(
             'ajax_url' => admin_url( 'admin-ajax.php' ),
             'nonce'    => wp_create_nonce( 'mbs_admin_nonce' ),
+            'doc_nonce' => wp_create_nonce( 'mbs_invoice_document_nonce' ),
         ) );
         // Enqueue media library for logo upload
         if ( strpos( $hook, 'mathlin-emails' ) !== false ) {
@@ -242,6 +243,23 @@ class MBS_Admin {
         $occurrences = $series ? MBS_Series::occurrences( $series->series_ref ) : array();
         $exceptions = $series ? MBS_Series::exceptions( $series ) : array();
         $invoices = $series ? MBS_Series::invoices( $series->series_ref ) : array();
+        // Map ledger invoice IDs to their current immutable document IDs (single query)
+        $invoice_documents = array();
+        if ( $invoices ) {
+            global $wpdb;
+            $doc_table = $wpdb->prefix . MBS_INVOICE_DOCUMENTS_TABLE;
+            $invoice_ids = array_map( function( $inv ) { return (int) $inv->id; }, $invoices );
+            $placeholders = implode( ',', array_fill( 0, count( $invoice_ids ), '%d' ) );
+            $doc_rows = $wpdb->get_results( $wpdb->prepare(
+                "SELECT invoice_id, id AS document_id FROM {$doc_table} WHERE invoice_id IN ({$placeholders}) AND status = 'issued' ORDER BY revision DESC",
+                $invoice_ids
+            ) );
+            foreach ( $doc_rows as $dr ) {
+                if ( ! isset( $invoice_documents[ (int) $dr->invoice_id ] ) ) {
+                    $invoice_documents[ (int) $dr->invoice_id ] = (int) $dr->document_id;
+                }
+            }
+        }
         $preview = $series ? MBS_Billing_Engine::preview( $series->series_ref ) : array();
         $audit = $series ? MBS_Audit_Log::get_for_booking( $series->series_ref ) : array();
         include MBS_PLUGIN_DIR . 'admin/views/series.php';
