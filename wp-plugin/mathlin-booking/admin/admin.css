@@ -530,7 +530,8 @@ button.mbs-invoice-card__ref:hover { color: #5a0fb0; }
 .mbs-payment-panel { margin-top: 12px; padding-top: 12px; border-top: 1px solid #eee; }
 .mbs-payment-form__fields { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
 .mbs-payment-form__amount input { width: 90px; }
-.mbs-payment-form__note { flex: 1; min-width: 120px; }
+.mbs-payment-form__note { flex: 1; min-width: 120px; display: flex; flex-direction: column; }
+.mbs-payment-form__note-input { width: 100%; }
 .mbs-payment-form__buttons { display: flex; gap: 8px; }
 
 /* ── Invoice modal ──────────────────────────────────────────────────────── */

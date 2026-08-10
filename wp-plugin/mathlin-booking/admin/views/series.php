@@ -108,7 +108,7 @@
                 <div class="mbs-invoice-card">
                     <div class="mbs-invoice-card__header">
                         <?php if ( $doc_id ) : ?>
-                            <button type="button" class="mbs-invoice-card__ref mbs-view-invoice-btn" data-document-id="<?php echo (int) $doc_id; ?>"><?php echo esc_html( $invoice->invoice_ref ); ?></button>
+                            <button type="button" class="mbs-invoice-card__ref mbs-view-invoice-btn" data-document-id="<?php echo (int) $doc_id; ?>" data-invoice-ref="<?php echo esc_attr( $invoice->invoice_ref ); ?>"><?php echo esc_html( $invoice->invoice_ref ); ?></button>
                         <?php else : ?>
                             <span class="mbs-invoice-card__ref"><?php echo esc_html( $invoice->invoice_ref ); ?></span>
                         <?php endif; ?>
@@ -122,7 +122,7 @@
                     </div>
                     <div class="mbs-invoice-card__actions">
                         <?php if ( $doc_id ) : ?>
-                            <button type="button" class="button mbs-view-invoice-btn" data-document-id="<?php echo (int) $doc_id; ?>">View invoice</button>
+                            <button type="button" class="button mbs-view-invoice-btn" data-document-id="<?php echo (int) $doc_id; ?>" data-invoice-ref="<?php echo esc_attr( $invoice->invoice_ref ); ?>">View invoice</button>
                             <a href="<?php echo esc_url( admin_url( 'admin-ajax.php?action=mbs_invoice_document&document_id=' . (int) $doc_id . '&format=pdf&mode=issued&nonce=' . wp_create_nonce( 'mbs_invoice_document_nonce' ) ) ); ?>" class="button" target="_blank">Download PDF</a>
                         <?php else : ?>
                             <span class="mbs-invoice-card__no-doc">Historical invoice — document unavailable</span>
@@ -137,8 +137,8 @@
                                 <input type="hidden" name="invoice_ref" value="<?php echo esc_attr( $invoice->invoice_ref ); ?>">
                                 <input type="hidden" name="expected_version" value="<?php echo (int) $invoice->version; ?>">
                                 <div class="mbs-payment-form__fields">
-                                    <label class="mbs-payment-form__amount">£<input name="amount" inputmode="decimal" value="<?php echo esc_attr( MBS_Money::decimal( $balance ) ); ?>" size="8"></label>
-                                    <input name="note" placeholder="Bank/PO note" class="mbs-payment-form__note">
+                                    <label class="mbs-payment-form__amount">Amount (£) <input name="amount" inputmode="decimal" value="<?php echo esc_attr( MBS_Money::decimal( $balance ) ); ?>" size="8"></label>
+                                    <label class="mbs-payment-form__note">Bank / PO note <input name="note" class="mbs-payment-form__note-input"></label>
                                 </div>
                                 <div class="mbs-payment-form__buttons">
                                     <button type="submit" class="button button-primary">Record payment</button>

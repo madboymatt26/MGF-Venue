@@ -762,7 +762,7 @@ jQuery(function ($) {
         if (amountMinor < 1) { alert('The payment must be greater than zero.'); return; }
         if (!confirm('Record an offline payment of £' + (amountMinor / 100).toFixed(2) + '?')) return;
         var key = window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() : ('manual-' + Date.now() + '-' + Math.random().toString(16).slice(2));
-        var $button = $form.find('button');
+        var $button = $form.find('button[type="submit"]');
         $button.prop('disabled', true).text('Recording…');
         $.post(MBS_Admin.ajax_url, {
             action: 'mbs_record_invoice_manual_payment', nonce: MBS_Admin.nonce,
@@ -1081,21 +1081,22 @@ jQuery(function ($) {
 // ── Invoice document modal & actions ───────────────────────────────────────────
 (function($) {
     var $modal = null;
+    var $opener = null; // Remember what opened the modal for focus restore
 
     function getModal() {
         if (!$modal) $modal = $('#mbs-invoice-modal');
         return $modal;
     }
 
-    function openInvoiceModal(documentId) {
+    function openInvoiceModal(documentId, invoiceRef, triggerEl) {
         var m = getModal();
         if (!m.length) return;
+        $opener = triggerEl || null;
         m.find('.mbs-modal__body').html('<p class="mbs-modal__loading">Loading invoice\u2026</p>');
-        m.find('.mbs-modal__title').text('Invoice');
+        m.find('.mbs-modal__title').text('Invoice ' + (invoiceRef || ''));
         var pdfUrl = MBS_Admin.ajax_url + '?action=mbs_invoice_document&document_id=' + documentId + '&format=pdf&mode=issued&nonce=' + MBS_Admin.doc_nonce;
         m.find('.mbs-modal__download').attr('href', pdfUrl);
         m.show();
-        // Focus the modal
         m.find('.mbs-modal__close').focus();
 
         $.ajax({
@@ -1105,7 +1106,6 @@ jQuery(function ($) {
             success: function(res) {
                 if (res.success && res.data && res.data.html) {
                     m.find('.mbs-modal__body').html(res.data.html);
-                    m.find('.mbs-modal__title').text('Invoice ' + documentId);
                 } else {
                     m.find('.mbs-modal__body').html('<p style="color:#dc3545;">Could not load the invoice document.</p>');
                 }
@@ -1120,12 +1120,18 @@ jQuery(function ($) {
         var m = getModal();
         m.hide();
         m.find('.mbs-modal__body').html('');
+        // Restore focus to the element that opened the modal
+        if ($opener && $opener.length && $opener.is(':visible')) {
+            $opener.focus();
+        }
+        $opener = null;
     }
 
     $(document).on('click', '.mbs-view-invoice-btn', function(e) {
         e.preventDefault();
         var docId = $(this).data('document-id');
-        if (docId) openInvoiceModal(docId);
+        var invRef = $(this).data('invoice-ref') || '';
+        if (docId) openInvoiceModal(docId, invRef, $(this));
     });
 
     $(document).on('click', '.mbs-modal__close, .mbs-modal__close-btn, .mbs-modal__backdrop', closeModal);
