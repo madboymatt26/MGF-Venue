@@ -431,7 +431,7 @@ class MBS_Database {
             PRIMARY KEY (id),
             UNIQUE KEY message_key (message_key),
             KEY idx_status (status, next_retry),
-            KEY idx_queue_processing (status, claimed_at)
+            KEY idx_queue_processing (status, next_retry)
         ) {$charset};";
         dbDelta( $sql4 );
 
