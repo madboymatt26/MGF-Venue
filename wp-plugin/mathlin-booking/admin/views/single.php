@@ -278,7 +278,7 @@ $kitchen_price = MBS_Bookings::get_tiered_kitchen_price( $pricing_tier );
                 <hr style="margin:0.5rem 0;border:none;border-top:1px solid var(--border);">
                 <p style="font-size:0.8rem;color:var(--text-muted);margin:0 0 0.5rem;">Series (<?php echo count( MBS_Bookings::get_series( $booking->series_id ) ); ?> bookings):</p>
                 <?php if ( $booking->status === 'pending' ) : ?>
-                    <button class="button button-primary nms-btn-series-status" data-series="<?php echo esc_attr( $booking->series_id ); ?>" data-status="confirmed">✓ Confirm Series</button>
+                    <button class="button button-primary nms-btn-series-status" data-series="<?php echo esc_attr( $booking->series_id ); ?>" data-status="confirmed">Review &amp; Approve</button>
                 <?php endif; ?>
                 <button class="button nms-btn-series-status" data-series="<?php echo esc_attr( $booking->series_id ); ?>" data-status="cancelled">✗ Cancel Series</button>
                 <?php endif; ?>

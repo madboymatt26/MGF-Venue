@@ -159,7 +159,7 @@
                             <button class="button button-small nms-toggle-series" data-series="<?php echo esc_attr( $b->series_id ); ?>">▶ Expand</button>
                             <a href="?page=mathlin-booking&action=view&ref=<?php echo esc_attr( $b->ref ); ?>" class="button button-small">View</a>
                             <?php if ( $series_status === 'pending' ) { ?>
-                                <button class="button button-small button-primary nms-btn-series-status" data-series="<?php echo esc_attr( $b->series_id ); ?>" data-status="confirmed" data-expected-status="<?php echo esc_attr( $series_status ); ?>" data-expected-version="<?php echo esc_attr( $series_record ? $series_record->version : 0 ); ?>">Approve Series</button>
+                                <button class="button button-small button-primary nms-btn-series-status" data-series="<?php echo esc_attr( $b->series_id ); ?>" data-status="confirmed" data-expected-status="<?php echo esc_attr( $series_status ); ?>" data-expected-version="<?php echo esc_attr( $series_record ? $series_record->version : 0 ); ?>">Review &amp; Approve</button>
                             <?php } ?>
                             <?php if ( $series_record && $series_status === 'confirmed' ) { ?>
                                 <button class="button button-small nms-btn-resend-series" data-series="<?php echo esc_attr( $b->series_id ); ?>">Resend Approval</button>
@@ -167,6 +167,9 @@
                             <?php if ( $series_record ) { ?>
                                 <button class="button button-small nms-btn-series-status" data-series="<?php echo esc_attr( $b->series_id ); ?>" data-status="cancelled" data-scope="future" data-expected-status="<?php echo esc_attr( $series_status ); ?>" data-expected-version="<?php echo esc_attr( $series_record->version ); ?>">Cancel Future</button>
                                 <button class="button button-small nms-btn-series-status" data-series="<?php echo esc_attr( $b->series_id ); ?>" data-status="cancelled" data-scope="all" data-expected-status="<?php echo esc_attr( $series_status ); ?>" data-expected-version="<?php echo esc_attr( $series_record->version ); ?>">Cancel All</button>
+                                <?php if ( $series_status === 'cancelled' ) { ?>
+                                    <button class="button button-small nms-btn-delete-archive-series" data-series="<?php echo esc_attr( $b->series_id ); ?>" style="color:#dc3545;">Delete &amp; Archive</button>
+                                <?php } ?>
                             <?php } else { ?>
                                 <button class="button button-small nms-btn-series-status" data-series="<?php echo esc_attr( $b->series_id ); ?>" data-status="cancelled">Cancel All</button>
                             <?php } ?>

@@ -759,6 +759,27 @@ jQuery(function ($) {
         });
     });
 
+    // ── Delete & Archive series ────────────────────────────────────────────────
+    $(document).on('click', '.nms-btn-delete-archive-series', function () {
+        var $btn = $(this);
+        var seriesId = $btn.data('series');
+        if (!confirm('Delete & Archive series ' + seriesId + '?\n\nThis will:\n• Archive past bookings\n• Delete future bookings\n• Remove the series record\n\nInvoices/credit notes are preserved. This cannot be undone.')) return;
+        $btn.prop('disabled', true);
+        $.post(MBS_Admin.ajax_url, {
+            action: 'mbs_delete_archive_series',
+            nonce: MBS_Admin.nonce,
+            series_ref: seriesId
+        }, function (res) {
+            $btn.prop('disabled', false);
+            if (res.success) {
+                alert('Done: ' + res.data.archived + ' booking(s) archived, ' + res.data.deleted + ' deleted.');
+                window.location.reload();
+            } else {
+                alert('Error: ' + (res.data || 'Unknown error'));
+            }
+        });
+    });
+
     $(document).on('click', '.nms-btn-series-pause', function () {
         var $btn = $(this);
         var paused = parseInt($btn.data('paused'), 10) === 1;

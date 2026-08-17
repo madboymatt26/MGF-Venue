@@ -35,6 +35,7 @@ class MBS_Admin {
         add_action( 'wp_ajax_mbs_pause_series', array( $this, 'ajax_pause_series' ) );
         add_action( 'wp_ajax_mbs_catch_up_series_billing', array( $this, 'ajax_catch_up_series_billing' ) );
         add_action( 'wp_ajax_mbs_extend_external_series', array( $this, 'ajax_extend_external_series' ) );
+        add_action( 'wp_ajax_mbs_delete_archive_series', array( $this, 'ajax_delete_archive_series' ) );
         add_action( 'wp_ajax_mbs_cancel_scout_series', array( $this, 'ajax_cancel_scout_series' ) );
         add_action( 'wp_ajax_mbs_edit_scout_series', array( $this, 'ajax_edit_scout_series' ) );
         add_action( 'wp_ajax_mbs_extend_scout_series', array( $this, 'ajax_extend_scout_series' ) );
@@ -1143,6 +1144,53 @@ class MBS_Admin {
             'payment_method'    => $series->payment_method,
             'invoice_lead_days' => (int) $series->invoice_lead_days,
             'payment_terms_days' => (int) $series->payment_terms_days,
+        ) );
+    }
+
+    /**
+     * Delete & Archive a cancelled series.
+     * - Past bookings → archived
+     * - Future bookings → deleted
+     * - Series record → deleted
+     * - Invoices/credit notes remain (financial history preserved)
+     */
+    public function ajax_delete_archive_series() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'Permission denied.', 403 );
+
+        $series_ref = sanitize_text_field( $_POST['series_ref'] ?? '' );
+        if ( ! $series_ref ) wp_send_json_error( 'Series reference is required.', 400 );
+
+        $series = MBS_Series::get( $series_ref );
+        if ( ! $series ) wp_send_json_error( 'Series not found.', 404 );
+        if ( $series->status !== 'cancelled' ) wp_send_json_error( 'Only cancelled series can be deleted and archived.', 400 );
+
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_TABLE;
+        $series_table = $wpdb->prefix . MBS_SERIES_TABLE;
+        $today = current_time( 'Y-m-d' );
+
+        // Archive past bookings (set status to 'archived')
+        $archived = (int) $wpdb->query( $wpdb->prepare(
+            "UPDATE {$table} SET status = 'archived', updated_at = NOW() WHERE series_id = %s AND booking_date < %s",
+            $series_ref, $today
+        ) );
+
+        // Delete future bookings
+        $deleted = (int) $wpdb->query( $wpdb->prepare(
+            "DELETE FROM {$table} WHERE series_id = %s AND booking_date >= %s",
+            $series_ref, $today
+        ) );
+
+        // Delete the series record
+        $wpdb->delete( $series_table, array( 'series_ref' => $series_ref ) );
+
+        MBS_Audit_Log::log( $series_ref, 'series_deleted', "Delete & Archive: archived {$archived} past booking(s), deleted {$deleted} future booking(s), removed series record." );
+
+        wp_send_json_success( array(
+            'series_ref' => $series_ref,
+            'archived'   => $archived,
+            'deleted'    => $deleted,
         ) );
     }
 
