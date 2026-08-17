@@ -275,3 +275,4 @@
     </table>
     <?php endif; ?>
 </div>
+<?php include __DIR__ . '/partials/approval-modal.php'; ?>

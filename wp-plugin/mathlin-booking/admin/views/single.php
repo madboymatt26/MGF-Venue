@@ -327,6 +327,7 @@ $kitchen_price = MBS_Bookings::get_tiered_kitchen_price( $pricing_tier );
     </div>
     <?php endif; ?>
 </div>
+<?php include __DIR__ . '/partials/approval-modal.php'; ?>
 
 <style>
 .nms-edit-label { display:block;font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:3px; }

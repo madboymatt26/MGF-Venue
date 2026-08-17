@@ -653,8 +653,70 @@ jQuery(function ($) {
         var scope    = $btn.data('scope') || 'all';
         var expectedStatus = $btn.data('expected-status') || '';
         var expectedVersion = parseInt($btn.data('expected-version'), 10) || 0;
-        var label    = status.charAt(0).toUpperCase() + status.slice(1);
 
+        // ── Approval: open the Review & Approve modal instead of direct confirm ──
+        if (status === 'confirmed') {
+            $btn.prop('disabled', true);
+            $.post(MBS_Admin.ajax_url, {
+                action: 'mbs_get_series_for_approval',
+                nonce: MBS_Admin.nonce,
+                series_ref: seriesId
+            }, function(res) {
+                $btn.prop('disabled', false);
+                if (!res.success) {
+                    alert('Could not load series: ' + (res.data || 'Unknown error'));
+                    return;
+                }
+                var s = res.data;
+
+                // Scout/no-charge: approve directly without billing review
+                if (s.scout_use) {
+                    if (!confirm('Approve this no-charge Scout series?')) return;
+                    $.post(MBS_Admin.ajax_url, {
+                        action: 'mbs_approve_series_with_billing',
+                        nonce: MBS_Admin.nonce,
+                        series_ref: s.series_ref,
+                        expected_version: s.version,
+                        billing_mode: 'none',
+                        billing_treatment: 'none',
+                        payment_method: 'none'
+                    }, function(r) {
+                        if (r.success) location.reload();
+                        else alert(r.data || 'Approval failed.');
+                    });
+                    return;
+                }
+
+                // Populate modal with series data
+                $('#mbs-approval-series-ref').text(s.series_ref);
+                $('#mbs-approval-space').text(s.space);
+                $('#mbs-approval-price').text('£' + s.price_per_booking.toFixed(2));
+                $('#mbs-approval-total').text('£' + s.estimated_total.toFixed(2));
+                $('#mbs-approval-dates').text(s.accepted_count + ' of ' + s.requested_count + ' requested');
+                var $form = $('#mbs-approval-form');
+                $form.find('[name="series_ref"]').val(s.series_ref);
+                $form.find('[name="expected_version"]').val(s.version);
+                $form.find('[name="billing_mode"]').val(s.billing_mode);
+                $form.find('[name="billing_treatment"]').val(s.billing_treatment);
+                $form.find('[name="payment_method"]').val(s.payment_method);
+                $form.find('[name="invoice_lead_days"]').val(s.invoice_lead_days);
+                $form.find('[name="payment_terms_days"]').val(s.payment_terms_days);
+                $form.find('.mbs-approval-message').text('');
+                $form.find('[type="submit"]').prop('disabled', false);
+                // Show/hide term dates row
+                $('.mbs-term-dates-row').toggle(s.billing_mode === 'termly');
+                $('#mbs-term-list').empty();
+
+                $('#mbs-approval-modal').show();
+            }).fail(function() {
+                $btn.prop('disabled', false);
+                alert('Request failed. Please try again.');
+            });
+            return;
+        }
+
+        // ── Cancellation: keep the original direct-post behaviour ──
+        var label    = status.charAt(0).toUpperCase() + status.slice(1);
         var scopeLabel = status === 'cancelled' && scope === 'future' ? ' future bookings in ' : ' all bookings in ';
         if (!confirm(label + scopeLabel + 'series ' + seriesId + '?')) return;
         $btn.prop('disabled', true);
@@ -762,7 +824,7 @@ jQuery(function ($) {
         if (amountMinor < 1) { alert('The payment must be greater than zero.'); return; }
         if (!confirm('Record an offline payment of £' + (amountMinor / 100).toFixed(2) + '?')) return;
         var key = window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() : ('manual-' + Date.now() + '-' + Math.random().toString(16).slice(2));
-        var $button = $form.find('button[type="submit"]');
+        var $button = $form.find('button');
         $button.prop('disabled', true).text('Recording…');
         $.post(MBS_Admin.ajax_url, {
             action: 'mbs_record_invoice_manual_payment', nonce: MBS_Admin.nonce,
@@ -921,19 +983,21 @@ jQuery(function ($) {
 (function($) {
     'use strict';
 
-    // Open the review modal
+    // Open the review modal (series detail page button)
     $(document).on('click', '.nms-btn-review-approve', function() {
-        var isScout = $(this).data('scout') === 1 || $(this).data('scout') === '1';
+        var $btn = $(this);
+        var seriesRef = $btn.data('series');
+        var isScout = $btn.data('scout') === 1 || $btn.data('scout') === '1';
+        var expectedVersion = parseInt($btn.data('expected-version'), 10) || 0;
+
         if (isScout) {
             // Scout/no-charge: approve directly without billing review
-            var series = $(this).data('series');
-            var version = $(this).data('expected-version');
             if (!confirm('Approve this no-charge Scout series?')) return;
             $.post(MBS_Admin.ajax_url, {
                 action: 'mbs_approve_series_with_billing',
                 nonce: MBS_Admin.nonce,
-                series_ref: series,
-                expected_version: version,
+                series_ref: seriesRef,
+                expected_version: expectedVersion,
                 billing_mode: 'none',
                 billing_treatment: 'none',
                 payment_method: 'none'
@@ -943,7 +1007,42 @@ jQuery(function ($) {
             });
             return;
         }
-        $('#mbs-approval-modal').show();
+
+        // Fetch series data and populate modal
+        $btn.prop('disabled', true);
+        $.post(MBS_Admin.ajax_url, {
+            action: 'mbs_get_series_for_approval',
+            nonce: MBS_Admin.nonce,
+            series_ref: seriesRef
+        }, function(res) {
+            $btn.prop('disabled', false);
+            if (!res.success) {
+                alert('Could not load series: ' + (res.data || 'Unknown error'));
+                return;
+            }
+            var s = res.data;
+            $('#mbs-approval-series-ref').text(s.series_ref);
+            $('#mbs-approval-space').text(s.space);
+            $('#mbs-approval-price').text('£' + s.price_per_booking.toFixed(2));
+            $('#mbs-approval-total').text('£' + s.estimated_total.toFixed(2));
+            $('#mbs-approval-dates').text(s.accepted_count + ' of ' + s.requested_count + ' requested');
+            var $form = $('#mbs-approval-form');
+            $form.find('[name="series_ref"]').val(s.series_ref);
+            $form.find('[name="expected_version"]').val(s.version);
+            $form.find('[name="billing_mode"]').val(s.billing_mode);
+            $form.find('[name="billing_treatment"]').val(s.billing_treatment);
+            $form.find('[name="payment_method"]').val(s.payment_method);
+            $form.find('[name="invoice_lead_days"]').val(s.invoice_lead_days);
+            $form.find('[name="payment_terms_days"]').val(s.payment_terms_days);
+            $form.find('.mbs-approval-message').text('');
+            $form.find('[type="submit"]').prop('disabled', false);
+            $('.mbs-term-dates-row').toggle(s.billing_mode === 'termly');
+            $('#mbs-term-list').empty();
+            $('#mbs-approval-modal').show();
+        }).fail(function() {
+            $btn.prop('disabled', false);
+            alert('Request failed. Please try again.');
+        });
     });
 
     // Close modal
@@ -1072,79 +1171,8 @@ jQuery(function ($) {
         previewTimer = setTimeout(refreshBillingPreview, 500);
     });
 
-    // Initial load when modal opens
-    $(document).on('click', '.nms-btn-review-approve', function() {
-        setTimeout(refreshBillingPreview, 200);
-    });
-})(jQuery);
-
-// ── Invoice document modal & actions ───────────────────────────────────────────
-(function($) {
-    var $modal = null;
-    var $opener = null; // Remember what opened the modal for focus restore
-
-    function getModal() {
-        if (!$modal) $modal = $('#mbs-invoice-modal');
-        return $modal;
-    }
-
-    function openInvoiceModal(documentId, invoiceRef, triggerEl) {
-        var m = getModal();
-        if (!m.length) return;
-        $opener = triggerEl || null;
-        m.find('.mbs-modal__body').html('<p class="mbs-modal__loading">Loading invoice\u2026</p>');
-        m.find('.mbs-modal__title').text('Invoice ' + (invoiceRef || ''));
-        var pdfUrl = MBS_Admin.ajax_url + '?action=mbs_invoice_document&document_id=' + documentId + '&format=pdf&mode=issued&nonce=' + MBS_Admin.doc_nonce;
-        m.find('.mbs-modal__download').attr('href', pdfUrl);
-        m.show();
-        m.find('.mbs-modal__close').focus();
-
-        $.ajax({
-            url: MBS_Admin.ajax_url,
-            method: 'POST',
-            data: { action: 'mbs_invoice_document', document_id: documentId, format: 'html', mode: 'issued', nonce: MBS_Admin.doc_nonce },
-            success: function(res) {
-                if (res.success && res.data && res.data.html) {
-                    m.find('.mbs-modal__body').html(res.data.html);
-                } else {
-                    m.find('.mbs-modal__body').html('<p style="color:#dc3545;">Could not load the invoice document.</p>');
-                }
-            },
-            error: function() {
-                m.find('.mbs-modal__body').html('<p style="color:#dc3545;">Failed to fetch invoice. Please try again.</p>');
-            }
-        });
-    }
-
-    function closeModal() {
-        var m = getModal();
-        m.hide();
-        m.find('.mbs-modal__body').html('');
-        // Restore focus to the element that opened the modal
-        if ($opener && $opener.length && $opener.is(':visible')) {
-            $opener.focus();
-        }
-        $opener = null;
-    }
-
-    $(document).on('click', '.mbs-view-invoice-btn', function(e) {
-        e.preventDefault();
-        var docId = $(this).data('document-id');
-        var invRef = $(this).data('invoice-ref') || '';
-        if (docId) openInvoiceModal(docId, invRef, $(this));
-    });
-
-    $(document).on('click', '.mbs-modal__close, .mbs-modal__close-btn, .mbs-modal__backdrop', closeModal);
-    $(document).on('keydown', function(e) { if (e.key === 'Escape') closeModal(); });
-
-    // Payment toggle
-    $(document).on('click', '.mbs-record-payment-toggle', function() {
-        $(this).closest('.mbs-invoice-card').find('.mbs-payment-panel').slideDown(200);
-        $(this).hide();
-    });
-    $(document).on('click', '.mbs-record-payment-cancel', function() {
-        var card = $(this).closest('.mbs-invoice-card');
-        card.find('.mbs-payment-panel').slideUp(200);
-        card.find('.mbs-record-payment-toggle').show();
+    // Initial load when modal opens (from any button that shows the modal)
+    $(document).on('click', '.nms-btn-review-approve, .nms-btn-series-status[data-status="confirmed"]', function() {
+        setTimeout(refreshBillingPreview, 400);
     });
 })(jQuery);
