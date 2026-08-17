@@ -30,6 +30,7 @@ class MBS_Admin {
         add_action( 'wp_ajax_mbs_resolve_invoice_reconciliation', array( $this, 'ajax_resolve_invoice_reconciliation' ) );
         add_action( 'wp_ajax_mbs_configure_series_billing', array( $this, 'ajax_configure_series_billing' ) );
         add_action( 'wp_ajax_mbs_approve_series_with_billing', array( $this, 'ajax_approve_series_with_billing' ) );
+        add_action( 'wp_ajax_mbs_get_series_for_approval', array( $this, 'ajax_get_series_for_approval' ) );
         add_action( 'wp_ajax_mbs_billing_preview', array( $this, 'ajax_billing_preview' ) );
         add_action( 'wp_ajax_mbs_pause_series', array( $this, 'ajax_pause_series' ) );
         add_action( 'wp_ajax_mbs_catch_up_series_billing', array( $this, 'ajax_catch_up_series_billing' ) );
@@ -166,7 +167,6 @@ class MBS_Admin {
         wp_localize_script( 'mbs-admin', 'MBS_Admin', array(
             'ajax_url' => admin_url( 'admin-ajax.php' ),
             'nonce'    => wp_create_nonce( 'mbs_admin_nonce' ),
-            'doc_nonce' => wp_create_nonce( 'mbs_invoice_document_nonce' ),
         ) );
         // Enqueue media library for logo upload
         if ( strpos( $hook, 'mathlin-emails' ) !== false ) {
@@ -243,23 +243,6 @@ class MBS_Admin {
         $occurrences = $series ? MBS_Series::occurrences( $series->series_ref ) : array();
         $exceptions = $series ? MBS_Series::exceptions( $series ) : array();
         $invoices = $series ? MBS_Series::invoices( $series->series_ref ) : array();
-        // Map ledger invoice IDs to their current immutable document IDs (single query)
-        $invoice_documents = array();
-        if ( $invoices ) {
-            global $wpdb;
-            $doc_table = $wpdb->prefix . MBS_INVOICE_DOCUMENTS_TABLE;
-            $invoice_ids = array_map( function( $inv ) { return (int) $inv->id; }, $invoices );
-            $placeholders = implode( ',', array_fill( 0, count( $invoice_ids ), '%d' ) );
-            $doc_rows = $wpdb->get_results( $wpdb->prepare(
-                "SELECT invoice_id, id AS document_id FROM {$doc_table} WHERE invoice_id IN ({$placeholders}) AND status = 'issued' ORDER BY revision DESC",
-                $invoice_ids
-            ) );
-            foreach ( $doc_rows as $dr ) {
-                if ( ! isset( $invoice_documents[ (int) $dr->invoice_id ] ) ) {
-                    $invoice_documents[ (int) $dr->invoice_id ] = (int) $dr->document_id;
-                }
-            }
-        }
         $preview = $series ? MBS_Billing_Engine::preview( $series->series_ref ) : array();
         $audit = $series ? MBS_Audit_Log::get_for_booking( $series->series_ref ) : array();
         include MBS_PLUGIN_DIR . 'admin/views/series.php';
@@ -1129,6 +1112,38 @@ class MBS_Admin {
             wp_send_json_error( $result->get_error_message(), $status );
         }
         wp_send_json_success( array( 'series_ref' => $series_ref, 'status' => 'confirmed' ) );
+    }
+
+    /**
+     * Return series billing defaults for the approval modal.
+     * Used when opening the Review & Approve modal from the list or single-booking pages.
+     */
+    public function ajax_get_series_for_approval() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'Permission denied.', 403 );
+
+        $series_ref = sanitize_text_field( $_POST['series_ref'] ?? '' );
+        if ( ! $series_ref ) wp_send_json_error( 'Series reference is required.', 400 );
+
+        $series = MBS_Series::get( $series_ref );
+        if ( ! $series ) wp_send_json_error( 'Series not found.', 404 );
+
+        wp_send_json_success( array(
+            'series_ref'        => $series->series_ref,
+            'version'           => (int) $series->version,
+            'status'            => $series->status,
+            'space'             => $series->space,
+            'price_per_booking' => (float) $series->price_per_booking,
+            'estimated_total'   => (float) $series->estimated_total,
+            'accepted_count'    => (int) $series->accepted_count,
+            'requested_count'   => (int) $series->requested_count,
+            'scout_use'         => (bool) $series->scout_use,
+            'billing_mode'      => $series->billing_mode,
+            'billing_treatment' => $series->billing_treatment,
+            'payment_method'    => $series->payment_method,
+            'invoice_lead_days' => (int) $series->invoice_lead_days,
+            'payment_terms_days' => (int) $series->payment_terms_days,
+        ) );
     }
 
     public function ajax_configure_series_billing() {

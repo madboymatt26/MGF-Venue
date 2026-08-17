@@ -955,6 +955,7 @@ class MBS_Rest_API {
             'resolve_invoice_reconciliation' => array( 'MBS_Admin', 'ajax_resolve_invoice_reconciliation' ),
             'configure_series_billing' => array( 'MBS_Admin', 'ajax_configure_series_billing' ),
             'approve_series_with_billing' => array( 'MBS_Admin', 'ajax_approve_series_with_billing' ),
+            'get_series_for_approval' => array( 'MBS_Admin', 'ajax_get_series_for_approval' ),
             'billing_preview'       => array( 'MBS_Admin', 'ajax_billing_preview' ),
             'pause_series'          => array( 'MBS_Admin', 'ajax_pause_series' ),
             'catch_up_series_billing' => array( 'MBS_Admin', 'ajax_catch_up_series_billing' ),
