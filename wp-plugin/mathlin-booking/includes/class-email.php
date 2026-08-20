@@ -14,7 +14,7 @@ class MBS_Email {
     /**
      * Get all notification email addresses (comma-separated in settings).
      */
-    private static function notification_emails() {
+    public static function notification_emails() {
         $primary    = MBS_Bookings::get_admin_email();
         $additional = get_option( 'mbs_additional_emails', '' );
 
@@ -27,7 +27,7 @@ class MBS_Email {
                 }
             }
         }
-        return $emails;
+        return array_values( array_unique( $emails ) );
     }
 
     public static function notify_admin( $booking ) {

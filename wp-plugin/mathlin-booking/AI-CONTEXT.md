@@ -1,4 +1,4 @@
-# AI-CONTEXT.md — MGF Venue (v3.24.2)
+# AI-CONTEXT.md — MGF Venue (v3.24.3)
 
 This document is designed for LLMs and AI agents to read before modifying this codebase. It maps the architecture, file relationships, and critical business logic rules.
 

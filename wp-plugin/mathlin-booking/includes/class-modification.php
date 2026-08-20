@@ -480,11 +480,33 @@ class MBS_Modification {
         $body .= '<p style="margin-top:24px;"><a href="' . admin_url( 'admin.php?page=mathlin-requests' ) . '" style="background:#7413DC;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;">Review Requests</a></p>';
         $body .= '</div></body></html>';
 
-        MBS_Email_Queue::send( $admin_email, $subject, $body, array(
+        $headers = array(
             'Content-Type: text/html; charset=UTF-8',
             'From: ' . $org['name'] . ' <' . get_option( 'admin_email', $admin_email ) . '>',
             'Reply-To: ' . $admin_email,
-        ) );
+        );
+        $sent_immediately = 0;
+        $queued_for_retry = 0;
+
+        foreach ( MBS_Email::notification_emails() as $email ) {
+            if ( MBS_Email_Queue::send( $email, $subject, $body, $headers ) ) {
+                $sent_immediately++;
+            } else {
+                $queued_for_retry++;
+            }
+        }
+
+        MBS_Audit_Log::log(
+            $booking->ref,
+            'admin_request_notification',
+            sprintf(
+                'Admin %s request notification: %d sent immediately, %d queued for retry.',
+                $type === 'cancel' ? 'cancellation' : 'change',
+                $sent_immediately,
+                $queued_for_retry
+            ),
+            0
+        );
     }
 
     /**
