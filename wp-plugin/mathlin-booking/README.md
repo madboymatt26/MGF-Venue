@@ -4,11 +4,23 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.21.0
+**Current Version:** 3.24.1
 **Requires WordPress:** 5.0+  
 **Requires PHP:** 7.4+  
 **Tested with WordPress:** 6.7  
 **License:** GPL-2.0+
+
+---
+
+## 3.24.1 Portal login and invoice visibility hotfix
+
+- Routes the customer portal through WordPress's standard sign-in flow and
+  accepts either the account email address or username, while retaining the
+  legacy AJAX field for cached pages.
+- Restores the recurring-series invoice cards, immutable HTML invoice view and
+  authenticated PDF download controls that were lost in the v3.23 admin-page
+  merge. Customer invoice delivery and financial calculations are unchanged.
+- Adds source-level regression checks for both behaviours.
 
 ---
 

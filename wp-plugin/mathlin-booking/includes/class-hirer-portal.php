@@ -217,20 +217,27 @@ class MBS_Hirer_Portal {
     public function ajax_login() {
         check_ajax_referer( 'mbs_public_nonce', 'nonce' );
 
-        $email = sanitize_email( $_POST['email'] ?? '' );
-        $pass  = $_POST['password'] ?? '';
+        // Follow the same authentication path as wp-login.php.  Keep accepting
+        // the legacy `email` field so cached/older portal markup still works.
+        $login = sanitize_text_field( wp_unslash( $_POST['login'] ?? $_POST['email'] ?? '' ) );
+        $pass  = isset( $_POST['password'] ) ? (string) wp_unslash( $_POST['password'] ) : '';
 
-        if ( ! $email || ! $pass ) {
-            wp_send_json_error( array( 'message' => 'Please enter your email and password.' ) );
+        if ( ! $login || ! $pass ) {
+            wp_send_json_error( array( 'message' => 'Please enter your email address or username and password.' ) );
         }
 
-        $user = wp_authenticate( $email, $pass );
+        $user = wp_signon( array(
+            'user_login'    => $login,
+            'user_password' => $pass,
+            'remember'      => false,
+        ), is_ssl() );
         if ( is_wp_error( $user ) ) {
-            wp_send_json_error( array( 'message' => 'Invalid email or password.' ) );
+            wp_send_json_error( array( 'message' => 'Invalid email address, username or password.' ) );
         }
 
+        // wp_signon() sets the authentication cookie; setting the current user
+        // makes the successful AJAX request consistent for login hooks too.
         wp_set_current_user( $user->ID );
-        wp_set_auth_cookie( $user->ID );
 
         wp_send_json_success( array( 'message' => 'Logged in! Redirecting…' ) );
     }

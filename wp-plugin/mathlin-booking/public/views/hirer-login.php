@@ -14,12 +14,12 @@
             <form id="nms-hirer-login">
                 <?php wp_nonce_field( 'mbs_public_nonce', 'nonce' ); ?>
                 <div class="nms-form-group">
-                    <label for="nms-login-email">Email Address</label>
-                    <input type="email" id="nms-login-email" name="email" required>
+                    <label for="nms-login-identity">Email Address or Username</label>
+                    <input type="text" id="nms-login-identity" name="login" autocomplete="username" required>
                 </div>
                 <div class="nms-form-group">
                     <label for="nms-login-pass">Password</label>
-                    <input type="password" id="nms-login-pass" name="password" required>
+                    <input type="password" id="nms-login-pass" name="password" autocomplete="current-password" required>
                 </div>
                 <div class="nms-form-group" style="margin-top:0.5rem;">
                     <button type="submit" class="nms-btn nms-btn-primary" style="width:100%;">Log In</button>

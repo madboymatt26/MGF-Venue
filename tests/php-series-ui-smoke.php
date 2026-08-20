@@ -1,6 +1,8 @@
 <?php
 $root = dirname( __DIR__ );
 $admin = file_get_contents( $root . '/wp-plugin/mathlin-booking/admin/class-admin.php' );
+$admin_js = file_get_contents( $root . '/wp-plugin/mathlin-booking/admin/admin.js' );
+$admin_css = file_get_contents( $root . '/wp-plugin/mathlin-booking/admin/admin.css' );
 $admin_view = file_get_contents( $root . '/wp-plugin/mathlin-booking/admin/views/series.php' );
 $single_view = file_get_contents( $root . '/wp-plugin/mathlin-booking/admin/views/single.php' );
 $portal = file_get_contents( $root . '/wp-plugin/mathlin-booking/includes/class-hirer-portal.php' );
@@ -24,6 +26,16 @@ series_ui_has( $admin, 'MBS_Billing_Engine::configure_series', 'Admin billing ch
 series_ui_has( $admin, 'MBS_Series::set_paused', 'Admin pause/resume uses optimistic series state.' );
 series_ui_has( $admin_view, 'Invoice preview', 'Series detail renders an invoice preview.' );
 series_ui_has( $admin_view, 'Invoices &amp; payments', 'Series detail renders invoice and payment history.' );
+series_ui_has( $admin, "'doc_nonce' => wp_create_nonce( 'mbs_invoice_document_nonce' )", 'Admin JavaScript receives a dedicated invoice-document nonce.' );
+series_ui_has( $admin, '$invoice_documents', 'Series rendering batch-loads immutable invoice document identifiers.' );
+series_ui_has( $admin_view, 'mbs-view-invoice-btn', 'Series invoices expose the immutable issued document for viewing.' );
+series_ui_has( $admin_view, 'Download PDF', 'Series invoices expose a secure PDF download action.' );
+series_ui_has( $admin_view, 'mbs_invoice_document_nonce', 'Server-rendered PDF links include the document nonce.' );
+series_ui_has( $admin_view, 'Historical invoice — document unavailable', 'Historical invoices without snapshots are labelled clearly.' );
+series_ui_has( $admin_js, 'action: \'mbs_invoice_document\'', 'Invoice modal loads through the authenticated delivery endpoint.' );
+series_ui_has( $admin_js, '$form.find(\'button[type="submit"]\')', 'Recording payment does not disable or relabel the cancel control.' );
+series_ui_has( $admin_css, '.mbs-invoice-card', 'Recurring-series invoice cards retain their admin styling.' );
+series_ui_has( $admin_css, '.mbs-modal__content', 'Invoice modal retains its admin styling.' );
 series_ui_has( $admin_view, 'Audit history', 'Series detail renders series audit history.' );
 series_ui_has( $admin_view, 'Cancel future dates', 'Series detail distinguishes future cancellation.' );
 series_ui_has( $single_view, 'Manage its consolidated invoices', 'Occurrence detail routes financial actions to the series.' );

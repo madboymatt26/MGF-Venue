@@ -38,12 +38,12 @@ if ( isset( $_GET['mbs_modify'] ) && $_GET['mbs_modify'] === '1' ) {
                 <form id="nms-manage-login" class="nms-form" novalidate>
                     <?php wp_nonce_field( 'mbs_public_nonce', 'nonce' ); ?>
                     <div class="nms-form-group">
-                        <label for="nms-login-email">Email Address</label>
-                        <input type="email" id="nms-login-email" name="email" placeholder="your@email.com" required>
+                        <label for="nms-login-identity">Email Address or Username</label>
+                        <input type="text" id="nms-login-identity" name="login" autocomplete="username" placeholder="your@email.com" required>
                     </div>
                     <div class="nms-form-group">
                         <label for="nms-login-pass">Password</label>
-                        <input type="password" id="nms-login-pass" name="password" placeholder="••••••••" required>
+                        <input type="password" id="nms-login-pass" name="password" autocomplete="current-password" placeholder="••••••••" required>
                     </div>
                     <div id="nms-login-msg" class="nms-manage-msg"></div>
                     <button type="submit" class="nms-btn nms-btn-primary" style="width:100%;">Sign In</button>
@@ -128,7 +128,7 @@ jQuery(function($) {
         $.post(NMS.ajax_url, {
             action:   'mbs_hirer_login',
             nonce:    $(this).find('[name=nonce]').val(),
-            email:    $('#nms-login-email').val(),
+            login:    $('#nms-login-identity').val(),
             password: $('#nms-login-pass').val()
         }, function(res) {
             if (res.success) {
