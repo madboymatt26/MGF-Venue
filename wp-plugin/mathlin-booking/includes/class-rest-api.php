@@ -599,14 +599,14 @@ class MBS_Rest_API {
         $result = MBS_Bookings::create( $data, true );
         if ( is_wp_error( $result ) ) return $result;
 
-        if ( $status === 'confirmed' && MBS_Bookings::update_status( $result['ref'], 'confirmed' ) === false ) {
+        if ( $status === 'confirmed' && MBS_Bookings::update_status( $result['ref'], 'confirmed', (bool) $notify ) === false ) {
             return new WP_Error( 'confirmation_failed', 'Booking was created but could not be confirmed.', array( 'status' => 500, 'ref' => $result['ref'] ) );
         }
 
         $booking = MBS_Bookings::get( $result['ref'] );
         if ( $notify && $booking ) {
             if ( $status === 'confirmed' ) {
-                MBS_Email::notify_confirmed( $booking );
+                if ( empty( $booking->current_invoice_document_id ) ) MBS_Email::notify_confirmed( $booking );
             } else {
                 MBS_Email::notify_booker( $result );
             }
@@ -836,7 +836,7 @@ class MBS_Rest_API {
             );
         }
 
-        if ( MBS_Bookings::update_status( $booking->ref, $status ) === false ) {
+        if ( MBS_Bookings::update_status( $booking->ref, $status, $status === 'confirmed' && $notify_hirer ) === false ) {
             return new WP_Error( 'update_failed', 'Could not update status.', array( 'status' => 500 ) );
         }
 
@@ -845,7 +845,7 @@ class MBS_Rest_API {
             if ( $series && $status === 'cancelled' ) {
                 MBS_Email::notify_series_changed( MBS_Series::get( $series->series_ref ), MBS_Series::active_occurrences( $series->series_ref ) );
             } elseif ( $status === 'confirmed' ) {
-                MBS_Email::notify_confirmed( $updated );
+                if ( empty( $updated->current_invoice_document_id ) ) MBS_Email::notify_confirmed( $updated );
             } elseif ( $status === 'cancelled' ) {
                 MBS_Email::notify_cancelled( $updated, $reason );
             }
@@ -1264,6 +1264,17 @@ class MBS_Rest_API {
         foreach ( array( 'attendees', 'chase_count' ) as $field ) {
             if ( array_key_exists( $field, $safe ) && $safe[ $field ] !== null ) $safe[ $field ] = (int) $safe[ $field ];
         }
+
+        $series = ! empty( $booking->series_id ) ? MBS_Series::get( $booking->series_id ) : null;
+        $series_managed = $series && in_array(
+            MBS_Series::billing_treatment_for_booking( $booking ),
+            array( 'manual_consolidated', 'invoice_managed', 'none' ),
+            true
+        );
+        $document_id = (int) ( $booking->current_invoice_document_id ?? 0 );
+        $safe['invoice_scope'] = $series_managed ? 'series' : ( (float) $booking->amount > 0 ? 'booking' : 'none' );
+        $safe['invoice_document_id'] = ! $series_managed && $document_id ? $document_id : null;
+        $safe['pdf_invoice_available'] = ! $series_managed && $document_id > 0;
         return $safe;
     }
 

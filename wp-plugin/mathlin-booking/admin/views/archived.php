@@ -40,6 +40,8 @@
         <?php foreach ( $bookings as $b ) :
             $spaces   = MBS_Bookings::get_spaces();
             $is_daily = isset( $spaces[ $b->space ] ) && $spaces[ $b->space ]['unit'] === 'day';
+            $archive_series = ! empty( $b->series_id ) ? MBS_Series::get( $b->series_id ) : null;
+            $archive_series_billing = $archive_series && in_array( MBS_Series::billing_treatment_for_booking( $b ), array( 'manual_consolidated', 'invoice_managed', 'none' ), true );
         ?>
             <tr>
                 <td><strong><?php echo esc_html( $b->ref ); ?></strong></td>
@@ -57,7 +59,11 @@
                 <td>
                     <div class="nms-action-btns">
                         <a href="?page=mathlin-booking&action=view&ref=<?php echo esc_attr( $b->ref ); ?>" class="button button-small">View</a>
-                        <a href="?page=mathlin-booking&action=invoice&ref=<?php echo esc_attr( $b->ref ); ?>" class="button button-small">Invoice</a>
+                        <?php if ( $archive_series_billing ) : ?>
+                            <a href="<?php echo esc_url( admin_url( 'admin.php?page=mathlin-series&ref=' . rawurlencode( $b->series_id ) ) ); ?>" class="button button-small">Series invoices</a>
+                        <?php else : ?>
+                            <a href="?page=mathlin-booking&action=invoice&ref=<?php echo esc_attr( $b->ref ); ?>" class="button button-small">Invoice</a>
+                        <?php endif; ?>
                         <button class="button button-small nms-btn-reopen" data-ref="<?php echo esc_attr( $b->ref ); ?>">Restore</button>
                         <button class="button button-small nms-btn-delete" data-ref="<?php echo esc_attr( $b->ref ); ?>">Delete</button>
                     </div>

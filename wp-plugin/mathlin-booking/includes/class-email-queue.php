@@ -284,6 +284,21 @@ class MBS_Email_Queue {
             $temp_file = null;
             $download_link_appended = false;
 
+            // Transactional booking confirmations are enqueued with a stable,
+            // side-effect-free placeholder. Build the complete branded email
+            // only after the confirmation transaction has committed.
+            if ( $email->message_type === 'booking_confirmation' && $email->reference_type === 'booking' && ! empty( $email->reference_id ) ) {
+                $booking = MBS_Bookings::get_by_id( (int) $email->reference_id );
+                if ( ! $booking ) {
+                    self::release_for_retry( $email->id, $worker_id, 'Booking confirmation source record is unavailable.' );
+                    $failed++;
+                    continue;
+                }
+                $message = MBS_Email::build_confirmation_message( $booking );
+                $email->subject = $message['subject'];
+                $email->body = $message['body'];
+            }
+
             // Determine attachment source
             if ( ! empty( $email->attachment_meta ) ) {
                 $meta = json_decode( $email->attachment_meta, true );

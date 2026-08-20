@@ -98,6 +98,10 @@ $a->run( 'One-off: idempotent replay produces no duplicate', function() use ( $w
     $doc_id_2 = (int) $after2->current_invoice_document_id;
     MBS_Audit_Assertions::assert_that( $doc_id_1 === $doc_id_2, 'Document ID should not change on replay: ' . $doc_id_1 . ' vs ' . $doc_id_2 );
 
+    // A legacy controller replaying the notifier must resolve to the same
+    // deterministic outbox row, not send an additional HTML invoice.
+    MBS_Email::notify_confirmed( $after2 );
+
     // Outbox still exactly 1
     $queue_table = $wpdb->prefix . 'mathlin_email_queue';
     $queue_count = (int) $wpdb->get_var( $wpdb->prepare(
@@ -107,7 +111,28 @@ $a->run( 'One-off: idempotent replay produces no duplicate', function() use ( $w
     MBS_Audit_Assertions::assert_that( $queue_count === 1, 'Replay must not add a second outbox entry, got ' . $queue_count );
 });
 
-// ── 3. Non-chargeable (£0) booking confirmed without document ──────────────────
+// ── 3. Notification opt-out still issues the document without emailing ────────
+
+$a->run( 'One-off: notification opt-out issues PDF document without outbox email', function() use ( $wpdb ) {
+    $b = doc_create_booking();
+    MBS_Audit_Assertions::assert_that( ! is_wp_error( $b ), 'Booking creation failed' );
+    $ref = $b['ref'];
+
+    $result = MBS_Bookings::update_status( $ref, 'confirmed', false );
+    MBS_Audit_Assertions::assert_that( $result === true, 'Opt-out confirmation should succeed' );
+
+    $after = MBS_Bookings::get( $ref );
+    MBS_Audit_Assertions::assert_that( ! empty( $after->current_invoice_document_id ), 'Opt-out confirmation must still issue the PDF document' );
+
+    $queue_table = $wpdb->prefix . 'mathlin_email_queue';
+    $queue_count = (int) $wpdb->get_var( $wpdb->prepare(
+        "SELECT COUNT(*) FROM {$queue_table} WHERE message_key LIKE %s",
+        'booking_confirmed:' . $ref . '%'
+    ) );
+    MBS_Audit_Assertions::assert_that( $queue_count === 0, 'notify_hirer=false must not enqueue a confirmation email' );
+});
+
+// ── 4. Non-chargeable (£0) booking confirmed without document ──────────────────
 
 $a->run( 'One-off: £0 booking confirms without document', function() use ( $wpdb ) {
     $b = doc_create_booking( array( 'scout_use' => true ) );
@@ -125,7 +150,7 @@ $a->run( 'One-off: £0 booking confirms without document', function() use ( $wpd
     MBS_Audit_Assertions::assert_that( empty( $after->current_invoice_document_id ), 'No document for £0 booking' );
 });
 
-// ── 4. Guest token creation ────────────────────────────────────────────────────
+// ── 5. Guest token creation ────────────────────────────────────────────────────
 
 $a->run( 'Guest token: create and validate lifecycle', function() use ( $wpdb ) {
     $b = doc_create_booking();
@@ -142,7 +167,7 @@ $a->run( 'Guest token: create and validate lifecycle', function() use ( $wpdb ) 
     MBS_Audit_Assertions::assert_that( strlen( $token ) === 64, 'Token should be 64 hex chars, got ' . strlen($token) );
 });
 
-// ── 5. Termly billing rejects empty terms ──────────────────────────────────────
+// ── 6. Termly billing rejects empty terms ──────────────────────────────────────
 
 $a->run( 'Termly: empty terms rejected on configure_series', function() use ( $wpdb ) {
     $series_table = $wpdb->prefix . MBS_SERIES_TABLE;

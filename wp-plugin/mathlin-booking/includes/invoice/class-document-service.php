@@ -147,18 +147,9 @@ class MBS_Invoice_Document_Service {
         $amount_minor_check = MBS_Money::from_decimal_string( (string) $booking->amount );
         if ( is_wp_error( $amount_minor_check ) ) $amount_minor_check = 0;
         if ( $notify_hirer && $amount_minor_check > 0 ) {
-            $message_key = 'booking_confirmed:' . $booking->ref . ':doc' . $document_id;
-            $email_body = self::build_confirmation_placeholder( $booking );
-            $subject = 'Booking Confirmed — ' . $booking->ref;
-            $headers = self::email_headers();
-            $attachment_meta = array( 'document_id' => $document_id, 'format' => 'pdf' );
-            $payload_hash = MBS_Email_Queue::compute_payload_hash( $booking->email, $subject, $email_body, $headers, $attachment_meta );
-
-            $enqueued = MBS_Email_Queue::enqueue(
-                $booking->email, $subject, $email_body, $headers,
-                $message_key, $payload_hash, $attachment_meta,
-                array( 'message_type' => 'booking_confirmation', 'reference_type' => 'booking', 'reference_id' => (int) $booking->id )
-            );
+            $booking->status = 'confirmed';
+            $booking->current_invoice_document_id = $document_id;
+            $enqueued = MBS_Email::enqueue_confirmed_document( $booking, $document_id );
             if ( is_wp_error( $enqueued ) ) {
                 $wpdb->query( 'ROLLBACK' );
                 return new WP_Error( 'queue_failed', 'Could not queue the confirmation email.' );
@@ -514,23 +505,6 @@ class MBS_Invoice_Document_Service {
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────
-
-    private static function build_confirmation_placeholder( $booking ) {
-        // The full confirmation email body is rendered by the queue worker using the template system.
-        // This is just the fallback body if the worker cannot load templates.
-        return '<p>Your booking ' . esc_html( $booking->ref ) . ' has been confirmed.</p>';
-    }
-
-    private static function email_headers() {
-        $org = class_exists( 'MBS_Email_Templates' ) ? MBS_Email_Templates::get_org_settings() : array();
-        $from_email = get_option( 'admin_email' );
-        $org_name = $org['name'] ?: get_bloginfo( 'name' );
-        return array(
-            'Content-Type: text/html; charset=UTF-8',
-            'From: ' . $org_name . ' <' . $from_email . '>',
-            'Reply-To: ' . MBS_Bookings::get_admin_email(),
-        );
-    }
 
     /**
      * Simple document issuance for already-confirmed bookings (legacy path).

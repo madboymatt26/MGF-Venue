@@ -5,6 +5,25 @@ $time_str = $is_daily ? 'All day' : ( $booking->start_time . ' – ' . $booking-
 $pricing_tier  = MBS_Bookings::get_booking_tier( $booking );
 $tier_multiplier = MBS_Bookings::get_tier_multiplier( $pricing_tier );
 $kitchen_price = MBS_Bookings::get_tiered_kitchen_price( $pricing_tier );
+$billing_treatment = MBS_Series::billing_treatment_for_booking( $booking );
+$uses_consolidated_billing = ! empty( $booking->series_id )
+    && MBS_Series::get( $booking->series_id )
+    && in_array( $billing_treatment, array( 'manual_consolidated', 'invoice_managed', 'none' ), true );
+$series_admin_url = ! empty( $booking->series_id )
+    ? admin_url( 'admin.php?page=mathlin-series&ref=' . rawurlencode( $booking->series_id ) )
+    : '';
+$invoice_document_id = ! $uses_consolidated_billing && ! empty( $booking->current_invoice_document_id )
+    ? (int) $booking->current_invoice_document_id
+    : 0;
+$invoice_document_nonce = $invoice_document_id ? wp_create_nonce( 'mbs_invoice_document_nonce' ) : '';
+$invoice_view_url = $invoice_document_id ? add_query_arg( array(
+    'action' => 'mbs_invoice_document', 'document_id' => $invoice_document_id,
+    'format' => 'html', 'mode' => 'issued', 'nonce' => $invoice_document_nonce,
+), admin_url( 'admin-ajax.php' ) ) : '';
+$invoice_pdf_url = $invoice_document_id ? add_query_arg( array(
+    'action' => 'mbs_invoice_document', 'document_id' => $invoice_document_id,
+    'format' => 'pdf', 'mode' => 'issued', 'nonce' => $invoice_document_nonce,
+), admin_url( 'admin-ajax.php' ) ) : '';
 ?>
 <div class="wrap mbs-admin">
     <h1>
@@ -51,7 +70,11 @@ $kitchen_price = MBS_Bookings::get_tiered_kitchen_price( $pricing_tier );
             ?>
             <div id="nms-view-mode" class="nms-detail-grid">
                 <div class="nms-detail-item"><label>Reference</label><span><?php echo esc_html( $booking->ref ); ?></span></div>
+                <?php if ( $uses_consolidated_billing ) : ?>
+                <div class="nms-detail-item"><label>Billing</label><span>Consolidated at series level<?php if ( $series_admin_url ) : ?> — <a href="<?php echo esc_url( $series_admin_url ); ?>">view series invoices</a><?php endif; ?></span></div>
+                <?php else : ?>
                 <div class="nms-detail-item"><label>Invoice No.</label><span><?php echo esc_html( $booking->invoice_number ); ?></span></div>
+                <?php endif; ?>
                 <div class="nms-detail-item"><label>Name</label><span><?php echo esc_html( $booking->name ); ?></span></div>
                 <div class="nms-detail-item"><label>Organisation</label><span><?php echo esc_html( $booking->organisation ?: '—' ); ?></span></div>
                 <div class="nms-detail-item"><label>Email</label><span><a href="mailto:<?php echo esc_attr( $booking->email ); ?>"><?php echo esc_html( $booking->email ); ?></a></span></div>
@@ -211,10 +234,6 @@ $kitchen_price = MBS_Bookings::get_tiered_kitchen_price( $pricing_tier );
         <div class="nms-card nms-actions-card">
             <div class="nms-card-header"><h2>Actions</h2></div>
             <div class="nms-action-list">
-                <?php
-                $billing_treatment = MBS_Series::billing_treatment_for_booking( $booking );
-                $uses_consolidated_billing = in_array( $billing_treatment, array( 'manual_consolidated', 'invoice_managed', 'none' ), true );
-                ?>
                 <?php if ( $booking->status === 'pending' ) : ?>
                     <button class="button button-primary nms-btn-confirm" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">✓ Confirm Booking</button>
                 <?php endif; ?>
@@ -258,7 +277,19 @@ $kitchen_price = MBS_Bookings::get_tiered_kitchen_price( $pricing_tier );
                 <?php if ( in_array( $booking->status, array( 'confirmed', 'deposit_paid', 'paid', 'cancelled' ) ) ) : ?>
                     <button class="button nms-btn-archive" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">📦 Archive</button>
                 <?php endif; ?>
-                <a href="?page=mathlin-booking&action=invoice&ref=<?php echo esc_attr( $booking->ref ); ?>" class="button">🧾 View Invoice</a>
+                <?php if ( $uses_consolidated_billing ) : ?>
+                    <?php if ( $series_admin_url ) : ?><a href="<?php echo esc_url( $series_admin_url ); ?>" class="button">🧾 Manage consolidated invoices</a><?php endif; ?>
+                <?php elseif ( $invoice_document_id ) : ?>
+                    <a href="<?php echo esc_url( $invoice_view_url ); ?>" class="button" target="_blank" rel="noopener">🧾 View issued invoice</a>
+                    <a href="<?php echo esc_url( $invoice_pdf_url ); ?>" class="button" target="_blank" rel="noopener">📄 Download PDF</a>
+                <?php elseif ( (float) $booking->amount <= 0 ) : ?>
+                    <div class="notice notice-info inline"><p>No invoice is required for this free booking.</p></div>
+                <?php elseif ( $booking->status === 'pending' ) : ?>
+                    <div class="notice notice-info inline"><p>The PDF invoice will be issued when this booking is confirmed.</p></div>
+                <?php else : ?>
+                    <a href="?page=mathlin-booking&action=invoice&ref=<?php echo esc_attr( $booking->ref ); ?>" class="button">🧾 View legacy invoice preview</a>
+                    <small class="nms-muted">This historical booking has no immutable PDF snapshot.</small>
+                <?php endif; ?>
                 <?php if ( get_option( 'mbs_access_enabled', 0 ) && in_array( $booking->status, array( 'paid', 'deposit_paid' ) ) ) : ?>
                 <button class="button nms-btn-resend-access" data-ref="<?php echo esc_attr( $booking->ref ); ?>">🔑 Send Access Details</button>
                 <?php if ( $booking->access_sent ) : ?>

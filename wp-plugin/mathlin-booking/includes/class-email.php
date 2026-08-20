@@ -72,7 +72,70 @@ class MBS_Email {
         self::send( $booking['email'], $subject, $body );
     }
 
+    /**
+     * Send or queue a normal booking confirmation.
+     *
+     * New chargeable one-off bookings use their immutable invoice document as
+     * the sole attachment source. The deterministic message key makes this
+     * safe when an older controller calls the notifier after the atomic
+     * confirmation service has already enqueued the message.
+     */
     public static function notify_confirmed( $booking ) {
+        if ( ! empty( $booking->current_invoice_document_id ) ) {
+            $result = self::enqueue_confirmed_document( $booking, (int) $booking->current_invoice_document_id );
+            if ( ! is_wp_error( $result ) && function_exists( 'spawn_cron' ) ) spawn_cron();
+            return ! is_wp_error( $result );
+        }
+
+        $message = self::build_confirmation_message( $booking );
+        $attachments = (float) $booking->amount > 0 ? self::generate_invoice_attachment( $booking ) : array();
+        return self::send( $booking->email, $message['subject'], $message['body'], $attachments );
+    }
+
+    /**
+     * Enqueue a confirmation with an immutable PDF document attachment.
+     * May be called inside the booking confirmation transaction.
+     *
+     * @return true|WP_Error
+     */
+    public static function enqueue_confirmed_document( $booking, $document_id ) {
+        $document_id = absint( $document_id );
+        if ( ! $document_id ) return new WP_Error( 'invalid_document_id', 'A valid invoice document is required.' );
+
+        $headers = self::email_headers();
+        $attachment_meta = array( 'document_id' => $document_id, 'format' => 'pdf' );
+        $message_key = 'booking_confirmed:' . $booking->ref . ':doc' . $document_id;
+        // Keep the transactional outbox payload deterministic and free from
+        // WooCommerce/template side effects. The queue worker hydrates the
+        // complete branded message after the booking transaction commits.
+        $subject = 'Booking confirmation — ' . $booking->ref;
+        $body = '<p>Your booking ' . esc_html( $booking->ref ) . ' has been confirmed.</p>';
+        $payload_hash = MBS_Email_Queue::compute_payload_hash(
+            $booking->email,
+            $subject,
+            $body,
+            $headers,
+            $attachment_meta
+        );
+
+        return MBS_Email_Queue::enqueue(
+            $booking->email,
+            $subject,
+            $body,
+            $headers,
+            $message_key,
+            $payload_hash,
+            $attachment_meta,
+            array(
+                'message_type'   => 'booking_confirmation',
+                'reference_type' => 'booking',
+                'reference_id'   => (int) $booking->id,
+            )
+        );
+    }
+
+    /** Build the complete branded booking-confirmation message. */
+    public static function build_confirmation_message( $booking ) {
         $tpl       = MBS_Email_Templates::get_template( 'booking_confirmed' );
         $subject   = MBS_Email_Templates::replace_placeholders( $tpl['subject'], $booking );
         $body_text = MBS_Email_Templates::replace_placeholders( $tpl['body'], $booking );
@@ -161,8 +224,7 @@ class MBS_Email {
 
         $body .= self::footer();
 
-        $attachments = self::generate_invoice_attachment( $booking );
-        self::send( $booking->email, $subject, $body, $attachments );
+        return array( 'subject' => $subject, 'body' => $body );
     }
 
     /**
@@ -696,7 +758,7 @@ class MBS_Email {
         return '';
     }
 
-    private static function send( $to, $subject, $html_body, $attachments = array() ) {
+    private static function email_headers() {
         $admin_email = self::admin_email();
         $org = MBS_Email_Templates::get_org_settings();
 
@@ -704,11 +766,15 @@ class MBS_Email {
         // when the admin notification email is the same as the recipient.
         // The Reply-To header ensures replies go to the admin email.
         $from_email = get_option( 'admin_email', $admin_email );
-        $headers = array(
+        return array(
             'Content-Type: text/html; charset=UTF-8',
             'From: ' . $org['name'] . ' <' . $from_email . '>',
             'Reply-To: ' . $admin_email,
         );
+    }
+
+    private static function send( $to, $subject, $html_body, $attachments = array() ) {
+        $headers = self::email_headers();
         // Use the email queue for automatic retry on failure
         return MBS_Email_Queue::send( $to, $subject, $html_body, $headers, $attachments );
     }

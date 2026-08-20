@@ -680,7 +680,7 @@ class MBS_Bookings {
         return $map;
     }
 
-    public static function update_status( $ref, $status ) {
+    public static function update_status( $ref, $status, $notify_hirer = true ) {
         global $wpdb;
         $table   = $wpdb->prefix . MBS_TABLE;
         $allowed = array( 'pending', 'confirmed', 'cancelled', 'archived', 'paid', 'deposit_paid' );
@@ -709,7 +709,7 @@ class MBS_Bookings {
 
             if ( $is_chargeable ) {
                 // Delegate to the atomic confirmation service
-                $atomic_result = MBS_Invoice_Document_Service::confirm_and_issue( $ref );
+                $atomic_result = MBS_Invoice_Document_Service::confirm_and_issue( $ref, null, (bool) $notify_hirer );
                 if ( is_wp_error( $atomic_result ) ) return false;
                 return true; // Both fresh-issue and idempotent no-op are successful
             }

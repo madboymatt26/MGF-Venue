@@ -287,12 +287,15 @@ class MBS_Admin {
             wp_send_json_error( 'Record payment against the consolidated invoice, not an individual occurrence.', 409 );
         }
 
-        $result = MBS_Bookings::update_status( $ref, $status );
+        $result = MBS_Bookings::update_status( $ref, $status, $status === 'confirmed' );
         if ( $result === false ) wp_send_json_error( 'This booking cannot be changed because it has financial history.', 409 );
 
         if ( $status === 'confirmed' ) {
             $booking = MBS_Bookings::get( $ref );
-            if ( $booking ) MBS_Email::notify_confirmed( $booking );
+            // Chargeable one-offs are notified transactionally with their PDF
+            // document. Free and legacy bookings still need the classic
+            // confirmation email, but must not create a duplicate attachment.
+            if ( $booking && empty( $booking->current_invoice_document_id ) ) MBS_Email::notify_confirmed( $booking );
         }
 
         if ( $status === 'cancelled' ) {
@@ -394,7 +397,7 @@ class MBS_Admin {
         if ( self::invoice_manages_occurrence( $booking ) ) wp_send_json_error( 'Recurring consolidated series do not use per-occurrence deposits.', 409 );
         if ( $booking->status !== 'deposit_paid' ) wp_send_json_error( 'Booking is not in Deposit Paid status.' );
 
-        MBS_Bookings::update_status( $ref, 'confirmed' );
+        MBS_Bookings::update_status( $ref, 'confirmed', false );
 
         global $wpdb;
         $table = $wpdb->prefix . MBS_TABLE;
@@ -597,7 +600,39 @@ class MBS_Admin {
         $booking = MBS_Bookings::get( $ref );
         if ( ! $booking ) wp_send_json_error( 'Not found' );
 
-        wp_send_json_success( array( 'html' => MBS_Invoice::generate_html( $booking ) ) );
+        $billing_treatment = MBS_Series::billing_treatment_for_booking( $booking );
+        if ( ! empty( $booking->series_id ) && MBS_Series::get( $booking->series_id ) && in_array( $billing_treatment, array( 'manual_consolidated', 'invoice_managed', 'none' ), true ) ) {
+            wp_send_json_success( array(
+                'html'              => '',
+                'managed_by_series' => true,
+                'series_id'         => $booking->series_id,
+                'message'           => 'This occurrence is billed through its recurring series and has no individual invoice.',
+            ) );
+        }
+
+        $document_id = (int) ( $booking->current_invoice_document_id ?? 0 );
+        if ( $document_id ) {
+            $model = MBS_Invoice_Document_Builder::build_from_document( $document_id, 'issued' );
+            if ( is_wp_error( $model ) ) wp_send_json_error( $model->get_error_message(), 500 );
+            $html = MBS_HTML_Renderer::render( $model );
+            if ( is_wp_error( $html ) ) wp_send_json_error( $html->get_error_message(), 500 );
+
+            wp_send_json_success( array(
+                'html'              => $html,
+                'managed_by_series' => false,
+                'immutable'         => true,
+                'document_id'       => $document_id,
+                'pdf_available'     => true,
+            ) );
+        }
+
+        wp_send_json_success( array(
+            'html'              => (float) $booking->amount > 0 ? MBS_Invoice::generate_html( $booking ) : '',
+            'managed_by_series' => false,
+            'immutable'         => false,
+            'legacy_preview'    => (float) $booking->amount > 0 && $booking->status !== 'pending',
+            'pdf_available'     => false,
+        ) );
     }
 
     public function ajax_save_settings() {
@@ -1800,12 +1835,12 @@ class MBS_Admin {
                 continue;
             }
 
-            if ( MBS_Bookings::update_status( $ref, $action ) === false ) { $skipped++; continue; }
+            if ( MBS_Bookings::update_status( $ref, $action, $action === 'confirmed' ) === false ) { $skipped++; continue; }
 
             // Send appropriate emails
             if ( $action === 'confirmed' ) {
                 $updated = MBS_Bookings::get( $ref );
-                if ( $updated ) MBS_Email::notify_confirmed( $updated );
+                if ( $updated && empty( $updated->current_invoice_document_id ) ) MBS_Email::notify_confirmed( $updated );
             }
             if ( $action === 'paid' ) {
                 $updated = MBS_Bookings::get( $ref );

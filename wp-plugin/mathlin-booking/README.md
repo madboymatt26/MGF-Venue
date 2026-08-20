@@ -4,11 +4,30 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.24.2
+**Current Version:** 3.24.3
 **Requires WordPress:** 5.0+  
 **Requires PHP:** 7.4+  
 **Tested with WordPress:** 6.7  
 **License:** GPL-2.0+
+
+---
+
+## 3.24.3 One-off PDF invoice parity
+
+- Shows the immutable invoice document and authenticated PDF download on a
+  normal booking's administrator screen. The legacy invoice route now renders
+  that issued snapshot rather than rebuilding the invoice from mutable booking
+  data.
+- Removes misleading individual invoice numbers and HTML invoice actions from
+  invoice-managed recurring occurrences. Those screens now route administrators
+  to the series-level consolidated invoices, and the grouped booking-list action
+  opens the dedicated series screen rather than the first occurrence.
+- Sends one idempotent confirmation email with the PDF document for chargeable
+  one-off bookings across web-admin, REST and MCP confirmation paths. Explicit
+  `notify_hirer: false` operations still issue the document without emailing.
+- Clearly identifies historical one-off previews where no immutable document
+  was issued; the plugin does not pretend a reconstructed preview was the
+  original invoice.
 
 ---
 

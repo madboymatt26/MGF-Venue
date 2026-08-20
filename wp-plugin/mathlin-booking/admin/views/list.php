@@ -157,7 +157,11 @@
                     <td>
                         <div class="nms-action-btns">
                             <button class="button button-small nms-toggle-series" data-series="<?php echo esc_attr( $b->series_id ); ?>">▶ Expand</button>
-                            <a href="?page=mathlin-booking&action=view&ref=<?php echo esc_attr( $b->ref ); ?>" class="button button-small">View</a>
+                            <?php if ( $series_record ) : ?>
+                                <a href="<?php echo esc_url( admin_url( 'admin.php?page=mathlin-series&ref=' . rawurlencode( $b->series_id ) ) ); ?>" class="button button-small">View series</a>
+                            <?php else : ?>
+                                <a href="?page=mathlin-booking&action=view&ref=<?php echo esc_attr( $b->ref ); ?>" class="button button-small">View legacy series</a>
+                            <?php endif; ?>
                             <?php if ( $series_status === 'pending' ) { ?>
                                 <button class="button button-small button-primary nms-btn-series-status" data-series="<?php echo esc_attr( $b->series_id ); ?>" data-status="confirmed" data-expected-status="<?php echo esc_attr( $series_status ); ?>" data-expected-version="<?php echo esc_attr( $series_record ? $series_record->version : 0 ); ?>">Review &amp; Approve</button>
                             <?php } ?>
@@ -198,7 +202,7 @@
                         <?php endif; ?>
                     </td>
                     <td><span class="nms-status nms-status-<?php echo esc_attr( $sb->status ); ?>"><?php echo esc_html( MBS_Bookings::status_label( $sb->status ) ); ?></span></td>
-                    <td><a href="?page=mathlin-booking&action=view&ref=<?php echo esc_attr( $sb->ref ); ?>" class="button button-small">View</a></td>
+                    <td><a href="?page=mathlin-booking&action=view&ref=<?php echo esc_attr( $sb->ref ); ?>" class="button button-small">View occurrence</a></td>
                 </tr>
                 <?php } ?>
             <?php } else {
