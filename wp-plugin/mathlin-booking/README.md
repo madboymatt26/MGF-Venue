@@ -4,11 +4,23 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.24.1
+**Current Version:** 3.24.2
 **Requires WordPress:** 5.0+  
 **Requires PHP:** 7.4+  
 **Tested with WordPress:** 6.7  
 **License:** GPL-2.0+
+
+---
+
+## 3.24.2 Wordfence-compatible portal authentication
+
+- Uses Wordfence's supported `wordfence_ls_require_captcha` integration filter
+  only around the booking portal's nonce-protected `wp_signon()` call. This
+  prevents Wordfence reCAPTCHA from rejecting custom AJAX authentication while
+  retaining its CAPTCHA on WordPress, WooCommerce and every other login route.
+- Adds a 10-attempt, 15-minute login throttle scoped by identity and network
+  address. Wordfence's remaining authentication and brute-force controls still
+  run normally.
 
 ---
 

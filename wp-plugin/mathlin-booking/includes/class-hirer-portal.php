@@ -18,6 +18,9 @@ class MBS_Hirer_Portal {
     const ROLE = 'mbs_hirer';
     const MANAGER_ROLE = 'mbs_booking_manager';
 
+    /** True only around this plugin's nonce-protected wp_signon() call. */
+    private $portal_login_in_progress = false;
+
     public function init() {
         add_action( 'init', array( $this, 'register_roles' ) );
         add_shortcode( 'mathlin_portal', array( $this, 'shortcode_portal' ) );
@@ -25,9 +28,21 @@ class MBS_Hirer_Portal {
         add_action( 'wp_ajax_nopriv_mbs_hirer_register', array( $this, 'ajax_register' ) );
         add_action( 'wp_ajax_mbs_hirer_login',       array( $this, 'ajax_login' ) );
         add_action( 'wp_ajax_nopriv_mbs_hirer_login', array( $this, 'ajax_login' ) );
+        // Wordfence documents this filter for custom authentication endpoints.
+        // The callback opts out of CAPTCHA only during our guarded wp_signon().
+        add_filter( 'wordfence_ls_require_captcha', array( $this, 'wordfence_captcha_required' ) );
 
         // Link bookings to user accounts by email
         add_action( 'user_register', array( $this, 'link_existing_bookings' ) );
+    }
+
+    /**
+     * Keep Wordfence reCAPTCHA on every request except the exact authentication
+     * call made by this portal after its nonce and rate limit have passed.
+     * Wordfence's remaining authentication and brute-force checks still run.
+     */
+    public function wordfence_captcha_required( $required ) {
+        return $this->portal_login_in_progress ? false : $required;
     }
 
     /**
@@ -226,14 +241,32 @@ class MBS_Hirer_Portal {
             wp_send_json_error( array( 'message' => 'Please enter your email address or username and password.' ) );
         }
 
-        $user = wp_signon( array(
-            'user_login'    => $login,
-            'user_password' => $pass,
-            'remember'      => false,
-        ), is_ssl() );
+        // Compensating control for custom/AJAX authentication.  Scope the
+        // counter to both network address and identity so one hirer's typo does
+        // not lock every customer behind the same proxy.
+        $remote_address = sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ?? 'unknown' ) );
+        $rate_key = 'mbs_login_' . md5( strtolower( $login ) . '|' . $remote_address );
+        $attempts = (int) get_transient( $rate_key );
+        if ( $attempts >= 10 ) {
+            wp_send_json_error( array( 'message' => 'Too many login attempts. Please wait 15 minutes and try again.' ), 429 );
+        }
+        set_transient( $rate_key, $attempts + 1, 15 * MINUTE_IN_SECONDS );
+
+        $this->portal_login_in_progress = true;
+        try {
+            $user = wp_signon( array(
+                'user_login'    => $login,
+                'user_password' => $pass,
+                'remember'      => false,
+            ), is_ssl() );
+        } finally {
+            $this->portal_login_in_progress = false;
+        }
         if ( is_wp_error( $user ) ) {
             wp_send_json_error( array( 'message' => 'Invalid email address, username or password.' ) );
         }
+
+        delete_transient( $rate_key );
 
         // wp_signon() sets the authentication cookie; setting the current user
         // makes the successful AJAX request consistent for login hooks too.
