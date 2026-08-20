@@ -219,14 +219,17 @@ jQuery(function($) {
                 html += '</table>';
 
                 html += '<div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:1rem;">';
+                if (b.invoice_pdf_url) {
+                    html += '<a href="' + escAttr(b.invoice_pdf_url) + '" class="nms-btn nms-btn-sm" style="background:#f5f0ff;color:#7413DC;border-color:#e0d0f0;">📄 Download Invoice PDF</a>';
+                }
                 if (b.payment_url) {
-                    html += '<a href="' + b.payment_url + '" class="nms-btn nms-btn-primary nms-btn-sm">💳 Pay Now</a>';
+                    html += '<a href="' + escAttr(b.payment_url) + '" class="nms-btn nms-btn-primary nms-btn-sm">💳 Pay Now</a>';
                 }
                 if (b.modify_url) {
-                    html += '<a href="' + b.modify_url + '" class="nms-btn nms-btn-sm" style="background:#f3f4f6;color:#374151;border-color:#d1d5db;">✏️ Request Changes</a>';
+                    html += '<a href="' + escAttr(b.modify_url) + '" class="nms-btn nms-btn-sm" style="background:#f3f4f6;color:#374151;border-color:#d1d5db;">✏️ Request Changes</a>';
                 }
                 if (b.ical_url) {
-                    html += '<a href="' + b.ical_url + '" class="nms-btn nms-btn-sm" style="background:#f3f4f6;color:#374151;border-color:#d1d5db;">📅 Add to Calendar</a>';
+                    html += '<a href="' + escAttr(b.ical_url) + '" class="nms-btn nms-btn-sm" style="background:#f3f4f6;color:#374151;border-color:#d1d5db;">📅 Add to Calendar</a>';
                 }
                 html += '</div>';
                 html += '</div>';
@@ -245,5 +248,6 @@ jQuery(function($) {
         return '<tr><td style="padding:8px 0;font-weight:600;color:#6b7280;width:35%;border-bottom:1px solid #f3f4f6;">' + label + '</td><td style="padding:8px 0;border-bottom:1px solid #f3f4f6;">' + escHtml(value || '—') + '</td></tr>';
     }
     function escHtml(s) { return $('<span>').text(s || '').html(); }
+    function escAttr(s) { return escHtml(s).replace(/"/g, '&quot;').replace(/'/g, '&#039;'); }
 });
 </script>

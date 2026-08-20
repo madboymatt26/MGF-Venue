@@ -4,11 +4,27 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.24.3
+**Current Version:** 3.24.4
 **Requires WordPress:** 5.0+  
 **Requires PHP:** 7.4+  
 **Tested with WordPress:** 6.7  
 **License:** GPL-2.0+
+
+---
+
+## 3.24.4 Hirer portal PDF access
+
+- Adds owner-authorised PDF downloads to signed-in hirers' consolidated
+  recurring invoice cards and one-off booking actions. Links use the existing
+  immutable document endpoint and are shown only when an issued document
+  exists.
+- Adds a protected PDF action to Quick Lookup after the booking reference and
+  email address have both matched. Its opaque credential expires after 15
+  minutes, permits three successful downloads and is protected by endpoint
+  rate limiting.
+- Keeps first-class recurring occurrences tied to their consolidated ledger
+  invoice for both document access and payment. It does not restore individual
+  occurrence invoices or per-occurrence checkout.
 
 ---
 

@@ -11,6 +11,27 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 class MBS_Invoice_Document_Service {
 
     /**
+     * Return the latest issued immutable PDF source for a ledger invoice.
+     *
+     * Ledger invoice rows deliberately do not store a mutable document
+     * pointer. Resolve the highest issued revision when presenting an invoice
+     * to a hirer.
+     */
+    public static function get_current_ledger_document_id( $invoice_id ) {
+        global $wpdb;
+        $invoice_id = absint( $invoice_id );
+        if ( ! $invoice_id ) return 0;
+
+        $doc_table = $wpdb->prefix . MBS_INVOICE_DOCUMENTS_TABLE;
+        return (int) $wpdb->get_var( $wpdb->prepare(
+            "SELECT id FROM {$doc_table}
+             WHERE invoice_id = %d AND document_type = 'invoice' AND status = 'issued'
+             ORDER BY revision DESC, id DESC LIMIT 1",
+            $invoice_id
+        ) );
+    }
+
+    /**
      * Confirm a booking and issue its immutable invoice document atomically.
      *
      * Transaction scope:

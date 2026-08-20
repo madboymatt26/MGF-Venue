@@ -108,12 +108,15 @@ foreach ( $invoices as $invoice ) $invoices_by_series[ $invoice->series_ref ][] 
             $invoice_series = isset( $series_refs[ $invoice->series_ref ] ) ? MBS_Series::get( $invoice->series_ref ) : null;
             $pay_url = $balance > 0 ? MBS_Invoice_Payment::generate_payment_url( $invoice ) : '';
             $transactions = MBS_Hirer_Portal::invoice_transactions( $invoice->id );
+            $invoice_document_id = MBS_Invoice_Document_Service::get_current_ledger_document_id( $invoice->id );
+            $invoice_pdf_url = $invoice_document_id ? MBS_Invoice_Delivery_Endpoint::authenticated_pdf_url( $invoice_document_id ) : '';
         ?>
         <div style="border-top:1px solid #e5e7eb;padding:1rem 0;display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
             <div><strong><?php echo esc_html( $invoice->invoice_ref ); ?></strong> · <?php echo esc_html( ucfirst( str_replace( '_', ' ', $invoice->status ) ) ); ?><br><span class="nms-muted"><?php echo esc_html( wp_date( 'j M Y', strtotime( $invoice->period_start ) ) . '–' . wp_date( 'j M Y', strtotime( $invoice->period_end ) ) ); ?> · Total <?php echo esc_html( MBS_Money::format( (int) $invoice->total_minor, $invoice->currency ) ); ?> · Paid <?php echo esc_html( MBS_Money::format( (int) $invoice->paid_minor, $invoice->currency ) ); ?></span>
                 <?php if ( $transactions ) : ?><details><summary>Payment history</summary><ul><?php foreach ( $transactions as $transaction ) : ?><li><?php echo esc_html( wp_date( 'j M Y', strtotime( $transaction->occurred_at ) ) . ' · ' . ucfirst( $transaction->transaction_type ) . ' ' . MBS_Money::format( (int) $transaction->amount_minor, $transaction->currency ) ); ?></li><?php endforeach; ?></ul></details><?php endif; ?>
             </div>
             <div style="text-align:right;"><strong>Balance <?php echo esc_html( MBS_Money::format( $balance, $invoice->currency ) ); ?></strong><br>
+                <?php if ( $invoice_pdf_url ) : ?><a href="<?php echo esc_url( $invoice_pdf_url ); ?>" class="nms-btn nms-btn-sm" style="background:#f5f0ff;color:#7413DC;border-color:#e0d0f0;">Download PDF</a><?php endif; ?>
                 <?php if ( $pay_url ) : ?><a href="<?php echo esc_url( $pay_url ); ?>" class="nms-btn nms-btn-sm" style="background:#2ecc71;color:#fff;border-color:#2ecc71;">Pay this invoice</a>
                 <?php elseif ( $balance > 0 && $invoice_series && $invoice_series->payment_method === 'offline_bacs' ) : ?><span class="nms-muted">Pay by BACS using <?php echo esc_html( $invoice->invoice_ref ); ?></span><?php endif; ?>
             </div>
@@ -201,6 +204,11 @@ foreach ( $invoices as $invoice ) $invoices_by_series[ $invoice->series_ref ][] 
                                     ?>
                                         <a href="<?php echo esc_url( $pay_url ); ?>" class="nms-btn nms-btn-sm" style="background:#2ecc71;color:#fff;border-color:#2ecc71;font-size:0.7rem;"><?php echo esc_html( $pay_label ); ?></a>
                                     <?php endif; endif; ?>
+                                    <?php if ( ! empty( $b->current_invoice_document_id ) ) :
+                                        $booking_pdf_url = MBS_Invoice_Delivery_Endpoint::authenticated_pdf_url( (int) $b->current_invoice_document_id );
+                                    ?>
+                                        <a href="<?php echo esc_url( $booking_pdf_url ); ?>" class="nms-btn nms-btn-sm" style="background:#f5f0ff;color:#7413DC;border-color:#e0d0f0;font-size:0.7rem;">Invoice PDF</a>
+                                    <?php endif; ?>
                                     <a href="<?php echo esc_url( rest_url( 'mathlin/v1/bookings/' . $b->ref . '/ical' ) ); ?>" class="nms-btn nms-btn-sm" style="background:#f5f0ff;color:#7413DC;border-color:#e0d0f0;font-size:0.7rem;">📅</a>
                                     <?php
                                     $mod_url = MBS_Modification::get_modification_url( $b );

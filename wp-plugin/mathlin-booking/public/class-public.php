@@ -446,8 +446,24 @@ class MBS_Public {
     // ── AJAX: lookup booking by reference ──────────────────────────────────────
     public function ajax_lookup_booking() {
         check_ajax_referer( 'mbs_public_nonce', 'nonce' );
+
         $ref   = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
         $email = sanitize_email( $_POST['email'] ?? '' );
+
+        // A successful lookup may mint a short-lived invoice credential, so
+        // throttle the endpoint itself rather than only failed lookups. The
+        // identity key avoids a reverse proxy causing unrelated hirers to
+        // share the normal limit; the wider IP ceiling still bounds spraying.
+        $remote_address = sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ?? 'unknown' ) );
+        $rate_key = 'mbs_lookup_' . md5( strtolower( $ref . '|' . $email . '|' . $remote_address ) );
+        $ip_rate_key = 'mbs_lookup_ip_' . md5( $remote_address );
+        $attempts = (int) get_transient( $rate_key );
+        $ip_attempts = (int) get_transient( $ip_rate_key );
+        if ( $attempts >= 10 || $ip_attempts >= 100 ) {
+            wp_send_json_error( array( 'message' => 'Too many lookup attempts. Please wait 15 minutes and try again.' ), 429 );
+        }
+        set_transient( $rate_key, $attempts + 1, 15 * MINUTE_IN_SECONDS );
+        set_transient( $ip_rate_key, $ip_attempts + 1, 15 * MINUTE_IN_SECONDS );
 
         if ( ! $ref || ! $email ) {
             wp_send_json_error( array( 'message' => 'Please enter your booking reference and email address.' ) );
@@ -474,12 +490,40 @@ class MBS_Public {
             'purpose'         => $booking->purpose,
             'amount'          => number_format( $booking->amount, 2 ),
             'invoice_number'  => $booking->invoice_number,
+            'invoice_pdf_url' => '',
             'ical_url'        => rest_url( 'mathlin/v1/bookings/' . $booking->ref . '/ical' ),
             'payment_url'     => '',
         );
 
-        // Add payment URL if WooCommerce is available and booking is confirmed (not yet paid)
-        if ( $booking->status === 'confirmed' && MBS_Woo_Payment::is_available() ) {
+        // A first-class recurring occurrence never has its own invoice. If it
+        // has been allocated, expose the consolidated ledger invoice instead.
+        $document_id = 0;
+        $ledger_invoice = null;
+        if ( ! empty( $booking->series_id ) ) {
+            $allocation = MBS_Billing_Ledger::get_active_booking_allocation( $booking->ref );
+            if ( $allocation && $allocation->document_type === 'invoice' ) {
+                $data['invoice_number'] = $allocation->invoice_ref;
+                $ledger_invoice = MBS_Billing_Ledger::get_invoice( $allocation->invoice_ref );
+                $document_id = MBS_Invoice_Document_Service::get_current_ledger_document_id( $allocation->invoice_id );
+            } else {
+                $data['invoice_number'] = '';
+            }
+        } elseif ( ! empty( $booking->current_invoice_document_id ) ) {
+            $document_id = (int) $booking->current_invoice_document_id;
+        }
+
+        if ( $document_id ) {
+            $guest_pdf_url = MBS_Invoice_Delivery_Endpoint::guest_pdf_url( $document_id, 15 * MINUTE_IN_SECONDS, 3 );
+            if ( ! is_wp_error( $guest_pdf_url ) ) {
+                $data['invoice_pdf_url'] = $guest_pdf_url;
+            }
+        }
+
+        // Recurring occurrences pay their consolidated invoice; one-offs keep
+        // the established booking payment path.
+        if ( $ledger_invoice && MBS_Billing_Ledger::balance_minor( $ledger_invoice ) > 0 ) {
+            $data['payment_url'] = MBS_Invoice_Payment::generate_payment_url( $ledger_invoice );
+        } elseif ( empty( $booking->series_id ) && $booking->status === 'confirmed' && MBS_Woo_Payment::is_available() ) {
             $data['payment_url'] = MBS_Woo_Payment::generate_payment_url( $booking );
         }
 

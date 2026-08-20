@@ -1,4 +1,4 @@
-# AI-CONTEXT.md — MGF Venue (v3.24.3)
+# AI-CONTEXT.md — MGF Venue (v3.24.4)
 
 This document is designed for LLMs and AI agents to read before modifying this codebase. It maps the architecture, file relationships, and critical business logic rules.
 
@@ -8,7 +8,7 @@ This document is designed for LLMs and AI agents to read before modifying this c
 > - **MGF Venue** = operator/product brand. Admin-only: WP admin menu + icon (`assets/mgf-venue-icon.png`), admin page `<h1>`s, Plugins list, updater, GDPR labels, developer `error_log` prefixes. Bundled logo assets live in `wp-plugin/mathlin-booking/assets/`.
 > - **Scout Group** = customer-facing brand. Everything a hirer sees (emails, invoices, public shortcode pages) must use the **configurable** Organisation Name (`mbs_org_name`) and uploaded logo (`mbs_org_logo_url`) via `MBS_Email_Templates::get_logo_html()` / `get_org_settings()`. **Never** surface the MGF brand or the bundled MGF assets to customers.
 
-### Invoice presentation invariant (v3.24.3)
+### Invoice presentation invariant (v3.24.4)
 
 - A chargeable one-off booking confirmed on the document-based path owns an
   immutable `current_invoice_document_id`. Admin screens, REST/MCP reads and
@@ -21,6 +21,11 @@ This document is designed for LLMs and AI agents to read before modifying this c
   the series ledger.
 - A historical one-off without a document may expose a clearly labelled legacy
   reconstruction, but it must never be described as the original issued PDF.
+- Signed-in hirers may download only owner-authorised immutable documents via
+  `MBS_Invoice_Delivery_Endpoint::authenticated_pdf_url()`. Quick Lookup may
+  mint a document-scoped URL only after reference-and-email verification; the
+  portal uses a 15-minute, three-use credential and never exposes a static PDF
+  file.
 - `MBS_Bookings::update_status()` accepts the explicit `$notify_hirer` policy.
   Web, REST and MCP controllers must not send a second legacy confirmation
   after the atomic document service has enqueued the idempotent PDF email.
