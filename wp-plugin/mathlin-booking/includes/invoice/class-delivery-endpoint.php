@@ -239,11 +239,26 @@ class MBS_Invoice_Delivery_Endpoint {
      *
      * @param int $document_id
      * @param int $ttl_seconds  Token lifetime (default 72 hours).
+     * @param int $max_uses     Maximum successful downloads (default 5).
      * @return string|WP_Error  The raw token (to include in URL).
      */
-    public static function create_guest_token( $document_id, $ttl_seconds = 259200 ) {
+    public static function create_guest_token( $document_id, $ttl_seconds = 259200, $max_uses = 5 ) {
         global $wpdb;
         $table = $wpdb->prefix . MBS_DOWNLOAD_TOKENS_TABLE;
+
+        $document_id = absint( $document_id );
+        if ( ! $document_id ) {
+            return new WP_Error( 'invalid_document_id', 'A valid invoice document is required.' );
+        }
+        $ttl_seconds = max( 60, min( DAY_IN_SECONDS * 7, (int) $ttl_seconds ) );
+        $max_uses = max( 1, min( 20, (int) $max_uses ) );
+
+        // Tokens are operational credentials rather than audit records. Remove
+        // credentials that can no longer be used before adding another one.
+        $wpdb->query( $wpdb->prepare(
+            "DELETE FROM {$table} WHERE expires_at < %s OR (max_uses IS NOT NULL AND use_count >= max_uses)",
+            current_time( 'mysql' )
+        ) );
 
         try {
             $raw_token = bin2hex( random_bytes( 32 ) );
@@ -256,9 +271,9 @@ class MBS_Invoice_Delivery_Endpoint {
 
         $inserted = $wpdb->insert( $table, array(
             'token_hash'  => $token_hash,
-            'document_id' => (int) $document_id,
+            'document_id' => $document_id,
             'expires_at'  => $expires_at,
-            'max_uses'    => 5,
+            'max_uses'    => $max_uses,
             'created_at'  => current_time( 'mysql' ),
         ) );
 
@@ -267,6 +282,39 @@ class MBS_Invoice_Delivery_Endpoint {
         }
 
         return $raw_token;
+    }
+
+    /**
+     * Build a nonce-protected PDF URL for the current signed-in user.
+     */
+    public static function authenticated_pdf_url( $document_id ) {
+        $document_id = absint( $document_id );
+        if ( ! $document_id ) return '';
+
+        return add_query_arg( array(
+            'action'      => 'mbs_invoice_document',
+            'document_id' => $document_id,
+            'format'      => 'pdf',
+            'mode'        => 'issued',
+            'nonce'       => wp_create_nonce( 'mbs_invoice_document_nonce' ),
+        ), admin_url( 'admin-ajax.php' ) );
+    }
+
+    /**
+     * Create a short-lived, document-scoped guest PDF URL.
+     *
+     * @return string|WP_Error
+     */
+    public static function guest_pdf_url( $document_id, $ttl_seconds = 900, $max_uses = 3 ) {
+        $token = self::create_guest_token( $document_id, $ttl_seconds, $max_uses );
+        if ( is_wp_error( $token ) ) return $token;
+
+        return add_query_arg( array(
+            'action'      => 'mbs_invoice_document',
+            'token'       => $token,
+            'document_id' => absint( $document_id ),
+            'format'      => 'pdf',
+        ), admin_url( 'admin-ajax.php' ) );
     }
 
     /**
