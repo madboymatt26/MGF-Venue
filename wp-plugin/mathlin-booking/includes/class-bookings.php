@@ -488,7 +488,7 @@ class MBS_Bookings {
             'purpose'          => sanitize_text_field( $data['purpose'] ),
             'notes'            => sanitize_textarea_field( $data['notes'] ?? '' ),
             'amount'           => $cost,
-            'invoice_number'   => 'INV-' . $ref,
+            'invoice_number'   => $scout_use ? '' : 'INV-' . $ref,
         );
 
         // Store custom field responses
@@ -693,6 +693,11 @@ class MBS_Bookings {
 
         // Status change with financial history is disallowed (immutable once invoiced)
         if ( self::has_financial_history( $ref ) ) return false;
+        $sync_scout_series = ! empty( $current->scout_use ) && ! empty( $current->series_id );
+        if ( $sync_scout_series && ! MBS_Series::get( $current->series_id ) ) {
+            $registered = MBS_Series::register_legacy_groups();
+            if ( is_wp_error( $registered ) || ! MBS_Series::get( $current->series_id ) ) return false;
+        }
 
         // Issue 1: Chargeable non-series pending→confirmed MUST delegate to
         // confirm_and_issue() for one atomic transaction. Do NOT confirm first
@@ -715,12 +720,30 @@ class MBS_Bookings {
             }
         }
 
+        if ( $sync_scout_series && $wpdb->query( 'START TRANSACTION' ) === false ) return false;
         $result = $wpdb->update(
             $table,
             array( 'status' => $status ),
             array( 'ref'    => $ref ),
             array( '%s' ), array( '%s' )
         );
+
+        if ( $result === false ) {
+            if ( $sync_scout_series ) $wpdb->query( 'ROLLBACK' );
+            return false;
+        }
+
+        if ( $sync_scout_series ) {
+            $synced = MBS_Series::synchronize_scout_series( $current->series_id );
+            if ( is_wp_error( $synced ) ) {
+                $wpdb->query( 'ROLLBACK' );
+                return false;
+            }
+            if ( $wpdb->query( 'COMMIT' ) === false ) {
+                $wpdb->query( 'ROLLBACK' );
+                return false;
+            }
+        }
 
         if ( $result !== false ) {
             // Audit log
@@ -765,9 +788,31 @@ class MBS_Bookings {
     public static function delete( $ref ) {
         global $wpdb;
         $table = $wpdb->prefix . MBS_TABLE;
+        $booking = self::get( $ref );
+        if ( ! $booking ) return false;
         if ( self::has_financial_history( $ref ) ) return false;
+        $sync_scout_series = ! empty( $booking->scout_use ) && ! empty( $booking->series_id );
+        if ( $sync_scout_series && ! MBS_Series::get( $booking->series_id ) ) {
+            $registered = MBS_Series::register_legacy_groups();
+            if ( is_wp_error( $registered ) || ! MBS_Series::get( $booking->series_id ) ) return false;
+        }
+        if ( $sync_scout_series && $wpdb->query( 'START TRANSACTION' ) === false ) return false;
         MBS_Audit_Log::log( $ref, 'deleted', 'Booking permanently deleted' );
-        return $wpdb->delete( $table, array( 'ref' => $ref ), array( '%s' ) );
+        $deleted = $wpdb->delete( $table, array( 'ref' => $ref ), array( '%s' ) );
+        if ( $deleted === false ) {
+            if ( $sync_scout_series ) $wpdb->query( 'ROLLBACK' );
+            return false;
+        }
+        if ( $sync_scout_series ) {
+            if ( self::get_series( $booking->series_id ) ) {
+                $synced = MBS_Series::synchronize_scout_series( $booking->series_id );
+                if ( is_wp_error( $synced ) ) { $wpdb->query( 'ROLLBACK' ); return false; }
+            } else {
+                MBS_Series::delete_empty_scout_series( $booking->series_id );
+            }
+            if ( $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); return false; }
+        }
+        return $deleted;
     }
 
     /** Any invoice item/allocation/transaction makes the occurrence an immutable financial record. */
@@ -786,20 +831,31 @@ class MBS_Bookings {
         return (bool) $exists;
     }
 
-    /** Compatibility series actions are only for genuinely legacy Scout rows. */
-    public static function is_legacy_scout_series( $series_id ) {
+    /** Scout-series actions are limited to groups containing only Scout-use rows. */
+    public static function is_scout_series( $series_id ) {
         global $wpdb;
         $table = $wpdb->prefix . MBS_TABLE;
         $series = MBS_Series::get( sanitize_text_field( $series_id ) );
         if ( $series ) {
-            $registered_legacy_scout = ! empty( $series->metadata_incomplete ) && ! empty( $series->scout_use ) && $series->billing_treatment === 'none';
-            if ( ! $registered_legacy_scout ) return false;
+            if ( empty( $series->scout_use ) || $series->billing_treatment !== 'none' ) return false;
         }
         $counts = $wpdb->get_row( $wpdb->prepare(
             "SELECT COUNT(*) AS total, SUM(CASE WHEN scout_use = 0 THEN 1 ELSE 0 END) AS non_scout FROM {$table} WHERE series_id = %s",
             sanitize_text_field( $series_id )
         ) );
-        return $counts && (int) $counts->total > 0 && (int) $counts->non_scout === 0;
+        $all_scout = $counts && (int) $counts->total > 0 && (int) $counts->non_scout === 0;
+        if ( $all_scout && ! $series ) {
+            $registered = MBS_Series::register_legacy_groups();
+            if ( is_wp_error( $registered ) ) return false;
+            $series = MBS_Series::get( sanitize_text_field( $series_id ) );
+            return $series && ! empty( $series->scout_use ) && $series->billing_treatment === 'none';
+        }
+        return $all_scout;
+    }
+
+    /** Backward-compatible alias retained for existing integrations. */
+    public static function is_legacy_scout_series( $series_id ) {
+        return self::is_scout_series( $series_id );
     }
 
     // ── Conflict Detection ─────────────────────────────────────────────────────
@@ -1187,6 +1243,9 @@ class MBS_Bookings {
 
         if ( $result === false ) return false;
 
+        $synced = MBS_Series::synchronize_scout_series( $series_id );
+        if ( is_wp_error( $synced ) ) return $synced;
+
         // Audit log + HA cancellation notices.
         MBS_Audit_Log::log(
             $series_id,
@@ -1293,6 +1352,9 @@ class MBS_Bookings {
                 if ( $fresh ) MBS_HomeAssistant::notify( $fresh );
             }
         }
+
+        $synced = MBS_Series::synchronize_scout_series( $series_id );
+        if ( is_wp_error( $synced ) ) return $synced;
 
         // Audit log
         $changed = array();
@@ -1444,6 +1506,16 @@ class MBS_Bookings {
             $created++;
         }
 
+        $new_exceptions = array_map( static function ( $date ) {
+            return array(
+                'date'    => $date,
+                'status'  => 'conflict',
+                'message' => 'Skipped while extending because the date was blocked or conflicted with another booking.',
+            );
+        }, $skipped );
+        $synced = MBS_Series::synchronize_scout_series( $series_id, $new_exceptions );
+        if ( is_wp_error( $synced ) ) return $synced;
+
         MBS_Audit_Log::log(
             $series_id,
             'series_extended',
@@ -1493,6 +1565,9 @@ class MBS_Bookings {
 
         if ( $result === false ) return false;
 
+        $synced = MBS_Series::synchronize_scout_series( $series_id );
+        if ( is_wp_error( $synced ) ) return $synced;
+
         MBS_Audit_Log::log(
             $series_id,
             'series_reopen',
@@ -1536,18 +1611,14 @@ class MBS_Bookings {
         ) );
         if ( $history_ref ) return false;
 
-        // Notify HA to clear any active (confirmed) future bookings first —
-        // these have live calendar entries / automations regardless of scope.
+        // Capture active bookings before deletion so Home Assistant can be
+        // cleared only after the database change has succeeded.
         $active = $wpdb->get_results( $wpdb->prepare(
             "SELECT * FROM {$table}
              WHERE series_id = %s AND booking_date >= %s AND status IN ('confirmed','deposit_paid','paid')",
             $series_id,
             $today
         ) );
-        foreach ( $active as $booking ) {
-            MBS_HomeAssistant::notify_cancelled( $booking );
-        }
-
         if ( $future_only ) {
             $result = $wpdb->query( $wpdb->prepare(
                 "DELETE FROM {$table} WHERE series_id = %s AND booking_date >= %s",
@@ -1562,6 +1633,17 @@ class MBS_Bookings {
         }
 
         if ( $result === false ) return false;
+
+        if ( self::get_series( $series_id ) ) {
+            $synced = MBS_Series::synchronize_scout_series( $series_id );
+            if ( is_wp_error( $synced ) ) return $synced;
+        } else {
+            MBS_Series::delete_empty_scout_series( $series_id );
+        }
+
+        foreach ( $active as $booking ) {
+            MBS_HomeAssistant::notify_cancelled( $booking );
+        }
 
         MBS_Audit_Log::log(
             $series_id,

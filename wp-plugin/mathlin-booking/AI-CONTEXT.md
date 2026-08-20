@@ -1,4 +1,4 @@
-# AI-CONTEXT.md — MGF Venue (v3.24.4)
+# AI-CONTEXT.md — MGF Venue (v3.25.0)
 
 This document is designed for LLMs and AI agents to read before modifying this codebase. It maps the architecture, file relationships, and critical business logic rules.
 
@@ -7,6 +7,23 @@ This document is designed for LLMs and AI agents to read before modifying this c
 > **CRITICAL — two distinct brands (do not mix):**
 > - **MGF Venue** = operator/product brand. Admin-only: WP admin menu + icon (`assets/mgf-venue-icon.png`), admin page `<h1>`s, Plugins list, updater, GDPR labels, developer `error_log` prefixes. Bundled logo assets live in `wp-plugin/mathlin-booking/assets/`.
 > - **Scout Group** = customer-facing brand. Everything a hirer sees (emails, invoices, public shortcode pages) must use the **configurable** Organisation Name (`mbs_org_name`) and uploaded logo (`mbs_org_logo_url`) via `MBS_Email_Templates::get_logo_html()` / `get_org_settings()`. **Never** surface the MGF brand or the bundled MGF assets to customers.
+
+### Scout-series administration invariant (v3.25.0)
+
+- `mathlin-series` is the external/customer recurring-series surface and must
+  request `scout_use = 0`. `mathlin-scout-nights` is the internal no-charge
+  surface and must request `scout_use = 1`; never expose billing controls on it.
+- Scout Nights is series-centred, but occurrence rows remain the canonical
+  availability and Home Assistant records. New Scout groups must use
+  `MBS_Bookings::create_recurring()` so the occurrence rows and parent snapshot
+  are created transactionally.
+- Every Scout occurrence or legacy Scout-series mutation must call
+  `MBS_Series::synchronize_scout_series()` before reporting success. Preserve
+  past occurrences, creation-time exceptions, no-charge billing fields and HA
+  notification/removal behaviour.
+- `MBS_Bookings::is_legacy_scout_series()` remains as a compatibility alias;
+  new code should use `is_scout_series()` so first-class and reconstructed Scout
+  parents follow the same protected action path.
 
 ### Invoice presentation invariant (v3.24.4)
 

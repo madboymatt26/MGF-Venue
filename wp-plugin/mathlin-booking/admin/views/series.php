@@ -2,7 +2,9 @@
 <div class="wrap nms-admin-wrap">
     <h1><?php echo MBS_Admin::brand_mark(); ?> Recurring Series</h1>
 
-    <?php if ( ! empty( $ref ) && ! $series ) : ?>
+    <?php if ( ! empty( $scout_series_redirect ) ) : ?>
+        <div class="notice notice-info"><p>This is a no-charge Scout series. <a href="<?php echo esc_url( $scout_series_redirect ); ?>">Manage it in Scout Nights</a>.</p></div>
+    <?php elseif ( ! empty( $ref ) && ! $series ) : ?>
         <div class="notice notice-error"><p>Recurring series not found.</p></div>
     <?php elseif ( ! $series ) : ?>
         <form method="get" style="display:flex;gap:8px;align-items:center;margin:16px 0;">

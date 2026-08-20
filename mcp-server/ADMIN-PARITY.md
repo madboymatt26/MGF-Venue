@@ -16,8 +16,8 @@ privileged admin AJAX hook is not represented in the closed REST action map.
 | Communications | Confirmation/cancellation/payment messages through status actions, payment chase, access details and feedback request |
 | Calendar and availability | Calendar/date reads, blocked dates and conflict-aware availability checks |
 | Blocked Dates | List, add, remove and clear expired blocks |
-| Scout Nights | Scout-only reads, series reads, create, confirm/cancel, edit future occurrences, extend, reopen and administrator-only deletion |
-| External recurring series | Typed list/detail, exceptions and occurrence reads; idempotent approval, pause/resume, extension, future/all cancellation, legacy adoption, billing preview/configuration, invoice and audit history |
+| Scout Nights | Scout-only booking reads plus `list_series(series_kind=scout)`, series detail, create, confirm/cancel, edit future occurrences, extend, reopen and administrator-only deletion |
+| External recurring series | `list_series(series_kind=external)`, typed detail, exceptions and occurrence reads; idempotent approval, pause/resume, extension, future/all cancellation, legacy adoption, billing preview/configuration, invoice and audit history |
 | Consolidated invoices | Typed list/detail/item/transaction reads; redacted bearer/hash fields; exact-minor-unit idempotent offline payment writes; online/offline invoice-level payment actions |
 | Change Requests | List, approve and reject with the existing notification behaviour |
 | Audit Log | Per-booking and searchable global audit history without stored IP addresses or numeric user IDs |

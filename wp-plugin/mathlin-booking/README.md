@@ -4,11 +4,31 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.24.4
+**Current Version:** 3.25.0
 **Requires WordPress:** 5.0+  
 **Requires PHP:** 7.4+  
 **Tested with WordPress:** 6.7  
 **License:** GPL-2.0+
+
+---
+
+## 3.25.0 Scout series administration
+
+- Rebuilds Scout Nights as a series-centred, responsive list and detail screen
+  matching the Recurring Series administration style, while retaining creation,
+  future editing, extension, per-night cancellation/reopening, bulk future
+  cancellation/reopening, conflict reporting and administrator-only deletion.
+- Separates internal no-charge Scout series from external customer recurring
+  series in the web admin, REST API and MCP list filters. Direct admin links are
+  routed to the appropriate management surface.
+- Creates new Scout series through the transactional first-class recurrence
+  path and keeps parent dates, schedule, counts, exceptions and status in sync
+  after Scout occurrence or series changes. Older occurrence-only Scout groups
+  are registered and reconciled idempotently during the 3.25.0 upgrade and
+  when the Scout administration screen is opened.
+- Preserves existing public availability blocking, booking references, audit
+  history, financial-history guards and Home Assistant notification/removal
+  behaviour. Scout management actions do not send hirer emails.
 
 ---
 
