@@ -104,6 +104,7 @@ class MBS_Audit_Log {
             'edited'            => '✏️ Booking Edited',
             'modification_requested' => '📝 Modification Requested',
             'cancellation_requested' => '❌ Cancellation Requested',
+            'admin_request_notification' => '📧 Admin Request Notification',
             'series_confirmed'  => '✅ Series Confirmed',
             'series_cancelled'  => '❌ Series Cancelled',
             'series_bulk_cancel' => '❌ Series Bulk-Cancelled (future)',
