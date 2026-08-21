@@ -127,7 +127,7 @@ foreach ( $invoices as $invoice ) $invoices_by_series[ $invoice->series_ref ][] 
 
     <!-- Bookings list -->
     <div class="nms-form-section">
-        <h3>One-off &amp; Legacy Bookings</h3>
+        <h3>One-off Bookings</h3>
 
         <?php if ( empty( $legacy_bookings ) ) : ?>
             <p class="nms-muted">You don't have any separate one-off bookings.</p>

@@ -41,8 +41,9 @@ WooCommerce orders and `WC_Order_Refund` objects. It covers payment/refund
 callback ordering and noiseless replay, full/partial-refund repayment, exact
 online order values (under/over, coupons, fees, edits, currency and stale
 generations), partial/cumulative/reordered cancellation-credit cash refunds,
-GMT/BST/positive-offset/DST-boundary reservations, durable OSM delivery failure
-and recovery, accounting boundary/non-GBP credit exports, safe-modification
+GMT/BST/positive-offset/DST-boundary reservations, payout-aware OSM
+classification/quarantine and ledger-event recovery, accounting
+boundary/non-GBP credit exports, safe-modification
 failure/retry, complete same-name schema corruption, forced migration operation
 and verification faults, mixed financial-history schema-5/6 upgrades, InnoDB
 rollback, more-than-100-series catch-up, and overlapping workers. The authenticated MCP test sends a real MCP tool call

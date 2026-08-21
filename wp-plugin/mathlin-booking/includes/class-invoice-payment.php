@@ -113,17 +113,10 @@ class MBS_Invoice_Payment {
 	            $refund_events = self::apply_refund_allocations( $result['invoice'], $allocations, false );
 	            if ( is_wp_error( $refund_events ) ) { $wpdb->query( 'ROLLBACK' ); return $refund_events; }
 	        }
-	        $outbox_ids = array();
-	        foreach ( $refund_events as $event ) {
-	            $booking = MBS_Bookings::get( $event['booking_ref'] );
-	            if ( ! $booking ) continue;
-	            $queued = MBS_OSM_Integration::queue_refund_reversal( $booking, $invoice_ref, (int)$event['amount_minor'], (int)$order_id, (int)$refund_id, $event['reversal_kind'] ?? 'partial' );
-	            if ( is_wp_error( $queued ) ) { $wpdb->query('ROLLBACK'); return $queued; }
-	            if ( $queued ) $outbox_ids[] = (int)$queued;
-	        }
 	        if ( $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'refund_transaction_commit_failed', 'Could not commit refund reconciliation.' ); }
-	        foreach ( array_unique( $outbox_ids ) as $outbox_id ) MBS_OSM_Integration::deliver_outbox_event( $outbox_id );
-	        $result['osm_outbox_ids'] = $outbox_ids;
+	        // OSM receives the single ledger refund event queued above. It is
+	        // consolidated with its WooPayments payout; occurrence allocations
+	        // remain an internal booking-domain concern and are not posted twice.
 	        return $result;
     }
 

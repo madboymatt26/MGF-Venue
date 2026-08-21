@@ -99,7 +99,7 @@ class MBS_Admin {
         add_submenu_page( 'mathlin-booking', 'OSM Integration', 'OSM Integration', $admin_cap, 'mathlin-osm', array( $this, 'render_osm_settings' ) );
 
         // Booking management pages — accessible to Booking Managers
-        add_submenu_page( 'mathlin-booking', 'Analytics', 'Analytics', $booking_cap, 'mathlin-analytics', array( $this, 'render_analytics' ) );
+        add_submenu_page( 'mathlin-booking', 'Reports & Analytics', 'Reports', $booking_cap, 'mathlin-analytics', array( $this, 'render_analytics' ) );
 
         $pending_count = MBS_Modification::get_pending_count();
         $requests_label = 'Requests';
@@ -942,7 +942,7 @@ class MBS_Admin {
     }
 
     public function render_osm_settings() {
-        include MBS_PLUGIN_DIR . 'admin/views/osm-settings.php';
+        include MBS_PLUGIN_DIR . 'admin/views/osm-settings-v2.php';
     }
 
     public function render_requests() {

@@ -18,12 +18,27 @@ if ( $month >= 4 ) {
     $fy_label = ( $year - 1 ) . '/' . $year;
 }
 
-// Bookings per month (last 12 months) — exclude internal Scout bookings
-$monthly = $wpdb->get_results(
+// Administrators can narrow every report on this page. Strict ISO dates keep
+// the queries deterministic and prevent malformed values reaching SQL.
+$valid_report_date = static function ( $value ) {
+    $date = DateTime::createFromFormat( '!Y-m-d', (string) $value );
+    return $date && $date->format( 'Y-m-d' ) === (string) $value ? (string) $value : '';
+};
+$requested_from = $valid_report_date( sanitize_text_field( wp_unslash( $_GET['report_from'] ?? '' ) ) );
+$requested_to = $valid_report_date( sanitize_text_field( wp_unslash( $_GET['report_to'] ?? '' ) ) );
+if ( $requested_from && $requested_to && $requested_from <= $requested_to ) {
+    $fy_start = $requested_from; $fy_end = $requested_to;
+    $fy_label = wp_date( 'j M Y', strtotime( $fy_start ) ) . ' – ' . wp_date( 'j M Y', strtotime( $fy_end ) );
+}
+$prev_fy_start = wp_date( 'Y-m-d', strtotime( $fy_start . ' -1 year' ) );
+$prev_fy_end = wp_date( 'Y-m-d', strtotime( $fy_end . ' -1 year' ) );
+
+// Bookings per month in the selected period — exclude internal Scout bookings
+$monthly = $wpdb->get_results( $wpdb->prepare(
     "SELECT DATE_FORMAT(booking_date, '%Y-%m') as month, COUNT(*) as count, SUM(amount) as revenue
-     FROM {$table} WHERE status IN ('confirmed', 'deposit_paid', 'paid') AND scout_use = 0 AND booking_date >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
-     GROUP BY month ORDER BY month ASC"
-);
+     FROM {$table} WHERE status IN ('confirmed', 'deposit_paid', 'paid') AND scout_use = 0 AND booking_date BETWEEN %s AND %s
+     GROUP BY month ORDER BY month ASC", $fy_start, $fy_end
+) );
 
 // Bookings by space — exclude internal Scout bookings
 $by_space = $wpdb->get_results(
@@ -45,13 +60,6 @@ $revenue_fy = (float) $wpdb->get_var( $wpdb->prepare(
     $fy_start, $fy_end
 ) );
 
-if ( $month >= 4 ) {
-    $prev_fy_start = ( $year - 1 ) . '-04-01';
-    $prev_fy_end   = $year . '-03-31';
-} else {
-    $prev_fy_start = ( $year - 2 ) . '-04-01';
-    $prev_fy_end   = ( $year - 1 ) . '-03-31';
-}
 $revenue_prev = (float) $wpdb->get_var( $wpdb->prepare(
     "SELECT COALESCE(SUM(amount), 0) FROM {$table} WHERE status IN ('confirmed', 'deposit_paid', 'paid') AND scout_use = 0 AND booking_date BETWEEN %s AND %s",
     $prev_fy_start, $prev_fy_end
@@ -138,7 +146,7 @@ $overdue_count = (int) $wpdb->get_var(
      AND (b.amount - b.amount_paid) > 0.01 AND b.chase_count > 0 AND NOT EXISTS (SELECT 1 FROM {$allocation_table} a WHERE a.booking_ref = b.ref)"
 ) + (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$invoice_table} WHERE document_type = 'invoice' AND status IN ('issued','part_paid','overdue') AND due_at < %s AND total_minor > paid_minor + credited_minor", current_time( 'mysql' ) ) );
 
-// Collection rate (% of billed income actually received) this FY
+// Collection rate (% of billed income actually received) in the selected period.
 $collection_rate = $invoiced_fy > 0 ? round( ( $net_collected_fy / $invoiced_fy ) * 100, 1 ) : 0;
 $legacy_prev_invoiced = (float) $wpdb->get_var( $wpdb->prepare(
     "SELECT COALESCE(SUM(b.amount), 0) FROM {$table} b WHERE b.status IN ('confirmed','deposit_paid','paid')
@@ -284,6 +292,62 @@ $yoy_pct = $revenue_prev > 0 ? round( ( ( $revenue_fy - $revenue_prev ) / $reven
 // Email queue stats
 $email_stats = MBS_Email_Queue::get_stats();
 
+// ── Cash received by customer and route (ledger transaction date) ───────────
+$outbox_table = $wpdb->prefix . MBS_OSM_OUTBOX_TABLE;
+$cash_rows = $wpdb->get_results( $wpdb->prepare(
+    "SELECT t.id,t.invoice_id,t.provider,t.transaction_type,t.amount_minor,t.metadata_json,
+            i.contact_name,i.contact_organisation,i.contact_email,
+            o.payment_gateway,o.target_mode,o.status AS osm_status
+     FROM {$transaction_table} t
+     INNER JOIN {$invoice_table} i ON i.id=t.invoice_id
+     LEFT JOIN {$outbox_table} o ON o.transaction_id=t.id
+     WHERE t.status='completed' AND DATE(t.occurred_at) BETWEEN %s AND %s
+     ORDER BY t.occurred_at DESC,t.id DESC",
+    $fy_start, $fy_end
+) );
+$customer_cash = array(); $payment_routes = array();
+foreach ( (array) $cash_rows as $cash ) {
+    $email_key = strtolower( trim( (string) $cash->contact_email ) );
+    $customer_key = $email_key !== '' ? $email_key : strtolower( (string) $cash->contact_name );
+    if ( ! isset( $customer_cash[$customer_key] ) ) $customer_cash[$customer_key] = array( 'name' => $cash->contact_organisation ?: $cash->contact_name, 'email' => $cash->contact_email, 'invoice_ids' => array(), 'legacy_bookings' => 0, 'payments_minor' => 0, 'refunds_minor' => 0 );
+    $customer_cash[$customer_key]['invoice_ids'][(int) $cash->invoice_id] = true;
+    if ( $cash->transaction_type === 'refund' ) $customer_cash[$customer_key]['refunds_minor'] += (int) $cash->amount_minor; else $customer_cash[$customer_key]['payments_minor'] += (int) $cash->amount_minor;
+    $gateway = (string) $cash->payment_gateway;
+    if ( $gateway === '' && $cash->provider === 'woocommerce' && function_exists( 'wc_get_order' ) ) {
+        $metadata = json_decode( (string) $cash->metadata_json, true ); $order_id = (int) ( is_array( $metadata ) ? ( $metadata['woocommerce_order_id'] ?? 0 ) : 0 );
+        $order = $order_id ? wc_get_order( $order_id ) : null; if ( $order ) $gateway = sanitize_key( $order->get_payment_method() );
+    }
+    if ( $cash->target_mode === 'woopayments_payout' || strpos( $gateway, 'woocommerce_payments' ) === 0 || strpos( $gateway, 'wcpay' ) === 0 ) $route = 'WooPayments card';
+    elseif ( $cash->provider === 'woocommerce' ) $route = 'WooCommerce – other gateway';
+    else $route = 'Manual / BACS';
+    if ( ! isset( $payment_routes[$route] ) ) $payment_routes[$route] = array( 'payments' => 0, 'refunds' => 0, 'transactions' => 0 );
+    $payment_routes[$route]['transactions']++;
+    if ( $cash->transaction_type === 'refund' ) $payment_routes[$route]['refunds'] += (int) $cash->amount_minor; else $payment_routes[$route]['payments'] += (int) $cash->amount_minor;
+}
+
+// Legacy rows have no immutable payment timestamp, so retain the existing
+// service-date basis and show them explicitly instead of pretending otherwise.
+$legacy_customer_rows = $wpdb->get_results( $wpdb->prepare(
+    "SELECT COALESCE(NULLIF(organisation,''),name) AS customer,name,email,COUNT(*) AS bookings,COALESCE(SUM(amount_paid),0) AS collected
+     FROM {$table} b WHERE b.scout_use=0 AND b.booking_date BETWEEN %s AND %s
+     AND NOT EXISTS (SELECT 1 FROM {$allocation_table} a WHERE a.booking_ref=b.ref)
+     GROUP BY LOWER(email),customer,name,email HAVING collected>0",
+    $fy_start, $fy_end
+) );
+$legacy_route_minor = 0; $legacy_route_count = 0;
+foreach ( (array) $legacy_customer_rows as $legacy ) {
+    $key = strtolower( trim( (string) $legacy->email ) ); if ( $key === '' ) $key = strtolower( (string) $legacy->name );
+    if ( ! isset( $customer_cash[$key] ) ) $customer_cash[$key] = array( 'name' => $legacy->customer, 'email' => $legacy->email, 'invoice_ids' => array(), 'legacy_bookings' => 0, 'payments_minor' => 0, 'refunds_minor' => 0 );
+    $customer_cash[$key]['legacy_bookings'] += (int) $legacy->bookings; $legacy_route_count += (int) $legacy->bookings;
+    $minor = (int) round( (float) $legacy->collected * 100 ); $customer_cash[$key]['payments_minor'] += $minor; $legacy_route_minor += $minor;
+}
+if ( $legacy_route_minor ) $payment_routes['Legacy booking records'] = array( 'payments' => $legacy_route_minor, 'refunds' => 0, 'transactions' => $legacy_route_count );
+$customer_cash = array_values( $customer_cash );
+usort( $customer_cash, static function ( $a, $b ) { return ( $b['payments_minor'] - $b['refunds_minor'] ) <=> ( $a['payments_minor'] - $a['refunds_minor'] ); } );
+uasort( $payment_routes, static function ( $a, $b ) { return ( $b['payments'] - $b['refunds'] ) <=> ( $a['payments'] - $a['refunds'] ); } );
+
+$osm_report = MBS_OSM_Integration::get_reporting_snapshot( $fy_start, $fy_end );
+
 // Prepare chart data
 $chart_labels  = array();
 $chart_counts  = array();
@@ -327,22 +391,30 @@ foreach ( $by_tier as $t ) {
 }
 
 // Defined ledger-backed metrics; outstanding is a current balance, not invoiced minus cash by issue year.
-$fin_labels = array( 'Invoiced in FY', 'Net cash in FY', 'Outstanding now' );
+$fin_labels = array( 'Invoiced in period', 'Net cash in period', 'Outstanding now' );
 $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), round( $outstanding_total, 2 ) );
 ?>
+<style>@media(max-width:900px){.mbs-admin [style*="grid-template-columns"]{grid-template-columns:1fr!important}.mbs-admin .nms-stats-row{grid-template-columns:1fr 1fr}}</style>
 <div class="wrap mbs-admin">
-    <h1><?php echo MBS_Admin::brand_mark(); ?>MGF Venue – Analytics</h1>
-    <p class="nms-muted">Financial Year: <?php echo esc_html( $fy_label ); ?>. Legacy values use booking/service date; consolidated invoices use issue date; payments and refunds use transaction date. Outstanding is the current balance across all dates.</p>
+    <h1><?php echo MBS_Admin::brand_mark(); ?>MGF Venue – Reports &amp; Analytics</h1>
+    <form method="get" style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;background:#fff;border:1px solid #dcdcde;padding:12px;margin:12px 0 18px;">
+        <input type="hidden" name="page" value="mathlin-analytics">
+        <label><strong>From</strong><br><input type="date" name="report_from" value="<?php echo esc_attr( $fy_start ); ?>"></label>
+        <label><strong>To</strong><br><input type="date" name="report_to" value="<?php echo esc_attr( $fy_end ); ?>"></label>
+        <button class="button button-primary">Update reports</button>
+        <a class="button" href="<?php echo esc_url( admin_url( 'admin.php?page=mathlin-analytics' ) ); ?>">Current financial year</a>
+    </form>
+    <p class="nms-muted">Reporting period: <?php echo esc_html( $fy_label ); ?>. Legacy values use booking/service date; consolidated invoices use issue date; payments and refunds use transaction date. Outstanding is the current balance across all dates.</p>
 
     <!-- Summary cards -->
     <div class="nms-stats-row" style="margin-bottom:2rem;">
         <div class="nms-stat-card">
             <div class="nms-stat-val"><?php echo esc_html( $total_fy ); ?></div>
-            <div class="nms-stat-label">Bookings This FY</div>
+            <div class="nms-stat-label">Bookings in Period</div>
         </div>
         <div class="nms-stat-card nms-stat-revenue">
             <div class="nms-stat-val">&pound;<?php echo number_format( $revenue_fy, 0 ); ?></div>
-            <div class="nms-stat-label">Invoiced This FY (service/issue date)
+            <div class="nms-stat-label">Invoiced in Period (service/issue date)
                 <?php if ( $yoy_pct !== null ) : ?>
                     <span style="color:<?php echo $yoy_pct >= 0 ? '#2ecc71' : '#e74c3c'; ?>;font-weight:700;">
                         <?php echo $yoy_pct >= 0 ? '▲' : '▼'; ?> <?php echo esc_html( abs( $yoy_pct ) ); ?>%
@@ -352,7 +424,7 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
         </div>
         <div class="nms-stat-card">
             <div class="nms-stat-val">&pound;<?php echo number_format( $revenue_prev, 0 ); ?></div>
-            <div class="nms-stat-label">Invoiced Last FY (service/issue date)</div>
+            <div class="nms-stat-label">Same Period Previous Year</div>
         </div>
         <div class="nms-stat-card">
             <div class="nms-stat-val">&pound;<?php echo number_format( $avg_value, 0 ); ?></div>
@@ -369,7 +441,7 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
     <div class="nms-stats-row" style="margin-bottom:2rem;">
         <div class="nms-stat-card nms-stat-revenue">
             <div class="nms-stat-val">&pound;<?php echo number_format( $collected_fy, 0 ); ?></div>
-            <div class="nms-stat-label">Collected This FY (legacy service date / ledger transaction date)</div>
+            <div class="nms-stat-label">Collected in Period (legacy service date / ledger transaction date)</div>
         </div>
         <div class="nms-stat-card nms-stat-pending">
             <div class="nms-stat-val">&pound;<?php echo number_format( $outstanding_total, 0 ); ?></div>
@@ -377,11 +449,11 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
         </div>
         <div class="nms-stat-card">
             <div class="nms-stat-val">&pound;<?php echo number_format( $credited_refunded_fy, 0 ); ?></div>
-            <div class="nms-stat-label">Credited / Refunded This FY (issue / transaction date)</div>
+            <div class="nms-stat-label">Credited / Refunded in Period (issue / transaction date)</div>
         </div>
         <div class="nms-stat-card nms-stat-revenue">
             <div class="nms-stat-val">&pound;<?php echo number_format( $net_collected_fy, 0 ); ?></div>
-            <div class="nms-stat-label">Net Cash This FY (<?php echo esc_html( $collection_rate ); ?>%; date bases above)</div>
+            <div class="nms-stat-label">Net Cash in Period (<?php echo esc_html( $collection_rate ); ?>%; date bases above)</div>
         </div>
         <div class="nms-stat-card">
             <div class="nms-stat-val">&pound;<?php echo number_format( $deposits_held, 0 ); ?></div>
@@ -419,6 +491,47 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
             <div class="nms-stat-val"><?php echo esc_html( $cancel_rate ); ?>%</div>
             <div class="nms-stat-label">Cancellation Rate</div>
         </div>
+    </div>
+
+    <!-- Clear cash/customer/OSM reporting -->
+    <h2 style="margin-top:2rem;">Income and OSM reconciliation</h2>
+    <p class="nms-muted">Customer and payment-route figures below are venue cash from the MGF ledger. OSM payout figures are the complete WooPayments bank settlements, which can also contain clothing sales and fees; do not add the two totals together.</p>
+    <div class="nms-stats-row" style="margin-bottom:1.5rem;">
+        <div class="nms-stat-card nms-stat-revenue"><div class="nms-stat-val"><?php echo esc_html( MBS_Money::format( (int) round( $net_collected_fy * 100 ) ) ); ?></div><div class="nms-stat-label">Net venue cash received</div></div>
+        <div class="nms-stat-card"><div class="nms-stat-val"><?php echo esc_html( MBS_Money::format( (int) $osm_report['delivered_net_minor'] ) ); ?></div><div class="nms-stat-label">WooPayments net deposits added to OSM</div></div>
+        <div class="nms-stat-card"><div class="nms-stat-val"><?php echo (int) $osm_report['delivered_payouts'] + (int) $osm_report['delivered_direct_events']; ?></div><div class="nms-stat-label">Cashbook entries added to OSM (<?php echo (int) $osm_report['delivered_payouts']; ?> payouts, <?php echo (int) $osm_report['delivered_direct_events']; ?> direct)</div></div>
+        <div class="nms-stat-card nms-stat-pending"><div class="nms-stat-val"><?php echo (int) $osm_report['awaiting_import']; ?></div><div class="nms-stat-label">Awaiting Co-op bank import</div></div>
+        <div class="nms-stat-card <?php echo $osm_report['needs_attention'] ? 'nms-stat-pending' : ''; ?>"><div class="nms-stat-val"><?php echo (int) $osm_report['needs_attention']; ?></div><div class="nms-stat-label">OSM items needing attention</div></div>
+        <div class="nms-stat-card"><div class="nms-stat-val"><?php echo (int) $osm_report['sandbox_previews']; ?></div><div class="nms-stat-label">Sandbox previews</div></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:minmax(0,1.35fr) minmax(320px,.65fr);gap:1.5rem;">
+        <div class="nms-card">
+            <div class="nms-card-header"><h2>Who venue income came from</h2></div>
+            <div style="padding:1rem 1.5rem;overflow:auto;"><table class="wp-list-table widefat striped" style="font-size:.85rem;"><thead><tr><th>Hirer</th><th>Invoices / legacy bookings</th><th>Received</th><th>Refunded</th><th>Net cash</th></tr></thead><tbody>
+            <?php foreach ( $customer_cash as $customer ) : $net = (int) $customer['payments_minor'] - (int) $customer['refunds_minor']; ?><tr><td><strong><?php echo esc_html( $customer['name'] ); ?></strong><br><span class="nms-muted"><?php echo esc_html( $customer['email'] ); ?></span></td><td><?php echo count( $customer['invoice_ids'] ); ?> / <?php echo (int) $customer['legacy_bookings']; ?></td><td><?php echo esc_html( MBS_Money::format( (int) $customer['payments_minor'] ) ); ?></td><td><?php echo esc_html( MBS_Money::format( -(int) $customer['refunds_minor'] ) ); ?></td><td><strong><?php echo esc_html( MBS_Money::format( $net ) ); ?></strong></td></tr><?php endforeach; ?>
+            <?php if ( ! $customer_cash ) : ?><tr><td colspan="5">No cash received in this reporting period.</td></tr><?php endif; ?>
+            </tbody></table><p class="nms-muted">Sorted by net cash. First-class values use payment/refund date; legacy values use booking service date because no historical payment timestamp exists.</p></div>
+        </div>
+        <div class="nms-card">
+            <div class="nms-card-header"><h2>Venue cash by payment route</h2></div>
+            <div style="padding:1rem 1.5rem;"><table class="wp-list-table widefat striped" style="font-size:.85rem;"><thead><tr><th>Route</th><th>Transactions</th><th>Net</th></tr></thead><tbody>
+            <?php foreach ( $payment_routes as $route => $totals ) : ?><tr><td><?php echo esc_html( $route ); ?></td><td><?php echo (int) $totals['transactions']; ?></td><td><strong><?php echo esc_html( MBS_Money::format( (int) $totals['payments'] - (int) $totals['refunds'] ) ); ?></strong><br><span class="nms-muted"><?php echo esc_html( MBS_Money::format( (int) $totals['payments'] ) ); ?> received, <?php echo esc_html( MBS_Money::format( -(int) $totals['refunds'] ) ); ?> refunded</span></td></tr><?php endforeach; ?>
+            <?php if ( ! $payment_routes ) : ?><tr><td colspan="3">No payment transactions in this period.</td></tr><?php endif; ?>
+            </tbody></table></div>
+        </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-top:1.5rem;">
+        <div class="nms-card"><div class="nms-card-header"><h2>What was added to OSM</h2></div><div style="padding:1rem 1.5rem;overflow:auto;"><table class="wp-list-table widefat striped" style="font-size:.85rem;"><thead><tr><th>Allocation</th><th>OSM category / item</th><th>Signed total</th></tr></thead><tbody>
+        <?php foreach ( $osm_report['category_totals'] as $line ) : $contribution = $line['kind'] === 'expense' ? -(int) $line['amount_minor'] : (int) $line['amount_minor']; ?><tr><td><?php echo esc_html( $line['label'] ); ?></td><td><?php echo esc_html( $line['category_id'] . ' / ' . $line['item_id'] ); ?></td><td><strong><?php echo esc_html( MBS_Money::format( $contribution ) ); ?></strong></td></tr><?php endforeach; ?>
+        <?php if ( ! $osm_report['category_totals'] ) : ?><tr><td colspan="3">No delivered OSM cashbook entries in this period.</td></tr><?php endif; ?>
+        </tbody></table><p class="nms-muted">Includes delivered WooPayments payout allocations and delivered direct/BACS venue events. Income, refunds and fees are signed.</p></div></div>
+        <div class="nms-card"><div class="nms-card-header"><h2>Recent additions to OSM</h2></div><div style="padding:1rem 1.5rem;overflow:auto;"><table class="wp-list-table widefat striped" style="font-size:.85rem;"><thead><tr><th>Payout</th><th>Date</th><th>Net</th><th>OSM bank / cashbook</th></tr></thead><tbody>
+        <?php foreach ( $osm_report['recent_delivered'] as $payout ) : ?><tr><td><?php echo esc_html( $payout['payout_ref'] ); ?></td><td><?php echo esc_html( $payout['payout_date'] ); ?></td><td><?php echo esc_html( MBS_Money::format( (int) $payout['amount_minor'] ) ); ?></td><td><?php echo esc_html( $payout['bank_transaction_id'] . ' / ' . $payout['cashbook_transaction_id'] ); ?></td></tr><?php endforeach; ?>
+        <?php foreach ( $osm_report['recent_direct'] as $event ) : ?><tr><td><?php echo esc_html( $event['invoice_ref'] . ' (direct)' ); ?></td><td><?php echo esc_html( substr( (string) $event['occurred_at'], 0, 10 ) ); ?></td><td><?php echo esc_html( MBS_Money::format( $event['event_type'] === 'refund' ? -(int) $event['amount_minor'] : (int) $event['amount_minor'] ) ); ?></td><td><?php echo esc_html( $event['bank_transaction_id'] . ' / ' . $event['remote_transaction_id'] ); ?></td></tr><?php endforeach; ?>
+        <?php if ( ! $osm_report['recent_delivered'] && ! $osm_report['recent_direct'] ) : ?><tr><td colspan="4">Nothing has been added to OSM in this period.</td></tr><?php endif; ?>
+        </tbody></table><p><a class="button" href="<?php echo esc_url( admin_url( 'admin.php?page=mathlin-osm' ) ); ?>">Open full OSM audit trail</a></p></div></div>
     </div>
 
     <!-- Charts -->
@@ -486,7 +599,7 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
 
         <!-- Space breakdown -->
         <div class="nms-card">
-            <div class="nms-card-header"><h2>Space Breakdown (FY <?php echo esc_html( $fy_label ); ?>)</h2></div>
+            <div class="nms-card-header"><h2>Space Breakdown (<?php echo esc_html( $fy_label ); ?>)</h2></div>
             <div style="padding:1rem 1.5rem;">
                 <table class="wp-list-table widefat fixed striped" style="font-size:0.85rem;">
                     <thead><tr><th>Space</th><th>Bookings</th><th>Revenue</th></tr></thead>
@@ -527,7 +640,7 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
 
         <!-- Top hirers -->
         <div class="nms-card">
-            <div class="nms-card-header"><h2>🏆 Top Hirers (FY <?php echo esc_html( $fy_label ); ?>)</h2></div>
+            <div class="nms-card-header"><h2>🏆 Top Hirers by Booked Value (<?php echo esc_html( $fy_label ); ?>)</h2></div>
             <div style="padding:1rem 1.5rem;">
                 <table class="wp-list-table widefat fixed striped" style="font-size:0.85rem;">
                     <thead><tr><th>Hirer</th><th>Bookings</th><th>Revenue</th></tr></thead>
@@ -549,7 +662,7 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
 
         <!-- Conversion & cancellations -->
         <div class="nms-card">
-            <div class="nms-card-header"><h2>🔄 Conversion &amp; Cancellations (FY <?php echo esc_html( $fy_label ); ?>)</h2></div>
+            <div class="nms-card-header"><h2>🔄 Conversion &amp; Cancellations (<?php echo esc_html( $fy_label ); ?>)</h2></div>
             <div style="padding:1rem 1.5rem;">
                 <table class="wp-list-table widefat fixed striped" style="font-size:0.85rem;">
                     <tbody>
@@ -599,7 +712,7 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
     }
     ?>
     <div class="nms-card" style="margin-top:1.5rem;">
-        <div class="nms-card-header"><h2>📈 Occupancy / Utilisation (FY <?php echo esc_html( $fy_label ); ?>)</h2></div>
+        <div class="nms-card-header"><h2>📈 Occupancy / Utilisation (<?php echo esc_html( $fy_label ); ?>)</h2></div>
         <div style="padding:1rem 1.5rem;">
             <p class="nms-muted" style="margin-bottom:1rem;">Based on <?php echo $hours_per_day; ?> available hours per day (8am–8pm), <?php echo $fy_days; ?> days in the period.</p>
             <table class="wp-list-table widefat fixed striped" style="font-size:0.85rem;">

@@ -10,6 +10,7 @@ define( 'MBS_PAYMENT_TRANSACTION_TABLE', 'mathlin_payment_transactions' );
 define( 'MBS_BILLING_ALLOCATION_TABLE', 'mathlin_billing_allocations' );
 define( 'MBS_PAYMENT_RESERVATION_TABLE', 'mathlin_payment_reservations' );
 define( 'MBS_OSM_OUTBOX_TABLE', 'mathlin_osm_outbox' );
+define( 'MBS_OSM_PAYOUT_TABLE', 'mathlin_osm_payouts' );
 define( 'MBS_INVOICE_DOCUMENTS_TABLE', 'mathlin_invoice_documents' );
 define( 'MBS_DOCUMENT_ASSETS_TABLE', 'mathlin_document_assets' );
 define( 'MBS_DOWNLOAD_TOKENS_TABLE', 'mathlin_download_tokens' );
@@ -64,7 +65,7 @@ $required = array(
     'wp_mathlin_bookings', 'wp_mathlin_booking_series', 'wp_mathlin_invoices',
     'wp_mathlin_invoice_items', 'wp_mathlin_payment_transactions',
     'wp_mathlin_billing_allocations', 'wp_mathlin_payment_reservations',
-    'wp_mathlin_osm_outbox', 'wp_mathlin_invoice_documents',
+    'wp_mathlin_osm_outbox', 'wp_mathlin_osm_payouts', 'wp_mathlin_invoice_documents',
     'wp_mathlin_document_assets', 'wp_mathlin_download_tokens',
     'wp_mathlin_blocked_dates',
     'wp_mathlin_audit_log', 'wp_mathlin_email_queue', 'wp_mathlin_mod_requests',

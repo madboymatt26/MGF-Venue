@@ -6,6 +6,11 @@ $public = file_get_contents( $root . '/wp-plugin/mathlin-booking/public/class-pu
 $dashboard = file_get_contents( $root . '/wp-plugin/mathlin-booking/public/views/hirer-dashboard.php' );
 $manage = file_get_contents( $root . '/wp-plugin/mathlin-booking/public/views/manage.php' );
 
+if ( strpos( $dashboard, 'Legacy Bookings' ) !== false || strpos( $dashboard, 'One-off &amp; Legacy' ) !== false ) {
+    fwrite( STDERR, "FAIL: customer dashboard exposes internal legacy-booking terminology.\n" );
+    exit( 1 );
+}
+
 $checks = 0;
 function hirer_pdf_has( $source, $needle, $message ) {
     global $checks;

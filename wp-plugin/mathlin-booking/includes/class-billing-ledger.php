@@ -393,6 +393,15 @@ class MBS_Billing_Ledger {
                 $paid, $invoice_status, $now, (int) $invoice->id
             ) );
             if ( $invoice_updated !== 1 ) return self::transaction_error( 'invoice_settlement_update_failed', 'Could not update invoice settlement.', $manage_transaction );
+
+            // The accounting outbox is part of the same durable transaction as
+            // the payment/refund. A completed ledger event must never commit
+            // without its exact amount/date/provider snapshot when the OSM
+            // integration is enabled.
+            if ( class_exists( 'MBS_OSM_Integration' ) ) {
+                $queued = MBS_OSM_Integration::queue_ledger_transaction( $transaction_id, $invoice );
+                if ( is_wp_error( $queued ) ) return self::transaction_error( $queued->get_error_code(), $queued->get_error_message(), $manage_transaction );
+            }
         }
         if ( $manage_transaction && $wpdb->query( 'COMMIT' ) === false ) return self::transaction_error( 'transaction_commit_failed', 'Could not commit the financial transaction.', true );
         $transaction = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$transaction_table} WHERE id = %d", $transaction_id ) );

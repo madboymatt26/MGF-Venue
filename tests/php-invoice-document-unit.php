@@ -19,12 +19,15 @@ define( 'MBS_PAYMENT_TRANSACTION_TABLE', 'mathlin_payment_transactions' );
 define( 'MBS_BILLING_ALLOCATION_TABLE', 'mathlin_billing_allocations' );
 define( 'MBS_PAYMENT_RESERVATION_TABLE', 'mathlin_payment_reservations' );
 define( 'MBS_OSM_OUTBOX_TABLE', 'mathlin_osm_outbox' );
+define( 'MBS_OSM_PAYOUT_TABLE', 'mathlin_osm_payouts' );
 define( 'MBS_INVOICE_DOCUMENTS_TABLE', 'mathlin_invoice_documents' );
 define( 'MBS_DOCUMENT_ASSETS_TABLE', 'mathlin_document_assets' );
 define( 'MBS_DOWNLOAD_TOKENS_TABLE', 'mathlin_download_tokens' );
 
 // Stub WP functions needed by the classes
 if ( ! function_exists( 'wp_json_encode' ) ) { function wp_json_encode( $data, $flags = 0 ) { return json_encode( $data, $flags | JSON_UNESCAPED_UNICODE ); } }
+if ( ! function_exists( 'mb_strlen' ) ) { function mb_strlen( $value ) { return strlen( $value ); } }
+if ( ! function_exists( 'mb_substr' ) ) { function mb_substr( $value, $start, $length = null ) { return $length === null ? substr( $value, $start ) : substr( $value, $start, $length ); } }
 if ( ! function_exists( 'sanitize_text_field' ) ) { function sanitize_text_field( $str ) { return trim( strip_tags( $str ) ); } }
 if ( ! function_exists( 'esc_html' ) ) { function esc_html( $text ) { return htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' ); } }
 if ( ! function_exists( 'esc_attr' ) ) { function esc_attr( $text ) { return htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' ); } }

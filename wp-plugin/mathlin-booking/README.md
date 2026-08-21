@@ -4,11 +4,41 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.25.0
+**Current Version:** 3.26.0
 **Requires WordPress:** 5.0+  
 **Requires PHP:** 7.4+  
 **Tested with WordPress:** 6.7  
 **License:** GPL-2.0+
+
+---
+
+## 3.26.0 Payout-aware OSM accountancy
+
+- Replaces the old per-booking paid-status push with immutable payment/refund
+  events written atomically alongside the billing ledger.
+- WooPayments card events wait for their containing payout. A payout is split
+  across venue hire, group clothing/shop income, refunds and processing fees,
+  proved back to the exact net total, then attached to one already-imported OSM
+  bank transaction. MGF Venue never creates a duplicate bank line.
+- Adds unique payout and bank-transaction ownership, strict JSON/HTML response
+  handling, stale-worker recovery, fail-closed product mapping, sandbox preview,
+  queue health, finance discovery, administrator/MCP sync and review controls.
+- Adds an expandable gross/fee/net/category calculation and immutable audit
+  trail for each payout. The Reports page now includes date-filtered customer
+  cash, payment routes, OSM workflow counts, delivered category totals and the
+  exact OSM bank/cashbook IDs, with explicit protection against double counting.
+- A payout with no imported statement line is shown as **Awaiting Co-op bank
+  import**, not as an error. Ambiguities and uncertain writes remain **Needs
+  attention**.
+- Uses OSM's v3 accountancy cashbook contract and a dedicated OAuth client;
+  GilbertWeb tokens remain read-only compatibility and are never refreshed or
+  mutated by MGF Venue.
+- Existing v1 OSM-enabled installations are paused on upgrade rather than
+  risking failed or duplicate accounting writes. Booking/payment processing
+  continues normally; an administrator must save the v2 mappings in sandbox
+  mode before the integration can be enabled again.
+- The public hirer dashboard now says **One-off Bookings** and no longer exposes
+  the internal term “legacy bookings”.
 
 ---
 
@@ -224,7 +254,7 @@ inside an arbitrary external payment provider.
 - Multi-day and full-day booking support
 - Recurring weekly bookings (up to one calendar year inclusive, maximum 53 dates)
 - Recurring billing safety: one durable, versioned Woo order owner per current invoice balance generation; refund remainders can acquire a successor generation, while mismatched or captured-but-unrecorded payments remain visibly quarantined for evidence-based reconciliation. Explicit manual/offline ledger payments may be partial; an altered online order may not.
-- Issued, part-paid, and overdue positive-balance invoices share one payable rule. Partial refunds use the canonical Woo refund hook and affect only their allocated occurrences. OSM reversals are inserted into a stable-idempotency outbox inside the refund transaction, with delivered/retry/manual-reconciliation states and auditable administrator retry/resolution.
+- Issued, part-paid, and overdue positive-balance invoices share one payable rule. Partial refunds use the canonical Woo refund hook and affect only their allocated occurrences. Completed payment/refund transactions are inserted into the OSM finance-event outbox atomically and are consolidated at bank/payout level rather than posted per occurrence.
 - Series creation and cancellation/credit reconciliation are transactional; financially documented occurrences require credit-and-replace rather than direct edit or deletion.
 - Late additions to an issued period receive a linked deterministic supplemental invoice, and catch-up keyset-paginates every eligible series beyond 100.
 - Financial reporting separately defines invoiced, gross collected, outstanding, credited/refunded, and net collected. Idempotency keys are bound to operation, target, and payload.
@@ -327,7 +357,7 @@ inside an arbitrary external payment provider.
 - WooCommerce: Pay Now button in emails, auto-status update, deposit support
 - iCal: downloadable .ics files + subscribable calendar feed
 - GitHub: auto-update from private repository releases
-- OSM (Online Scout Manager): push financial records on payment
+- OSM (Online Scout Manager): reconcile imported bank transactions and classify WooPayments payouts without duplicates
 
 ### Security & Privacy
 - GDPR right-to-erasure (WordPress Privacy tools integration)
