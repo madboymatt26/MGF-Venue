@@ -313,70 +313,59 @@ mbs_audit_case( 'accounting boundaries, financial-year credits, and non-GBP expo
     mbs_audit_assert(strpos($xero,'USD')!==false&&strpos($xero,'-12.00')!==false&&strpos($sage,'SC')!==false&&strpos($quickbooks,'Credit Memo')!==false,'Non-GBP credit export lost currency, type, or sign semantics.');
 } );
 
-mbs_audit_case( 'OSM receives partial and full refund reversals', static function () {
+mbs_audit_case( 'OSM mirrors exact ledger payments and refunds without per-occurrence delivery', static function () {
     global $wpdb;
-    update_option('mbs_osm_enabled',true); update_option('mbs_osm_sandbox_mode',true);
-    update_option('mbs_osm_section_id','audit-section'); update_option('mbs_osm_category_id','audit-category'); update_option('mbs_osm_account_id','audit-account');
-    $booking = mbs_audit_booking( 'INT-A-OSM-REFUND', '10.00', 78 );
-    $invoice = mbs_audit_invoice( 'osm-refund', $booking );
-    list( $order ) = mbs_audit_order( $invoice );
-    $order = mbs_audit_pay( $order );
-    mbs_audit_refund( $order, '4.00', 'OSM partial reversal' );
-    mbs_audit_refund( $order, '6.00', 'OSM full reversal' );
-    $reversals = (int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->prefix}mathlin_audit_log WHERE ref=%s AND action='osm_sandbox_refund'",$booking->ref));
-    $kinds=$wpdb->get_col($wpdb->prepare('SELECT reversal_kind FROM '.$wpdb->prefix.MBS_OSM_OUTBOX_TABLE.' WHERE booking_ref=%s ORDER BY id ASC',$booking->ref));
-    mbs_audit_assert( $reversals === 2 && $kinds===array('partial','full'), 'OSM income was not offset by distinct partial and full durable reversals.' );
+    update_option( 'mbs_osm_configuration_version', '2' ); update_option( 'mbs_osm_enabled', true ); update_option( 'mbs_osm_sandbox_mode', true );
+    update_option( 'mbs_osm_section_id', '4015' ); update_option( 'mbs_osm_bank_account_id', '6037' );
+    update_option( 'mbs_osm_venue_category_id', '25' ); update_option( 'mbs_osm_venue_item_id', '60891' );
+    $booking = mbs_audit_booking( 'INT-A-OSM-LEDGER', '10.00', 78 );
+    $invoice = mbs_audit_invoice( 'osm-ledger', $booking );
+    list( $order ) = mbs_audit_order( $invoice ); $order = mbs_audit_pay( $order );
+    $partial = mbs_audit_refund( $order, '4.00', 'OSM partial refund' );
+    $full = mbs_audit_refund( $order, '6.00', 'OSM remaining refund' );
+    $rows = $wpdb->get_results( $wpdb->prepare( 'SELECT transaction_id,event_type,amount_minor,status,target_mode FROM ' . $wpdb->prefix . MBS_OSM_OUTBOX_TABLE . ' WHERE invoice_ref=%s ORDER BY id ASC', $invoice->invoice_ref ) );
+    mbs_audit_assert( count( $rows ) === 3, 'Payment/refund ledger transactions did not each own one OSM event.' );
+    mbs_audit_assert( array_map( static function ( $row ) { return $row->event_type; }, $rows ) === array( 'payment', 'refund', 'refund' ), 'OSM event types did not mirror the ledger.' );
+    mbs_audit_assert( array_map( static function ( $row ) { return (int) $row->amount_minor; }, $rows ) === array( 1000, 400, 600 ), 'OSM events lost the exact payment/refund amounts.' );
+    mbs_audit_assert( count( array_unique( array_map( static function ( $row ) { return (int) $row->transaction_id; }, $rows ) ) ) === 3, 'Ledger transaction ownership is not unique.' );
+    mbs_audit_assert( ! array_filter( $rows, static function ( $row ) { return $row->status !== 'awaiting_bank_match' || $row->target_mode !== 'bank_match'; } ), 'Non-WooPayments events were posted before an imported bank match.' );
+    $before = count( $rows ); ( new MBS_Woo_Payment() )->on_order_refunded( $order->get_id(), $partial->get_id() );
+    $after = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM ' . $wpdb->prefix . MBS_OSM_OUTBOX_TABLE . ' WHERE invoice_ref=%s', $invoice->invoice_ref ) );
+    mbs_audit_assert( $before === $after, 'An idempotent refund callback created a duplicate OSM event.' );
+    update_option( 'mbs_osm_enabled', false );
 } );
 
-mbs_audit_case( 'OSM reversal failure is durably recoverable', static function () {
-    global $wpdb;
-    update_option( 'mbs_osm_enabled', true );
-    update_option( 'mbs_osm_sandbox_mode', false );
-    update_option( 'mbs_osm_section_id', 'audit-section' );
-    update_option( 'mbs_osm_category_id', 'audit-category' );
-    update_option( 'mbs_osm_account_id', 'audit-account' );
-    $booking = mbs_audit_booking( 'INT-A-OSM-RETRY', '10.00', 80 );
-    $invoice = mbs_audit_invoice( 'osm-retry', $booking );
-    list( $order ) = mbs_audit_order( $invoice );
-    $order = mbs_audit_pay( $order );
-    $fail_http = static function () { return new WP_Error( 'audit_osm_down', 'Controlled OSM outage.' ); };
-    add_filter( 'pre_http_request', $fail_http );
-    try {
-        mbs_audit_refund( $order, '10.00', 'OSM durable retry' );
-    } finally {
-        remove_filter( 'pre_http_request', $fail_http );
-    }
-    $outbox_table = $wpdb->prefix . 'mathlin_osm_outbox';
-    $exists = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $outbox_table ) ) === $outbox_table;
-    $pending = $exists ? (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$outbox_table} WHERE status IN ('pending','retry','manual_reconciliation')" ) : 0;
-    mbs_audit_assert( $exists && $pending === 1, 'Failed OSM reversal was not retained in a durable retry/reconciliation outbox.' );
+mbs_audit_case( 'OSM payout classification reconciles venue, clothing, fees and refunds to one net deposit', static function () {
+    $settings = array(
+        'venue_category_id' => '10', 'venue_item_id' => '100',
+        'clothing_category_id' => '20', 'clothing_item_id' => '200',
+        'fees_category_id' => '30', 'fees_item_id' => '300',
+        'product_mappings' => array(), 'description_tpl' => 'Woo payout {payout_id}',
+    );
+    $classified = MBS_OSM_Integration::classify_payout(
+        array( 'id' => 'po-audit', 'date' => '2026-08-21', 'amount' => 1650, 'currency' => 'GBP' ),
+        array(
+            array( 'type' => 'charge', 'mapping_key' => 'venue', 'amount' => 1200, 'fee' => 36, 'currency' => 'GBP', 'order_id' => 11 ),
+            array( 'type' => 'charge', 'mapping_key' => 'clothing', 'amount' => 700, 'fee' => 14, 'currency' => 'GBP', 'order_id' => 12 ),
+            array( 'type' => 'refund', 'mapping_key' => 'venue', 'amount' => 200, 'fee' => 0, 'currency' => 'GBP', 'order_id' => 11 ),
+        ),
+        $settings
+    );
+    mbs_audit_assert( ! is_wp_error( $classified ) && $classified['amount'] === 1650 && count( $classified['categories'] ) === 3, 'A mixed WooPayments payout did not reconcile to one exact net deposit.' );
+    $bad = MBS_OSM_Integration::classify_payout( array( 'id' => 'po-bad', 'date' => '2026-08-21', 'amount' => 1651, 'currency' => 'GBP' ), array( array( 'type' => 'charge', 'mapping_key' => 'venue', 'amount' => 1700, 'fee' => 50, 'currency' => 'GBP' ) ), $settings );
+    mbs_audit_assert( is_wp_error( $bad ) && $bad->get_error_code() === 'payout_net_mismatch', 'A payout total mismatch did not fail closed.' );
 } );
 
-mbs_audit_case( 'OSM outbox handles retry, permanent failure, ambiguity, replay, and restart recovery', static function () {
+mbs_audit_case( 'Legacy per-booking OSM events cannot be delivered independently', static function () {
     global $wpdb;
-    update_option('mbs_osm_enabled',true);update_option('mbs_osm_sandbox_mode',false);update_option('mbs_osm_auth_source','standalone');
-    update_option('mbs_osm_access_token_data',(object)array('access_token'=>'integration-only'));update_option('mbs_osm_access_token_expiry',time()+3600);
-    update_option('mbs_osm_section_id','audit-section');update_option('mbs_osm_category_id','audit-category');update_option('mbs_osm_account_id','audit-account');
-    $booking=mbs_audit_booking('INT-A-OSM-DELIVERY','10.00',119);$invoice=mbs_audit_invoice('osm-delivery',$booking);list($order)=mbs_audit_order($invoice);$order=mbs_audit_pay($order);
-    $response=static function($code){return array('headers'=>array(),'body'=>'{}','response'=>array('code'=>$code,'message'=>'audit'),'cookies'=>array(),'filename'=>null);};
-    $server_error=static function()use($response){return $response(500);};add_filter('pre_http_request',$server_error,10,3);
-    $retry_refund=mbs_audit_refund($order,'2.00','OSM retry');remove_filter('pre_http_request',$server_error,10);
-    $table=$wpdb->prefix.MBS_OSM_OUTBOX_TABLE;$retry_event=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$table} WHERE refund_id=%d",$retry_refund->get_id()));
-    mbs_audit_assert($retry_event&&$retry_event->status==='retry','Definite OSM server failure was not retained for bounded retry.');
-    $success=static function()use($response){return $response(200);};add_filter('pre_http_request',$success,10,3);MBS_OSM_Integration::deliver_outbox_event((int)$retry_event->id);remove_filter('pre_http_request',$success,10);
-    mbs_audit_assert($wpdb->get_var($wpdb->prepare("SELECT status FROM {$table} WHERE id=%d",(int)$retry_event->id))==='delivered','OSM retry did not record eventual delivery.');
-    $permanent=static function()use($response){return $response(400);};add_filter('pre_http_request',$permanent,10,3);$permanent_refund=mbs_audit_refund($order,'2.00','OSM permanent');remove_filter('pre_http_request',$permanent,10);
-    mbs_audit_assert($wpdb->get_var($wpdb->prepare("SELECT status FROM {$table} WHERE refund_id=%d",$permanent_refund->get_id()))==='manual_reconciliation','Permanent OSM failure did not become an administrator task.');
-    $timeout=static function(){return new WP_Error('http_request_failed','Controlled ambiguous timeout.');};add_filter('pre_http_request',$timeout,10,3);$timeout_refund=mbs_audit_refund($order,'2.00','OSM timeout');remove_filter('pre_http_request',$timeout,10);
-    mbs_audit_assert($wpdb->get_var($wpdb->prepare("SELECT status FROM {$table} WHERE refund_id=%d",$timeout_refund->get_id()))==='manual_reconciliation','Ambiguous OSM response was retried blindly or lost.');
-    $before_events=(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$table} WHERE invoice_ref=%s",$invoice->invoice_ref));
-    $before_notes=count(wc_get_order_notes(array('order_id'=>$order->get_id(),'type'=>'internal')));(new MBS_Woo_Payment())->on_order_refunded($order->get_id(),$retry_refund->get_id());
-    $after_events=(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$table} WHERE invoice_ref=%s",$invoice->invoice_ref));$after_notes=count(wc_get_order_notes(array('order_id'=>$order->get_id(),'type'=>'internal')));
-    mbs_audit_assert($before_events===$after_events&&$before_notes===$after_notes,'Duplicate refund replay created another OSM event or success note.');
-    $crash_id=MBS_OSM_Integration::queue_refund_reversal($booking,$invoice->invoice_ref,100,$order->get_id(),999999,'partial');
-    mbs_audit_assert(!is_wp_error($crash_id)&&$wpdb->get_var($wpdb->prepare("SELECT status FROM {$table} WHERE id=%d",(int)$crash_id))==='pending','Crash-window reversal was not durable before HTTP delivery.');
-    add_filter('pre_http_request',$success,10,3);MBS_OSM_Integration::deliver_outbox_event((int)$crash_id);remove_filter('pre_http_request',$success,10);
-    mbs_audit_assert($wpdb->get_var($wpdb->prepare("SELECT status FROM {$table} WHERE id=%d",(int)$crash_id))==='delivered','Pending crash-window reversal was not recoverable after restart.');
+    update_option( 'mbs_osm_configuration_version', '2' ); update_option( 'mbs_osm_enabled', true );
+    $booking = mbs_audit_booking( 'INT-A-OSM-LEGACY', '10.00', 119 );
+    $event_id = MBS_OSM_Integration::queue_refund_reversal( $booking, 'INV-LEGACY-AUDIT', 100, 123, 456, 'partial' );
+    $table = $wpdb->prefix . MBS_OSM_OUTBOX_TABLE;
+    mbs_audit_assert( ! is_wp_error( $event_id ) && $wpdb->get_var( $wpdb->prepare( "SELECT status FROM {$table} WHERE id=%d", (int) $event_id ) ) === 'manual_reconciliation', 'Legacy event was not quarantined.' );
+    MBS_OSM_Integration::deliver_outbox_event( (int) $event_id );
+    mbs_audit_assert( $wpdb->get_var( $wpdb->prepare( "SELECT status FROM {$table} WHERE id=%d", (int) $event_id ) ) === 'manual_reconciliation', 'Legacy event was delivered outside its payout.' );
+    update_option( 'mbs_osm_enabled', false );
 } );
 
 mbs_audit_case( 'safe non-financial modification preserves issued history', static function () {

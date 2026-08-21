@@ -13,7 +13,7 @@ $plugin = dirname( __DIR__, 2 ) . '/wp-plugin/mathlin-booking';
 
 require_once $plugin . '/includes/class-rest-api.php';
 require_once $plugin . '/admin/class-admin.php';
-require_once $plugin . '/includes/class-osm-integration.php';
+require_once $plugin . '/includes/class-osm-accounting-v2.php';
 require_once $plugin . '/includes/class-csv-export.php';
 require_once $plugin . '/includes/class-accounting-export.php';
 require_once $plugin . '/includes/class-bookings.php';
@@ -35,8 +35,8 @@ foreach ( $handlers as $action => $handler ) {
     }
 }
 
-if ( count( $handlers ) !== 47 ) {
-    $errors[] = 'Expected 47 mapped admin actions; found ' . count( $handlers );
+if ( count( $handlers ) !== 51 ) {
+    $errors[] = 'Expected 51 mapped admin actions; found ' . count( $handlers );
 }
 
 // Every privileged AJAX hook in the admin surfaces must remain represented in
@@ -44,7 +44,7 @@ if ( count( $handlers ) !== 47 ) {
 // brittle expected count alone.
 $hook_files = array(
     $plugin . '/admin/class-admin.php',
-    $plugin . '/includes/class-osm-integration.php',
+    $plugin . '/includes/class-osm-accounting-v2.php',
     $plugin . '/includes/class-csv-export.php',
     $plugin . '/includes/class-accounting-export.php',
 );

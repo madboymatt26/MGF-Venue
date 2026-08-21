@@ -448,6 +448,8 @@ $script:Tools = @(
                 status = @{ type = 'string'; enum = @('pending', 'all'); default = 'pending' }
                 search = @{ type = 'string'; description = 'Search reference, action, details or user for global_audit.' }
                 limit = @{ type = 'integer'; minimum = 1; maximum = 1000; default = 100 }
+                date_from = @{ type = 'string'; pattern = '^\d{4}-\d{2}-\d{2}$'; description = 'Optional report start date for analytics (YYYY-MM-DD).' }
+                date_to = @{ type = 'string'; pattern = '^\d{4}-\d{2}-\d{2}$'; description = 'Optional report end date for analytics (YYYY-MM-DD).' }
             }
             required = @('resource')
             additionalProperties = $false
@@ -474,7 +476,8 @@ $script:Tools = @(
                         'extend_scout_series', 'reopen_scout_series', 'delete_scout_series',
                         'save_admin_notes', 'chase_payment', 'save_email_settings',
                         'save_custom_fields', 'edit_booking', 'approve_request', 'reject_request',
-                        'bulk_action', 'save_osm_settings', 'test_osm_connection', 'osm_get_sections'
+                        'bulk_action', 'save_osm_settings', 'test_osm_connection', 'osm_get_sections',
+                        'osm_discover', 'osm_sync_woopayments', 'osm_retry_event', 'osm_resolve_event'
                     )
                 }
                 arguments = @{ type = 'object'; description = 'Arguments expected by the matching MGF Venue admin action.'; additionalProperties = $true }
@@ -622,7 +625,17 @@ function Invoke-MgfVenueTool {
                 'email_configuration' { return Invoke-VenueApi -Method GET -Path '/admin/email-configuration' }
                 'custom_fields' { return Invoke-VenueApi -Method GET -Path '/admin/custom-fields' }
                 'osm_configuration' { return Invoke-VenueApi -Method GET -Path '/admin/osm-configuration' }
-                'analytics' { return Invoke-VenueApi -Method GET -Path '/admin/analytics' }
+                'analytics' {
+                    $queryValues = @{}
+                    $dateFrom = Get-PropertyValue $Arguments 'date_from' $null
+                    $dateTo = Get-PropertyValue $Arguments 'date_to' $null
+                    if ($null -ne $dateFrom -and [string]$dateFrom -ne '') { $queryValues['report_from'] = [string]$dateFrom }
+                    if ($null -ne $dateTo -and [string]$dateTo -ne '') { $queryValues['report_to'] = [string]$dateTo }
+                    $query = ConvertTo-QueryString $queryValues
+                    $analyticsPath = '/admin/analytics'
+                    if ($query) { $analyticsPath = "/admin/analytics?${query}" }
+                    return Invoke-VenueApi -Method GET -Path $analyticsPath
+                }
                 'invoice' {
                     return Invoke-VenueApi -Method POST -Path '/admin/actions/get_invoice' -Body @{ ref = Get-PropertyValue $Arguments 'ref' '' }
                 }

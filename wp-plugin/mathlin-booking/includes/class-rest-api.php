@@ -987,6 +987,10 @@ class MBS_Rest_API {
             'save_osm_settings'     => array( 'MBS_OSM_Integration', 'ajax_save_settings' ),
             'test_osm_connection'   => array( 'MBS_OSM_Integration', 'ajax_test_connection' ),
             'osm_get_sections'      => array( 'MBS_OSM_Integration', 'ajax_get_sections' ),
+            'osm_discover'          => array( 'MBS_OSM_Integration', 'ajax_discover' ),
+            'osm_sync_woopayments'  => array( 'MBS_OSM_Integration', 'ajax_sync_woopayments' ),
+            'osm_retry_event'       => array( 'MBS_OSM_Integration', 'ajax_retry_event' ),
+            'osm_resolve_event'     => array( 'MBS_OSM_Integration', 'ajax_resolve_event' ),
             'export_csv'            => array( 'MBS_CSV_Export', 'handle_export' ),
             'export_accounting'     => array( 'MBS_Accounting_Export', 'handle_export' ),
         );
@@ -1008,7 +1012,8 @@ class MBS_Rest_API {
             $admin_only_actions = array(
                 'delete_booking', 'resolve_invoice_reconciliation', 'save_settings', 'test_ha', 'check_update',
                 'delete_scout_series', 'save_email_settings', 'save_custom_fields',
-                'save_osm_settings', 'test_osm_connection', 'osm_get_sections',
+                'save_osm_settings', 'test_osm_connection', 'osm_get_sections', 'osm_discover',
+                'osm_sync_woopayments', 'osm_retry_event', 'osm_resolve_event',
                 'export_csv', 'export_accounting',
             );
             $actions = array_values( array_diff( $actions, $admin_only_actions ) );
@@ -1246,6 +1251,7 @@ class MBS_Rest_API {
         $settings['client_secret_configured'] = ! empty( $settings['client_secret'] );
         unset( $settings['client_id'], $settings['client_secret'] );
         $settings['gilbertweb_available'] = MBS_OSM_Integration::gilbertweb_available();
+        $settings['queue'] = MBS_OSM_Integration::get_queue_health();
         return rest_ensure_response( $settings );
     }
 
@@ -1254,11 +1260,26 @@ class MBS_Rest_API {
      * same metrics and date basis as the WordPress admin page. The HTML is kept
      * intact because the page contains a broad set of derived charts and tables.
      */
-    public function get_admin_analytics() {
+    public function get_admin_analytics( WP_REST_Request $request ) {
+        $previous = array( 'report_from' => $_GET['report_from'] ?? null, 'report_to' => $_GET['report_to'] ?? null );
+        foreach ( array( 'report_from', 'report_to' ) as $key ) {
+            $value = sanitize_text_field( (string) $request->get_param( $key ) );
+            if ( $value !== '' ) $_GET[$key] = $value;
+        }
         ob_start();
         include MBS_PLUGIN_DIR . 'admin/views/analytics.php';
         $html = ob_get_clean();
-        return rest_ensure_response( array( 'html' => $html ) );
+        foreach ( $previous as $key => $value ) { if ( $value === null ) unset( $_GET[$key] ); else $_GET[$key] = $value; }
+        $customers = array_map( static function ( $customer ) { return array( 'name' => $customer['name'], 'email' => $customer['email'], 'invoice_count' => count( $customer['invoice_ids'] ), 'legacy_booking_count' => (int) $customer['legacy_bookings'], 'received_minor' => (int) $customer['payments_minor'], 'refunded_minor' => (int) $customer['refunds_minor'], 'net_minor' => (int) $customer['payments_minor'] - (int) $customer['refunds_minor'] ); }, $customer_cash );
+        $routes = array(); foreach ( $payment_routes as $label => $totals ) $routes[] = array( 'label' => $label, 'transactions' => (int) $totals['transactions'], 'received_minor' => (int) $totals['payments'], 'refunded_minor' => (int) $totals['refunds'], 'net_minor' => (int) $totals['payments'] - (int) $totals['refunds'] );
+        $osm_summary = $osm_report;
+        $osm_summary['recent_delivered'] = array_map( static function ( $row ) { return array_intersect_key( $row, array_flip( array( 'payout_ref', 'payout_date', 'amount_minor', 'bank_transaction_id', 'cashbook_transaction_id', 'delivered_at' ) ) ); }, $osm_report['recent_delivered'] );
+        $osm_summary['recent_direct'] = array_map( static function ( $row ) { return array_intersect_key( $row, array_flip( array( 'event_ref', 'invoice_ref', 'event_type', 'amount_minor', 'occurred_at', 'bank_transaction_id', 'remote_transaction_id', 'delivered_at' ) ) ); }, $osm_report['recent_direct'] );
+        return rest_ensure_response( array(
+            'period' => array( 'from' => $fy_start, 'to' => $fy_end, 'label' => $fy_label ),
+            'summary' => array( 'bookings' => (int) $total_fy, 'invoiced_minor' => (int) round( $invoiced_fy * 100 ), 'received_minor' => (int) round( $collected_fy * 100 ), 'refunded_minor' => (int) $invoice_refunded_minor, 'net_cash_minor' => (int) round( $net_collected_fy * 100 ), 'outstanding_minor' => (int) round( $outstanding_total * 100 ) ),
+            'customers' => $customers, 'payment_routes' => $routes, 'osm' => $osm_summary, 'html' => $html,
+        ) );
     }
 
     private function find_booking( WP_REST_Request $request ) {

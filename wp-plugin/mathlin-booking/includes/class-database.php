@@ -280,22 +280,81 @@ class MBS_Database {
         ) ENGINE=InnoDB {$charset};";
         dbDelta( $reservation_sql );
 
-        // Durable OSM reversal delivery. Rows are inserted in the same
-        // transaction as the corresponding refund ledger mutation.
+        // Durable finance-event outbox. Completed payment/refund rows are
+        // inserted here in the same transaction as the billing ledger. Card
+        // events wait for their WooPayments payout rather than being posted to
+        // OSM individually (a payout can also contain shop sales and fees).
         $osm_outbox_table = $wpdb->prefix . MBS_OSM_OUTBOX_TABLE;
         $osm_outbox_sql = "CREATE TABLE {$osm_outbox_table} (
             id                    BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
             event_ref             VARCHAR(100) NOT NULL,
-            booking_ref           VARCHAR(20) NOT NULL,
+            transaction_id        BIGINT(20) UNSIGNED DEFAULT NULL,
+            transaction_ref       VARCHAR(40) NOT NULL DEFAULT '',
+            event_type            VARCHAR(20) NOT NULL DEFAULT 'legacy_refund',
+            provider              VARCHAR(30) NOT NULL DEFAULT '',
+            provider_transaction_id VARCHAR(100) NOT NULL DEFAULT '',
+            payment_gateway       VARCHAR(60) NOT NULL DEFAULT '',
+            target_mode           VARCHAR(30) NOT NULL DEFAULT 'manual_review',
+            payout_id             VARCHAR(100) NOT NULL DEFAULT '',
+            booking_ref           VARCHAR(20) NOT NULL DEFAULT '',
             invoice_ref           VARCHAR(30) NOT NULL,
             order_id              BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
             refund_id             BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
             amount_minor          BIGINT(20) UNSIGNED NOT NULL,
-            reversal_kind         VARCHAR(20) NOT NULL,
+            currency              CHAR(3) NOT NULL DEFAULT 'GBP',
+            occurred_at           DATETIME DEFAULT NULL,
+            section_id            BIGINT(20) UNSIGNED DEFAULT NULL,
+            bank_account_id       BIGINT(20) UNSIGNED DEFAULT NULL,
+            category_id           BIGINT(20) UNSIGNED DEFAULT NULL,
+            item_id               BIGINT(20) UNSIGNED DEFAULT NULL,
+            reversal_kind         VARCHAR(20) NOT NULL DEFAULT '',
             payload_json          LONGTEXT NOT NULL,
-            status                VARCHAR(30) NOT NULL DEFAULT 'pending',
+            payload_hash          CHAR(64) NOT NULL DEFAULT '',
+            status                VARCHAR(30) NOT NULL DEFAULT 'manual_review',
             attempts              SMALLINT UNSIGNED NOT NULL DEFAULT 0,
             next_attempt_at       DATETIME DEFAULT NULL,
+            claimed_at            DATETIME DEFAULT NULL,
+            lease_expires_at      DATETIME DEFAULT NULL,
+            last_error            TEXT DEFAULT '',
+            response_code         SMALLINT UNSIGNED DEFAULT NULL,
+            bank_transaction_id   BIGINT(20) UNSIGNED DEFAULT NULL,
+            remote_transaction_id BIGINT(20) UNSIGNED DEFAULT NULL,
+            created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            delivered_at          DATETIME DEFAULT NULL,
+            resolved_at           DATETIME DEFAULT NULL,
+            resolved_by           BIGINT(20) UNSIGNED DEFAULT NULL,
+            PRIMARY KEY (id),
+            UNIQUE KEY event_ref (event_ref),
+            UNIQUE KEY transaction_owner (transaction_id),
+            KEY idx_osm_delivery (status, next_attempt_at),
+            KEY idx_osm_payout (payout_id, status),
+            KEY idx_osm_order (order_id),
+            KEY idx_osm_booking (booking_ref),
+            KEY idx_osm_refund (refund_id)
+        ) ENGINE=InnoDB {$charset};";
+        dbDelta( $osm_outbox_sql );
+
+        // Exactly one row owns each WooPayments payout and each matched OSM
+        // bank transaction. The unique keys are the last line of defence
+        // against duplicate cashbook records during retries or overlapping
+        // administrator/MCP requests.
+        $osm_payout_table = $wpdb->prefix . MBS_OSM_PAYOUT_TABLE;
+        $osm_payout_sql = "CREATE TABLE {$osm_payout_table} (
+            id                    BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            payout_ref            VARCHAR(100) NOT NULL,
+            payout_date           DATE NOT NULL,
+            currency              CHAR(3) NOT NULL DEFAULT 'GBP',
+            amount_minor          BIGINT(20) NOT NULL,
+            bank_account_id       BIGINT(20) UNSIGNED NOT NULL,
+            bank_transaction_id   BIGINT(20) UNSIGNED DEFAULT NULL,
+            cashbook_transaction_id BIGINT(20) UNSIGNED DEFAULT NULL,
+            payload_json          LONGTEXT NOT NULL,
+            payload_hash          CHAR(64) NOT NULL,
+            status                VARCHAR(30) NOT NULL DEFAULT 'pending',
+            attempts              SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            claimed_at            DATETIME DEFAULT NULL,
+            lease_expires_at      DATETIME DEFAULT NULL,
             last_error            TEXT DEFAULT '',
             response_code         SMALLINT UNSIGNED DEFAULT NULL,
             created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -304,12 +363,12 @@ class MBS_Database {
             resolved_at           DATETIME DEFAULT NULL,
             resolved_by           BIGINT(20) UNSIGNED DEFAULT NULL,
             PRIMARY KEY (id),
-            UNIQUE KEY event_ref (event_ref),
-            KEY idx_osm_delivery (status, next_attempt_at),
-            KEY idx_osm_booking (booking_ref),
-            KEY idx_osm_refund (refund_id)
+            UNIQUE KEY payout_ref (payout_ref),
+            UNIQUE KEY bank_transaction_owner (bank_transaction_id),
+            KEY idx_payout_status (status, payout_date),
+            KEY idx_payout_cashbook (cashbook_transaction_id)
         ) ENGINE=InnoDB {$charset};";
-        dbDelta( $osm_outbox_sql );
+        dbDelta( $osm_payout_sql );
 
         // Immutable invoice document snapshots (append-only history)
         $documents_table = $wpdb->prefix . MBS_INVOICE_DOCUMENTS_TABLE;
@@ -469,6 +528,7 @@ class MBS_Database {
             $allocation_table => $allocation_sql,
             $reservation_table => $reservation_sql,
             $osm_outbox_table => $osm_outbox_sql,
+            $osm_payout_table => $osm_payout_sql,
             $documents_table => $documents_sql,
             $assets_table => $assets_sql,
             $tokens_table => $tokens_sql,
@@ -515,7 +575,8 @@ class MBS_Database {
             $wpdb->prefix.MBS_TABLE, $wpdb->prefix.MBS_SERIES_TABLE, $wpdb->prefix.MBS_INVOICE_TABLE,
             $wpdb->prefix.MBS_INVOICE_ITEM_TABLE, $wpdb->prefix.MBS_PAYMENT_TRANSACTION_TABLE,
             $wpdb->prefix.MBS_BILLING_ALLOCATION_TABLE, $wpdb->prefix.MBS_PAYMENT_RESERVATION_TABLE,
-            $wpdb->prefix.MBS_OSM_OUTBOX_TABLE, $wpdb->prefix.MBS_INVOICE_DOCUMENTS_TABLE,
+            $wpdb->prefix.MBS_OSM_OUTBOX_TABLE, $wpdb->prefix.MBS_OSM_PAYOUT_TABLE,
+            $wpdb->prefix.MBS_INVOICE_DOCUMENTS_TABLE,
             $wpdb->prefix.MBS_DOCUMENT_ASSETS_TABLE, $wpdb->prefix.MBS_DOWNLOAD_TOKENS_TABLE,
             $wpdb->prefix.'mathlin_blocked_dates',
             $wpdb->prefix.'mathlin_audit_log', $wpdb->prefix.'mathlin_email_queue',

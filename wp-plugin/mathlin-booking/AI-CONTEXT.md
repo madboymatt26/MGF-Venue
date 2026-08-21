@@ -1,4 +1,4 @@
-# AI-CONTEXT.md — MGF Venue (v3.25.0)
+# AI-CONTEXT.md — MGF Venue (v3.26.0)
 
 This document is designed for LLMs and AI agents to read before modifying this codebase. It maps the architecture, file relationships, and critical business logic rules.
 
@@ -24,6 +24,43 @@ This document is designed for LLMs and AI agents to read before modifying this c
 - `MBS_Bookings::is_legacy_scout_series()` remains as a compatibility alias;
   new code should use `is_scout_series()` so first-class and reconstructed Scout
   parents follow the same protected action path.
+
+### OSM accountancy invariant (v3.26.0)
+
+- Never post an individual WooCommerce/MGF payment as an OSM bank receipt.
+  WooPayments deposits can combine venue orders, clothing/scarf orders, fees
+  and refunds. The imported Co-op transaction is the authoritative bank line.
+- Completed MGF ledger payments/refunds atomically create one immutable
+  `mathlin_osm_outbox` event. WooPayments events remain `awaiting_payout` until
+  their payout is classified and reconciled.
+- Non-card venue payments/refunds remain separate ledger events. They may be
+  linked only to one unclassified imported OSM bank line with the same signed
+  amount and date; an identifying reference or an administrator-supplied exact
+  bank transaction ID is required.
+- `mathlin_osm_payouts.payout_ref` and `bank_transaction_id` are unique. One
+  payout may create only one cashbook transaction and one imported bank line
+  may be owned by only one payout.
+- Classification must map every order/product and fee, and signed category
+  lines must equal the exact payout net in minor units. Unknown products,
+  mixed currencies, mismatched totals, already-classified bank lines, missing
+  or multiple matches, HTML-200 responses and ambiguous write responses stop
+  for manual reconciliation.
+- Venue orders are identified by `_mbs_invoice_ref`; clothing/scarf/uniform
+  products use the clothing mapping, with explicit product/category JSON rules
+  for other WooCommerce sales. Fees use a separate OSM expense category/item.
+- OSM writes use the v3 cashbook endpoint with
+  `bank_account_transaction_id`. The integration never adds a bank transaction.
+- A dedicated MGF OAuth client is preferred. The GilbertWeb token is read-only
+  compatibility; MGF Venue must never refresh or mutate another plugin's token.
+- An upgraded v1 configuration is not considered enabled until
+  `mbs_osm_configuration_version=2` has been saved. This prevents incomplete
+  new mappings from blocking ordinary booking payment transactions.
+- Public copy must not expose the internal phrase “legacy bookings”.
+- `awaiting_bank_import` is a normal workflow state, not an accounting error.
+  Reports may aggregate OSM category totals only from `delivered` payouts;
+  sandbox, waiting and manual-review snapshots must never be presented as
+  amounts already added to OSM. Do not add full Woo payout totals to MGF venue
+  cash totals because a payout may also include non-venue shop income and fees.
 
 ### Invoice presentation invariant (v3.24.4)
 
@@ -126,7 +163,7 @@ mathlin-booking/
 │   ├── class-accounting-export.php  Xero/Sage/QuickBooks CSV
 │   ├── class-ical.php               iCal file generation
 │   ├── class-updater.php            GitHub release auto-updater
-│   ├── class-osm-integration.php    Online Scout Manager integration
+│   ├── class-osm-accounting-v2.php  Payout-aware OSM accountancy integration
 │   └── class-woo-ux.php             WooCommerce UX for hirers + managers
 │
 ├── admin/
@@ -648,11 +685,10 @@ File: `includes/class-woo-ux.php`
 - Financial analytics/accounting exports must combine invoice records with
 	  only bookings that have no historic billing allocation, or values will be
 	  double counted.
-- OSM income is paired with partial/full refund expenditure events inserted into
-	  `mathlin_osm_outbox` in the same transaction as the refund. Each event has a
-	  stable identity and delivered/retry/manual-reconciliation lifecycle. Definite
-	  server failures use bounded backoff; ambiguous responses stop for audited
-	  administrator reconciliation rather than risking duplicate expenditure.
+- OSM events mirror completed ledger payments/refunds atomically. WooPayments
+	  events are grouped by payout with site-wide Woo order classification, then a
+	  single multi-line cashbook transaction is linked to the existing imported
+	  bank transaction. Individual event delivery is deliberately disabled.
 
 ---
 
