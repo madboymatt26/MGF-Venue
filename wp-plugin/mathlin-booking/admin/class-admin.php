@@ -233,6 +233,38 @@ class MBS_Admin {
     }
 
     public function render_scout_nights() {
+        // Pick up any Scout occurrence groups created by older plugin versions.
+        // The scan is idempotent and prevents the series-centred screen from
+        // hiding a valid legacy group that has no parent snapshot yet.
+        $legacy_registration = MBS_Series::register_legacy_groups();
+        $registration_error = is_wp_error( $legacy_registration ) ? $legacy_registration : null;
+        $ref = sanitize_text_field( $_GET['ref'] ?? '' );
+        $status = sanitize_key( $_GET['status'] ?? '' );
+        $scope = sanitize_key( $_GET['scope'] ?? 'current' );
+        if ( ! in_array( $scope, array( 'current', 'ended', 'all' ), true ) ) $scope = 'current';
+        $search = sanitize_text_field( $_GET['s'] ?? '' );
+        $external_series_redirect = '';
+        $series = $ref ? MBS_Series::get( $ref ) : null;
+        if ( $series && empty( $series->scout_use ) ) {
+            $target = admin_url( 'admin.php?page=mathlin-series&ref=' . rawurlencode( $series->series_ref ) );
+            if ( ! headers_sent() ) { wp_safe_redirect( $target ); return; }
+            $external_series_redirect = $target;
+            $series = null;
+        }
+        $series_rows = $ref ? array() : MBS_Series::get_all( array(
+            'status' => $status,
+            'scope' => $scope,
+            'search' => $search,
+            'scout_use' => 1,
+            'limit' => 500,
+        ) );
+        $occurrences = $series && ! empty( $series->scout_use ) ? MBS_Series::occurrences( $series->series_ref ) : array();
+        $exceptions = $series && ! empty( $series->scout_use ) ? MBS_Series::exceptions( $series ) : array();
+        $audit = $series && ! empty( $series->scout_use ) ? MBS_Audit_Log::get_for_booking( $series->series_ref ) : array();
+        $summary_refs = $series ? array( $series->series_ref ) : array_map( static function ( $row ) { return $row->series_ref; }, $series_rows );
+        $occurrence_summaries = MBS_Series::occurrence_summaries( $summary_refs );
+        $spaces = MBS_Bookings::get_spaces();
+        $can_delete = self::can_delete_bookings();
         include MBS_PLUGIN_DIR . 'admin/views/scout-nights.php';
     }
 
@@ -240,8 +272,15 @@ class MBS_Admin {
         $ref = sanitize_text_field( $_GET['ref'] ?? '' );
         $status = sanitize_key( $_GET['status'] ?? '' );
         $search = sanitize_text_field( $_GET['s'] ?? '' );
+        $scout_series_redirect = '';
         $series = $ref ? MBS_Series::get( $ref ) : null;
-        $series_rows = $ref ? array() : MBS_Series::get_all( array( 'status' => $status, 'search' => $search ) );
+        if ( $series && ! empty( $series->scout_use ) ) {
+            $target = admin_url( 'admin.php?page=mathlin-scout-nights&ref=' . rawurlencode( $series->series_ref ) );
+            if ( ! headers_sent() ) { wp_safe_redirect( $target ); return; }
+            $scout_series_redirect = $target;
+            $series = null;
+        }
+        $series_rows = $ref ? array() : MBS_Series::get_all( array( 'status' => $status, 'search' => $search, 'scout_use' => 0 ) );
         $occurrences = $series ? MBS_Series::occurrences( $series->series_ref ) : array();
         $exceptions = $series ? MBS_Series::exceptions( $series ) : array();
         $invoices = $series ? MBS_Series::invoices( $series->series_ref ) : array();
@@ -280,7 +319,8 @@ class MBS_Admin {
 
         $current = MBS_Bookings::get( $ref );
         if ( ! $current ) wp_send_json_error( 'Booking not found.' );
-        if ( ! empty( $current->series_id ) && MBS_Series::get( $current->series_id ) ) {
+        $is_scout_occurrence = ! empty( $current->scout_use );
+        if ( ! empty( $current->series_id ) && MBS_Series::get( $current->series_id ) && ! $is_scout_occurrence ) {
             wp_send_json_error( 'Change first-class recurring occurrences through the versioned series screen.', 409 );
         }
         if ( in_array( $status, array( 'paid', 'deposit_paid' ), true ) && self::invoice_manages_occurrence( $current ) ) {
@@ -295,12 +335,12 @@ class MBS_Admin {
             // Chargeable one-offs are notified transactionally with their PDF
             // document. Free and legacy bookings still need the classic
             // confirmation email, but must not create a duplicate attachment.
-            if ( $booking && empty( $booking->current_invoice_document_id ) ) MBS_Email::notify_confirmed( $booking );
+            if ( $booking && ! $is_scout_occurrence && empty( $booking->current_invoice_document_id ) ) MBS_Email::notify_confirmed( $booking );
         }
 
         if ( $status === 'cancelled' ) {
             $booking = MBS_Bookings::get( $ref );
-            if ( $booking ) MBS_Email::notify_cancelled( $booking, $reason );
+            if ( $booking && ! $is_scout_occurrence ) MBS_Email::notify_cancelled( $booking, $reason );
         }
 
         if ( $status === 'paid' ) {
@@ -324,6 +364,7 @@ class MBS_Admin {
 
         $ref    = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
         $result = MBS_Bookings::delete( $ref );
+        if ( $result === false ) wp_send_json_error( 'The booking could not be deleted.', 409 );
         wp_send_json_success( array( 'deleted' => $ref ) );
     }
 
@@ -435,12 +476,33 @@ class MBS_Admin {
         $allowed = array( 'confirmed', 'deposit_paid', 'paid' );
         if ( ! in_array( $status, $allowed ) ) $status = 'confirmed';
 
-        // Direct DB update — bypasses update_status() to avoid triggering emails/webhooks
+        // Direct DB update — bypasses update_status() to avoid triggering emails/webhooks.
+        // Scout occurrences keep their parent snapshot in the same transaction.
         global $wpdb;
         $table = $wpdb->prefix . MBS_TABLE;
-        $wpdb->update( $table, array( 'status' => $status ), array( 'ref' => $ref ) );
+        $sync_scout_series = ! empty( $booking->scout_use ) && ! empty( $booking->series_id );
+        if ( $sync_scout_series && $wpdb->query( 'START TRANSACTION' ) === false ) wp_send_json_error( 'Could not start the Scout occurrence restore.', 500 );
+        $updated = $wpdb->update( $table, array( 'status' => $status ), array( 'ref' => $ref ) );
+        if ( $updated === false ) {
+            if ( $sync_scout_series ) $wpdb->query( 'ROLLBACK' );
+            wp_send_json_error( 'Could not restore the booking.', 500 );
+        }
+
+        if ( $sync_scout_series ) {
+            $synced = MBS_Series::synchronize_scout_series( $booking->series_id );
+            if ( is_wp_error( $synced ) ) { $wpdb->query( 'ROLLBACK' ); wp_send_json_error( $synced->get_error_message(), 500 ); }
+            if ( $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); wp_send_json_error( 'Could not commit the Scout occurrence restore.', 500 ); }
+        }
 
         MBS_Audit_Log::log( $ref, 'restored', 'Booking restored from ' . $booking->status . ' to ' . $status . ' (no notification sent).' );
+
+        if ( $sync_scout_series ) {
+            $fresh = MBS_Bookings::get( $ref );
+            if ( $fresh && $status === 'confirmed' ) {
+                MBS_HomeAssistant::notify( $fresh );
+                $wpdb->update( $table, array( 'ha_notified' => 1 ), array( 'ref' => $ref ) );
+            }
+        }
 
         wp_send_json_success( array( 'ref' => $ref, 'status' => $status ) );
     }
@@ -519,76 +581,44 @@ class MBS_Admin {
         $first_day = strtotime( "this {$day_name}", $current - 86400 );
         if ( $first_day < $current ) $first_day = strtotime( "next {$day_name}", $current );
 
-        $series_id = MBS_Bookings::generate_series_id();
-        $created   = 0;
-        $skipped   = 0;
+        if ( ! $first_day || ! $end || $first_day > $end ) wp_send_json_error( 'The chosen date range contains no ' . $day_name . ' occurrence.' );
+        if ( strtotime( $end_time ) <= strtotime( $start_time ) ) wp_send_json_error( 'End time must be after start time.' );
 
-        global $wpdb;
-        $table = $wpdb->prefix . MBS_TABLE;
+        $data = array(
+            'name'             => $purpose,
+            'organisation'     => get_option( 'mbs_org_name', get_bloginfo( 'name' ) ),
+            'email'            => MBS_Bookings::get_admin_email(),
+            'phone'            => '',
+            'address'          => '',
+            'space'            => $space,
+            'kitchen'          => false,
+            'booking_date'     => wp_date( 'Y-m-d', $first_day ),
+            'booking_date_end' => wp_date( 'Y-m-d', $first_day ),
+            'all_day'          => false,
+            'scout_use'        => true,
+            'pricing_tier'     => 'standard',
+            'start_time'       => $start_time,
+            'end_time'         => $end_time,
+            'attendees'        => 0,
+            'purpose'          => $purpose,
+            'notes'            => '',
+            'is_public'        => false,
+            'accept_terms'     => true,
+        );
+        $result = MBS_Bookings::create_recurring( $data, $date_to, true );
+        if ( is_wp_error( $result ) ) wp_send_json_error( $result->get_error_message(), 409 );
+        $approval = MBS_Series::approve( $result['series_id'], 'pending', (int) $result['series']->version, false );
+        if ( is_wp_error( $approval ) ) wp_send_json_error( $approval->get_error_message(), 500 );
 
-        for ( $d = $first_day; $d <= $end; $d = strtotime( '+1 week', $d ) ) {
-            $date_str = wp_date( 'Y-m-d', $d );
-
-            // M-1: Wrap conflict check + insert in a transaction with row locking to
-            // prevent a TOCTOU race where a public booking lands between check and insert.
-            if ( $wpdb->query( 'START TRANSACTION' ) === false ) wp_send_json_error( 'Could not start recurring booking creation.', 500 );
-            $wpdb->query( $wpdb->prepare(
-                "SELECT id FROM {$table} WHERE space = %s AND booking_date = %s AND status NOT IN ('cancelled','archived') FOR UPDATE",
-                $space, $date_str
-            ) );
-
-            // Check for conflicts (now with lock held)
-            $conflicts = MBS_Bookings::check_conflicts( $space, $date_str, $start_time, $end_time, false );
-            if ( ! empty( $conflicts ) ) {
-                $wpdb->query( 'ROLLBACK' );
-                $skipped++;
-                continue;
-            }
-
-            // Check for blocked dates
-            if ( MBS_Blocked_Dates::is_blocked( $date_str, $space ) ) {
-                $wpdb->query( 'ROLLBACK' );
-                $skipped++;
-                continue;
-            }
-
-            $ref = MBS_Bookings::generate_ref();
-            $wpdb->insert( $table, array(
-                'ref'              => $ref,
-                'status'           => 'confirmed',
-                'name'             => $purpose,
-                'organisation'     => get_option( 'mbs_org_name', get_bloginfo( 'name' ) ),
-                'email'            => MBS_Bookings::get_admin_email(),
-                'phone'            => '',
-                'address'          => '',
-                'space'            => $space,
-                'kitchen'          => 0,
-                'booking_date'     => $date_str,
-                'booking_date_end' => $date_str,
-                'all_day'          => 0,
-                'scout_use'        => 1,
-                'start_time'       => $start_time,
-                'end_time'         => $end_time,
-                'attendees'        => 0,
-                'purpose'          => $purpose,
-                'amount'           => 0,
-                'amount_paid'      => 0,
-                'invoice_number'   => '',
-                'series_id'        => $series_id,
-                'modification_token' => wp_generate_password( 32, false ),
-            ) );
-            if ( $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); wp_send_json_error( 'Could not commit recurring booking creation.', 500 ); }
-            $created++;
-        }
-
-        if ( $created > 0 ) {
-            MBS_Audit_Log::log( $series_id, 'created', "Scout recurring: {$created} x {$purpose} ({$day_name}s, {$start_time}–{$end_time}) in {$space}. Skipped: {$skipped}" );
-        }
+        $created = (int) $result['created'];
+        $skipped = count( $result['skipped'] );
+        MBS_Audit_Log::log( $result['series_id'], 'created', "Scout recurring: {$created} x {$purpose} ({$day_name}s, {$start_time}–{$end_time}) in {$space}. Skipped: {$skipped}" );
 
         wp_send_json_success( array(
             'created'   => $created,
             'skipped'   => $skipped,
-            'series_id' => $series_id,
+            'series_id' => $result['series_id'],
+            'occurrences' => $result['occurrences'],
         ) );
     }
 

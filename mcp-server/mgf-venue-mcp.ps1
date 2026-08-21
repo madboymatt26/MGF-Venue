@@ -344,11 +344,12 @@ $script:Tools = @(
     @{
         name = 'list_series'
         title = 'List recurring booking series'
-        description = 'List first-class and registered legacy recurring series with safe billing metadata.'
+        description = 'List recurring series with safe metadata. Filter external customer hires from no-charge Scout series with series_kind.'
         inputSchema = @{
             type = 'object'; properties = @{
                 status = @{ type = 'string'; enum = @('pending', 'confirmed', 'paused', 'cancelled_future', 'cancelled') }
                 search = @{ type = 'string' }
+                series_kind = @{ type = 'string'; enum = @('all', 'external', 'scout'); default = 'all'; description = 'Return all series, external customer hires only, or internal Scout-use series only.' }
                 limit = @{ type = 'integer'; minimum = 1; maximum = 500; default = 100 }
             }; additionalProperties = $false
         }
@@ -557,7 +558,7 @@ function Invoke-MgfVenueTool {
         }
         'list_series' {
             $queryValues = @{}
-            foreach ($key in @('status', 'search', 'limit')) { $value = Get-PropertyValue $Arguments $key $null; if ($null -ne $value) { $queryValues[$key] = $value } }
+            foreach ($key in @('status', 'search', 'series_kind', 'limit')) { $value = Get-PropertyValue $Arguments $key $null; if ($null -ne $value) { $queryValues[$key] = $value } }
             $query = ConvertTo-QueryString $queryValues
             $path = '/admin/series'; if ($query) { $path += "?${query}" }
             return Invoke-VenueApi -Method GET -Path $path

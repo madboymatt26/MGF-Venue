@@ -81,6 +81,7 @@ class MBS_Series {
         $table = $wpdb->prefix . MBS_SERIES_TABLE;
         $status = sanitize_key( $args['status'] ?? '' );
         $search = sanitize_text_field( $args['search'] ?? '' );
+        $scope = sanitize_key( $args['scope'] ?? '' );
         $limit = max( 1, min( 500, (int) ( $args['limit'] ?? 100 ) ) );
         $where = array( '1=1' );
         $params = array();
@@ -90,8 +91,19 @@ class MBS_Series {
         }
         if ( $search ) {
             $like = '%' . $wpdb->esc_like( $search ) . '%';
-            $where[] = '(series_ref LIKE %s OR contact_name LIKE %s OR contact_organisation LIKE %s OR contact_email LIKE %s)';
-            array_push( $params, $like, $like, $like, $like );
+            $where[] = '(series_ref LIKE %s OR contact_name LIKE %s OR contact_organisation LIKE %s OR contact_email LIKE %s OR purpose LIKE %s OR space LIKE %s)';
+            array_push( $params, $like, $like, $like, $like, $like, $like );
+        }
+        if ( array_key_exists( 'scout_use', $args ) && $args['scout_use'] !== '' && $args['scout_use'] !== null ) {
+            $where[] = 'scout_use = %d';
+            $params[] = ! empty( $args['scout_use'] ) ? 1 : 0;
+        }
+        if ( $scope === 'current' ) {
+            $where[] = 'repeat_until >= %s';
+            $params[] = wp_date( 'Y-m-d' );
+        } elseif ( $scope === 'ended' ) {
+            $where[] = 'repeat_until < %s';
+            $params[] = wp_date( 'Y-m-d' );
         }
         $sql = "SELECT * FROM {$table} WHERE " . implode( ' AND ', $where ) . ' ORDER BY created_at DESC LIMIT %d';
         $params[] = $limit;
@@ -239,6 +251,204 @@ class MBS_Series {
             "SELECT * FROM {$table} WHERE series_id = %s{$archived} ORDER BY booking_date ASC, start_time ASC",
             sanitize_text_field( $series_ref )
         ) );
+    }
+
+    /**
+     * Return occurrence roll-ups for one or more series without an N+1 query.
+     *
+     * @return array<string,object> Series reference keyed summary objects.
+     */
+    public static function occurrence_summaries( $series_refs ) {
+        global $wpdb;
+        $series_refs = array_values( array_unique( array_filter( array_map( 'sanitize_text_field', (array) $series_refs ) ) ) );
+        if ( ! $series_refs ) return array();
+
+        $table = $wpdb->prefix . MBS_TABLE;
+        $today = wp_date( 'Y-m-d' );
+        $placeholders = implode( ',', array_fill( 0, count( $series_refs ), '%s' ) );
+        $params = array_merge( array( $today, $today, $today, $today ), $series_refs );
+        $rows = $wpdb->get_results( $wpdb->prepare(
+            "SELECT series_id,
+                    COUNT(*) AS total_count,
+                    SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled_count,
+                    SUM(CASE WHEN booking_date >= %s AND status NOT IN ('cancelled','archived') THEN 1 ELSE 0 END) AS future_active_count,
+                    SUM(CASE WHEN booking_date >= %s AND status = 'cancelled' THEN 1 ELSE 0 END) AS future_cancelled_count,
+                    SUM(CASE WHEN booking_date < %s THEN 1 ELSE 0 END) AS past_count,
+                    MIN(CASE WHEN booking_date >= %s AND status NOT IN ('cancelled','archived') THEN booking_date ELSE NULL END) AS next_date,
+                    MAX(booking_date) AS last_date
+             FROM {$table}
+             WHERE series_id IN ({$placeholders})
+             GROUP BY series_id",
+            $params
+        ) );
+
+        $summaries = array();
+        foreach ( $rows as $row ) {
+            $summaries[ $row->series_id ] = $row;
+        }
+        return $summaries;
+    }
+
+    /**
+     * Rebuild the mutable Scout-series summary from its occurrence records.
+     * Existing creation-time conflict/blocked exceptions are preserved.
+     *
+     * @return object|WP_Error Refreshed series row.
+     */
+    public static function synchronize_scout_series( $series_ref, $additional_exceptions = array() ) {
+        global $wpdb;
+        $series_ref = sanitize_text_field( $series_ref );
+        if ( ! $series_ref ) return new WP_Error( 'series_required', 'A series reference is required.' );
+
+        $series = self::get( $series_ref );
+        if ( ! $series || empty( $series->scout_use ) || $series->billing_treatment !== 'none' ) {
+            return new WP_Error( 'scout_series_required', 'This operation is limited to no-charge Scout series.' );
+        }
+
+        $bookings = self::occurrences( $series_ref );
+        if ( ! $bookings ) return new WP_Error( 'empty_scout_series', 'The Scout series has no occurrence records.' );
+        foreach ( $bookings as $booking ) {
+            if ( empty( $booking->scout_use ) ) {
+                return new WP_Error( 'mixed_scout_series', 'The series contains a non-Scout occurrence and was not changed.' );
+            }
+        }
+
+        $today = wp_date( 'Y-m-d' );
+        $template = null;
+        $has_future_active = false;
+        $has_future_cancelled = false;
+        $has_any_active = false;
+        $has_pending = false;
+        foreach ( $bookings as $booking ) {
+            $active = ! in_array( $booking->status, array( 'cancelled', 'archived' ), true );
+            if ( $active ) $has_any_active = true;
+            if ( $booking->status === 'pending' ) $has_pending = true;
+            if ( $booking->booking_date >= $today && $active ) {
+                $has_future_active = true;
+                if ( ! $template ) $template = $booking;
+            } elseif ( $booking->booking_date >= $today && $booking->status === 'cancelled' ) {
+                $has_future_cancelled = true;
+            }
+        }
+        if ( ! $template ) $template = end( $bookings );
+
+        $status = $has_pending ? 'pending' : 'confirmed';
+        if ( ! $has_any_active ) {
+            $status = 'cancelled';
+        } elseif ( ! $has_future_active && $has_future_cancelled ) {
+            $status = 'cancelled_future';
+        }
+
+        $first = reset( $bookings );
+        $last = end( $bookings );
+        $exceptions = self::exceptions( $series );
+        foreach ( (array) $additional_exceptions as $exception ) {
+            $date = sanitize_text_field( $exception['date'] ?? '' );
+            $type = sanitize_key( $exception['status'] ?? 'conflict' );
+            if ( ! $date ) continue;
+            $duplicate = false;
+            foreach ( $exceptions as $existing ) {
+                if ( ( $existing['date'] ?? '' ) === $date && ( $existing['status'] ?? '' ) === $type ) {
+                    $duplicate = true;
+                    break;
+                }
+            }
+            if ( ! $duplicate ) {
+                $exceptions[] = array(
+                    'date'    => $date,
+                    'status'  => $type,
+                    'message' => sanitize_text_field( $exception['message'] ?? 'This date was skipped.' ),
+                );
+            }
+        }
+        $exception_counts = array( 'conflict' => 0, 'blocked' => 0, 'error' => 0 );
+        foreach ( $exceptions as $exception ) {
+            $type = sanitize_key( $exception['status'] ?? '' );
+            if ( isset( $exception_counts[ $type ] ) ) $exception_counts[ $type ]++;
+        }
+        $schedule = array(
+            'frequency'    => 'weekly',
+            'interval'     => 1,
+            'start_date'   => $first->booking_date,
+            'repeat_until' => $last->booking_date,
+            'all_day'      => ! empty( $template->all_day ),
+            'start_time'   => (string) $template->start_time,
+            'end_time'     => (string) $template->end_time,
+        );
+
+        $table = $wpdb->prefix . MBS_SERIES_TABLE;
+        $update = array(
+            'status'            => $status,
+            'space'             => sanitize_text_field( $template->space ),
+            'kitchen'           => ! empty( $template->kitchen ) ? 1 : 0,
+            'all_day'           => ! empty( $template->all_day ) ? 1 : 0,
+            'start_time'        => ! empty( $template->start_time ) ? $template->start_time : null,
+            'end_time'          => ! empty( $template->end_time ) ? $template->end_time : null,
+            'attendees'         => absint( $template->attendees ),
+            'purpose'           => sanitize_text_field( $template->purpose ),
+            'start_date'        => sanitize_text_field( $first->booking_date ),
+            'repeat_until'      => sanitize_text_field( $last->booking_date ),
+            'schedule_json'     => wp_json_encode( $schedule ),
+            'price_per_booking' => '0.00',
+            'estimated_total'   => '0.00',
+            'requested_count'   => count( $bookings ) + array_sum( $exception_counts ),
+            'accepted_count'    => count( $bookings ),
+            'conflict_count'    => $exception_counts['conflict'],
+            'blocked_count'     => $exception_counts['blocked'],
+            'error_count'       => $exception_counts['error'],
+            'exceptions_json'   => wp_json_encode( $exceptions ),
+            'billing_mode'      => 'none',
+            'billing_treatment' => 'none',
+            'deposit_policy'    => 'none',
+            'payment_method'    => 'none',
+            'automatic_reminders' => 0,
+        );
+        $integer_fields = array( 'kitchen', 'all_day', 'attendees', 'requested_count', 'accepted_count', 'conflict_count', 'blocked_count', 'error_count', 'automatic_reminders' );
+        $decimal_fields = array( 'price_per_booking', 'estimated_total' );
+        $changed = false;
+        foreach ( $update as $field => $value ) {
+            $current = $series->{$field} ?? null;
+            if ( in_array( $field, $integer_fields, true ) ) {
+                $different = (int) $current !== (int) $value;
+            } elseif ( in_array( $field, $decimal_fields, true ) ) {
+                $different = number_format( (float) $current, 2, '.', '' ) !== number_format( (float) $value, 2, '.', '' );
+            } else {
+                $different = (string) $current !== (string) $value;
+            }
+            if ( $different ) { $changed = true; break; }
+        }
+        if ( ! $changed ) return $series;
+
+        $update['version'] = (int) $series->version + 1;
+        $update['updated_at'] = current_time( 'mysql' );
+        $updated = $wpdb->update( $table, $update, array( 'series_ref' => $series_ref, 'scout_use' => 1 ) );
+        if ( $updated === false ) return new WP_Error( 'scout_series_sync_failed', 'Could not update the Scout series summary.' );
+        return self::get( $series_ref );
+    }
+
+    /** Reconcile every registered Scout parent after upgrading from the legacy UI. */
+    public static function synchronize_all_scout_series() {
+        $rows = self::get_all( array( 'scout_use' => 1, 'limit' => 500 ) );
+        $updated = 0;
+        foreach ( $rows as $row ) {
+            $before = (int) $row->version;
+            $synced = self::synchronize_scout_series( $row->series_ref );
+            if ( is_wp_error( $synced ) ) return $synced;
+            if ( (int) $synced->version !== $before ) $updated++;
+        }
+        return array( 'checked' => count( $rows ), 'updated' => $updated );
+    }
+
+    /** Remove a now-empty Scout parent row after an authorised hard delete. */
+    public static function delete_empty_scout_series( $series_ref ) {
+        global $wpdb;
+        $series = self::get( sanitize_text_field( $series_ref ) );
+        if ( ! $series || empty( $series->scout_use ) || self::occurrences( $series_ref ) ) return false;
+        return $wpdb->delete(
+            $wpdb->prefix . MBS_SERIES_TABLE,
+            array( 'series_ref' => sanitize_text_field( $series_ref ), 'scout_use' => 1 ),
+            array( '%s', '%d' )
+        );
     }
 
     public static function invoices( $series_ref ) {

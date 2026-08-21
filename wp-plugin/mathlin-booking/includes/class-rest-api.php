@@ -226,6 +226,16 @@ class MBS_Rest_API {
             'methods'             => 'GET',
             'callback'            => array( $this, 'get_admin_series_list' ),
             'permission_callback' => array( $this, 'booking_manager_permission' ),
+            'args'                => array(
+                'status'      => array( 'sanitize_callback' => 'sanitize_key' ),
+                'search'      => array( 'sanitize_callback' => 'sanitize_text_field' ),
+                'series_kind' => array(
+                    'default'           => 'all',
+                    'sanitize_callback' => 'sanitize_key',
+                    'validate_callback' => static function ( $value ) { return in_array( $value, array( 'all', 'external', 'scout' ), true ); },
+                ),
+                'limit'       => array( 'default' => 100, 'sanitize_callback' => 'absint' ),
+            ),
         ) );
 
         register_rest_route( self::API_NAMESPACE, '/admin/series/(?P<series_id>[A-Z0-9\-]+)/approve', array(
@@ -1020,6 +1030,10 @@ class MBS_Rest_API {
         $series_id = strtoupper( sanitize_text_field( $request->get_param( 'series_id' ) ) );
         $series = MBS_Series::get( $series_id );
         $items = MBS_Bookings::get_series( $series_id );
+        if ( ! $series && $items && ! array_filter( $items, static function ( $item ) { return empty( $item->scout_use ); } ) ) {
+            MBS_Series::register_legacy_groups();
+            $series = MBS_Series::get( $series_id );
+        }
         if ( ! $series && empty( $items ) ) {
             return new WP_Error( 'not_found', 'Booking series not found.', array( 'status' => 404 ) );
         }
@@ -1043,12 +1057,31 @@ class MBS_Rest_API {
     }
 
     public function get_admin_series_list( WP_REST_Request $request ) {
-        $rows = MBS_Series::get_all( array(
+        MBS_Series::register_legacy_groups();
+        $series_kind = sanitize_key( $request->get_param( 'series_kind' ) ?: 'all' );
+        $args = array(
             'status' => sanitize_key( $request->get_param( 'status' ) ?? '' ),
             'search' => sanitize_text_field( $request->get_param( 'search' ) ?? '' ),
             'limit' => min( 500, max( 1, absint( $request->get_param( 'limit' ) ?: 100 ) ) ),
-        ) );
-        return rest_ensure_response( array( 'items' => array_map( array( $this, 'format_admin_series' ), $rows ) ) );
+        );
+        if ( $series_kind === 'scout' ) $args['scout_use'] = 1;
+        if ( $series_kind === 'external' ) $args['scout_use'] = 0;
+        $rows = MBS_Series::get_all( $args );
+        $summaries = MBS_Series::occurrence_summaries( array_map( static function ( $row ) { return $row->series_ref; }, $rows ) );
+        $items = array_map( function ( $row ) use ( $summaries ) {
+            $formatted = $this->format_admin_series( $row );
+            $summary = $summaries[ $row->series_ref ] ?? null;
+            $formatted['occurrence_summary'] = $summary ? array(
+                'total' => (int) $summary->total_count,
+                'future_active' => (int) $summary->future_active_count,
+                'future_cancelled' => (int) $summary->future_cancelled_count,
+                'cancelled' => (int) $summary->cancelled_count,
+                'next_date' => $summary->next_date ?: null,
+                'last_date' => $summary->last_date ?: null,
+            ) : array();
+            return $formatted;
+        }, $rows );
+        return rest_ensure_response( array( 'series_kind' => $series_kind, 'items' => $items ) );
     }
 
     public function approve_admin_series( WP_REST_Request $request ) {
@@ -1297,6 +1330,7 @@ class MBS_Rest_API {
         $safe['billing_schedule'] = json_decode( (string) ( $series->billing_schedule_json ?? '' ), true ) ?: array();
         $safe['terms_accepted'] = ! empty( $series->terms_accepted_at );
         $safe['terms_accepted_at'] = $series->terms_accepted_at ?: null;
+        $safe['series_kind'] = ! empty( $series->scout_use ) ? 'scout' : 'external';
         return $safe;
     }
 

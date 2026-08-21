@@ -3,7 +3,7 @@
  * Plugin Name: MGF Venue
  * Plugin URI:  https://github.com/madboymatt26/MGF-Venue
  * Description: Venue booking and management system with Home Assistant integration.
- * Version:     3.24.4
+ * Version:     3.25.0
  * Author:      MGF Venue
  * License:     GPL-2.0+
  * Text Domain: mathlin-booking
@@ -11,7 +11,7 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'MBS_VERSION',    '3.24.4' );
+define( 'MBS_VERSION',    '3.25.0' );
 define( 'MBS_DB_VERSION', '3.22.0-schema-10' );
 define( 'MBS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MBS_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -122,6 +122,18 @@ function mbs_init() {
     if ( MBS_Database::migration_is_current() && get_option( 'mbs_legacy_series_registered' ) !== MBS_DB_VERSION ) {
         $legacy_registration = MBS_Series::register_legacy_groups();
         if ( ! is_wp_error( $legacy_registration ) ) update_option( 'mbs_legacy_series_registered', MBS_DB_VERSION, false );
+    }
+    if ( MBS_Database::migration_is_current() && get_option( 'mbs_scout_series_reconciled' ) !== MBS_VERSION ) {
+        // The legacy Scout screen created occurrence groups independently of
+        // first-class parent snapshots. Register any late groups and repair
+        // existing parent dates/counts/status once for this feature release.
+        $scout_registration = MBS_Series::register_legacy_groups();
+        $scout_reconciliation = is_wp_error( $scout_registration ) ? $scout_registration : MBS_Series::synchronize_all_scout_series();
+        if ( ! is_wp_error( $scout_reconciliation ) ) {
+            update_option( 'mbs_scout_series_reconciled', MBS_VERSION, false );
+        } else {
+            error_log( '[MGF Venue] Scout series reconciliation failed: ' . $scout_reconciliation->get_error_message() );
+        }
     }
 
     $admin   = new MBS_Admin();

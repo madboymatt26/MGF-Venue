@@ -1139,6 +1139,153 @@ jQuery(function ($) {
     });
 })(jQuery);
 
+// ── Scout series administration ───────────────────────────────────────────
+(function ($) {
+    'use strict';
+
+    function responseMessage(res, fallback) {
+        if (!res || typeof res.data === 'undefined') return fallback;
+        if (typeof res.data === 'string') return res.data;
+        return res.data.message || fallback;
+    }
+
+    function postScoutAction($button, data, busyLabel) {
+        var original = $button.text();
+        $button.prop('disabled', true).text(busyLabel);
+        return $.post(MBS_Admin.ajax_url, $.extend({ nonce: MBS_Admin.nonce }, data))
+            .done(function (res) {
+                if (res.success) {
+                    if (res.data && res.data.message) alert(res.data.message);
+                    window.location.reload();
+                } else {
+                    alert('Error: ' + responseMessage(res, 'The action could not be completed.'));
+                    $button.prop('disabled', false).text(original);
+                }
+            })
+            .fail(function () {
+                alert('Network error — please try again.');
+                $button.prop('disabled', false).text(original);
+            });
+    }
+
+    $('#nms-create-scout-recurring').on('click', function () {
+        var $button = $(this);
+        var $message = $('#nms-scout-msg');
+        var start = $('#scout-start').val();
+        var end = $('#scout-end').val();
+        if (!start || !end || end <= start) {
+            $message.css('color', '#b32d2e').text('End time must be after start time.');
+            return;
+        }
+        $button.prop('disabled', true).text('Creating…');
+        $message.text('');
+        $.post(MBS_Admin.ajax_url, {
+            action: 'mbs_create_scout_recurring', nonce: MBS_Admin.nonce,
+            space: $('#scout-space').val(), day_of_week: $('#scout-day').val(),
+            start_time: start, end_time: end, purpose: $('#scout-purpose').val(),
+            date_from: $('#scout-date-from').val(), date_to: $('#scout-date-to').val()
+        }).done(function (res) {
+            if (res.success) {
+                var skipped = parseInt(res.data.skipped, 10) || 0;
+                $message.css('color', '#008a20').text('Created ' + res.data.created + ' night(s)' + (skipped ? '; ' + skipped + ' skipped.' : '.'));
+                window.location.href = 'admin.php?page=mathlin-scout-nights&ref=' + encodeURIComponent(res.data.series_id);
+            } else {
+                $message.css('color', '#b32d2e').text(responseMessage(res, 'Could not create the Scout series.'));
+                $button.prop('disabled', false).text('Create Scout series');
+            }
+        }).fail(function () {
+            $message.css('color', '#b32d2e').text('Network error — please try again.');
+            $button.prop('disabled', false).text('Create Scout series');
+        });
+    });
+
+    $(document).on('click', '.nms-btn-cancel-scout-occurrence', function () {
+        var $button = $(this);
+        var ref = $button.data('ref');
+        if (!confirm('Cancel Scout night ' + ref + '? No email will be sent.')) return;
+        postScoutAction($button, { action: 'mbs_update_status', ref: ref, status: 'cancelled' }, 'Cancelling…');
+    });
+
+    $(document).on('click', '.nms-btn-reopen-scout-occurrence', function () {
+        var $button = $(this);
+        var ref = $button.data('ref');
+        if (!confirm('Reopen Scout night ' + ref + '? No email will be sent.')) return;
+        postScoutAction($button, { action: 'mbs_restore_booking', ref: ref, status: 'confirmed' }, 'Reopening…');
+    });
+
+    $(document).on('click', '.nms-btn-cancel-scout-series', function () {
+        var $button = $(this);
+        var series = $button.data('series');
+        if (!confirm('Cancel all future nights in ' + series + '? Past nights will be kept and no email will be sent.')) return;
+        postScoutAction($button, { action: 'mbs_cancel_scout_series', series_id: series }, 'Cancelling…');
+    });
+
+    $(document).on('click', '.nms-btn-reopen-scout-series', function () {
+        var $button = $(this);
+        var series = $button.data('series');
+        if (!confirm('Reopen all cancelled future nights in ' + series + '? No email will be sent.')) return;
+        postScoutAction($button, { action: 'mbs_reopen_scout_series', series_id: series }, 'Reopening…');
+    });
+
+    $(document).on('click', '.nms-btn-delete-scout-series', function () {
+        var $button = $(this);
+        var series = $button.data('series');
+        var scope = $button.data('scope') === 'future' ? 'future' : 'all';
+        var warning = scope === 'all'
+            ? 'Permanently delete the entire series ' + series + ', including past records? This cannot be undone.'
+            : 'Permanently delete all future records in ' + series + '? Past records will remain. This cannot be undone.';
+        if (!confirm(warning)) return;
+        postScoutAction($button, { action: 'mbs_delete_scout_series', series_id: series, scope: scope }, 'Deleting…');
+    });
+
+    $(document).on('click', '.nms-btn-edit-series', function () {
+        var $button = $(this);
+        $('#nms-edit-series-series').val($button.data('series'));
+        $('#nms-edit-series-id').text($button.data('series'));
+        $('#nms-edit-series-space').val($button.data('space'));
+        $('#nms-edit-series-start').val($button.data('start'));
+        $('#nms-edit-series-end').val($button.data('end'));
+        $('#nms-edit-series-purpose').val($button.data('purpose'));
+        $('#nms-edit-series-msg, #nms-extend-series-msg').text('');
+        $('#nms-edit-series-extend-until').val('');
+        $('#nms-edit-series-modal').css('display', 'flex');
+    });
+
+    $(document).on('click', '.nms-edit-series-close, #nms-edit-series-modal .mbs-modal__backdrop', function () {
+        $('#nms-edit-series-modal').hide();
+    });
+
+    $('#nms-edit-series-save').on('click', function () {
+        var $button = $(this);
+        var $message = $('#nms-edit-series-msg');
+        var series = $('#nms-edit-series-series').val();
+        var start = $('#nms-edit-series-start').val();
+        var end = $('#nms-edit-series-end').val();
+        if (!start || !end || end <= start) {
+            $message.css('color', '#b32d2e').text('End time must be after start time.');
+            return;
+        }
+        if (!confirm('Apply these changes to future active nights in ' + series + '?')) return;
+        postScoutAction($button, {
+            action: 'mbs_edit_scout_series', series_id: series,
+            space: $('#nms-edit-series-space').val(), start_time: start, end_time: end,
+            purpose: $('#nms-edit-series-purpose').val()
+        }, 'Saving…');
+    });
+
+    $('#nms-edit-series-extend').on('click', function () {
+        var $button = $(this);
+        var until = $('#nms-edit-series-extend-until').val();
+        var series = $('#nms-edit-series-series').val();
+        if (!until) {
+            $('#nms-extend-series-msg').css('color', '#b32d2e').text('Choose a date to extend until.');
+            return;
+        }
+        if (!confirm('Add weekly Scout nights to ' + series + ' through ' + until + '?')) return;
+        postScoutAction($button, { action: 'mbs_extend_scout_series', series_id: series, extend_until: until }, 'Extending…');
+    });
+})(jQuery);
+
 // ── Invoice document modal & actions ───────────────────────────────────────────
 (function($) {
     var $modal = null;

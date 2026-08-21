@@ -35,6 +35,11 @@ if ( $setStatus.inputSchema.required -notcontains 'idempotency_key' ) { throw 's
 foreach ( $toolName in @('list_series', 'get_series', 'approve_series', 'configure_series_billing', 'update_series_state', 'list_invoices', 'get_invoice', 'record_invoice_payment') ) {
     if ( $null -eq ($tools | Where-Object { $_.name -eq $toolName }) ) { throw "Missing recurring billing tool $toolName." }
 }
+$listSeries = $tools | Where-Object { $_.name -eq 'list_series' }
+if ( $null -eq $listSeries.inputSchema.properties.series_kind ) { throw 'list_series is missing series_kind.' }
+foreach ( $kind in @('all', 'external', 'scout') ) {
+    if ( $listSeries.inputSchema.properties.series_kind.enum -notcontains $kind ) { throw "list_series series_kind is missing $kind." }
+}
 foreach ( $toolName in @('approve_series', 'configure_series_billing', 'update_series_state', 'record_invoice_payment') ) {
     $tool = $tools | Where-Object { $_.name -eq $toolName }
     foreach ( $required in @('idempotency_key', 'expected_version') ) {
