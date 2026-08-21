@@ -315,7 +315,7 @@ mbs_audit_case( 'accounting boundaries, financial-year credits, and non-GBP expo
 
 mbs_audit_case( 'OSM mirrors exact ledger payments and refunds without per-occurrence delivery', static function () {
     global $wpdb;
-    update_option( 'mbs_osm_enabled', true ); update_option( 'mbs_osm_sandbox_mode', true );
+    update_option( 'mbs_osm_configuration_version', '2' ); update_option( 'mbs_osm_enabled', true ); update_option( 'mbs_osm_sandbox_mode', true );
     update_option( 'mbs_osm_section_id', '4015' ); update_option( 'mbs_osm_bank_account_id', '6037' );
     update_option( 'mbs_osm_venue_category_id', '25' ); update_option( 'mbs_osm_venue_item_id', '60891' );
     $booking = mbs_audit_booking( 'INT-A-OSM-LEDGER', '10.00', 78 );
@@ -358,7 +358,7 @@ mbs_audit_case( 'OSM payout classification reconciles venue, clothing, fees and 
 
 mbs_audit_case( 'Legacy per-booking OSM events cannot be delivered independently', static function () {
     global $wpdb;
-    update_option( 'mbs_osm_enabled', true );
+    update_option( 'mbs_osm_configuration_version', '2' ); update_option( 'mbs_osm_enabled', true );
     $booking = mbs_audit_booking( 'INT-A-OSM-LEGACY', '10.00', 119 );
     $event_id = MBS_OSM_Integration::queue_refund_reversal( $booking, 'INV-LEGACY-AUDIT', 100, 123, 456, 'partial' );
     $table = $wpdb->prefix . MBS_OSM_OUTBOX_TABLE;
