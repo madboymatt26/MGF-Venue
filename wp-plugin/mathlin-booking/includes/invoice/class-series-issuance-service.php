@@ -279,17 +279,43 @@ class MBS_Series_Issuance_Service {
      * Called WITHIN an existing transaction.
      */
     private static function try_supplement_within_transaction( $series, $period, $base_invoice, $base_idempotency_key, $logo_ref ) {
+        global $wpdb;
+
         $occurrences = $period['occurrences'] ?? array();
         if ( empty( $occurrences ) ) return null;
 
-        // Identify occurrences that do NOT already have an active financial allocation
+        // A catch-up preview is not authoritative. Re-lock every candidate and
+        // apply the same ownership, status, period and money checks as base
+        // issuance before allowing a supplementary invoice to be created.
+        $booking_table = $wpdb->prefix . MBS_TABLE;
         $new_occurrences = array();
         foreach ( $occurrences as $occurrence ) {
             $ref = $occurrence['ref'] ?? null;
-            if ( $ref && MBS_Billing_Ledger::get_active_booking_allocation( $ref ) ) {
+            if ( ! $ref || MBS_Billing_Ledger::get_active_booking_allocation( $ref ) ) {
                 continue; // Already allocated
             }
-            $new_occurrences[] = $occurrence;
+
+            $locked_occ = $wpdb->get_row( $wpdb->prepare(
+                "SELECT * FROM {$booking_table} WHERE ref = %s FOR UPDATE",
+                sanitize_text_field( $ref )
+            ) );
+            if ( ! $locked_occ ) continue;
+            if ( $locked_occ->series_id !== $series->series_ref ) continue;
+            if ( ! in_array( $locked_occ->status, array( 'confirmed', 'deposit_paid', 'paid' ), true ) ) continue;
+            if ( ! empty( $locked_occ->legacy_billing_excluded ) ) continue;
+            if ( $locked_occ->booking_date < $period['period_start'] || $locked_occ->booking_date > $period['period_end'] ) continue;
+
+            $occ_amount = MBS_Money::from_decimal_string( (string) $locked_occ->amount );
+            if ( is_wp_error( $occ_amount ) ) {
+                return new WP_Error( 'invalid_occurrence_amount', 'Occurrence ' . $ref . ' has an invalid amount.' );
+            }
+
+            $new_occurrences[] = array(
+                'ref'          => $ref,
+                'date'         => $locked_occ->booking_date,
+                'amount_minor' => (int) $occ_amount,
+                'description'  => $locked_occ->space . ' hire on ' . wp_date( 'j F Y', strtotime( $locked_occ->booking_date ) ) . ( ! empty( $locked_occ->kitchen ) ? ' (including kitchen)' : '' ),
+            );
         }
 
         if ( empty( $new_occurrences ) ) {
