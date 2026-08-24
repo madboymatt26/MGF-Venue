@@ -146,6 +146,7 @@ $invoice = (object) array( 'id' => 7, 'invoice_ref' => 'INV-7', 'status' => 'ove
 $first = MBS_Invoice_Reservation::acquire( $invoice );
 $second = MBS_Invoice_Reservation::acquire( $invoice );
 $same = MBS_Invoice_Reservation::acquire( $invoice, $first['reservation_ref'] );
+$zero_bound = MBS_Invoice_Reservation::bind_order( 'INV-7', $first['reservation_ref'], 0 );
 $bound = MBS_Invoice_Reservation::bind_order( 'INV-7', $first['reservation_ref'], 41 );
 $repeat = MBS_Invoice_Reservation::bind_order( 'INV-7', $first['reservation_ref'], 41 );
 $conflict = MBS_Invoice_Reservation::bind_order( 'INV-7', $first['reservation_ref'], 42 );
@@ -157,6 +158,7 @@ $checks = array(
     is_array( $first ),
     is_wp_error( $second ) && $second->get_error_code() === 'invoice_payment_reserved',
     $same['reservation_ref'] === $first['reservation_ref'],
+    is_wp_error( $zero_bound ) && $zero_bound->get_error_code() === 'invoice_order_id_required',
     $bound['order_id'] === 41,
     $repeat['order_id'] === 41,
     is_wp_error( $conflict ),

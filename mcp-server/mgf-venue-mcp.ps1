@@ -7,7 +7,7 @@ $ProgressPreference = 'SilentlyContinue'
 $InformationPreference = 'SilentlyContinue'
 
 $script:ServerName = 'mgf-venue'
-$script:ServerVersion = '0.3.1'
+$script:ServerVersion = '0.3.2'
 $script:DefaultProtocolVersion = '2025-06-18'
 
 function Get-PropertyValue {
@@ -471,6 +471,7 @@ $script:Tools = @(
                         'create_scout_recurring', 'save_settings', 'test_ha', 'check_update',
                         'archive_past', 'add_blocked', 'delete_blocked', 'clear_expired_blocks',
                         'update_series_status', 'resend_series_confirmation', 'record_invoice_manual_payment',
+                        'resolve_invoice_reconciliation', 'reconcile_zero_bound_invoice_order',
                         'configure_series_billing', 'pause_series', 'catch_up_series_billing', 'extend_external_series',
                         'cancel_scout_series', 'edit_scout_series',
                         'extend_scout_series', 'reopen_scout_series', 'delete_scout_series',

@@ -963,6 +963,7 @@ class MBS_Rest_API {
             'resend_series_confirmation' => array( 'MBS_Admin', 'ajax_resend_series_confirmation' ),
             'record_invoice_manual_payment' => array( 'MBS_Admin', 'ajax_record_invoice_manual_payment' ),
             'resolve_invoice_reconciliation' => array( 'MBS_Admin', 'ajax_resolve_invoice_reconciliation' ),
+            'reconcile_zero_bound_invoice_order' => array( 'MBS_Admin', 'ajax_reconcile_zero_bound_invoice_order' ),
             'configure_series_billing' => array( 'MBS_Admin', 'ajax_configure_series_billing' ),
             'approve_series_with_billing' => array( 'MBS_Admin', 'ajax_approve_series_with_billing' ),
             'get_series_for_approval' => array( 'MBS_Admin', 'ajax_get_series_for_approval' ),
@@ -1010,7 +1011,7 @@ class MBS_Rest_API {
             ) );
         } else {
             $admin_only_actions = array(
-                'delete_booking', 'resolve_invoice_reconciliation', 'save_settings', 'test_ha', 'check_update',
+                'delete_booking', 'resolve_invoice_reconciliation', 'reconcile_zero_bound_invoice_order', 'save_settings', 'test_ha', 'check_update',
                 'delete_scout_series', 'save_email_settings', 'save_custom_fields',
                 'save_osm_settings', 'test_osm_connection', 'osm_get_sections', 'osm_discover',
                 'osm_sync_woopayments', 'osm_retry_event', 'osm_resolve_event',
@@ -1250,6 +1251,7 @@ class MBS_Rest_API {
         $settings['client_id_configured']     = ! empty( $settings['client_id'] );
         $settings['client_secret_configured'] = ! empty( $settings['client_secret'] );
         unset( $settings['client_id'], $settings['client_secret'] );
+        $settings['mgf_connect_available'] = MBS_OSM_Integration::mgf_connect_available();
         $settings['gilbertweb_available'] = MBS_OSM_Integration::gilbertweb_available();
         $settings['queue'] = MBS_OSM_Integration::get_queue_health();
         return rest_ensure_response( $settings );

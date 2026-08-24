@@ -67,6 +67,7 @@ function mbs_audit_order( $invoice ) {
     $order->add_item( $item );
     $order->set_total( $decimal );
     $order->save();
+    MBS_Woo_Payment::bind_and_lock_invoice_order( $order );
     return array( wc_get_order($order->get_id()), $claim );
 }
 

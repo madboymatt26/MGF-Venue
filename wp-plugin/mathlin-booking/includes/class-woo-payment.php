@@ -34,7 +34,7 @@ class MBS_Woo_Payment {
         add_action( 'woocommerce_order_status_cancelled',  array( 'MBS_Invoice_Reservation', 'release_order' ) );
         add_action( 'mbs_release_invoice_reservation',      array( 'MBS_Invoice_Reservation', 'release_expired' ), 10, 2 );
         add_action( 'woocommerce_after_checkout_validation', array( $this, 'validate_invoice_checkout' ), 10, 2 );
-        add_action( 'woocommerce_checkout_order_created', array( __CLASS__, 'lock_invoice_order' ) );
+        add_action( 'woocommerce_checkout_order_created', array( __CLASS__, 'bind_and_lock_invoice_order' ) );
         add_action( 'woocommerce_before_order_object_save', array( __CLASS__, 'guard_locked_invoice_order' ) );
         add_action( 'woocommerce_before_order_item_object_save', array( __CLASS__, 'guard_locked_invoice_item' ) );
         add_action( 'woocommerce_thankyou',                array( $this, 'thankyou_message' ) );
@@ -328,9 +328,24 @@ class MBS_Woo_Payment {
             $item->add_meta_data( '_mbs_invoice_amount_minor', (int) ( $values['mbs_invoice_amount_minor'] ?? 0 ), true );
             $order->update_meta_data( '_mbs_invoice_ref', $values['mbs_invoice_ref'] );
             $order->update_meta_data( '_mbs_invoice_reservation_ref', $values['mbs_invoice_reservation_ref'] ?? '' );
-            $bound = MBS_Invoice_Reservation::bind_order( $values['mbs_invoice_ref'], $values['mbs_invoice_reservation_ref'] ?? '', $order->get_id() );
+        }
+    }
+
+    /** Bind an invoice reservation only after WooCommerce has persisted the order. */
+    public static function bind_and_lock_invoice_order( $order ) {
+        if ( ! $order instanceof WC_Order ) return;
+        $order_id = (int) $order->get_id();
+        if ( $order_id < 1 ) self::immutable_order_exception();
+
+        foreach ( $order->get_items() as $item ) {
+            $invoice_ref = (string) $item->get_meta( '_mbs_invoice_ref' );
+            if ( ! $invoice_ref ) continue;
+            $reservation_ref = (string) $item->get_meta( '_mbs_invoice_reservation_ref' );
+            $bound = MBS_Invoice_Reservation::bind_order( $invoice_ref, $reservation_ref, $order_id );
             if ( is_wp_error( $bound ) ) throw new Exception( $bound->get_error_message() );
         }
+
+        self::lock_invoice_order( $order );
     }
 
     /** Reject stale, mismatched or second-session invoice carts before order creation. */
@@ -371,6 +386,11 @@ class MBS_Woo_Payment {
             || (int) $reservation->balance_version !== (int) $invoice->version
             || MBS_Billing_Ledger::balance_minor( $invoice ) !== (int) $claimed_minor
             || ! MBS_Invoice_Reservation::validate( $invoice->invoice_ref, $reservation_ref, $claimed_minor, $order_id ) ) return false;
+        return self::validate_captured_invoice_order_values( $order, $item, $invoice, $claimed_minor );
+    }
+
+    private static function validate_captured_invoice_order_values( $order, $item, $invoice, $claimed_minor ) {
+        if ( ! $invoice || $claimed_minor < 1 || (int) $invoice->version < 1 ) return false;
         $actual_minor = MBS_Money::from_decimal_string( (string) $order->get_total() );
         $line_total = MBS_Money::from_decimal_string( (string) $item->get_total() );
         $line_subtotal = MBS_Money::from_decimal_string( (string) $item->get_subtotal() );
@@ -396,6 +416,56 @@ class MBS_Woo_Payment {
                 return;
             }
         }
+    }
+
+    /** Recover only the historical checkout defect that bound a paid order to ID 0. */
+    public static function reconcile_zero_bound_captured_order( $order_id, $invoice_ref, $reservation_ref ) {
+        $order_id = absint( $order_id );
+        $invoice_ref = sanitize_text_field( $invoice_ref );
+        $reservation_ref = sanitize_text_field( $reservation_ref );
+        $order = $order_id && function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
+        if ( ! $order || ! $order->is_paid() ) return new WP_Error( 'captured_order_required', 'The WooCommerce order is not recorded as paid.' );
+
+        $invoice_items = array_values( array_filter( $order->get_items(), static function ( $item ) {
+            return (bool) $item->get_meta( '_mbs_invoice_ref' );
+        } ) );
+        if ( count( $invoice_items ) !== 1 || count( $order->get_items() ) !== 1 ) {
+            return new WP_Error( 'invoice_order_structure_mismatch', 'The paid order is not an exact single-invoice order.' );
+        }
+
+        $item = $invoice_items[0];
+        if ( ! hash_equals( $invoice_ref, (string) $item->get_meta( '_mbs_invoice_ref' ) )
+            || ! hash_equals( $reservation_ref, (string) $item->get_meta( '_mbs_invoice_reservation_ref' ) ) ) {
+            return new WP_Error( 'invoice_order_identity_mismatch', 'The paid order does not match the supplied invoice reservation.' );
+        }
+
+        $invoice = MBS_Billing_Ledger::get_invoice( $invoice_ref );
+        $claimed_minor = (int) $item->get_meta( '_mbs_invoice_amount_minor' );
+        $claim = MBS_Invoice_Reservation::get( $invoice_ref );
+        if ( ! $claim
+            || ! hash_equals( $reservation_ref, (string) $claim->reservation_ref )
+            || $claim->status !== 'bound'
+            || (int) $claim->order_id !== 0
+            || (int) $claim->amount_minor !== $claimed_minor
+            || (int) $claim->balance_version !== (int) ( $invoice->version ?? 0 )
+            || MBS_Billing_Ledger::balance_minor( $invoice ) !== $claimed_minor
+            || ! self::validate_captured_invoice_order_values( $order, $item, $invoice, $claimed_minor ) ) {
+            return new WP_Error( 'captured_order_validation_failed', 'The paid order no longer exactly matches the outstanding invoice balance.' );
+        }
+        $rebound = MBS_Invoice_Reservation::repair_zero_order_binding( $invoice_ref, $reservation_ref, $order_id );
+        if ( is_wp_error( $rebound ) ) return $rebound;
+        if ( ! self::validate_captured_invoice_order( $order, $item, $invoice, $reservation_ref, $claimed_minor ) ) {
+            return new WP_Error( 'captured_order_validation_failed', 'The paid order no longer exactly matches the outstanding invoice balance.' );
+        }
+
+        $handler = new self();
+        $handler->on_order_completed( $order_id );
+        $fresh = MBS_Billing_Ledger::get_invoice( $invoice_ref );
+        $claim = MBS_Invoice_Reservation::get( $invoice_ref );
+        if ( ! $fresh || MBS_Billing_Ledger::balance_minor( $fresh ) !== 0 || ! $claim || $claim->status !== 'captured' ) {
+            return new WP_Error( 'captured_order_reconciliation_failed', 'The payment could not be committed to the invoice ledger.' );
+        }
+        return array( 'invoice' => $fresh, 'order_id' => $order_id, 'reservation' => $claim );
     }
 
     private static function immutable_order_exception() {

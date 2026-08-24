@@ -4,13 +4,24 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.26.0
+**Current Version:** 3.26.1
 **Requires WordPress:** 5.0+  
 **Requires PHP:** 7.4+  
 **Tested with WordPress:** 6.7  
 **License:** GPL-2.0+
 
 ---
+
+## 3.26.1 Captured invoice payment and MGF Connect compatibility
+
+- Binds consolidated-invoice reservations after WooCommerce has persisted the
+  checkout order, preventing valid captures being quarantined against order ID
+  zero. Includes a fail-closed recovery action for payments already affected by
+  that defect; it revalidates the exact paid order before recording the ledger.
+- Replaces the removed GilbertWeb compatibility option with MGF Connect shared
+  authentication, including delegated token validation and refresh. The old
+  REST availability field remains as a deprecated alias for clients that still
+  read it.
 
 ## 3.26.0 Payout-aware OSM accountancy
 
@@ -30,9 +41,8 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 - A payout with no imported statement line is shown as **Awaiting Co-op bank
   import**, not as an error. Ambiguities and uncertain writes remain **Needs
   attention**.
-- Uses OSM's v3 accountancy cashbook contract and a dedicated OAuth client;
-  GilbertWeb tokens remain read-only compatibility and are never refreshed or
-  mutated by MGF Venue.
+- Uses OSM's v3 accountancy cashbook contract with either a dedicated OAuth
+  client or the existing MGF Connect authentication.
 - Existing v1 OSM-enabled installations are paused on upgrade rather than
   risking failed or duplicate accounting writes. Booking/payment processing
   continues normally; an administrator must save the v2 mappings in sandbox

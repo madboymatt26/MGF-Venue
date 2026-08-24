@@ -66,6 +66,7 @@ function mbs_it_order( $invoice ) {
     $order->add_item( $item );
     $order->set_total( $decimal );
     $order->save();
+    MBS_Woo_Payment::bind_and_lock_invoice_order( $order );
     return array( wc_get_order( $order->get_id() ), $claim );
 }
 
@@ -190,6 +191,18 @@ $recorded = MBS_Invoice_Payment::record_gateway_payment( $rec_invoice->invoice_r
 mbs_it_assert( !is_wp_error($recorded), 'Administrator could not safely record the captured payment.' );
 $resolved = MBS_Invoice_Reservation::resolve( $rec_invoice->invoice_ref, $rec_claim['reservation_ref'], $rec_order->get_id(), 'ledger_recorded' );
 mbs_it_assert( $resolved === true && MBS_Invoice_Reservation::get($rec_invoice->invoice_ref)->status === 'captured', 'Verified administrator reconciliation did not resolve ownership.' );
+
+// Regression: production checkout previously bound the reservation while the
+// Woo order still had ID 0. A paid order affected by that exact defect can be
+// recovered only after every normal captured-order invariant is revalidated.
+$zero_booking = mbs_it_booking( 'INT-F-ZERO', '10.00', 15 );
+$zero_invoice = mbs_it_invoice( 'zero-order', array( $zero_booking ) );
+list( $zero_order, $zero_claim ) = mbs_it_order( $zero_invoice );
+$wpdb->update( $wpdb->prefix . MBS_PAYMENT_RESERVATION_TABLE, array( 'order_id'=>0, 'status'=>'bound' ), array( 'invoice_ref'=>$zero_invoice->invoice_ref ) );
+$zero_order = mbs_it_gateway_pay( $zero_order );
+mbs_it_assert( (int)MBS_Billing_Ledger::get_invoice($zero_invoice->invoice_ref)->paid_minor === 0, 'The order-zero defect was not quarantined before recovery.' );
+$zero_recovered = MBS_Woo_Payment::reconcile_zero_bound_captured_order( $zero_order->get_id(), $zero_invoice->invoice_ref, $zero_claim['reservation_ref'] );
+mbs_it_assert( !is_wp_error($zero_recovered) && $zero_recovered['invoice']->status === 'paid' && MBS_Invoice_Reservation::get($zero_invoice->invoice_ref)->status === 'captured', 'A valid captured order-zero payment was not recovered safely.' );
 
 // A pre-existing partial payment reserves and captures only the outstanding balance.
 $partial_booking = mbs_it_booking( 'INT-F-PART', '10.00', 14 );

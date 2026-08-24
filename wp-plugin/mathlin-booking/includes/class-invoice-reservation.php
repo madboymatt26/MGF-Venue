@@ -42,6 +42,8 @@ class MBS_Invoice_Reservation {
     }
 
     public static function bind_order( $invoice_ref, $reservation_ref, $order_id ) {
+	        $order_id=(int)$order_id;
+        if($order_id<1)return new WP_Error('invoice_order_id_required','The invoice reservation cannot be bound before WooCommerce assigns an order ID.');
 	        global $wpdb; $table=self::table(); $now=self::utc_now();
         $claim=self::get($invoice_ref);
         if(!$claim||!hash_equals($claim->reservation_ref,(string)$reservation_ref))return new WP_Error('invoice_reservation_order_conflict','This invoice reservation is no longer authoritative.');
@@ -50,6 +52,20 @@ class MBS_Invoice_Reservation {
         $current=self::get($invoice_ref);
         if($current&&$current->status==='bound'&&(int)$current->order_id===(int)$order_id&&hash_equals($current->reservation_ref,(string)$reservation_ref))return (array)$current;
         return new WP_Error('invoice_reservation_order_conflict','This invoice reservation is already bound to another order.');
+    }
+
+    /** Repair only the historical checkout defect that persisted order_id=0. */
+    public static function repair_zero_order_binding( $invoice_ref, $reservation_ref, $order_id ) {
+        global $wpdb;
+        $order_id=(int)$order_id;
+        if($order_id<1)return new WP_Error('invoice_order_id_required','A persisted WooCommerce order ID is required.');
+        $table=self::table();$claim=self::get($invoice_ref);
+        if(!$claim||!hash_equals($claim->reservation_ref,(string)$reservation_ref))return new WP_Error('reconciliation_owner_changed','The reservation owner changed; refresh before resolving.');
+        if($claim->status==='bound'&&(int)$claim->order_id===$order_id)return (array)$claim;
+        if($claim->status!=='bound'||(int)$claim->order_id!==0)return new WP_Error('zero_order_binding_not_found','This reservation is not affected by the historical order-zero checkout defect.');
+        $updated=$wpdb->query($wpdb->prepare("UPDATE {$table} SET order_id=%d,version=version+1,last_error=%s,updated_at=%s WHERE invoice_ref=%s AND reservation_ref=%s AND version=%d AND status='bound' AND order_id=0",$order_id,'Recovered historical order-zero checkout binding',self::utc_now(),$invoice_ref,$reservation_ref,(int)$claim->version));
+        if($updated===1)return (array)self::get($invoice_ref);
+        return new WP_Error('reconciliation_owner_changed','The reservation state changed; refresh before resolving.');
     }
 
     public static function validate( $invoice_ref, $reservation_ref, $amount_minor, $order_id = 0 ) {
