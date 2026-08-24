@@ -26,6 +26,8 @@ if ( strpos( $payment, 'modification_token' ) !== false ) {
 $checks++;
 payment_has( $woo, '_mbs_invoice_ref', 'Woo order items carry invoice reference metadata.' );
 payment_has( $woo, '_mbs_booking_ref', 'Legacy booking payment metadata is preserved.' );
+payment_has( $woo, "woocommerce_checkout_order_created', array( __CLASS__, 'bind_and_lock_invoice_order'", 'Invoice reservations bind only after WooCommerce persists the order.' );
+payment_has( $woo, 'repair_zero_order_binding', 'Historical order-zero checkout bindings have a constrained recovery path.' );
 payment_has( $payment, "woo-order:' . \$order_id . ':invoice:'", 'Woo completion has an invoice-specific idempotency key.' );
 payment_has( $payment, "woo-refund:' . \$refund_id", 'Each partial Woo refund has its own idempotency key.' );
 payment_has( $payment, "b.status IN ('confirmed','deposit_paid')", 'Only occurrences covered by a fully settled invoice are marked paid.' );

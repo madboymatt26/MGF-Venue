@@ -28,6 +28,7 @@ class MBS_Admin {
         add_action( 'wp_ajax_mbs_resend_series_confirmation', array( $this, 'ajax_resend_series_confirmation' ) );
         add_action( 'wp_ajax_mbs_record_invoice_manual_payment', array( $this, 'ajax_record_invoice_manual_payment' ) );
         add_action( 'wp_ajax_mbs_resolve_invoice_reconciliation', array( $this, 'ajax_resolve_invoice_reconciliation' ) );
+        add_action( 'wp_ajax_mbs_reconcile_zero_bound_invoice_order', array( $this, 'ajax_reconcile_zero_bound_invoice_order' ) );
         add_action( 'wp_ajax_mbs_configure_series_billing', array( $this, 'ajax_configure_series_billing' ) );
         add_action( 'wp_ajax_mbs_approve_series_with_billing', array( $this, 'ajax_approve_series_with_billing' ) );
         add_action( 'wp_ajax_mbs_get_series_for_approval', array( $this, 'ajax_get_series_for_approval' ) );
@@ -1121,6 +1122,26 @@ class MBS_Admin {
         }
         MBS_Audit_Log::log( $invoice_ref, 'payment_reconciliation_resolved', 'Order #' . $order_id . ' resolved as ' . $resolution . ' by administrator.' );
         wp_send_json_success( array( 'invoice_ref' => $invoice_ref, 'order_id' => $order_id, 'status' => $requested_resolution ) );
+    }
+
+    /** Recover an already-captured order affected by the historical order-ID-zero checkout defect. */
+    public function ajax_reconcile_zero_bound_invoice_order() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'Only an administrator can reconcile captured invoice payments.', 403 );
+        $invoice_ref = sanitize_text_field( $_POST['invoice_ref'] ?? '' );
+        $reservation_ref = sanitize_text_field( $_POST['reservation_ref'] ?? '' );
+        $order_id = absint( $_POST['order_id'] ?? 0 );
+        if ( ! $invoice_ref || ! $reservation_ref || ! $order_id ) wp_send_json_error( 'Invoice, reservation and order are required.', 400 );
+        $result = MBS_Woo_Payment::reconcile_zero_bound_captured_order( $order_id, $invoice_ref, $reservation_ref );
+        if ( is_wp_error( $result ) ) wp_send_json_error( $result->get_error_message(), 409 );
+        MBS_Audit_Log::log( $invoice_ref, 'payment_reconciliation_resolved', 'WooCommerce Order #' . $order_id . ' recovered from the historical order-zero checkout defect by administrator.' );
+        wp_send_json_success( array(
+            'invoice_ref' => $invoice_ref,
+            'order_id' => $order_id,
+            'status' => $result['invoice']->status,
+            'version' => (int) $result['invoice']->version,
+            'balance_minor' => MBS_Billing_Ledger::balance_minor( $result['invoice'] ),
+        ) );
     }
 
     /**

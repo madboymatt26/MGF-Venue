@@ -67,6 +67,12 @@ function mbs_audit_order( $invoice ) {
     $order->add_item( $item );
     $order->set_total( $decimal );
     $order->save();
+    // Bind after persistence to mirror the real checkout lifecycle. Do not
+    // apply the immutability lock in this adversarial helper: the cases below
+    // deliberately emulate gateway/storage corruption and prove the captured
+    // payment callback itself still quarantines every mismatch.
+    $bound = MBS_Invoice_Reservation::bind_order( $invoice->invoice_ref, $claim['reservation_ref'], $order->get_id() );
+    if ( is_wp_error( $bound ) ) throw new RuntimeException( $bound->get_error_message() );
     return array( wc_get_order($order->get_id()), $claim );
 }
 

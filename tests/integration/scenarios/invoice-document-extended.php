@@ -44,8 +44,11 @@ function ext_create_series_with_occurrences( $occurrence_count = 4, $confirmed =
     $booking_table = $wpdb->prefix . MBS_TABLE;
 
     $series_ref = 'INT-EXT-' . strtoupper( substr( md5( uniqid( '', true ) ), 0, 8 ) );
-    $start_date = wp_date( 'Y-m-d', strtotime( '+7 days' ) );
-    $repeat_until = wp_date( 'Y-m-d', strtotime( '+' . ( 7 * $occurrence_count + 7 ) . ' days' ) );
+    // Keep the fixture in one complete future month so the test does not
+    // become date-dependent near a month boundary.
+    $month_start = wp_date( 'Y-m-01', strtotime( 'first day of next month' ) );
+    $start_date = wp_date( 'Y-m-d', strtotime( $month_start . ' +6 days' ) );
+    $repeat_until = wp_date( 'Y-m-d', strtotime( $month_start . ' +' . ( 6 + 7 * ( $occurrence_count - 1 ) ) . ' days' ) );
 
     $wpdb->insert( $series_table, array(
         'series_ref'           => $series_ref,
@@ -66,7 +69,7 @@ function ext_create_series_with_occurrences( $occurrence_count = 4, $confirmed =
 
     $occurrences = array();
     for ( $i = 0; $i < $occurrence_count; $i++ ) {
-        $date = wp_date( 'Y-m-d', strtotime( '+' . ( 7 + $i * 7 ) . ' days' ) );
+        $date = wp_date( 'Y-m-d', strtotime( $month_start . ' +' . ( 6 + $i * 7 ) . ' days' ) );
         $ref = 'MBS-EXT-' . strtoupper( substr( md5( $series_ref . $i ), 0, 6 ) );
         $wpdb->insert( $booking_table, array(
             'ref'            => $ref,
@@ -147,6 +150,40 @@ $a->run( 'V3.21 compat: issued period replay is a no-op', function() use ( $wpdb
     MBS_Audit_Assertions::assert_that( ! is_wp_error( $replay ), 'Replay should not error: ' . ( is_wp_error($replay) ? $replay->get_error_message() : '' ) );
     MBS_Audit_Assertions::assert_that( ! empty( $replay['no_op'] ), 'Replay of issued period should be a no-op' );
     MBS_Audit_Assertions::assert_that( $replay['invoice_ref'] === $first['invoice_ref'], 'Replay returns same invoice_ref' );
+});
+
+$a->run( 'Supplement: out-of-period preview occurrence is ignored', function() use ( $wpdb ) {
+    $setup = ext_create_series_with_occurrences( 1 );
+    $month = substr( $setup['occurrences'][0]['date'], 0, 7 );
+    $period_args = array(
+        'period_key'   => 'month-' . $month,
+        'period_start' => $month . '-01',
+        'period_end'   => wp_date( 'Y-m-t', strtotime( $month . '-01' ) ),
+        'issue_on'     => wp_date( 'Y-m-d' ),
+        'due_on'       => wp_date( 'Y-m-d', strtotime( '+14 days' ) ),
+        'occurrences'  => array( $setup['occurrences'][0] ),
+    );
+
+    $base = MBS_Series_Issuance_Service::issue_period_invoice( $setup['series_ref'], $period_args );
+    MBS_Audit_Assertions::assert_that( ! is_wp_error( $base ) && empty( $base['no_op'] ), 'Base invoice should be issued' );
+
+    $outside_ref = 'MBS-OUT-' . strtoupper( substr( md5( uniqid() ), 0, 6 ) );
+    $outside_date = wp_date( 'Y-m-d', strtotime( $period_args['period_end'] . ' +7 days' ) );
+    $wpdb->insert( $wpdb->prefix . MBS_TABLE, array(
+        'ref' => $outside_ref, 'series_id' => $setup['series_ref'], 'status' => 'confirmed',
+        'name' => 'Series Test', 'email' => 'series-test@example.com', 'phone' => '07700900002',
+        'address' => '3 Test Lane', 'space' => 'Main Hall', 'booking_date' => $outside_date,
+        'start_time' => '18:00', 'end_time' => '20:00', 'attendees' => 15,
+        'purpose' => 'Next period session', 'amount' => '50.00', 'pricing_tier' => 'standard',
+        'legacy_billing_excluded' => 0, 'created_at' => current_time( 'mysql' ),
+    ) );
+    $period_args['occurrences'][] = array( 'ref' => $outside_ref, 'date' => $outside_date, 'amount_minor' => 5000 );
+
+    $replay = MBS_Series_Issuance_Service::issue_period_invoice( $setup['series_ref'], $period_args );
+    MBS_Audit_Assertions::assert_that( ! is_wp_error( $replay ), 'Replay should not error' );
+    MBS_Audit_Assertions::assert_that( ! empty( $replay['no_op'] ), 'Out-of-period occurrence must not create a supplement' );
+    MBS_Audit_Assertions::assert_that( $replay['invoice_ref'] === $base['invoice_ref'], 'Replay must return the base invoice' );
+    MBS_Audit_Assertions::assert_that( ! MBS_Billing_Ledger::get_active_booking_allocation( $outside_ref ), 'Out-of-period occurrence must remain unallocated' );
 });
 
 // ── Supplement lifecycle ───────────────────────────────────────────────────────

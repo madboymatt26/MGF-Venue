@@ -12,7 +12,6 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 class MBS_OSM_Integration {
     const OSM_DOMAIN = 'https://www.onlinescoutmanager.co.uk';
     const OSM_TOKEN = 'https://www.onlinescoutmanager.co.uk/oauth/token';
-    const GWC_SLUG = 'gilbertweb-connector-waiting-list-manager';
 
     public function init() {
         add_action( 'init', array( __CLASS__, 'recover_stale_claims' ) );
@@ -31,11 +30,14 @@ class MBS_OSM_Integration {
         $client_secret = defined( 'MBS_OSM_CLIENT_SECRET' ) ? MBS_OSM_CLIENT_SECRET : get_option( 'mbs_osm_client_secret', '' );
         $legacy_enabled = (bool) get_option( 'mbs_osm_enabled', false );
         $v2_configured = (string) get_option( 'mbs_osm_configuration_version', '' ) === '2';
+        $auth_source = sanitize_key( get_option( 'mbs_osm_auth_source', 'mgf_connect' ) );
+        if ( $auth_source === 'gilbertweb' ) $auth_source = 'mgf_connect';
+        if ( ! in_array( $auth_source, array( 'standalone', 'mgf_connect' ), true ) ) $auth_source = 'standalone';
         return array(
             'enabled' => $v2_configured && $legacy_enabled,
             'upgrade_required' => ! $v2_configured && $legacy_enabled,
             'sandbox_mode' => (bool) get_option( 'mbs_osm_sandbox_mode', true ),
-            'auth_source' => sanitize_key( get_option( 'mbs_osm_auth_source', 'gilbertweb' ) ),
+            'auth_source' => $auth_source,
             'client_id' => (string) $client_id,
             'client_secret' => (string) $client_secret,
             'section_id' => (string) get_option( 'mbs_osm_section_id', '' ),
@@ -64,19 +66,24 @@ class MBS_OSM_Integration {
         return '';
     }
 
-    /** Deprecated read-only compatibility; this plugin never refreshes another plugin's token. */
+    /** Use MGF Connect as the shared OSM OAuth owner when selected. */
+    public static function mgf_connect_available() {
+        return class_exists( 'MGF_OSM_Auth' ) && MGF_OSM_Auth::ensure_valid_token() && MGF_OSM_Auth::get_access_token() !== '';
+    }
+
+    /** Deprecated REST compatibility alias retained for existing clients. */
     public static function gilbertweb_available() {
-        $expiry = (int) get_option( self::GWC_SLUG . '_osm_access_token_expiry', 0 );
-        return self::token_from_value( get_option( self::GWC_SLUG . '_osm_access_token_data' ) ) !== '' && ( ! $expiry || $expiry > time() + 30 );
+        return self::mgf_connect_available();
     }
 
     private static function get_access_token( $force_refresh = false ) {
         $filtered = apply_filters( 'mbs_osm_access_token', '', $force_refresh );
         if ( is_string( $filtered ) && $filtered !== '' ) return $filtered;
         $settings = self::get_settings();
-        if ( $settings['auth_source'] === 'gilbertweb' ) {
-            if ( $force_refresh || ! self::gilbertweb_available() ) return '';
-            return self::token_from_value( get_option( self::GWC_SLUG . '_osm_access_token_data' ) );
+        if ( $settings['auth_source'] === 'mgf_connect' ) {
+            if ( ! class_exists( 'MGF_OSM_Auth' ) ) return '';
+            $valid = $force_refresh ? MGF_OSM_Auth::refresh_token() : MGF_OSM_Auth::ensure_valid_token();
+            return $valid ? (string) MGF_OSM_Auth::get_access_token() : '';
         }
         $stored = get_option( 'mbs_osm_access_token_data' );
         $expiry = (int) get_option( 'mbs_osm_access_token_expiry', 0 );
@@ -616,7 +623,7 @@ class MBS_OSM_Integration {
     private static function require_admin_ajax() { check_ajax_referer( 'mbs_admin_nonce', 'nonce' ); if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( array( 'message' => 'Administrator permission is required.' ), 403 ); }
 
     public function ajax_save_settings() {
-        self::require_admin_ajax(); $auth = sanitize_key( $_POST['osm_auth_source'] ?? 'standalone' ); if ( ! in_array( $auth, array( 'standalone', 'gilbertweb' ), true ) ) $auth = 'standalone';
+        self::require_admin_ajax(); $auth = sanitize_key( $_POST['osm_auth_source'] ?? 'standalone' ); if ( $auth === 'gilbertweb' ) $auth = 'mgf_connect'; if ( ! in_array( $auth, array( 'standalone', 'mgf_connect' ), true ) ) $auth = 'standalone';
         $requested_enabled = ! empty( $_POST['osm_enabled'] );
         // Keep delivery disabled until every required mapping has validated.
         // This avoids turning a partially saved admin form into a payment-flow
