@@ -535,61 +535,61 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
     </div>
 
     <!-- Charts -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;">
+    <div class="mbs-analytics-charts">
 
         <!-- Monthly bookings -->
         <div class="nms-card">
             <div class="nms-card-header"><h2>📊 Bookings Per Month</h2></div>
-            <div style="padding:1.5rem;">
-                <canvas id="mbs-chart-monthly" height="250"></canvas>
+            <div class="mbs-chart-panel">
+                <canvas id="mbs-chart-monthly"></canvas>
             </div>
         </div>
 
         <!-- Monthly revenue -->
         <div class="nms-card">
             <div class="nms-card-header"><h2>💷 Revenue Per Month</h2></div>
-            <div style="padding:1.5rem;">
-                <canvas id="mbs-chart-revenue" height="250"></canvas>
+            <div class="mbs-chart-panel">
+                <canvas id="mbs-chart-revenue"></canvas>
             </div>
         </div>
 
         <!-- By space -->
         <div class="nms-card">
             <div class="nms-card-header"><h2>🏛️ Bookings By Space</h2></div>
-            <div style="padding:1.5rem;">
-                <canvas id="mbs-chart-space" height="250"></canvas>
+            <div class="mbs-chart-panel">
+                <canvas id="mbs-chart-space"></canvas>
             </div>
         </div>
 
         <!-- By day of week -->
         <div class="nms-card">
             <div class="nms-card-header"><h2>📅 Busiest Days</h2></div>
-            <div style="padding:1.5rem;">
-                <canvas id="mbs-chart-days" height="250"></canvas>
+            <div class="mbs-chart-panel">
+                <canvas id="mbs-chart-days"></canvas>
             </div>
         </div>
 
         <!-- Measures with explicitly different date bases -->
         <div class="nms-card">
             <div class="nms-card-header"><h2>💷 Financial Measures (see date-basis note)</h2></div>
-            <div style="padding:1.5rem;">
-                <canvas id="mbs-chart-financial" height="250"></canvas>
+            <div class="mbs-chart-panel">
+                <canvas id="mbs-chart-financial"></canvas>
             </div>
         </div>
 
         <!-- Revenue by tier -->
         <div class="nms-card">
             <div class="nms-card-header"><h2>🏷️ Revenue By Pricing Tier</h2></div>
-            <div style="padding:1.5rem;">
-                <canvas id="mbs-chart-tier" height="250"></canvas>
+            <div class="mbs-chart-panel">
+                <canvas id="mbs-chart-tier"></canvas>
             </div>
         </div>
 
         <!-- Time of day -->
         <div class="nms-card">
             <div class="nms-card-header"><h2>🕐 Bookings By Time of Day</h2></div>
-            <div style="padding:1.5rem;">
-                <canvas id="mbs-chart-timeslot" height="250"></canvas>
+            <div class="mbs-chart-panel">
+                <canvas id="mbs-chart-timeslot"></canvas>
             </div>
         </div>
     </div>
@@ -777,7 +777,7 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
             labels: <?php echo wp_json_encode( $chart_labels ); ?>,
             datasets: [{ label: 'Bookings', data: <?php echo wp_json_encode( $chart_counts ); ?>, backgroundColor: purple, borderRadius: 4 }]
         },
-        options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
     });
 
     // Monthly revenue
@@ -787,7 +787,7 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
             labels: <?php echo wp_json_encode( $chart_labels ); ?>,
             datasets: [{ label: 'Revenue (£)', data: <?php echo wp_json_encode( $chart_revenue ); ?>, borderColor: green, backgroundColor: 'rgba(46,204,113,0.1)', fill: true, tension: 0.3 }]
         },
-        options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
     });
 
     // By space (doughnut)
@@ -797,7 +797,7 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
             labels: <?php echo wp_json_encode( $space_labels ); ?>,
             datasets: [{ data: <?php echo wp_json_encode( $space_counts ); ?>, backgroundColor: [purple, gold, green, blue, '#e74c3c', '#9b59b6'] }]
         },
-        options: { responsive: true }
+        options: { responsive: true, maintainAspectRatio: false }
     });
 
     // By day of week
@@ -807,7 +807,7 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
             labels: <?php echo wp_json_encode( $day_labels ); ?>,
             datasets: [{ label: 'Bookings', data: <?php echo wp_json_encode( $day_counts ); ?>, backgroundColor: gold, borderRadius: 4 }]
         },
-        options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
     });
 
     // Financial measures: issue/service FY, transaction/service FY, and current balance.
@@ -817,7 +817,7 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
             labels: <?php echo wp_json_encode( $fin_labels ); ?>,
             datasets: [{ label: '£', data: <?php echo wp_json_encode( $fin_values ); ?>, backgroundColor: [purple, green, '#e67e22'], borderRadius: 4 }]
         },
-        options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
     });
 
     // Revenue by tier
@@ -827,7 +827,7 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
             labels: <?php echo wp_json_encode( $tier_labels ); ?>,
             datasets: [{ data: <?php echo wp_json_encode( $tier_revenue ); ?>, backgroundColor: [purple, gold, green, blue, '#e74c3c', '#9b59b6'] }]
         },
-        options: { responsive: true }
+        options: { responsive: true, maintainAspectRatio: false }
     });
 
     // Time of day
@@ -837,7 +837,7 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
             labels: <?php echo wp_json_encode( $slot_labels ); ?>,
             datasets: [{ label: 'Bookings', data: <?php echo wp_json_encode( $slot_counts ); ?>, backgroundColor: blue, borderRadius: 4 }]
         },
-        options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
     });
 })();
 

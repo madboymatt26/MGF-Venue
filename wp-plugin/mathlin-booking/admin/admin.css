@@ -87,6 +87,33 @@
 .nms-card .form-table th { padding-left: 0; }
 .nms-card .form-table td { padding-right: 0; }
 
+/* Reports charts: Chart.js must size against a bounded parent, not the
+   canvas's intrinsic 300x150/height-attribute aspect ratio. */
+.mbs-analytics-charts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1.5rem;
+}
+.mbs-analytics-charts .nms-card { min-width: 0; }
+.mbs-chart-panel {
+    position: relative;
+    box-sizing: border-box;
+    width: 100%;
+    height: clamp(240px, 25vw, 320px);
+    padding: 1.5rem;
+}
+.mbs-chart-panel canvas {
+    display: block;
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100%;
+}
+
+@media (max-width: 900px) {
+    .mbs-analytics-charts { grid-template-columns: minmax(0, 1fr); }
+    .mbs-chart-panel { height: 250px; padding: 1rem; }
+}
+
 /* Single booking layout */
 .nms-single-layout { display: grid; grid-template-columns: 1fr 280px; gap: 1.5rem; align-items: start; }
 .nms-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0; padding: 1rem 1.5rem; }

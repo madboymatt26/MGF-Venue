@@ -1,4 +1,4 @@
-# AI-CONTEXT.md — MGF Venue (v3.26.1)
+# AI-CONTEXT.md — MGF Venue (v3.26.2)
 
 This document is designed for LLMs and AI agents to read before modifying this codebase. It maps the architecture, file relationships, and critical business logic rules.
 
@@ -7,6 +7,13 @@ This document is designed for LLMs and AI agents to read before modifying this c
 > **CRITICAL — two distinct brands (do not mix):**
 > - **MGF Venue** = operator/product brand. Admin-only: WP admin menu + icon (`assets/mgf-venue-icon.png`), admin page `<h1>`s, Plugins list, updater, GDPR labels, developer `error_log` prefixes. Bundled logo assets live in `wp-plugin/mathlin-booking/assets/`.
 > - **Scout Group** = customer-facing brand. Everything a hirer sees (emails, invoices, public shortcode pages) must use the **configurable** Organisation Name (`mbs_org_name`) and uploaded logo (`mbs_org_logo_url`) via `MBS_Email_Templates::get_logo_html()` / `get_org_settings()`. **Never** surface the MGF brand or the bundled MGF assets to customers.
+
+### Analytics chart layout invariant (v3.26.2)
+
+- Every Chart.js canvas on the Reports page belongs in `.mbs-chart-panel` and
+  must use `responsive: true` with `maintainAspectRatio: false`. The bounded
+  parent controls chart height across desktop and mobile; do not reintroduce a
+  canvas `height` attribute or an unbounded responsive canvas.
 
 ### Captured invoice checkout invariant (v3.26.1)
 
