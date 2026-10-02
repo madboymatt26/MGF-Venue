@@ -12,14 +12,19 @@ class MBS_Recurrence {
     const MAX_OCCURRENCES = 53;
 
     /**
-     * Generate an inclusive list of weekly occurrence dates.
+     * Generate an inclusive list of weekly or fortnightly occurrence dates.
      *
      * @param array  $booking      Booking fields containing booking_date and,
      *                            optionally, booking_date_end.
      * @param string $repeat_until Inclusive final date (Y-m-d).
+     * @param int    $interval_weeks Number of weeks between occurrences (1 or 2).
      * @return array|WP_Error
      */
-    public static function weekly_dates( $booking, $repeat_until ) {
+    public static function weekly_dates( $booking, $repeat_until, $interval_weeks = 1 ) {
+        $interval_weeks = absint( $interval_weeks );
+        if ( ! in_array( $interval_weeks, array( 1, 2 ), true ) ) {
+            return new WP_Error( 'invalid_recurrence_interval', 'Repeat interval must be weekly or every two weeks.' );
+        }
         $start = self::parse_date( $booking['booking_date'] ?? '', 'booking date' );
         if ( is_wp_error( $start ) ) {
             return $start;
@@ -68,7 +73,7 @@ class MBS_Recurrence {
                     sprintf( 'Recurring requests may contain no more than %d bookings.', self::MAX_OCCURRENCES )
                 );
             }
-            $current = $current->modify( '+7 days' );
+            $current = $current->modify( '+' . $interval_weeks . ' weeks' );
         }
 
         return $dates;

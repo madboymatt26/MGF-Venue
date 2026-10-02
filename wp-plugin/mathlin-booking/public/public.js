@@ -285,14 +285,15 @@ jQuery(function ($) {
         }
 
         // Calculate recurring total
-        var isRecurring = $('#nms-recurring').val() === '1';
+        var recurrenceInterval = parseInt($('#nms-recurring').val(), 10) || 0;
+        var isRecurring = recurrenceInterval > 0;
         var repeatUntil = $('#nms-repeat-until').val();
         var numWeeks = 1;
 
         if (isRecurring && dateFrom && repeatUntil) {
             var startMs = new Date(dateFrom + 'T00:00:00').getTime();
             var endMs   = new Date(repeatUntil + 'T00:00:00').getTime();
-            numWeeks = Math.max(1, Math.floor((endMs - startMs) / (7 * 86400000)) + 1);
+            numWeeks = Math.max(1, Math.floor((endMs - startMs) / (recurrenceInterval * 7 * 86400000)) + 1);
             numWeeks = Math.min(numWeeks, 53);
         }
 
@@ -477,13 +478,20 @@ jQuery(function ($) {
     }
 
     $('#nms-recurring').on('change', function () {
-        var isRecurring = $(this).val() === '1';
+        var interval = parseInt($(this).val(), 10) || 0;
+        var isRecurring = interval > 0;
         $('#nms-repeat-until-group').toggle(isRecurring);
         if (!isRecurring) {
             $('#nms-repeat-until').val('');
         } else {
+            $('#nms-repeat-hint').text(
+                interval === 2
+                    ? 'Booking will repeat every two weeks for up to one calendar year. Dates with conflicts will be skipped.'
+                    : 'Booking will repeat every week for up to one calendar year (maximum 53 dates). Dates with conflicts will be skipped.'
+            );
             updateRecurrenceDateLimits();
         }
+        updateCost();
     });
     $('#nms-date').on('change', updateRecurrenceDateLimits);
 
@@ -562,7 +570,8 @@ jQuery(function ($) {
         $btn.prop('disabled', true).text('Submitting…');
 
         // UX-004: Confirm before submitting recurring bookings
-        if ($('#nms-recurring').val() === '1' && $('#nms-repeat-until').val()) {
+        var recurrenceInterval = parseInt($('#nms-recurring').val(), 10) || 0;
+        if (recurrenceInterval > 0 && $('#nms-repeat-until').val()) {
             var dateFrom = $('#nms-date').val();
             var dateTo = $('#nms-date-end').val() || dateFrom;
             var repeatUntil = $('#nms-repeat-until').val();
@@ -573,8 +582,9 @@ jQuery(function ($) {
                     $btn.prop('disabled', false).text('Submit Booking Request');
                     return;
                 }
-                var weeks = Math.max(1, Math.floor((new Date(repeatUntil + 'T00:00:00') - new Date(dateFrom + 'T00:00:00')) / (7 * 86400000)) + 1);
-                if (!confirm('You are about to create up to ' + weeks + ' weekly bookings. Dates with conflicts will be skipped.\n\nContinue?')) {
+                var occurrences = Math.max(1, Math.floor((new Date(repeatUntil + 'T00:00:00') - new Date(dateFrom + 'T00:00:00')) / (recurrenceInterval * 7 * 86400000)) + 1);
+                var cadence = recurrenceInterval === 2 ? 'fortnightly' : 'weekly';
+                if (!confirm('You are about to create up to ' + occurrences + ' ' + cadence + ' bookings. Dates with conflicts will be skipped.\n\nContinue?')) {
                     $btn.prop('disabled', false).text('Submit Booking Request');
                     return;
                 }

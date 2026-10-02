@@ -335,7 +335,12 @@ class MBS_Public {
 
         // Handle recurring bookings
         $repeat_until = sanitize_text_field( $_POST['repeat_until'] ?? '' );
+        $recurrence_interval = absint( $_POST['recurrence_interval'] ?? 0 );
         if ( $repeat_until ) {
+            if ( ! in_array( $recurrence_interval, array( 1, 2 ), true ) ) {
+                wp_send_json_error( array( 'message' => 'Please choose a valid repeat interval.' ) );
+            }
+            $_POST['recurrence_interval'] = $recurrence_interval;
             $result = MBS_Bookings::create_recurring( $_POST, $repeat_until );
 
             if ( is_wp_error( $result ) ) {
@@ -358,7 +363,7 @@ class MBS_Public {
                 'recurring' => true,
                 'created'   => $result['created'],
                 'skipped'   => count( $result['skipped'] ),
-                'requested' => $result['total_weeks'],
+                'requested' => $result['total_occurrences'],
                 'price_per_booking' => (float) $result['series']->price_per_booking,
                 'estimated_full_value' => (float) $result['series']->estimated_total,
                 'amount_due' => 0,

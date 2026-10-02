@@ -172,9 +172,14 @@ class MBS_Series {
         $accepted_terms = ! empty( $data['accept_terms'] );
         $now = current_time( 'mysql' );
 
+        $interval_weeks = absint( $data['recurrence_interval'] ?? 1 );
+        if ( ! in_array( $interval_weeks, array( 1, 2 ), true ) ) {
+            return new WP_Error( 'invalid_recurrence_interval', 'Repeat interval must be weekly or every two weeks.' );
+        }
+
         $schedule = array(
             'frequency'    => 'weekly',
-            'interval'     => 1,
+            'interval'     => $interval_weeks,
             'start_date'   => sanitize_text_field( $data['booking_date'] ),
             'repeat_until' => sanitize_text_field( $repeat_until ),
             'all_day'      => ! empty( $data['all_day'] ),
@@ -203,7 +208,7 @@ class MBS_Series {
             'notes'                => sanitize_textarea_field( $first->notes ),
             'start_date'           => sanitize_text_field( $data['booking_date'] ),
             'repeat_until'         => sanitize_text_field( $repeat_until ),
-            'recurrence_rule'      => 'FREQ=WEEKLY;INTERVAL=1',
+            'recurrence_rule'      => 'FREQ=WEEKLY;INTERVAL=' . $interval_weeks,
             'schedule_json'        => wp_json_encode( $schedule ),
             'price_per_booking'    => (float) $first->amount,
             'estimated_total'      => round( $estimated_total, 2 ),
@@ -482,7 +487,7 @@ class MBS_Series {
         return array( 'series' => self::get( $series_ref ), 'no_op' => false );
     }
 
-    /** Safely extend a first-class weekly series within its original one-year window. */
+    /** Safely extend a first-class weekly or fortnightly series within its original one-year window. */
     public static function extend( $series_ref, $new_repeat_until, $expected_version, $notify_hirer = false ) {
         global $wpdb;
         $series_table = $wpdb->prefix . MBS_SERIES_TABLE;
@@ -490,7 +495,20 @@ class MBS_Series {
         $series_ref = sanitize_text_field( $series_ref );
         $seed = self::get( $series_ref );
         if ( ! $seed ) return new WP_Error( 'series_not_found', 'Recurring series not found.' );
-        $dates = MBS_Recurrence::weekly_dates( array( 'booking_date' => $seed->start_date, 'booking_date_end' => $seed->start_date ), $new_repeat_until );
+        $schedule = json_decode( (string) $seed->schedule_json, true );
+        $interval_weeks = isset( $schedule['interval'] ) ? absint( $schedule['interval'] ) : 0;
+        if ( ! in_array( $interval_weeks, array( 1, 2 ), true )
+            && preg_match( '/(?:^|;)INTERVAL=(\d+)(?:;|$)/', (string) $seed->recurrence_rule, $matches ) ) {
+            $interval_weeks = absint( $matches[1] );
+        }
+        if ( ! in_array( $interval_weeks, array( 1, 2 ), true ) ) {
+            $interval_weeks = 1;
+        }
+        $dates = MBS_Recurrence::weekly_dates(
+            array( 'booking_date' => $seed->start_date, 'booking_date_end' => $seed->start_date ),
+            $new_repeat_until,
+            $interval_weeks
+        );
         if ( is_wp_error( $dates ) ) return $dates;
 
         if ( $wpdb->query( 'START TRANSACTION' ) === false ) return new WP_Error( 'transaction_start_failed', 'Could not start the series-extension transaction.' );

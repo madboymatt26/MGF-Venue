@@ -172,16 +172,17 @@
 
                 <div class="nms-form-row">
                     <div class="nms-form-group">
-                        <label for="nms-recurring">Repeat Weekly?</label>
-                        <select id="nms-recurring" name="recurring">
+                        <label for="nms-recurring">Repeat Booking?</label>
+                        <select id="nms-recurring" name="recurrence_interval">
                             <option value="0">No — single booking</option>
-                            <option value="1">Yes — repeat weekly</option>
+                            <option value="1">Yes — every week</option>
+                            <option value="2">Yes — every two weeks</option>
                         </select>
                     </div>
                     <div class="nms-form-group" id="nms-repeat-until-group" style="display:none">
                         <label for="nms-repeat-until">Repeat Until <span class="nms-req">*</span></label>
                         <input type="date" id="nms-repeat-until" name="repeat_until">
-                        <p class="nms-field-hint">Booking will repeat weekly for up to one calendar year (maximum 53 dates). Dates with conflicts will be skipped.</p>
+                        <p class="nms-field-hint" id="nms-repeat-hint">Booking will repeat for up to one calendar year (maximum 53 dates). Dates with conflicts will be skipped.</p>
                     </div>
                 </div>
 

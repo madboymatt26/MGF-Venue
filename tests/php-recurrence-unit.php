@@ -14,6 +14,7 @@ class WP_Error {
 }
 function is_wp_error( $value ) { return $value instanceof WP_Error; }
 function wp_timezone() { return new DateTimeZone( 'Europe/London' ); }
+function absint( $value ) { return abs( (int) $value ); }
 
 require_once dirname( __DIR__ ) . '/wp-plugin/mathlin-booking/includes/class-recurrence.php';
 
@@ -32,6 +33,17 @@ $dates = MBS_Recurrence::weekly_dates(
     '2026-04-12'
 );
 assert_same( array( '2026-03-22', '2026-03-29', '2026-04-05', '2026-04-12' ), $dates, 'Weekly dates stay on Sunday through the BST transition.' );
+
+$dates = MBS_Recurrence::weekly_dates(
+    array( 'booking_date' => '2026-10-12', 'booking_date_end' => '2026-10-12' ),
+    '2026-12-14',
+    2
+);
+assert_same(
+    array( '2026-10-12', '2026-10-26', '2026-11-09', '2026-11-23', '2026-12-07' ),
+    $dates,
+    'Fortnightly dates remain on the same weekday through the autumn GMT transition.'
+);
 
 $dates = MBS_Recurrence::weekly_dates( array( 'booking_date' => '2026-09-27' ), '2026-12-20' );
 assert_same( 13, count( $dates ), 'A 13-occurrence series is generated exactly.' );
@@ -62,5 +74,8 @@ $error = MBS_Recurrence::weekly_dates(
     '2026-06-10'
 );
 assert_same( 'recurring_multi_day', $error->get_error_code(), 'Recurring multi-day requests are rejected.' );
+
+$error = MBS_Recurrence::weekly_dates( array( 'booking_date' => '2026-05-10' ), '2026-06-10', 3 );
+assert_same( 'invalid_recurrence_interval', $error->get_error_code(), 'Unsupported repeat intervals are rejected.' );
 
 echo "OK: {$tests} recurrence assertions passed.\n";
