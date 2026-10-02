@@ -285,15 +285,12 @@ jQuery(function ($) {
         }
 
         // Calculate recurring total
-        var isRecurring = $('#nms-recurring').val() === '1';
+        var isRecurring = $('#nms-recurring').val() !== 'none';
         var repeatUntil = $('#nms-repeat-until').val();
         var numWeeks = 1;
 
         if (isRecurring && dateFrom && repeatUntil) {
-            var startMs = new Date(dateFrom + 'T00:00:00').getTime();
-            var endMs   = new Date(repeatUntil + 'T00:00:00').getTime();
-            numWeeks = Math.max(1, Math.floor((endMs - startMs) / (7 * 86400000)) + 1);
-            numWeeks = Math.min(numWeeks, 53);
+            numWeeks = recurrenceDates(dateFrom, repeatUntil, $('#nms-recurring').val()).length;
         }
 
         var grandTotal = singleTotal * numWeeks;
@@ -457,6 +454,36 @@ jQuery(function ($) {
         return year + '-' + month + '-' + day;
     }
 
+    // UTC here represents calendar dates only, avoiding BST/GMT count drift.
+    function recurrenceDates(startValue, untilValue, pattern) {
+        var start = new Date(startValue + 'T00:00:00Z');
+        var until = new Date(untilValue + 'T00:00:00Z');
+        if (isNaN(start.getTime()) || isNaN(until.getTime()) || until < start) return [];
+        var dates = [];
+        function add(date) {
+            if (date >= start && date <= until) dates.push(date.toISOString().slice(0, 10));
+        }
+        if (pattern === 'selected') {
+            dates = [startValue].concat($('#nms-selected-dates').val().split(/[\s,]+/).filter(Boolean));
+            return Array.from(new Set(dates)).filter(function (date) { return date >= startValue && date <= untilValue; }).sort();
+        }
+        if (pattern === 'monthly_date' || pattern === 'monthly_weekday') {
+            var month = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
+            var ordinal = Math.ceil(start.getUTCDate() / 7);
+            while (month <= until) {
+                var day = pattern === 'monthly_date' ? start.getUTCDate()
+                    : 1 + (start.getUTCDay() - month.getUTCDay() + 7) % 7 + 7 * (ordinal - 1);
+                var date = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth(), day));
+                if (date.getUTCMonth() === month.getUTCMonth()) add(date);
+                month.setUTCMonth(month.getUTCMonth() + 1);
+            }
+        } else {
+            var step = pattern === 'daily' ? 1 : pattern === 'fortnightly' ? 14 : 7;
+            for (var current = new Date(start); current <= until && dates.length < 367; current.setUTCDate(current.getUTCDate() + step)) add(current);
+        }
+        return dates;
+    }
+
     function updateRecurrenceDateLimits() {
         var startValue = $('#nms-date').val();
         var $until = $('#nms-repeat-until');
@@ -477,15 +504,32 @@ jQuery(function ($) {
     }
 
     $('#nms-recurring').on('change', function () {
-        var isRecurring = $(this).val() === '1';
+        var pattern = $(this).val();
+        var isRecurring = pattern !== 'none';
         $('#nms-repeat-until-group').toggle(isRecurring);
+        $('#nms-repeat-until').prop('required', isRecurring);
+        $('#nms-selected-dates-group').toggle(pattern === 'selected');
         if (!isRecurring) {
             $('#nms-repeat-until').val('');
         } else {
+            var hint = 'Repeat for up to one calendar year. Dates with conflicts will be skipped.';
+            if (pattern === 'monthly_date') hint += ' Months without the selected date are skipped (for example, 31 February).';
+            if (pattern === 'monthly_weekday') hint += ' Uses the start date’s weekday and week number (for example, second Monday). Months without a fifth occurrence are skipped.';
+            if (pattern === 'selected') hint = 'Choose the exact dates between the start and repeat-until dates. Dates with conflicts will be skipped.';
+            $('#nms-repeat-hint').text(hint);
             updateRecurrenceDateLimits();
         }
+        updateCost();
     });
     $('#nms-date').on('change', updateRecurrenceDateLimits);
+    $('#nms-selected-dates').on('input change', updateCost);
+    $('#nms-add-date-btn').on('click', function () {
+        var date = $('#nms-add-date').val();
+        if (!date) return;
+        var values = $('#nms-selected-dates').val().split(/[\s,]+/).filter(Boolean);
+        values.push(date);
+        $('#nms-selected-dates').val(Array.from(new Set(values)).sort().join('\n')).trigger('change');
+    });
 
     // When switching to full day, also hide the error message if it was about time fields
     $('#nms-allday').on('change', function () {
@@ -562,7 +606,8 @@ jQuery(function ($) {
         $btn.prop('disabled', true).text('Submitting…');
 
         // UX-004: Confirm before submitting recurring bookings
-        if ($('#nms-recurring').val() === '1' && $('#nms-repeat-until').val()) {
+        var recurrencePattern = $('#nms-recurring').val();
+        if (recurrencePattern !== 'none' && $('#nms-repeat-until').val()) {
             var dateFrom = $('#nms-date').val();
             var dateTo = $('#nms-date-end').val() || dateFrom;
             var repeatUntil = $('#nms-repeat-until').val();
@@ -573,8 +618,8 @@ jQuery(function ($) {
                     $btn.prop('disabled', false).text('Submit Booking Request');
                     return;
                 }
-                var weeks = Math.max(1, Math.floor((new Date(repeatUntil + 'T00:00:00') - new Date(dateFrom + 'T00:00:00')) / (7 * 86400000)) + 1);
-                if (!confirm('You are about to create up to ' + weeks + ' weekly bookings. Dates with conflicts will be skipped.\n\nContinue?')) {
+                var dates = recurrenceDates(dateFrom, repeatUntil, recurrencePattern);
+                if (!confirm('You are about to request ' + dates.length + ' bookings on these dates:\n' + dates.join(', ') + '\n\nDates with conflicts will be skipped. Continue?')) {
                     $btn.prop('disabled', false).text('Submit Booking Request');
                     return;
                 }
@@ -621,6 +666,7 @@ jQuery(function ($) {
 
                 $ok.html(msg).show();
                 $form[0].reset();
+                $('#nms-recurring').trigger('change');
                 updateCost();
                 // Refresh calendar dots to show the new booking
                 loadCalendar(calYear, calMonth);

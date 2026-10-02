@@ -986,7 +986,7 @@ class MBS_Bookings {
     }
 
     /**
-     * Create a recurring booking series (weekly repeat).
+     * Create a recurring booking series (weekly or fortnightly repeat).
      *
      * @param array  $data       Base booking data
      * @param string $repeat_until  End date for recurrence (Y-m-d)
@@ -996,7 +996,8 @@ class MBS_Bookings {
      */
     public static function create_recurring( $data, $repeat_until, $trusted_admin_context = false ) {
         global $wpdb;
-        $dates = MBS_Recurrence::weekly_dates( $data, $repeat_until );
+        $interval_weeks = absint( $data['recurrence_interval'] ?? 1 );
+        $dates = MBS_Recurrence::dates( $data, $repeat_until );
         if ( is_wp_error( $dates ) ) {
             return $dates;
         }
@@ -1125,6 +1126,7 @@ class MBS_Bookings {
             );
         }
 
+        $data['recurrence_interval'] = $interval_weeks;
         $series = MBS_Series::create_from_request( $series_id, $data, $repeat_until, $occurrences, $refs );
         if ( is_wp_error( $series ) ) {
             $wpdb->query( 'ROLLBACK' );
@@ -1152,6 +1154,7 @@ class MBS_Bookings {
             'refs'       => $refs,
             'created'    => count( $refs ),
             'skipped'    => $skipped,
+            'total_occurrences' => count( $dates ),
             'total_weeks' => count( $dates ),
             'occurrences' => $occurrences,
             'series'      => $series,

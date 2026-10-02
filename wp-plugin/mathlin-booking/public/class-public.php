@@ -335,7 +335,11 @@ class MBS_Public {
 
         // Handle recurring bookings
         $repeat_until = sanitize_text_field( $_POST['repeat_until'] ?? '' );
-        if ( $repeat_until ) {
+        $pattern = sanitize_key( $_POST['recurrence_pattern'] ?? '' );
+        // Support already-open weekly/fortnightly forms from the previous release.
+        if ( ! $pattern && $repeat_until ) $pattern = (int) ( $_POST['recurrence_interval'] ?? 1 ) === 2 ? 'fortnightly' : 'weekly';
+        if ( $pattern && $pattern !== 'none' ) {
+            $_POST['recurrence_pattern'] = $pattern;
             $result = MBS_Bookings::create_recurring( $_POST, $repeat_until );
 
             if ( is_wp_error( $result ) ) {
@@ -358,7 +362,7 @@ class MBS_Public {
                 'recurring' => true,
                 'created'   => $result['created'],
                 'skipped'   => count( $result['skipped'] ),
-                'requested' => $result['total_weeks'],
+                'requested' => $result['total_occurrences'],
                 'price_per_booking' => (float) $result['series']->price_per_booking,
                 'estimated_full_value' => (float) $result['series']->estimated_total,
                 'amount_due' => 0,

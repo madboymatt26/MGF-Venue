@@ -28,7 +28,7 @@ compat_has( $series, "'billing_mode' => \$is_scout ? 'none' : 'legacy_per_occurr
 compat_has( $series, "'terms_hash' => null", 'Legacy registration does not invent terms acceptance.' );
 compat_has( $billing, 'legacy_adoption_confirmation_required', 'Consolidated adoption requires explicit preview confirmation.' );
 compat_has( $billing, "\$booking->status === 'confirmed'", 'Paid legacy occurrences are excluded from adopted invoice periods.' );
-compat_has( $series, 'MBS_Recurrence::weekly_dates', 'Series extension uses the shared calendar-safe recurrence rule.' );
+compat_has( $series, 'MBS_Recurrence::dates', 'Series extension uses the shared calendar-safe recurrence rule.' );
 compat_has( $series, "'invoice_number' => ''", 'Extended consolidated occurrences do not receive legacy invoices.' );
 compat_has( $series, 'MBS_HomeAssistant::notify( $booking )', 'Confirmed extended occurrences retain Home Assistant notification.' );
 compat_has( $series, "booking_date >= %s AND status IN ('deposit_paid','paid')", 'Series-wide cancellation preserves historical paid occurrence statuses.' );

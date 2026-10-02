@@ -15,9 +15,11 @@ function wp_date( $format, $timestamp = null ) {
 }
 function sanitize_key( $value ) { return preg_replace( '/[^a-z0-9_\-]/', '', strtolower( (string) $value ) ); }
 function sanitize_text_field( $value ) { return trim( (string) $value ); }
+function absint( $value ) { return abs( (int) $value ); }
 
 require_once dirname( __DIR__ ) . '/wp-plugin/mathlin-booking/includes/class-money.php';
 require_once dirname( __DIR__ ) . '/wp-plugin/mathlin-booking/includes/class-billing-engine.php';
+require_once dirname( __DIR__ ) . '/wp-plugin/mathlin-booking/includes/class-recurrence.php';
 
 $checks = 0;
 function billing_same( $expected, $actual, $message ) {
@@ -91,3 +93,22 @@ $error = MBS_Billing_Engine::build_periods( $base, $float_booking );
 billing_same( 'float_booking_amount', $error->get_error_code(), 'Float booking snapshots are rejected.' );
 
 echo "OK: {$checks} billing-engine assertions passed.\n";
+
+foreach ( array( 'daily', 'weekly', 'fortnightly', 'monthly_date', 'monthly_weekday', 'selected' ) as $pattern ) {
+    $dates = MBS_Recurrence::dates( array( 'booking_date' => '2026-10-12', 'recurrence_pattern' => $pattern, 'recurrence_dates' => '2026-10-26,2026-11-02,2026-11-16,2026-11-30,2026-12-14' ), '2026-12-14' );
+    $rows = array(); $expected = array();
+    foreach ( $dates as $i => $date ) {
+        $rows[] = booking( 'TEST-' . $i, $date, '30.00' );
+        $month = substr( $date, 0, 7 );
+        $expected[ $month ] = ( $expected[ $month ] ?? 0 ) + 1;
+    }
+    $periods = MBS_Billing_Engine::build_periods( $base, $rows );
+    billing_same( count( $expected ), count( $periods ), $pattern . ' produces one invoice period per occupied month.' );
+    foreach ( $periods as $period ) {
+        // Compare by chronological period position, as build_periods sorts dates.
+        $count = array_shift( $expected );
+        billing_same( $count, $period['occurrence_count'], $pattern . ' includes exactly the requested occurrences.' );
+        billing_same( $count * 3000, $period['total_minor'], $pattern . ' monthly charge is exact.' );
+    }
+}
+echo "OK: {$checks} expanded billing assertions passed.\n";

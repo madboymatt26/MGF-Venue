@@ -4,7 +4,14 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.26.2
+**Current Version:** 3.26.3
+
+## 3.26.3 Flexible public recurring bookings
+
+- Public hirers can choose daily, weekly, fortnightly, monthly on the same date, monthly on the same weekday/week, or specific dates.
+- Monthly dates that do not exist (such as the 31st, or a fifth Monday) are skipped and explained in the form. Specific dates include the start date, are deduplicated and sorted, and must be within the requested range.
+- Estimates, confirmation prompts, stored recurrence rules and later series extensions preserve the selected cadence.
+- Server-side validation rejects unsupported patterns, invalid dates and ranges beyond one calendar year. Daily/selected requests may contain up to 367 dates. Billing continues to group accepted occurrences by service month.
 **Requires WordPress:** 5.0+  
 **Requires PHP:** 7.4+  
 **Tested with WordPress:** 6.7  
@@ -268,7 +275,7 @@ inside an arbitrary external payment provider.
 - Interactive availability calendar with blocked date indicators
 - Booking form with real-time cost calculation (tier-aware)
 - Multi-day and full-day booking support
-- Recurring weekly bookings (up to one calendar year inclusive, maximum 53 dates)
+- Recurring weekly or fortnightly bookings (up to one calendar year inclusive, maximum 53 dates)
 - Recurring billing safety: one durable, versioned Woo order owner per current invoice balance generation; refund remainders can acquire a successor generation, while mismatched or captured-but-unrecorded payments remain visibly quarantined for evidence-based reconciliation. Explicit manual/offline ledger payments may be partial; an altered online order may not.
 - Issued, part-paid, and overdue positive-balance invoices share one payable rule. Partial refunds use the canonical Woo refund hook and affect only their allocated occurrences. Completed payment/refund transactions are inserted into the OSM finance-event outbox atomically and are consolidated at bank/payout level rather than posted per occurrence.
 - Series creation and cancellation/credit reconciliation are transactional; financially documented occurrences require credit-and-replace rather than direct edit or deletion.
