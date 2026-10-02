@@ -43,9 +43,9 @@ contains_text( $email, 'Amount due at submission', 'Receipt states the submissio
 contains_text( $email, 'Estimated full series value', 'Receipt labels the estimate accurately.' );
 contains_text( $javascript, 'if (!isRecurring && depositSettings.enabled', 'Annual deposits are suppressed for recurring requests.' );
 contains_text( $javascript, "$('#nms-cost-recurring-due').text('£0.00')", 'Browser preview shows zero due at submission.' );
-contains_text( $form, '<option value="2">Yes — every two weeks</option>', 'Public form offers fortnightly recurrence.' );
+contains_text( $form, '<option value="fortnightly">Every two weeks</option>', 'Public form offers fortnightly recurrence.' );
 contains_text( $recurrence, "array( 1, 2 )", 'Server recurrence accepts only weekly and fortnightly intervals.' );
-contains_text( $series, "'recurrence_rule'      => 'FREQ=WEEKLY;INTERVAL=' . \$interval_weeks", 'Series metadata preserves the chosen interval.' );
-contains_text( $javascript, 'recurrenceInterval * 7 * 86400000', 'Browser estimate counts occurrences using the chosen interval.' );
+contains_text( $series, 'MBS_Recurrence::rule( $pattern )', 'Series metadata preserves the chosen pattern.' );
+contains_text( $javascript, 'recurrenceDates(dateFrom, repeatUntil', 'Browser estimate counts occurrences using the chosen pattern.' );
 
 echo "OK: {$assertions} recurring-series metadata assertions passed.\n";

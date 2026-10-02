@@ -172,13 +172,15 @@ class MBS_Series {
         $accepted_terms = ! empty( $data['accept_terms'] );
         $now = current_time( 'mysql' );
 
-        $interval_weeks = absint( $data['recurrence_interval'] ?? 1 );
-        if ( ! in_array( $interval_weeks, array( 1, 2 ), true ) ) {
-            return new WP_Error( 'invalid_recurrence_interval', 'Repeat interval must be weekly or every two weeks.' );
-        }
+        $pattern = $data['recurrence_pattern'] ?? ( (int) ( $data['recurrence_interval'] ?? 1 ) === 2 ? 'fortnightly' : 'weekly' );
+        $requested_dates = MBS_Recurrence::dates( $data, $repeat_until );
+        if ( is_wp_error( $requested_dates ) ) return $requested_dates;
+        $interval_weeks = $pattern === 'fortnightly' ? 2 : 1;
 
         $schedule = array(
-            'frequency'    => 'weekly',
+            'frequency'    => $pattern === 'daily' ? 'daily' : ( strpos( $pattern, 'monthly_' ) === 0 ? 'monthly' : ( $pattern === 'selected' ? 'selected' : 'weekly' ) ),
+            'pattern'      => $pattern,
+            'dates'        => $requested_dates,
             'interval'     => $interval_weeks,
             'start_date'   => sanitize_text_field( $data['booking_date'] ),
             'repeat_until' => sanitize_text_field( $repeat_until ),
@@ -208,7 +210,7 @@ class MBS_Series {
             'notes'                => sanitize_textarea_field( $first->notes ),
             'start_date'           => sanitize_text_field( $data['booking_date'] ),
             'repeat_until'         => sanitize_text_field( $repeat_until ),
-            'recurrence_rule'      => 'FREQ=WEEKLY;INTERVAL=' . $interval_weeks,
+            'recurrence_rule'      => MBS_Recurrence::rule( $pattern ),
             'schedule_json'        => wp_json_encode( $schedule ),
             'price_per_booking'    => (float) $first->amount,
             'estimated_total'      => round( $estimated_total, 2 ),
@@ -504,10 +506,11 @@ class MBS_Series {
         if ( ! in_array( $interval_weeks, array( 1, 2 ), true ) ) {
             $interval_weeks = 1;
         }
-        $dates = MBS_Recurrence::weekly_dates(
-            array( 'booking_date' => $seed->start_date, 'booking_date_end' => $seed->start_date ),
-            $new_repeat_until,
-            $interval_weeks
+        $pattern = $schedule['pattern'] ?? ( $interval_weeks === 2 ? 'fortnightly' : 'weekly' );
+        if ( $pattern === 'selected' ) return new WP_Error( 'selected_dates_extension', 'This series uses selected dates. Submit another selected-date request to add hires.' );
+        $dates = MBS_Recurrence::dates(
+            array( 'booking_date' => $seed->start_date, 'booking_date_end' => $seed->start_date, 'recurrence_pattern' => $pattern ),
+            $new_repeat_until
         );
         if ( is_wp_error( $dates ) ) return $dates;
 

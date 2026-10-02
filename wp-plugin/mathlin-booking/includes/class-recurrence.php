@@ -11,6 +11,66 @@ class MBS_Recurrence {
 
     const MAX_OCCURRENCES = 53;
 
+    /** Generate the actual requested dates, using local calendar arithmetic. */
+    public static function dates( $booking, $repeat_until ) {
+        if ( ! isset( $booking['recurrence_pattern'] ) && ! in_array( (string) ( $booking['recurrence_interval'] ?? 1 ), array( '1', '2' ), true ) ) {
+            return new WP_Error( 'invalid_recurrence_interval', 'Repeat interval must be weekly or every two weeks.' );
+        }
+        $pattern = $booking['recurrence_pattern'] ?? ( (int) ( $booking['recurrence_interval'] ?? 1 ) === 2 ? 'fortnightly' : 'weekly' );
+        if ( ! in_array( $pattern, array( 'daily', 'weekly', 'fortnightly', 'monthly_date', 'monthly_weekday', 'selected' ), true ) ) {
+            return new WP_Error( 'invalid_recurrence_pattern', 'Please choose a valid repeat pattern.' );
+        }
+        // Reuse strict date/range and single-day validation before generating.
+        $validated = self::weekly_dates( $booking, $repeat_until );
+        if ( is_wp_error( $validated ) ) return $validated;
+        $start = self::parse_date( $booking['booking_date'], 'booking date' );
+        $until = self::parse_date( $repeat_until, 'repeat-until date' );
+        if ( $pattern === 'weekly' || $pattern === 'fortnightly' ) {
+            return self::weekly_dates( $booking, $repeat_until, $pattern === 'fortnightly' ? 2 : 1 );
+        }
+        if ( $pattern === 'selected' ) {
+            $values = $booking['recurrence_dates'] ?? '';
+            $values = is_array( $values ) ? $values : preg_split( '/[\s,]+/', trim( (string) $values ), -1, PREG_SPLIT_NO_EMPTY );
+            $dates = array( $start->format( 'Y-m-d' ) );
+            foreach ( $values as $value ) {
+                $date = self::parse_date( $value, 'selected date' );
+                if ( is_wp_error( $date ) ) return $date;
+                if ( $date < $start || $date > $until ) return new WP_Error( 'invalid_selected_range', 'Selected dates must be between the start date and repeat-until date.' );
+                $dates[] = $date->format( 'Y-m-d' );
+            }
+            $dates = array_values( array_unique( $dates ) );
+            sort( $dates );
+            if ( count( $dates ) > 367 ) return new WP_Error( 'too_many_occurrences', 'Choose no more than 367 dates.' );
+            return $dates;
+        }
+        $dates = array();
+        if ( $pattern === 'daily' ) {
+            for ( $date = $start; $date <= $until; $date = $date->modify( '+1 day' ) ) $dates[] = $date->format( 'Y-m-d' );
+            return $dates;
+        }
+        $day = (int) $start->format( 'j' );
+        $weekday = (int) $start->format( 'N' );
+        $ordinal = (int) ceil( $day / 7 );
+        for ( $month = $start->modify( 'first day of this month' ); $month <= $until; $month = $month->modify( '+1 month' ) ) {
+            if ( $pattern === 'monthly_date' ) {
+                // Skip months without this date; never silently shift the hire.
+                if ( $day > (int) $month->format( 't' ) ) continue;
+                $date = $month->setDate( (int) $month->format( 'Y' ), (int) $month->format( 'm' ), $day );
+            } else {
+                $offset = ( $weekday - (int) $month->format( 'N' ) + 7 ) % 7 + 7 * ( $ordinal - 1 );
+                $date = $month->modify( '+' . $offset . ' days' );
+                if ( $date->format( 'm' ) !== $month->format( 'm' ) ) continue;
+            }
+            if ( $date >= $start && $date <= $until ) $dates[] = $date->format( 'Y-m-d' );
+        }
+        return $dates;
+    }
+
+    public static function rule( $pattern ) {
+        $rules = array( 'daily' => 'FREQ=DAILY;INTERVAL=1', 'weekly' => 'FREQ=WEEKLY;INTERVAL=1', 'fortnightly' => 'FREQ=WEEKLY;INTERVAL=2', 'monthly_date' => 'FREQ=MONTHLY;MODE=DATE', 'monthly_weekday' => 'FREQ=MONTHLY;MODE=WEEKDAY', 'selected' => 'RDATE' );
+        return $rules[ $pattern ] ?? '';
+    }
+
     /**
      * Generate an inclusive list of weekly or fortnightly occurrence dates.
      *

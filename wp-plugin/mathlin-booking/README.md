@@ -6,11 +6,12 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 **Current Version:** 3.26.3
 
-## 3.26.3 Fortnightly public bookings
+## 3.26.3 Flexible public recurring bookings
 
-- Public hirers can choose a weekly or every-two-weeks recurring schedule.
+- Public hirers can choose daily, weekly, fortnightly, monthly on the same date, monthly on the same weekday/week, or specific dates.
+- Monthly dates that do not exist (such as the 31st, or a fifth Monday) are skipped and explained in the form. Specific dates include the start date, are deduplicated and sorted, and must be within the requested range.
 - Estimates, confirmation prompts, stored recurrence rules and later series extensions preserve the selected cadence.
-- Server-side validation rejects unsupported repeat intervals.
+- Server-side validation rejects unsupported patterns, invalid dates and ranges beyond one calendar year. Daily/selected requests may contain up to 367 dates. Billing continues to group accepted occurrences by service month.
 **Requires WordPress:** 5.0+  
 **Requires PHP:** 7.4+  
 **Tested with WordPress:** 6.7  

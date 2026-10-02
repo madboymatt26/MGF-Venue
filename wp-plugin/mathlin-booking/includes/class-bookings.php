@@ -997,7 +997,7 @@ class MBS_Bookings {
     public static function create_recurring( $data, $repeat_until, $trusted_admin_context = false ) {
         global $wpdb;
         $interval_weeks = absint( $data['recurrence_interval'] ?? 1 );
-        $dates = MBS_Recurrence::weekly_dates( $data, $repeat_until, $interval_weeks );
+        $dates = MBS_Recurrence::dates( $data, $repeat_until );
         if ( is_wp_error( $dates ) ) {
             return $dates;
         }

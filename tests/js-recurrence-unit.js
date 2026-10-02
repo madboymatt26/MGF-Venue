@@ -1,0 +1,17 @@
+const fs = require('fs');
+const vm = require('vm');
+const assert = require('assert');
+const source = fs.readFileSync(require('path').join(__dirname, '../wp-plugin/mathlin-booking/public/public.js'), 'utf8');
+const helper = source.slice(source.indexOf('    function recurrenceDates('), source.indexOf('    function updateRecurrenceDateLimits('));
+const context = { $: () => ({ val: () => '2026-12-14,2026-10-26,2026-11-02,2026-11-16,2026-11-30,2026-10-26' }) };
+vm.createContext(context);
+vm.runInContext(helper, context);
+const dates = (start, until, pattern) => Array.from(context.recurrenceDates(start, until, pattern));
+assert.deepStrictEqual(dates('2026-03-28', '2026-03-30', 'daily'), ['2026-03-28', '2026-03-29', '2026-03-30']);
+assert.deepStrictEqual(dates('2026-10-12', '2026-12-14', 'fortnightly'), ['2026-10-12', '2026-10-26', '2026-11-09', '2026-11-23', '2026-12-07']);
+assert.deepStrictEqual(dates('2026-01-31', '2026-05-31', 'monthly_date'), ['2026-01-31', '2026-03-31', '2026-05-31']);
+assert.deepStrictEqual(dates('2026-01-12', '2026-04-30', 'monthly_weekday'), ['2026-01-12', '2026-02-09', '2026-03-09', '2026-04-13']);
+assert.deepStrictEqual(dates('2026-03-30', '2026-06-30', 'monthly_weekday'), ['2026-03-30', '2026-06-29']);
+assert.deepStrictEqual(dates('2026-10-12', '2026-12-14', 'selected'), ['2026-10-12', '2026-10-26', '2026-11-02', '2026-11-16', '2026-11-30', '2026-12-14']);
+assert.strictEqual(dates('2026-01-01', '2027-01-01', 'daily').length, 366);
+console.log('OK: browser recurrence dates match the server calendar cases.');

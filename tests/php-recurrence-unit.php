@@ -79,3 +79,14 @@ $error = MBS_Recurrence::weekly_dates( array( 'booking_date' => '2026-05-10' ), 
 assert_same( 'invalid_recurrence_interval', $error->get_error_code(), 'Unsupported repeat intervals are rejected.' );
 
 echo "OK: {$tests} recurrence assertions passed.\n";
+
+assert_same( array( '2026-03-28', '2026-03-29', '2026-03-30' ), MBS_Recurrence::dates( array( 'booking_date' => '2026-03-28', 'recurrence_pattern' => 'daily' ), '2026-03-30' ), 'Daily dates survive the spring clock change.' );
+assert_same( 366, count( MBS_Recurrence::dates( array( 'booking_date' => '2026-01-01', 'recurrence_pattern' => 'daily' ), '2027-01-01' ) ), 'Daily pattern supports an inclusive full year.' );
+assert_same( array( '2026-01-31', '2026-03-31', '2026-05-31' ), MBS_Recurrence::dates( array( 'booking_date' => '2026-01-31', 'recurrence_pattern' => 'monthly_date' ), '2026-05-31' ), 'Monthly dates skip unavailable days without drifting.' );
+assert_same( array( '2026-01-12', '2026-02-09', '2026-03-09', '2026-04-13' ), MBS_Recurrence::dates( array( 'booking_date' => '2026-01-12', 'recurrence_pattern' => 'monthly_weekday' ), '2026-04-30' ), 'Second Monday stays second Monday each month.' );
+assert_same( array( '2026-03-30', '2026-06-29' ), MBS_Recurrence::dates( array( 'booking_date' => '2026-03-30', 'recurrence_pattern' => 'monthly_weekday' ), '2026-06-30' ), 'Fifth weekdays skip months without a fifth occurrence.' );
+$emma_dates = array( '2026-10-12', '2026-10-26', '2026-11-02', '2026-11-16', '2026-11-30', '2026-12-14' );
+assert_same( $emma_dates, MBS_Recurrence::dates( array( 'booking_date' => '2026-10-12', 'recurrence_pattern' => 'selected', 'recurrence_dates' => '2026-12-14,2026-10-26,2026-11-02,2026-11-16,2026-11-30,2026-10-26' ), '2026-12-14' ), 'Selected dates reproduce irregular schedules and deduplicate.' );
+assert_same( 'invalid_date', MBS_Recurrence::dates( array( 'booking_date' => '2026-01-01', 'recurrence_pattern' => 'selected', 'recurrence_dates' => '2026-02-30' ), '2026-03-01' )->get_error_code(), 'Invalid selected dates are rejected.' );
+assert_same( 'invalid_selected_range', MBS_Recurrence::dates( array( 'booking_date' => '2026-01-01', 'recurrence_pattern' => 'selected', 'recurrence_dates' => '2026-04-01' ), '2026-03-01' )->get_error_code(), 'Selected dates outside the requested range are rejected.' );
+echo "OK: {$tests} expanded recurrence assertions passed.\n";

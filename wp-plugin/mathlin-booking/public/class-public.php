@@ -335,12 +335,11 @@ class MBS_Public {
 
         // Handle recurring bookings
         $repeat_until = sanitize_text_field( $_POST['repeat_until'] ?? '' );
-        $recurrence_interval = absint( $_POST['recurrence_interval'] ?? 0 );
-        if ( $repeat_until ) {
-            if ( ! in_array( $recurrence_interval, array( 1, 2 ), true ) ) {
-                wp_send_json_error( array( 'message' => 'Please choose a valid repeat interval.' ) );
-            }
-            $_POST['recurrence_interval'] = $recurrence_interval;
+        $pattern = sanitize_key( $_POST['recurrence_pattern'] ?? '' );
+        // Support already-open weekly/fortnightly forms from the previous release.
+        if ( ! $pattern && $repeat_until ) $pattern = (int) ( $_POST['recurrence_interval'] ?? 1 ) === 2 ? 'fortnightly' : 'weekly';
+        if ( $pattern && $pattern !== 'none' ) {
+            $_POST['recurrence_pattern'] = $pattern;
             $result = MBS_Bookings::create_recurring( $_POST, $repeat_until );
 
             if ( is_wp_error( $result ) ) {
