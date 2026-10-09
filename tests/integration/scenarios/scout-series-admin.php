@@ -43,7 +43,7 @@ try {
         'booking_date_end' => $start->modify( '+1 day' )->format( 'Y-m-d' ),
         'purpose' => 'One-off Scout UI regression',
     ) );
-    $one_off = MBS_Bookings::create( $one_off_data );
+    $one_off = MBS_Bookings::create( $one_off_data, true );
     mbs_scout_assert( ! is_wp_error( $one_off ), 'One-off Scout fixture could not be created.' );
     $one_off_ref = $one_off['ref'];
     $one_off_args = array( 'scout_only' => true, 'one_off_only' => true, 'exclude_archived' => false, 'date_scope' => 'current', 'search' => $one_off_ref );
