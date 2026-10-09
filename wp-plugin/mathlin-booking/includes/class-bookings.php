@@ -596,6 +596,8 @@ class MBS_Bookings {
             'exclude_archived' => true,
             'exclude_scout'    => false,
             'scout_only'       => false,
+            'one_off_only'     => false,
+            'date_scope'       => '',
         );
         $args = wp_parse_args( $args, $defaults );
 
@@ -612,6 +614,15 @@ class MBS_Bookings {
             $where[] = "scout_use = 1";
         } elseif ( $args['exclude_scout'] ) {
             $where[] = "scout_use = 0";
+        }
+        if ( $args['one_off_only'] ) {
+            $where[] = "(series_id IS NULL OR series_id = '')";
+        }
+        // Include multi-day bookings until their final day, not just their start.
+        if ( in_array( $args['date_scope'], array( 'current', 'ended' ), true ) ) {
+            $operator = $args['date_scope'] === 'current' ? '>=' : '<';
+            $where[] = "COALESCE(NULLIF(booking_date_end, ''), booking_date) {$operator} %s";
+            $values[] = wp_date( 'Y-m-d' );
         }
         if ( $args['date_from'] ) {
             $where[]  = 'booking_date >= %s';
@@ -631,8 +642,9 @@ class MBS_Bookings {
         $orderby = in_array( $args['orderby'], $allowed_order ) ? $args['orderby'] : 'booking_date';
         $order   = strtoupper( $args['order'] ) === 'DESC' ? 'DESC' : 'ASC';
 
+        $tie_breaker = $args['one_off_only'] ? ", start_time {$order}, id {$order}" : '';
         $sql      = "SELECT * FROM {$table} WHERE " . implode( ' AND ', $where ) .
-                    " ORDER BY {$orderby} {$order} LIMIT %d OFFSET %d";
+                    " ORDER BY {$orderby} {$order}{$tie_breaker} LIMIT %d OFFSET %d";
         $values[] = $args['limit'];
         $values[] = $args['offset'];
 

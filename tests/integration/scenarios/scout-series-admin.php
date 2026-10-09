@@ -22,6 +22,7 @@ $data = array(
 $created = MBS_Bookings::create_recurring( $data, $repeat_until, true );
 mbs_scout_assert( ! is_wp_error( $created ), 'Scout recurring creation failed: ' . ( is_wp_error( $created ) ? $created->get_error_message() : '' ) );
 $series_ref = $created['series_id'];
+$one_off_ref = '';
 
 try {
     $series = MBS_Series::get( $series_ref );
@@ -34,6 +35,24 @@ try {
     $scout_rows = MBS_Series::get_all( array( 'scout_use' => 1, 'search' => $series_ref ) );
     $external_rows = MBS_Series::get_all( array( 'scout_use' => 0, 'search' => $series_ref ) );
     mbs_scout_assert( count( $scout_rows ) === 1 && count( $external_rows ) === 0, 'Scout/external series filtering failed.' );
+
+    // The Scout Nights one-off tab must query individual Scout bookings without
+    // leaking series occurrences or external hires, including after archiving.
+    $one_off_data = array_merge( $data, array(
+        'booking_date' => $start->modify( '+1 day' )->format( 'Y-m-d' ),
+        'booking_date_end' => $start->modify( '+1 day' )->format( 'Y-m-d' ),
+        'purpose' => 'One-off Scout UI regression',
+    ) );
+    $one_off = MBS_Bookings::create( $one_off_data );
+    mbs_scout_assert( ! is_wp_error( $one_off ), 'One-off Scout fixture could not be created.' );
+    $one_off_ref = $one_off['ref'];
+    $one_off_args = array( 'scout_only' => true, 'one_off_only' => true, 'exclude_archived' => false, 'date_scope' => 'current', 'search' => $one_off_ref );
+    $individual = MBS_Bookings::get_all( $one_off_args );
+    mbs_scout_assert( count( $individual ) === 1 && $individual[0]->ref === $one_off_ref && (float) $individual[0]->amount === 0.0, 'Free one-off Scout booking is missing from the tab query.' );
+    mbs_scout_assert( count( MBS_Bookings::get_all( array_merge( $one_off_args, array( 'search' => $created['refs'][0] ) ) ) ) === 0, 'A recurring Scout occurrence leaked into the one-off list.' );
+    mbs_scout_assert( count( MBS_Bookings::get_all( array_merge( $one_off_args, array( 'date_scope' => 'ended' ) ) ) ) === 0, 'Future booking appeared in past bookings.' );
+    MBS_Bookings::update_status( $one_off_ref, 'archived', false );
+    mbs_scout_assert( count( MBS_Bookings::get_all( array_merge( $one_off_args, array( 'status' => 'archived', 'date_scope' => 'all' ) ) ) ) === 1, 'Archived Scout booking is hidden from the archived/all-dates filter.' );
 
     $edited = MBS_Bookings::update_series_future( $series_ref, array( 'purpose' => 'Updated Integration Scouts' ) );
     mbs_scout_assert( ! is_wp_error( $edited ) && $edited['updated'] === 3, 'Future Scout series edit failed.' );
@@ -57,6 +76,7 @@ try {
     mbs_scout_assert( ! MBS_Series::get( $series_ref ), 'Empty Scout parent remained after full deletion.' );
     $series_ref = '';
 } finally {
+    if ( $one_off_ref ) MBS_Bookings::delete( $one_off_ref );
     if ( $series_ref ) MBS_Bookings::delete_series( $series_ref, 'all' );
 }
 

@@ -27,7 +27,11 @@ $invoice_pdf_url = $invoice_document_id ? add_query_arg( array(
 ?>
 <div class="wrap mbs-admin">
     <h1>
-        <a href="?page=mathlin-booking" class="nms-back-link">&#8592; All Bookings</a>
+        <?php if ( ! empty( $booking->scout_use ) && empty( $booking->series_id ) ) : ?>
+            <a href="<?php echo esc_url( admin_url( 'admin.php?page=mathlin-scout-nights&tab=one-off&scope=all' ) ); ?>" class="nms-back-link">&#8592; One-off Scout bookings</a>
+        <?php else : ?>
+            <a href="?page=mathlin-booking" class="nms-back-link">&#8592; All Bookings</a>
+        <?php endif; ?>
         &nbsp; Booking <?php echo esc_html( $booking->ref ); ?>
     </h1>
 
