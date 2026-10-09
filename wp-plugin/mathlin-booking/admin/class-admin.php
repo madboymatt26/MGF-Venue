@@ -245,6 +245,25 @@ class MBS_Admin {
         if ( ! in_array( $scope, array( 'current', 'ended', 'all' ), true ) ) $scope = 'current';
         $search = sanitize_text_field( $_GET['s'] ?? '' );
         $external_series_redirect = '';
+        $scout_tab = ! $ref && ( $_GET['tab'] ?? '' ) === 'one-off' ? 'one-off' : 'recurring';
+        $one_off_page = max( 1, absint( $_GET['paged'] ?? 1 ) );
+        $one_off_bookings = array();
+        $one_off_has_next = false;
+        if ( $scout_tab === 'one-off' ) {
+            $one_off_bookings = MBS_Bookings::get_all( array(
+                'scout_only' => true,
+                'one_off_only' => true,
+                'exclude_archived' => false,
+                'status' => in_array( $status, array( 'pending', 'confirmed', 'deposit_paid', 'paid', 'cancelled', 'archived' ), true ) ? $status : '',
+                'date_scope' => $scope,
+                'search' => $search,
+                'order' => $scope === 'ended' ? 'DESC' : 'ASC',
+                'limit' => 51,
+                'offset' => ( $one_off_page - 1 ) * 50,
+            ) );
+            $one_off_has_next = count( $one_off_bookings ) > 50;
+            $one_off_bookings = array_slice( $one_off_bookings, 0, 50 );
+        }
         $series = $ref ? MBS_Series::get( $ref ) : null;
         if ( $series && empty( $series->scout_use ) ) {
             $target = admin_url( 'admin.php?page=mathlin-series&ref=' . rawurlencode( $series->series_ref ) );
@@ -252,7 +271,7 @@ class MBS_Admin {
             $external_series_redirect = $target;
             $series = null;
         }
-        $series_rows = $ref ? array() : MBS_Series::get_all( array(
+        $series_rows = $ref || $scout_tab === 'one-off' ? array() : MBS_Series::get_all( array(
             'status' => $status,
             'scope' => $scope,
             'search' => $search,

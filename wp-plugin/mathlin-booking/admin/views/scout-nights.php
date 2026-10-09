@@ -10,7 +10,11 @@ $status_label = static function ( $row, $summary ) use ( $today ) {
 ?>
 <div class="wrap nms-admin-wrap mbs-scout-series-admin">
     <h1><?php echo MBS_Admin::brand_mark(); ?> Scout Nights</h1>
-    <p>Manage internal Scout-use series. They block public availability, remain free of charge and do not send hirer emails.</p>
+    <p>Manage recurring and one-off Scout-use bookings. Both block public availability and remain free of charge. Recurring Scout series do not send hirer emails.</p>
+    <nav class="nav-tab-wrapper" aria-label="Scout booking type">
+        <a class="nav-tab <?php echo $scout_tab === 'recurring' ? 'nav-tab-active' : ''; ?>" <?php if ( $scout_tab === 'recurring' ) echo 'aria-current="page"'; ?> href="<?php echo esc_url( admin_url( 'admin.php?page=mathlin-scout-nights' ) ); ?>">Recurring bookings</a>
+        <a class="nav-tab <?php echo $scout_tab === 'one-off' ? 'nav-tab-active' : ''; ?>" <?php if ( $scout_tab === 'one-off' ) echo 'aria-current="page"'; ?> href="<?php echo esc_url( admin_url( 'admin.php?page=mathlin-scout-nights&tab=one-off' ) ); ?>">One-off bookings</a>
+    </nav>
 
     <?php if ( $registration_error ) : ?>
         <div class="notice notice-error"><p>Some older Scout series could not be registered: <?php echo esc_html( $registration_error->get_error_message() ); ?></p></div>
@@ -20,6 +24,8 @@ $status_label = static function ( $row, $summary ) use ( $today ) {
         <div class="notice notice-info"><p>This is an external customer series. <a href="<?php echo esc_url( $external_series_redirect ); ?>">Manage it in Recurring Series</a>.</p></div>
     <?php elseif ( ! empty( $ref ) && ( ! $series || empty( $series->scout_use ) ) ) : ?>
         <div class="notice notice-error"><p>Scout series not found.</p></div>
+    <?php elseif ( $scout_tab === 'one-off' ) : ?>
+        <?php include MBS_PLUGIN_DIR . 'admin/views/scout-one-off.php'; ?>
     <?php elseif ( ! $series ) : ?>
         <details class="postbox mbs-scout-create" <?php echo empty( $series_rows ) ? 'open' : ''; ?>>
             <summary><strong>Create Scout series</strong><span>Add a weekly no-charge section booking</span></summary>
