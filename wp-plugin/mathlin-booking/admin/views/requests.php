@@ -18,6 +18,10 @@ $resolved = array_filter( $all, function( $r ) { return $r->status !== 'pending'
                 <p class="nms-muted">No pending requests. 🎉</p>
             <?php else : ?>
                 <?php foreach ( $pending as $r ) :
+                    if ( MBS_Series_Request::is_series_request( $r ) ) {
+                        include MBS_PLUGIN_DIR . 'admin/views/series-request.php';
+                        continue;
+                    }
                     $changes = json_decode( $r->requested_data, true ) ?: array();
                     $is_cancel = $r->request_type === 'cancel';
                 ?>
@@ -85,11 +89,11 @@ $resolved = array_filter( $all, function( $r ) { return $r->status !== 'pending'
                 <?php foreach ( $resolved as $r ) : ?>
                     <tr>
                         <td><a href="?page=mathlin-booking&action=view&ref=<?php echo esc_attr( $r->booking_ref ); ?>"><?php echo esc_html( $r->booking_ref ); ?></a></td>
-                        <td><?php echo $r->request_type === 'cancel' ? '❌ Cancel' : '✏️ Modify'; ?></td>
+                        <td><?php echo esc_html( str_replace( '_', ' ', ucfirst( $r->request_type ) ) ); ?></td>
                         <td><?php echo esc_html( $r->name ); ?></td>
                         <td><?php echo esc_html( date( 'j M Y', strtotime( $r->created_at ) ) ); ?></td>
                         <td>
-                            <span class="nms-status nms-status-<?php echo $r->status === 'approved' ? 'confirmed' : 'cancelled'; ?>">
+                            <span class="nms-status nms-status-<?php echo in_array( $r->status, array( 'approved', 'handled' ), true ) ? 'confirmed' : 'cancelled'; ?>">
                                 <?php echo esc_html( ucfirst( $r->status ) ); ?>
                             </span>
                         </td>

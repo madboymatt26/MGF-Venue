@@ -107,9 +107,15 @@ class MBS_Modification {
     public static function approve( $request_id ) {
         $request = self::get_request( $request_id );
         if ( ! $request || $request->status !== 'pending' ) return false;
+        if ( MBS_Series_Request::is_series_request( $request ) ) {
+            return new WP_Error( 'series_review_required', 'Review and apply this request using the series controls, then record the outcome in Change Requests. No automatic changes have been applied.' );
+        }
 
 	        $booking = MBS_Bookings::get( $request->booking_ref );
 	        if ( ! $booking ) return false;
+            if ( ! empty( $booking->series_id ) && MBS_Series::get( $booking->series_id ) ) {
+                return new WP_Error( 'canonical_series_required', 'This is a recurring-series occurrence. Review it through the series workflow rather than applying an individual-booking request.' );
+            }
 	        $changes = $request->request_type === 'modify' ? ( json_decode( $request->requested_data, true ) ?: array() ) : array();
 	        $financial_fields = array( 'space', 'date', 'date_end', 'start_time', 'end_time', 'kitchen', 'booking_type' );
 	        $financial_change = (bool) array_intersect( $financial_fields, array_keys( $changes ) );
@@ -391,6 +397,9 @@ class MBS_Modification {
     public static function reject( $request_id, $reason = '' ) {
         $request = self::get_request( $request_id );
         if ( ! $request || $request->status !== 'pending' ) return false;
+        if ( MBS_Series_Request::is_series_request( $request ) ) {
+            return MBS_Series_Request::resolve( $request_id, $reason ?: 'We are unable to accept this request. Please contact the venue to discuss alternatives.', 'rejected' );
+        }
 
         $booking = MBS_Bookings::get( $request->booking_ref );
         if ( ! $booking ) return false;
@@ -416,6 +425,9 @@ class MBS_Modification {
         $booking = MBS_Bookings::get( $ref );
         if ( ! $booking || in_array( $booking->status, array( 'cancelled', 'archived' ) ) ) {
             wp_send_json_error( array( 'message' => 'This booking cannot be modified.' ) );
+        }
+        if ( ! empty( $booking->series_id ) && MBS_Series::get( $booking->series_id ) ) {
+            wp_send_json_error( array( 'message' => 'Please sign in to Manage Bookings to request changes to a recurring series, or contact the venue.' ), 400 );
         }
 
         $mod_action = sanitize_text_field( $_POST['mod_action'] ?? 'modify' );

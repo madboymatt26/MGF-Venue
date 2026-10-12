@@ -555,6 +555,36 @@ jQuery(function ($) {
     });
 
     // ── Approve/reject modification requests ────────────────────────────────────
+    $(document).on('click', '.nms-approve-series-cancellation', function () {
+        var $btn = $(this);
+        if (!confirm('Approve cancellation of ONLY the sessions listed in this request? Review cancellation charges and refunds first. Applicable invoice lines will be credited and the hirer notified; cash is not automatically refunded.')) return;
+        $btn.prop('disabled', true);
+        $.post(MBS_Admin.ajax_url, {action: 'mbs_approve_series_cancellation', nonce: MBS_Admin.nonce, id: $btn.data('id'), version: $btn.data('version')})
+            .done(function (res) {
+                if (res.success) window.location.reload();
+                else { alert(res.data && res.data.message ? res.data.message : 'Unable to approve cancellation.'); $btn.prop('disabled', false); }
+            }).fail(function (xhr) {
+                var data = xhr.responseJSON && xhr.responseJSON.data;
+                alert(data && data.message ? data.message : 'Unable to confirm cancellation. Refresh and check the request and series before retrying.');
+                $btn.prop('disabled', false);
+            });
+    });
+    $(document).on('click', '.nms-handle-series-request', function () {
+        var $btn = $(this);
+        if (!confirm('Have you applied and checked the requested booking and billing changes? This only records the outcome; it does not change bookings or issue refunds.')) return;
+        var response = prompt('Enter the outcome to email to the hirer, including any changed dates, charges or credits:');
+        if (!response || response.trim().length < 3) return;
+        $btn.prop('disabled', true);
+        $.post(MBS_Admin.ajax_url, {action: 'mbs_resolve_series_request', nonce: MBS_Admin.nonce, id: $btn.data('id'), response: response})
+            .done(function (res) {
+                if (res.success) window.location.reload();
+                else { alert(res.data && res.data.message ? res.data.message : 'Unable to record outcome.'); $btn.prop('disabled', false); }
+            }).fail(function (xhr) {
+                var data = xhr.responseJSON && xhr.responseJSON.data;
+                alert(data && data.message ? data.message : 'Unable to confirm outcome. Refresh and check the request status.');
+                $btn.prop('disabled', false);
+            });
+    });
     $(document).on('click', '.nms-approve-request', function () {
         var $btn = $(this);
         var id   = $btn.data('id');

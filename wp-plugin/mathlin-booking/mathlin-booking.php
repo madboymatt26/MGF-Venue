@@ -3,7 +3,7 @@
  * Plugin Name: MGF Venue
  * Plugin URI:  https://github.com/madboymatt26/MGF-Venue
  * Description: Venue booking and management system with Home Assistant integration.
- * Version:     3.26.5
+ * Version:     3.27.0
  * Author:      MGF Venue
  * License:     GPL-2.0+
  * Text Domain: mathlin-booking
@@ -11,7 +11,7 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'MBS_VERSION',    '3.26.5' );
+define( 'MBS_VERSION',    '3.27.0' );
 define( 'MBS_DB_VERSION', '3.26.0-schema-11' );
 define( 'MBS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MBS_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -59,6 +59,7 @@ require_once MBS_PLUGIN_DIR . 'includes/class-email-queue.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-custom-fields.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-modification.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-hirer-portal.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-series-request.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-accounting-export.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-osm-accounting-v2.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-logo-asset.php';
@@ -174,6 +175,7 @@ function mbs_init() {
     $email_queue->init();
     $modification->init();
     $hirer_portal->init();
+    ( new MBS_Series_Request() )->init();
     $accounting->init();
     $osm_integration->init();
     $woo_ux->init();
