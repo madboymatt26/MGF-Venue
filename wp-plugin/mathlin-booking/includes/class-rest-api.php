@@ -1145,7 +1145,7 @@ class MBS_Rest_API {
         if ( $operation === 'pause' || $operation === 'resume' ) {
             $result = MBS_Series::set_paused( $series_ref, $operation === 'pause', $status, $version );
         } elseif ( $operation === 'cancel' ) {
-            $result = MBS_Series::cancel( $series_ref, sanitize_key( $request->get_param( 'scope' ) ?: 'future' ), $status, $version, rest_sanitize_boolean( $request->get_param( 'notify_hirer' ) ) );
+            $result = MBS_Series::cancel( $series_ref, sanitize_key( $request->get_param( 'scope' ) ?: 'future' ), $status, $version, rest_sanitize_boolean( $request->get_param( 'notify_hirer' ) ), sanitize_text_field( $request->get_param( 'from_date' ) ?? '' ) );
         } elseif ( $operation === 'extend' ) {
             $result = MBS_Series::extend( $series_ref, sanitize_text_field( $request->get_param( 'repeat_until' ) ), $version, rest_sanitize_boolean( $request->get_param( 'notify_hirer' ) ) );
         } else {

@@ -755,12 +755,25 @@ class MBS_Series {
     }
 
     /** Safely cancel all occurrences or future occurrences only. */
-    public static function cancel( $series_ref, $scope, $expected_status, $expected_version, $notify_hirer = false ) {
+    public static function cancel( $series_ref, $scope, $expected_status, $expected_version, $notify_hirer = false, $from_date = '' ) {
         global $wpdb;
         $series_table  = $wpdb->prefix . MBS_SERIES_TABLE;
         $booking_table = $wpdb->prefix . MBS_TABLE;
         $series_ref = sanitize_text_field( $series_ref );
-        $scope = $scope === 'future' ? 'future' : 'all';
+        if ( ! in_array( $scope, array( 'future', 'all', 'from_date' ), true ) ) {
+            return new WP_Error( 'invalid_cancel_scope', 'Choose future, all or from_date cancellation.' );
+        }
+        $today = wp_date( 'Y-m-d' );
+        $cutoff = $today;
+        if ( $scope === 'from_date' ) {
+            $date = is_string( $from_date ) ? DateTimeImmutable::createFromFormat( '!Y-m-d', $from_date ) : false;
+            if ( ! $date || $date->format( 'Y-m-d' ) !== $from_date || $from_date < $today ) {
+                return new WP_Error( 'invalid_cancel_date', 'Choose a valid cancellation date on or after today (YYYY-MM-DD).' );
+            }
+            $cutoff = $from_date;
+        } elseif ( $from_date !== '' ) {
+            return new WP_Error( 'invalid_cancel_date', 'A cancellation date requires from_date scope.' );
+        }
 
         if ( $wpdb->query( 'START TRANSACTION' ) === false ) return new WP_Error( 'transaction_start_failed', 'Could not start the series-cancellation transaction.' );
         $series = $wpdb->get_row( $wpdb->prepare(
@@ -780,18 +793,25 @@ class MBS_Series {
             return new WP_Error( 'series_precondition_failed', 'The recurring series changed since it was loaded. Refresh and try again.' );
         }
 
-        $today = wp_date( 'Y-m-d' );
         // "All" means the whole still-actionable series, not rewriting the
         // historical record of occurrences which were already paid. Future
         // paid/deposit-paid occurrences are cancellable so their immutable
         // invoice allocation can be credited by the billing reconciler.
-        $eligible_sql = $scope === 'future'
+        $eligible_sql = $scope !== 'all'
             ? "booking_date >= %s AND status IN ('pending','confirmed','deposit_paid','paid')"
             : "(status IN ('pending','confirmed') OR (booking_date >= %s AND status IN ('deposit_paid','paid')))";
         $select_sql = "SELECT * FROM {$booking_table} WHERE series_id = %s AND {$eligible_sql} FOR UPDATE";
         $update_sql = "UPDATE {$booking_table} SET status = 'cancelled', access_sent = 0 WHERE series_id = %s AND {$eligible_sql}";
-        $params = array( $series_ref, $today );
+        $params = array( $series_ref, $cutoff );
         $affected = $wpdb->get_results( $wpdb->prepare( $select_sql, $params ) );
+        if ( ! is_array( $affected ) || $wpdb->last_error ) {
+            $wpdb->query( 'ROLLBACK' );
+            return new WP_Error( 'series_read_failed', 'Could not read the occurrences to cancel.' );
+        }
+        if ( ! $affected ) {
+            $wpdb->query( 'ROLLBACK' );
+            return array( 'transitioned' => false, 'no_op' => true, 'cancelled' => 0, 'series' => $series );
+        }
         $reconciled = MBS_Billing_Engine::reconcile_occurrences( wp_list_pluck( $affected, 'ref' ), false );
         if ( is_wp_error( $reconciled ) ) {
             $wpdb->query( 'ROLLBACK' );
@@ -802,7 +822,19 @@ class MBS_Series {
             $wpdb->query( 'ROLLBACK' );
             return new WP_Error( 'series_cancel_failed', 'Could not cancel the selected occurrences.' );
         }
-        $new_status = $scope === 'future' ? 'cancelled_future' : 'cancelled';
+        $new_status = $scope !== 'all' ? 'cancelled_future' : 'cancelled';
+        if ( $scope === 'from_date' ) {
+            $remaining = $wpdb->get_results( $wpdb->prepare(
+                "SELECT ref FROM {$booking_table} WHERE series_id = %s AND booking_date >= %s AND status IN ('pending','confirmed','deposit_paid','paid') FOR UPDATE",
+                $series_ref, $today
+            ) );
+            if ( ! is_array( $remaining ) || $wpdb->last_error ) {
+                $wpdb->query( 'ROLLBACK' );
+                return new WP_Error( 'series_read_failed', 'Could not verify retained occurrences.' );
+            }
+            // Earlier sessions must retain their billing and access lifecycle.
+            if ( $remaining ) $new_status = $series->status;
+        }
         $series_updated = $wpdb->query( $wpdb->prepare(
             "UPDATE {$series_table} SET status = %s, version = version + 1, updated_at = %s
              WHERE series_ref = %s AND status = %s AND version = %d",
@@ -819,9 +851,15 @@ class MBS_Series {
                 MBS_HomeAssistant::notify_cancelled( $booking );
             }
         }
-        MBS_Audit_Log::log( $series_ref, 'series_cancelled', 'Cancelled ' . (int) $cancelled . ' ' . $scope . ' occurrence(s).' );
+        MBS_Audit_Log::log( $series_ref, 'series_cancelled', 'Cancelled ' . (int) $cancelled . ' ' . $scope . ' occurrence(s).' . ( $scope === 'from_date' ? ' From ' . $cutoff . ' inclusive; earlier sessions retained.' : '' ) );
         $fresh = self::get( $series_ref );
-        if ( $notify_hirer ) MBS_Email::notify_series_cancelled( $fresh, self::active_occurrences( $series_ref ) );
+        if ( $notify_hirer ) {
+            if ( $scope === 'from_date' && $new_status !== 'cancelled_future' ) {
+                MBS_Email::notify_series_changed( $fresh, self::active_occurrences( $series_ref ) );
+            } else {
+                MBS_Email::notify_series_cancelled( $fresh, self::active_occurrences( $series_ref ) );
+            }
+        }
         return array(
             'transitioned' => true,
             'no_op'        => false,

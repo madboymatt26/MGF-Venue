@@ -715,10 +715,19 @@ jQuery(function ($) {
             return;
         }
 
-        // ── Cancellation: keep the original direct-post behaviour ──
+        // Date-bounded cancellation uses the same atomic billing reconciliation.
+        var fromDate = '';
+        if (status === 'cancelled' && scope === 'from_date') {
+            var dateInput = $btn.closest('.nms-cancel-from-date').find('.nms-cancel-date')[0];
+            if (!dateInput || !dateInput.reportValidity()) return;
+            fromDate = dateInput.value;
+        }
         var label    = status.charAt(0).toUpperCase() + status.slice(1);
         var scopeLabel = status === 'cancelled' && scope === 'future' ? ' future bookings in ' : ' all bookings in ';
-        if (!confirm(label + scopeLabel + 'series ' + seriesId + '?')) return;
+        var confirmation = scope === 'from_date'
+            ? 'Cancel bookings on or after ' + fromDate + ' (inclusive) in series ' + seriesId + '? Earlier sessions stay booked. Issued invoices will be credited as applicable; cash refunds are not automatic. The hirer will be emailed the updated schedule.'
+            : label + scopeLabel + 'series ' + seriesId + '?';
+        if (!confirm(confirmation)) return;
         $btn.prop('disabled', true);
 
         $.post(MBS_Admin.ajax_url, {
@@ -727,6 +736,7 @@ jQuery(function ($) {
             series_id: seriesId,
             status:    status,
             scope:     scope,
+            from_date: fromDate,
             expected_status: expectedStatus,
             expected_version: expectedVersion
         }, function (res) {
@@ -737,6 +747,9 @@ jQuery(function ($) {
             } else {
                 alert('Error: ' + (res.data || 'Unknown error'));
             }
+        }).fail(function () {
+            $btn.prop('disabled', false);
+            alert('Request failed. Refresh the series to check its current state before retrying.');
         });
     });
 

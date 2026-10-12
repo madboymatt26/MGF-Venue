@@ -22,7 +22,7 @@ has_source( $series, 'version = version + 1', 'Real transitions advance the vers
 has_source( $series, 'MBS_HomeAssistant::notify( $booking )', 'Changed occurrences retain the existing HA payload path.' );
 has_source( $series, 'series_confirmed', 'Approval writes one series-level audit action.' );
 has_source( $series, "\$scope === 'future'", 'Cancellation supports future-only scope.' );
-if ( ! preg_match( '/\$eligible_sql\s*=\s*\$scope\s*===\s*[\'\"]future[\'\"]\s*\?\s*[\'\"]booking_date\s*>=\s*%s/s', $series ) ) {
+if ( ! preg_match( '/\$eligible_sql\s*=\s*\$scope\s*!==\s*[\'\"]all[\'\"]\s*\?\s*[\'\"]booking_date\s*>=\s*%s/s', $series ) ) {
     fwrite( STDERR, "FAIL: Future cancellation must constrain booking_date to today or later.\n" );
     exit( 1 );
 }

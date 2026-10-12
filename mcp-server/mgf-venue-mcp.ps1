@@ -397,11 +397,12 @@ $script:Tools = @(
     @{
         name = 'update_series_state'
         title = 'Pause, resume or cancel recurring series'
-        description = 'Change series state with optimistic concurrency and a stable idempotency key. Cancellation may be future-only or entire-series; email is opt-in.'
+        description = 'Change series state with optimistic concurrency and a stable idempotency key. Cancellation may be from today, from an inclusive future date, or entire-series; email is opt-in.'
         inputSchema = @{
             type = 'object'; properties = @{
                 series_ref = @{ type = 'string' }; operation = @{ type = 'string'; enum = @('pause', 'resume', 'cancel', 'extend') }
-                scope = @{ type = 'string'; enum = @('future', 'all'); default = 'future' }; expected_status = @{ type = 'string' }
+                scope = @{ type = 'string'; enum = @('future', 'all', 'from_date'); default = 'future' }; expected_status = @{ type = 'string' }
+                from_date = @{ type = 'string'; description = 'Required for from_date cancellation: inclusive YYYY-MM-DD cutoff, today or later. Earlier sessions are retained.' }
                 repeat_until = @{ type = 'string'; description = 'Required for extend; within one calendar year of the original start.' }
                 expected_version = @{ type = 'integer'; minimum = 1 }; idempotency_key = @{ type = 'string'; minLength = 8; maxLength = 128 }
                 notify_hirer = @{ type = 'boolean'; default = $false }
