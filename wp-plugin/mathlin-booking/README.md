@@ -4,7 +4,15 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.26.3
+**Current Version:** 3.27.0
+
+## 3.27.0 Hirer series change and cancellation requests
+
+- Signed-in hirers can request changes or cancellation for one session, selected sessions, or currently booked sessions from an inclusive future cutoff.
+- Owner-only request history shows pending requests and staff outcomes. Requests do not directly change bookings, access or invoices; overlapping pending requests are blocked.
+- Staff can approve the exact requested cancellations through the series billing service. Booking cancellation, affected invoice credits and request approval commit together; unselected sessions remain active. Cash refunds and cancellation charges require separate review.
+- Other changes are staff-assisted: apply and verify the appropriate booking/billing changes, then record and email the outcome. This is not automatic rescheduling or repricing.
+- Protects recurring occurrences against the legacy individual-booking modification path. No database schema change.
 
 ## 3.26.3 Flexible public recurring bookings
 

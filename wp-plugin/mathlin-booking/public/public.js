@@ -724,6 +724,32 @@ jQuery(function ($) {
         });
     });
 
+    $(document).on('change', '.nms-series-request-form [name="scope"]', function () {
+        var $form = $(this).closest('form'), scope = $(this).val();
+        $form.find('.nms-series-one').prop('hidden', scope !== 'one').find('select').prop('disabled', scope !== 'one');
+        $form.find('.nms-series-selected').prop('hidden', scope !== 'selected').prop('disabled', scope !== 'selected');
+        $form.find('.nms-series-from').prop('hidden', scope !== 'from_date').find('input').prop('disabled', scope !== 'from_date');
+    });
+    $(document).on('submit', '.nms-series-request-form', function (event) {
+        event.preventDefault();
+        var $form = $(this), $button = $form.find('[type="submit"]'), $result = $form.find('[role="status"]');
+        if ($button.prop('disabled')) return;
+        if ($form.find('[name="scope"]').val() === 'selected' && !$form.find('.nms-series-selected :checked').length) {
+            $result.text('Please select at least one session.'); return;
+        }
+        $button.prop('disabled', true);
+        $result.text('Submitting request…');
+        $.post(NMS.ajax_url, $form.serialize() + '&action=mbs_series_request&nonce=' + encodeURIComponent(NMS.nonce))
+            .done(function (res) {
+                $result.text(res.data && res.data.message ? res.data.message : 'Unable to save your request.');
+                if (!res.success) $button.prop('disabled', false);
+            }).fail(function (xhr) {
+                var data = xhr.responseJSON && xhr.responseJSON.data;
+                $result.text(data && data.message ? data.message : 'Unable to confirm receipt. Refresh the page and check Request history before trying again.');
+                $button.prop('disabled', false);
+            });
+    });
+
     // ── Helpers ────────────────────────────────────────────────────────────────
     function pad(n) { return String(n).padStart(2, '0'); }
 

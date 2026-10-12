@@ -755,15 +755,26 @@ class MBS_Series {
     }
 
     /** Safely cancel all occurrences or future occurrences only. */
-    public static function cancel( $series_ref, $scope, $expected_status, $expected_version, $notify_hirer = false, $from_date = '' ) {
+    public static function cancel( $series_ref, $scope, $expected_status, $expected_version, $notify_hirer = false, $from_date = '', $selected_refs = array(), $request_id = 0 ) {
         global $wpdb;
         $series_table  = $wpdb->prefix . MBS_SERIES_TABLE;
         $booking_table = $wpdb->prefix . MBS_TABLE;
         $series_ref = sanitize_text_field( $series_ref );
-        if ( ! in_array( $scope, array( 'future', 'all', 'from_date' ), true ) ) {
+        if ( ! in_array( $scope, array( 'future', 'all', 'from_date', 'selected' ), true ) ) {
             return new WP_Error( 'invalid_cancel_scope', 'Choose future, all or from_date cancellation.' );
         }
         $today = wp_date( 'Y-m-d' );
+        if ( $scope === 'selected' && ( ! is_array( $selected_refs ) || ! $selected_refs || count( $selected_refs ) > 500 ) ) {
+            return new WP_Error( 'invalid_selection', 'Select between one and 500 sessions.' );
+        }
+        if ( $scope === 'selected' ) {
+            foreach ( $selected_refs as $ref ) {
+                if ( ! is_string( $ref ) || sanitize_text_field( $ref ) !== $ref || $ref === '' ) return new WP_Error( 'invalid_selection', 'Invalid session reference.' );
+            }
+            $selected_refs = array_values( array_unique( $selected_refs ) );
+        } elseif ( $selected_refs || $request_id ) {
+            return new WP_Error( 'invalid_selection', 'Selected references and request IDs require selected scope.' );
+        }
         $cutoff = $today;
         if ( $scope === 'from_date' ) {
             $date = is_string( $from_date ) ? DateTimeImmutable::createFromFormat( '!Y-m-d', $from_date ) : false;
@@ -803,6 +814,12 @@ class MBS_Series {
         $select_sql = "SELECT * FROM {$booking_table} WHERE series_id = %s AND {$eligible_sql} FOR UPDATE";
         $update_sql = "UPDATE {$booking_table} SET status = 'cancelled', access_sent = 0 WHERE series_id = %s AND {$eligible_sql}";
         $params = array( $series_ref, $cutoff );
+        if ( $scope === 'selected' ) {
+            $eligible_sql = "booking_date > %s AND status IN ('pending','confirmed','deposit_paid','paid') AND ref IN (" . implode( ',', array_fill( 0, count( $selected_refs ), '%s' ) ) . ')';
+            $select_sql = "SELECT * FROM {$booking_table} WHERE series_id = %s AND {$eligible_sql} FOR UPDATE";
+            $update_sql = "UPDATE {$booking_table} SET status = 'cancelled', access_sent = 0 WHERE series_id = %s AND {$eligible_sql}";
+            $params = array_merge( $params, $selected_refs );
+        }
         $affected = $wpdb->get_results( $wpdb->prepare( $select_sql, $params ) );
         if ( ! is_array( $affected ) || $wpdb->last_error ) {
             $wpdb->query( 'ROLLBACK' );
@@ -811,6 +828,25 @@ class MBS_Series {
         if ( ! $affected ) {
             $wpdb->query( 'ROLLBACK' );
             return array( 'transitioned' => false, 'no_op' => true, 'cancelled' => 0, 'series' => $series );
+        }
+        if ( $scope === 'selected' && count( $affected ) !== count( $selected_refs ) ) {
+            $wpdb->query( 'ROLLBACK' );
+            return new WP_Error( 'selection_changed', 'Some selected sessions are no longer active future bookings. Review the request again.' );
+        }
+        if ( $request_id ) {
+            $request_table = $wpdb->prefix . 'mathlin_mod_requests';
+            $request = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$request_table} WHERE id = %d FOR UPDATE", $request_id ) );
+            $request_data = $request ? json_decode( $request->requested_data, true ) : array();
+            $expected_targets = is_array( $request_data ) && is_array( $request_data['targets'] ?? null ) ? $request_data['targets'] : array();
+            $actual_targets = array();
+            foreach ( $affected as $booking ) $actual_targets[ $booking->ref ] = $booking->booking_date;
+            ksort( $expected_targets );
+            ksort( $actual_targets );
+            if ( ! $request || $request->status !== 'pending' || $request->request_type !== 'series_cancel' ||
+                ( $request_data['series_ref'] ?? '' ) !== $series_ref || $expected_targets !== $actual_targets ) {
+                $wpdb->query( 'ROLLBACK' );
+                return new WP_Error( 'request_changed', 'The cancellation request or its dates changed. Refresh and review it again.' );
+            }
         }
         $reconciled = MBS_Billing_Engine::reconcile_occurrences( wp_list_pluck( $affected, 'ref' ), false );
         if ( is_wp_error( $reconciled ) ) {
@@ -823,7 +859,7 @@ class MBS_Series {
             return new WP_Error( 'series_cancel_failed', 'Could not cancel the selected occurrences.' );
         }
         $new_status = $scope !== 'all' ? 'cancelled_future' : 'cancelled';
-        if ( $scope === 'from_date' ) {
+        if ( $scope === 'from_date' || $scope === 'selected' ) {
             $remaining = $wpdb->get_results( $wpdb->prepare(
                 "SELECT ref FROM {$booking_table} WHERE series_id = %s AND booking_date >= %s AND status IN ('pending','confirmed','deposit_paid','paid') FOR UPDATE",
                 $series_ref, $today
@@ -844,6 +880,12 @@ class MBS_Series {
             $wpdb->query( 'ROLLBACK' );
             return new WP_Error( 'series_concurrent_update', 'The recurring series was updated by another request. Refresh and try again.' );
         }
+        if ( $request_id && $wpdb->update( $request_table, array( 'status' => 'approved',
+            'admin_response' => 'Cancellation approved for the requested sessions. Applicable invoice lines have been credited; cash refunds are not automatic.',
+            'resolved_at' => current_time( 'mysql' ), 'resolved_by' => get_current_user_id() ), array( 'id' => $request_id, 'status' => 'pending' ) ) !== 1 ) {
+            $wpdb->query( 'ROLLBACK' );
+            return new WP_Error( 'request_update_failed', 'The request could not be resolved; no cancellation has been applied.' );
+        }
         if ( $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'transaction_commit_failed', 'Could not commit series cancellation.' ); }
 
         foreach ( $affected as $booking ) {
@@ -854,7 +896,7 @@ class MBS_Series {
         MBS_Audit_Log::log( $series_ref, 'series_cancelled', 'Cancelled ' . (int) $cancelled . ' ' . $scope . ' occurrence(s).' . ( $scope === 'from_date' ? ' From ' . $cutoff . ' inclusive; earlier sessions retained.' : '' ) );
         $fresh = self::get( $series_ref );
         if ( $notify_hirer ) {
-            if ( $scope === 'from_date' && $new_status !== 'cancelled_future' ) {
+            if ( ( $scope === 'from_date' || $scope === 'selected' ) && $new_status !== 'cancelled_future' ) {
                 MBS_Email::notify_series_changed( $fresh, self::active_occurrences( $series_ref ) );
             } else {
                 MBS_Email::notify_series_cancelled( $fresh, self::active_occurrences( $series_ref ) );

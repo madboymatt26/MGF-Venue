@@ -57,3 +57,19 @@ $repeat = MBS_Series::cancel($ref,'from_date','confirmed',2,false,$cutoff);
 cutoff_it_assert(!is_wp_error($repeat) && $repeat['no_op'], 'Retry did not become a no-op.');
 cutoff_it_assert(MBS_Billing_Ledger::balance_minor(MBS_Billing_Ledger::get_invoice($invoice->invoice_ref))===1000, 'Retry duplicated credits.');
 echo "OK: date cancellation retained earlier sessions, reconciled a mixed invoice and excluded unissued sessions.\n";
+
+// The portal review path must commit the request and financial cancellation together.
+$saved = MBS_Modification::create_request(array(
+    'ref'=>$bookings[0]->ref, 'type'=>'series_cancel', 'notes'=>'Synthetic owner cancellation request.',
+    'changes'=>array('series_ref'=>$ref, 'series_version'=>2, 'scope'=>'one', 'from_date'=>'', 'targets'=>array($bookings[0]->ref=>$early)),
+));
+cutoff_it_assert($saved!==false, 'Could not seed portal cancellation request.');
+$request_id=(int)$wpdb->insert_id;
+$result=MBS_Series::cancel($ref,'selected','confirmed',2,false,'',array($bookings[0]->ref),$request_id);
+cutoff_it_assert(!is_wp_error($result) && $result['cancelled']===1, 'Selected portal cancellation did not apply.');
+cutoff_it_assert(MBS_Modification::get_request($request_id)->status==='approved', 'Request did not commit with cancellation.');
+cutoff_it_assert(MBS_Billing_Ledger::balance_minor(MBS_Billing_Ledger::get_invoice($invoice->invoice_ref))===0, 'Selected invoice line was not credited exactly once.');
+$repeat=MBS_Series::cancel($ref,'selected','cancelled_future',3,false,'',array($bookings[0]->ref),$request_id);
+cutoff_it_assert(!is_wp_error($repeat) && $repeat['no_op'], 'Selected approval replay is not a no-op.');
+cutoff_it_assert(MBS_Billing_Ledger::balance_minor(MBS_Billing_Ledger::get_invoice($invoice->invoice_ref))===0, 'Selected replay duplicated credits.');
+echo "OK: selected portal cancellation approved its request and reconciled an issued invoice atomically.\n";

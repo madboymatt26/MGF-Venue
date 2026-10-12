@@ -1861,7 +1861,9 @@ class MBS_Admin {
         if ( ! $id ) wp_send_json_error( 'Invalid request ID.' );
 
         $result = MBS_Modification::reject( $id, $reason );
-        if ( $result ) {
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( array( 'message' => $result->get_error_message() ), 409 );
+        } elseif ( $result ) {
             wp_send_json_success( array( 'rejected' => true ) );
         } else {
             wp_send_json_error( 'Could not reject this request.' );

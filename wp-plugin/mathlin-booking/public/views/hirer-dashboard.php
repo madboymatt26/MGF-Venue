@@ -95,6 +95,7 @@ foreach ( $invoices as $invoice ) $invoices_by_series[ $invoice->series_ref ][] 
                     <?php endforeach; ?>
                 </ul>
             </details>
+            <?php include MBS_PLUGIN_DIR . 'public/views/series-request-form.php'; ?>
         </article>
         <?php endforeach; ?>
     </div>
