@@ -77,6 +77,7 @@ $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/inv
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/invoice-money-and-delivery.php --allow-root || audit_failed=1
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/legacy-adoption.php --allow-root || audit_failed=1
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/mutation-matrix.php --allow-root || audit_failed=1
+$compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/series-cancel-cutoff.php --allow-root || audit_failed=1
 sh tests/integration/run-migrations.sh || audit_failed=1
 sh tests/integration/run-catch-up.sh || audit_failed=1
 if [ "$audit_failed" -ne 0 ]; then

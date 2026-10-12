@@ -38,6 +38,9 @@ series_ui_has( $admin_css, '.mbs-invoice-card', 'Recurring-series invoice cards 
 series_ui_has( $admin_css, '.mbs-modal__content', 'Invoice modal retains its admin styling.' );
 series_ui_has( $admin_view, 'Audit history', 'Series detail renders series audit history.' );
 series_ui_has( $admin_view, 'Cancel future dates', 'Series detail distinguishes future cancellation.' );
+series_ui_has( $admin_view, 'Cancel from date', 'Series detail exposes inclusive date-based cancellation.' );
+series_ui_has( $admin_js, 'from_date: fromDate', 'Cancellation cutoff is submitted by the admin interface.' );
+series_ui_has( $admin_js, 'reportValidity()', 'Invalid cutoff dates are blocked before submission.' );
 series_ui_has( $single_view, 'Manage its consolidated invoices', 'Occurrence detail routes financial actions to the series.' );
 series_ui_has( $admin, 'invoice_manages_occurrence', 'Server handlers reject occurrence financial writes for consolidated series.' );
 

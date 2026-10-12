@@ -52,6 +52,13 @@
                     <?php if ( ! in_array( $series->status, array( 'cancelled', 'cancelled_future' ), true ) ) : ?><button class="button nms-btn-series-status" data-series="<?php echo esc_attr( $series->series_ref ); ?>" data-status="cancelled" data-scope="future" data-expected-status="<?php echo esc_attr( $series->status ); ?>" data-expected-version="<?php echo (int) $series->version; ?>">Cancel future dates</button><?php endif; ?>
                     <?php if ( $series->status !== 'cancelled' ) : ?><button class="button nms-btn-series-status" data-series="<?php echo esc_attr( $series->series_ref ); ?>" data-status="cancelled" data-scope="all" data-expected-status="<?php echo esc_attr( $series->status ); ?>" data-expected-version="<?php echo (int) $series->version; ?>">Cancel entire series</button><?php endif; ?>
                 </div>
+                <?php if ( ! in_array( $series->status, array( 'cancelled', 'cancelled_future' ), true ) ) : ?>
+                <div class="nms-cancel-from-date" style="margin-top:12px;">
+                    <label>Cancel bookings on or after <input type="date" class="nms-cancel-date" min="<?php echo esc_attr( wp_date( 'Y-m-d' ) ); ?>" required></label>
+                    <button type="button" class="button nms-btn-series-status" data-series="<?php echo esc_attr( $series->series_ref ); ?>" data-status="cancelled" data-scope="from_date" data-expected-status="<?php echo esc_attr( $series->status ); ?>" data-expected-version="<?php echo (int) $series->version; ?>">Cancel from date</button>
+                    <p class="description">The selected date is inclusive. Earlier sessions stay booked. Issued invoices are reconciled with credit notes; no cash refund is made automatically. The hirer receives an updated schedule.</p>
+                </div>
+                <?php endif; ?>
                 <?php if ( ! in_array( $series->status, array( 'cancelled', 'cancelled_future' ), true ) ) : ?><form class="nms-extend-external-series" style="margin-top:12px;display:flex;gap:8px;align-items:center;"><input type="hidden" name="series_ref" value="<?php echo esc_attr( $series->series_ref ); ?>"><input type="hidden" name="expected_version" value="<?php echo (int) $series->version; ?>"><label>Extend to <input type="date" name="repeat_until" min="<?php echo esc_attr( wp_date( 'Y-m-d', strtotime( $series->repeat_until . ' +1 day' ) ) ); ?>" max="<?php echo esc_attr( wp_date( 'Y-m-d', strtotime( $series->start_date . ' +1 year' ) ) ); ?>" required></label><button class="button">Extend series</button></form><?php endif; ?>
             </section>
 

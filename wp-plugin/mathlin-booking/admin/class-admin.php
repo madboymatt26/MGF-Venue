@@ -1039,7 +1039,8 @@ class MBS_Admin {
                 $count  = is_wp_error( $result ) ? 0 : (int) $result['updated'];
             } elseif ( $status === 'cancelled' ) {
                 $scope  = sanitize_key( $_POST['scope'] ?? 'all' );
-                $result = MBS_Series::cancel( $series_id, $scope, $expected_status, $expected_version, true );
+                $from_date = sanitize_text_field( $_POST['from_date'] ?? '' );
+                $result = MBS_Series::cancel( $series_id, $scope, $expected_status, $expected_version, true, $from_date );
                 $count  = is_wp_error( $result ) ? 0 : (int) $result['cancelled'];
             } else {
                 wp_send_json_error( 'First-class series support only approval or cancellation through this action.' );
