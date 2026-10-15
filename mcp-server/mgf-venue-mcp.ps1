@@ -7,7 +7,7 @@ $ProgressPreference = 'SilentlyContinue'
 $InformationPreference = 'SilentlyContinue'
 
 $script:ServerName = 'mgf-venue'
-$script:ServerVersion = '0.3.2'
+$script:ServerVersion = '0.4.0'
 $script:DefaultProtocolVersion = '2025-06-18'
 
 function Get-PropertyValue {
@@ -411,6 +411,61 @@ $script:Tools = @(
         annotations = @{ readOnlyHint = $false; destructiveHint = $true; idempotentHint = $true; openWorldHint = $true }
     },
     @{
+        name = 'list_additional_charges'
+        title = 'List additional charges'
+        description = 'Read booking/series-linked extra charges, including staff-only drafts, with pagination. No payment links or customer email are generated.'
+        inputSchema = @{ type = 'object'; properties = @{
+            related_ref = @{ type = 'string' }; status = @{ type = 'string'; enum = @('draft','issued','part_paid','paid','overdue','credited','void','payment_review') }
+            limit = @{ type = 'integer'; minimum = 1; maximum = 200 }; offset = @{ type = 'integer'; minimum = 0 }
+        }; additionalProperties = $false }
+        annotations = @{ readOnlyHint = $true; destructiveHint = $false; idempotentHint = $true; openWorldHint = $true }
+    },
+    @{
+        name = 'get_additional_charge'
+        title = 'Read additional charge details'
+        description = 'Read the current invoice version, charge association, internal notes, payment history, credit/PDF document references and audit. No bearer tokens or hashes are returned.'
+        inputSchema = @{ type = 'object'; properties = @{ invoice_ref = @{ type = 'string' } }; required = @('invoice_ref'); additionalProperties = $false }
+        annotations = @{ readOnlyHint = $true; destructiveHint = $false; idempotentHint = $true; openWorldHint = $true }
+    },
+    @{
+        name = 'manage_additional_charge'
+        title = 'Manage an additional charge'
+        description = 'Explicitly create/edit a staff draft, issue its separate invoice, send/resend an invoice or credit PDF, change post-issue reminders, discard a draft or issue a credit. Read current state first. Non-create actions require invoice_ref and expected_version. All require a stable idempotency_key. Issue never sends email; send/resend/send_credit require customer-send approval and confirm_send=true. send_credit requires document_ref; set_reminders requires enabled boolean and does not reset the one-reminder limit. Credits do not refund cash. No action changes the original hire.'
+        inputSchema = @{ type = 'object'; properties = @{
+            operation = @{ type = 'string'; enum = @('create','edit','issue','send','resend','send_credit','set_reminders','discard','credit') }
+            document_ref = @{ type = 'string'; description = 'Credit note reference for send_credit.' }
+            enabled = @{ type = 'boolean'; description = 'Required for set_reminders. Does not reset an already sent reminder.' }
+            invoice_ref = @{ type = 'string' }; expected_version = @{ type = 'integer'; minimum = 1 }
+            idempotency_key = @{ type = 'string'; minLength = 8; maxLength = 128 }
+            confirm_send = @{ type = 'boolean'; default = $false }
+            amount_minor = @{ type = 'string'; pattern = '^[0-9]+$'; description = 'Positive credit amount in pence, e.g. 2500.' }
+            reason = @{ type = 'string'; description = 'Required for credit.' }
+            fields = @{ type = 'object'; properties = @{
+                related_ref = @{ type = 'string'; description = 'Required for create; booking or series reference.' }
+                category = @{ type = 'string'; enum = @('cleaning','damage','other') }
+                description = @{ type = 'string'; maxLength = 500 }; amount = @{ type = 'string'; pattern = '^[0-9]+(\.[0-9]{1,2})?$'; description = 'Exact GBP decimal string, e.g. 25.00.' }
+                service_date = @{ type = 'string'; pattern = '^\d{4}-\d{2}-\d{2}$' }; due_date = @{ type = 'string'; pattern = '^\d{4}-\d{2}-\d{2}$' }
+                contact_name = @{ type = 'string' }; contact_email = @{ type = 'string' }; contact_organisation = @{ type = 'string' }; contact_address = @{ type = 'string' }
+                notes = @{ type = 'string'; description = 'Internal only; never include CCTV or child details.' }; automatic_reminders = @{ type = 'boolean'; default = $false }
+            }; required = @('category','description','amount','service_date','due_date','contact_name','contact_email'); additionalProperties = $false }
+        }; required = @('operation','idempotency_key'); additionalProperties = $false }
+        annotations = @{ readOnlyHint = $false; destructiveHint = $true; idempotentHint = $false; openWorldHint = $true }
+    },
+    @{
+        name = 'get_additional_charge_document'
+        title = 'Read an issued additional-charge document'
+        description = 'Read immutable issued invoice or related credit-note HTML. document_ref defaults to the charge invoice reference. This never issues a document or generates a payment link.'
+        inputSchema = @{ type = 'object'; properties = @{ invoice_ref = @{ type = 'string' }; document_ref = @{ type = 'string' } }; required = @('invoice_ref'); additionalProperties = $false }
+        annotations = @{ readOnlyHint = $true; destructiveHint = $false; idempotentHint = $true; openWorldHint = $true }
+    },
+    @{
+        name = 'export_additional_charge_pdf'
+        title = 'Save an additional-charge invoice or credit PDF'
+        description = 'Render an already issued charge invoice or related credit note and save its PDF at an explicit local path. Parent directory must exist; existing files are never overwritten. Does not issue invoices or send mail.'
+        inputSchema = @{ type = 'object'; properties = @{ invoice_ref = @{ type = 'string' }; document_ref = @{ type = 'string' }; output_path = @{ type = 'string' } }; required = @('invoice_ref','output_path'); additionalProperties = $false }
+        annotations = @{ readOnlyHint = $false; destructiveHint = $false; idempotentHint = $false; openWorldHint = $true }
+    },
+    @{
         name = 'list_invoices'
         title = 'List consolidated invoices'
         description = 'List safe invoice summaries without payment tokens or idempotency hashes.'
@@ -590,6 +645,47 @@ function Invoke-MgfVenueTool {
             $query = ConvertTo-QueryString $queryValues
             $path = '/admin/invoices'; if ($query) { $path += "?${query}" }
             return Invoke-VenueApi -Method GET -Path $path
+        }
+        'list_additional_charges' {
+            $values = @{}
+            foreach ($key in @('related_ref','status','limit','offset')) { $value = Get-PropertyValue $Arguments $key $null; if ($null -ne $value) { $values[$key] = $value } }
+            $query = ConvertTo-QueryString $values
+            $path = '/admin/additional-charges'; if ($query) { $path += "?${query}" }
+            return Invoke-VenueApi -Method GET -Path $path
+        }
+        'get_additional_charge' {
+            $ref = [Uri]::EscapeDataString(([string](Get-PropertyValue $Arguments 'invoice_ref' '')).ToUpperInvariant())
+            return Invoke-VenueApi -Method GET -Path "/admin/additional-charges/${ref}"
+        }
+        'manage_additional_charge' {
+            return Invoke-VenueApi -Method POST -Path '/admin/additional-charges' -Body $Arguments
+        }
+        'get_additional_charge_document' {
+            $ref = [Uri]::EscapeDataString(([string](Get-PropertyValue $Arguments 'invoice_ref' '')).ToUpperInvariant())
+            $values = @{ format = 'html' }
+            $documentRef = Get-PropertyValue $Arguments 'document_ref' $null
+            if ($documentRef) { $values['document_ref'] = $documentRef }
+            $query = ConvertTo-QueryString $values
+            return Invoke-VenueApi -Method GET -Path "/admin/additional-charges/${ref}/document?${query}"
+        }
+        'export_additional_charge_pdf' {
+            $output = [string](Get-PropertyValue $Arguments 'output_path' '')
+            if (-not [IO.Path]::IsPathRooted($output) -or [IO.Path]::GetExtension($output) -ne '.pdf') { throw 'Use an absolute local .pdf output path.' }
+            if ($output -match '^[\\/]{2}' -or ([IO.Path]::DirectorySeparatorChar -eq '\' -and $output -notmatch '^[A-Za-z]:[\\/]')) { throw 'Use a fully qualified local file path, not a network or drive-relative path.' }
+            $output = [IO.Path]::GetFullPath($output)
+            if ([IO.File]::Exists($output) -or -not [IO.Directory]::Exists([IO.Path]::GetDirectoryName($output))) { throw 'Parent directory must exist and output file must not already exist.' }
+            $ref = [Uri]::EscapeDataString(([string](Get-PropertyValue $Arguments 'invoice_ref' '')).ToUpperInvariant())
+            $values = @{ format = 'pdf' }; $documentRef = Get-PropertyValue $Arguments 'document_ref' $null
+            if ($documentRef) { $values['document_ref'] = $documentRef }
+            $query = ConvertTo-QueryString $values
+            $result = Invoke-VenueApi -Method GET -Path "/admin/additional-charges/${ref}/document?${query}"
+            $bytes = [Convert]::FromBase64String([string]$result.pdf_base64)
+            if ($bytes.Length -lt 5 -or $bytes.Length -gt 5242880 -or [Text.Encoding]::ASCII.GetString($bytes,0,5) -ne '%PDF-') { throw 'Invalid PDF response; no file saved.' }
+            $stream = [IO.File]::Open($output,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+            try { $stream.Write($bytes,0,$bytes.Length) } finally { $stream.Dispose() }
+            $sha = [Security.Cryptography.SHA256]::Create()
+            try { $digest = ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() }
+            return @{ output_path = $output; document_ref = $result.document_ref; document_id = $result.document_id; bytes = $bytes.Length; sha256 = $digest }
         }
         'get_invoice' {
             $invoiceRef = [Uri]::EscapeDataString(([string](Get-PropertyValue $Arguments 'invoice_ref' '')).ToUpperInvariant())

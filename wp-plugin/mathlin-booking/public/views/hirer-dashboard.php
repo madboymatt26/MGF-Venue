@@ -109,11 +109,20 @@ foreach ( $invoices as $invoice ) $invoices_by_series[ $invoice->series_ref ][] 
             $invoice_series = isset( $series_refs[ $invoice->series_ref ] ) ? MBS_Series::get( $invoice->series_ref ) : null;
             $pay_url = $balance > 0 ? MBS_Invoice_Payment::generate_payment_url( $invoice ) : '';
             $transactions = MBS_Hirer_Portal::invoice_transactions( $invoice->id );
+            $charge_meta = MBS_Additional_Charges::metadata( $invoice );
+            $charge_state = $charge_meta ? MBS_Additional_Charges::payment_state( $invoice ) : array( 'status' => 'none' );
+            $charge_held = in_array( $charge_state['status'], array( 'bound','reconciliation_required' ), true );
+            if ( $charge_held ) $pay_url = '';
             $invoice_document_id = MBS_Invoice_Document_Service::get_current_ledger_document_id( $invoice->id );
             $invoice_pdf_url = $invoice_document_id ? MBS_Invoice_Delivery_Endpoint::authenticated_pdf_url( $invoice_document_id ) : '';
         ?>
         <div style="border-top:1px solid #e5e7eb;padding:1rem 0;display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
             <div><strong><?php echo esc_html( $invoice->invoice_ref ); ?></strong> · <?php echo esc_html( ucfirst( str_replace( '_', ' ', $invoice->status ) ) ); ?><br><span class="nms-muted"><?php echo esc_html( wp_date( 'j M Y', strtotime( $invoice->period_start ) ) . '–' . wp_date( 'j M Y', strtotime( $invoice->period_end ) ) ); ?> · Total <?php echo esc_html( MBS_Money::format( (int) $invoice->total_minor, $invoice->currency ) ); ?> · Paid <?php echo esc_html( MBS_Money::format( (int) $invoice->paid_minor, $invoice->currency ) ); ?></span>
+                <?php if ( $charge_meta ) : ?><p>Additional charge, separate from hire payment: <?php echo esc_html( $charge_meta['category'] . ' / ' . $charge_meta['related_ref'] ); ?>. Due <?php echo esc_html( substr( $invoice->due_at, 0, 10 ) ); ?>.</p><?php endif; ?>
+                <?php if ( $charge_meta ) : $charge_items = MBS_Billing_Ledger::get_items( $invoice->id ); ?><p><?php echo esc_html( $charge_items ? $charge_items[0]->description : '' ); ?></p>
+                    <?php foreach ( MBS_Additional_Charges::documents( $invoice ) as $charge_document ) : if ( $charge_document['type'] !== 'credit_note' ) continue; ?><p><a href="<?php echo esc_url( $charge_document['pdf_url'] ); ?>">Download credit note <?php echo esc_html( $charge_document['reference'] ); ?></a></p><?php endforeach; ?>
+                <?php endif; ?>
+                <?php if ( $charge_held ) : ?><p>Your payment is being checked. Please do not pay again while we review it.</p><?php endif; ?>
                 <?php if ( $transactions ) : ?><details><summary>Payment history</summary><ul><?php foreach ( $transactions as $transaction ) : ?><li><?php echo esc_html( wp_date( 'j M Y', strtotime( $transaction->occurred_at ) ) . ' · ' . ucfirst( $transaction->transaction_type ) . ' ' . MBS_Money::format( (int) $transaction->amount_minor, $transaction->currency ) ); ?></li><?php endforeach; ?></ul></details><?php endif; ?>
             </div>
             <div style="text-align:right;"><strong>Balance <?php echo esc_html( MBS_Money::format( $balance, $invoice->currency ) ); ?></strong><br>

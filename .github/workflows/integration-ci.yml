@@ -53,6 +53,9 @@ jobs:
       - name: Validate MCP schemas
         shell: pwsh
         run: ./mcp-server/tests/mcp-tool-schema-smoke.ps1
+      - name: Validate additional-charge MCP dispatch and PDF export
+        shell: pwsh
+        run: ./mcp-server/tests/additional-charge-dispatch-smoke.ps1
       - name: Check patch whitespace
         run: git diff --check HEAD^ HEAD
       - name: Scan tracked files for committed credential formats
@@ -111,6 +114,8 @@ jobs:
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli sh /workspace/tests/integration/setup.sh
       - name: Show exact runtime versions
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/runtime-smoke.php --allow-root
+      - name: Additional charge financial isolation
+        run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/additional-charges.php --allow-root
       - name: Verify Scout series administration lifecycle
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/scout-series-admin.php --allow-root
       - name: Run invoice lifecycle matrix

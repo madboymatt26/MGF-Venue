@@ -121,7 +121,9 @@ class MBS_Hirer_Portal {
         global $wpdb;
         $table = $wpdb->prefix . MBS_INVOICE_TABLE;
         return $wpdb->get_results( $wpdb->prepare(
-            "SELECT * FROM {$table} WHERE contact_email = %s AND document_type = 'invoice' ORDER BY period_start DESC, created_at DESC",
+            "SELECT * FROM {$table} WHERE contact_email = %s AND document_type = 'invoice'
+             AND NOT (billing_mode = 'additional_charge' AND status IN ('draft','void'))
+             ORDER BY period_start DESC, created_at DESC",
             sanitize_email( $email )
         ) );
     }

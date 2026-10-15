@@ -197,7 +197,12 @@ class MBS_Invoice_Delivery_Endpoint {
         // Check ownership via ledger invoice → series → occurrences (user_id first)
         if ( $document->invoice_id ) {
             $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
-            $invoice = $wpdb->get_row( $wpdb->prepare( "SELECT series_ref, contact_email FROM {$invoice_table} WHERE id = %d", (int) $document->invoice_id ) );
+            $invoice = $wpdb->get_row( $wpdb->prepare( "SELECT series_ref, contact_email, billing_mode FROM {$invoice_table} WHERE id = %d", (int) $document->invoice_id ) );
+            if ( $invoice && $invoice->billing_mode === 'additional_charge' ) {
+                $user = get_userdata( $user_id );
+                if ( $user && strcasecmp( $user->user_email, $invoice->contact_email ) === 0 ) return true;
+                return new WP_Error( 'not_authorised', 'You do not have permission to access this additional-charge document.' );
+            }
             if ( $invoice && $invoice->series_ref ) {
                 // Try user_id from series occurrences (strongest ownership signal)
                 $booking_table = $wpdb->prefix . MBS_TABLE;

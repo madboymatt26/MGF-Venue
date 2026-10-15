@@ -333,6 +333,12 @@ class MBS_Billing_Ledger {
         if ( ! $invoice ) return self::transaction_error( 'invoice_not_found', 'Invoice not found.', $manage_transaction );
         if ( $invoice->document_type !== 'invoice' || in_array( $invoice->status, array( 'draft', 'void' ), true ) ) return self::transaction_error( 'invoice_not_payable', 'This invoice cannot accept a payment transaction.', $manage_transaction );
         if ( isset( $data['expected_version'] ) && (int) $data['expected_version'] !== (int) $invoice->version ) return self::transaction_error( 'invoice_precondition_failed', 'The invoice changed since it was loaded.', $manage_transaction );
+        if ( ( $invoice->billing_mode ?? '' ) === 'additional_charge' && $type === 'payment' && ( $data['provider'] ?? 'manual' ) === 'manual' ) {
+            // Recheck while holding the same invoice lock as charge checkout;
+            // the UI preflight alone cannot prevent a simultaneous checkout.
+            $claim = $wpdb->get_row( $wpdb->prepare( 'SELECT status FROM ' . $wpdb->prefix . MBS_PAYMENT_RESERVATION_TABLE . ' WHERE invoice_ref=%s FOR UPDATE', $invoice_ref ) );
+            if ( $claim && in_array( $claim->status, array( 'active','bound','reconciliation_required' ), true ) ) return self::transaction_error( 'charge_checkout_active', 'Resolve the online checkout before recording an offline charge payment.', $manage_transaction );
+        }
         $current_balance = self::balance_minor( $invoice );
         if ( $type === 'payment' && $amount > $current_balance ) return self::transaction_error( 'payment_exceeds_balance', 'Payment exceeds the current invoice balance.', $manage_transaction );
         if ( $type === 'refund' && $amount > (int) $invoice->paid_minor ) return self::transaction_error( 'refund_exceeds_paid', 'Refund exceeds payments recorded against this invoice.', $manage_transaction );
@@ -398,7 +404,7 @@ class MBS_Billing_Ledger {
             // the payment/refund. A completed ledger event must never commit
             // without its exact amount/date/provider snapshot when the OSM
             // integration is enabled.
-            if ( class_exists( 'MBS_OSM_Integration' ) ) {
+            if ( class_exists( 'MBS_OSM_Integration' ) && ( $invoice->billing_mode ?? '' ) !== 'additional_charge' ) {
                 $queued = MBS_OSM_Integration::queue_ledger_transaction( $transaction_id, $invoice );
                 if ( is_wp_error( $queued ) ) return self::transaction_error( $queued->get_error_code(), $queued->get_error_message(), $manage_transaction );
             }

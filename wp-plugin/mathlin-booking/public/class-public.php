@@ -536,6 +536,7 @@ class MBS_Public {
             $data['modify_url'] = MBS_Modification::get_modification_url( $booking );
         }
 
+        $data['additional_charges'] = MBS_Additional_Charges::customer_for_booking( $booking, $email );
         wp_send_json_success( $data );
     }
 

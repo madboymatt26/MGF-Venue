@@ -494,6 +494,7 @@ class MBS_Invoice_Document_Service {
         $subtotal_minor = (int) $invoice->subtotal_minor;
         $tax_amount_minor = (int) $invoice->tax_minor;
         $total_minor = (int) $invoice->total_minor;
+        $charge_meta = class_exists( 'MBS_Additional_Charges' ) ? MBS_Additional_Charges::metadata( $invoice ) : array();
 
         return MBS_Issued_Invoice_Snapshot::build( array(
             'logo_asset_id'          => $logo_ref ? $logo_ref['asset_id'] : null,
@@ -503,7 +504,8 @@ class MBS_Invoice_Document_Service {
             'recipient_email'        => $invoice->contact_email,
             'recipient_address'      => $invoice->contact_address ?: null,
             'invoice_number'         => $invoice_number,
-            'series_ref'             => $invoice->series_ref,
+            'series_ref'             => $invoice->series_ref ?: ( ( $charge_meta['related_kind'] ?? '' ) === 'series' ? $charge_meta['related_ref'] : null ),
+            'booking_ref'            => ( $charge_meta['related_kind'] ?? '' ) === 'booking' ? $charge_meta['related_ref'] : null,
             'document_type'          => $invoice->document_type,
             'revision'               => $revision,
             'issue_date'             => wp_date( 'Y-m-d' ),

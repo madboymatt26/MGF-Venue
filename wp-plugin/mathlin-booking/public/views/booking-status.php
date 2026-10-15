@@ -101,6 +101,7 @@ jQuery(function($) {
 
                 html += '</div>';
                 $res.html(html).show();
+                if (window.NMSAdditionalCharges) $res.append(window.NMSAdditionalCharges(res.data.additional_charges));
             } else {
                 $res.html('<div class="nms-alert nms-alert-error">' + (res.data.message || 'Booking not found.') + '</div>').show();
             }
