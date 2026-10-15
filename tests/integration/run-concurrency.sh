@@ -59,6 +59,20 @@ echo "OK: controlled false adversarial assertion returned a non-zero WP-CLI exit
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/audit-assertions-self-test.php pass --allow-root
 
 audit_failed=0
+# Additional-charge invoice lock must serialize checkout against offline settlement.
+$compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/seed-reservation.php INT-EXTRA-RACE charge --allow-root
+( set +e; $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/additional-charge-race.php INT-EXTRA-RACE checkout --allow-root > tests/integration/.worker-extra-checkout 2>&1; echo "$?" > tests/integration/.exit-extra-checkout ) &
+extra_checkout_pid=$!
+( set +e; $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/additional-charge-race.php INT-EXTRA-RACE offline --allow-root > tests/integration/.worker-extra-offline 2>&1; echo "$?" > tests/integration/.exit-extra-offline ) &
+extra_offline_pid=$!
+wait "$extra_checkout_pid"; wait "$extra_offline_pid"
+extra_checkout_code=$(cat tests/integration/.exit-extra-checkout)
+extra_offline_code=$(cat tests/integration/.exit-extra-offline)
+if { [ "$extra_checkout_code" -eq 0 ] && [ "$extra_offline_code" -eq 0 ]; } || { [ "$extra_checkout_code" -ne 0 ] && [ "$extra_offline_code" -ne 0 ]; }; then
+  cat tests/integration/.worker-extra-checkout tests/integration/.worker-extra-offline >&2
+  audit_failed=1
+fi
+$compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/additional-charge-race.php INT-EXTRA-RACE assert --allow-root || audit_failed=1
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/audit-regressions.php --allow-root || audit_failed=1
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/audit-migration-regressions.php --allow-root || audit_failed=1
 for iteration in 1 2 3; do
