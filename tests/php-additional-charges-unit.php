@@ -38,7 +38,8 @@ if ( PHP_VERSION_ID < 80100 ) $refund->setAccessible( true );
 charge_assert( $refund->invoke( null, $charge, 2500, array() ) === array(), 'Charge refund creates no hire allocations.' );
 charge_assert( is_wp_error( $refund->invoke( null, $charge, 2500, array( 'MBS-SYNTHETIC' => 2500 ) ) ), 'Explicit hire allocation is forbidden on charge refunds.' );
 $source = file_get_contents( __DIR__ . '/../wp-plugin/mathlin-booking/includes/class-additional-charges.php' );
-preg_match_all("/self::finish\\( \\$invoice, '([^']+)'/",$source,$audit_actions);
+preg_match_all("/self::finish\\( [^,]+, '([^']+)'/",$source,$audit_actions);
+charge_assert(count($audit_actions[1])>=6,'Find all charge completion audit events');
 foreach($audit_actions[1] as $action)charge_assert(strlen($action)<=30,'Audit event fits existing VARCHAR(30): '.$action);
 foreach ( array( "'booking_ref' => null", 'check_admin_referer', 'FOR UPDATE', 'expected', 'additional_charge:', 'create_ledger_document_within_transaction' ) as $needle ) {
     // Structural guard supplements behavioural tests; not database proof.
