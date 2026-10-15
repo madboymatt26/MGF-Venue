@@ -116,6 +116,22 @@ jobs:
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/runtime-smoke.php --allow-root
       - name: Additional charge financial isolation
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/additional-charges.php --allow-root
+      - name: Browser acceptance for additional charges
+        if: matrix.php == '8.2'
+        shell: bash
+        run: |
+          npm install --prefix "$RUNNER_TEMP/mgf-browser" playwright@1.55.1
+          node "$RUNNER_TEMP/mgf-browser/node_modules/playwright/cli.js" install --with-deps chromium
+          export MGF_BROWSER_MODULE="$RUNNER_TEMP/mgf-browser/node_modules/playwright/index.mjs"
+          export MGF_BROWSER_FIXTURE="$(docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp option get mbs_extra_browser_fixture --format=json --allow-root)"
+          node tests/integration/additional-charges-browser.mjs
+      - name: Upload browser acceptance screenshots
+        if: always() && matrix.php == '8.2'
+        uses: actions/upload-artifact@v4
+        with:
+          name: additional-charge-browser
+          path: browser-artifacts
+          if-no-files-found: ignore
       - name: Verify Scout series administration lifecycle
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/scout-series-admin.php --allow-root
       - name: Run invoice lifecycle matrix

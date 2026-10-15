@@ -109,3 +109,11 @@ extra_it_assert(extra_rest('GET','/'.$api_issued['invoice_ref'])->get_status()>=
 extra_it_assert(extra_rest('POST','',$issue_body)->get_status()>=400,'Unauthenticated charge mutation denied');
 wp_set_current_user(1);
 echo "OK: typed REST creation, issue/replay, explicit-send guard, safe detail/HTML/PDF reads and permission gates.\n";
+
+// Disposable browser fixtures only; never run against a real venue site.
+$browser_user = username_exists('extra-browser');
+if (!$browser_user) $browser_user=wp_insert_user(array('user_login'=>'extra-browser','user_pass'=>'integration-only','user_email'=>$data['contact_email'],'role'=>'subscriber'));
+extra_it_assert($browser_user,'Create synthetic browser owner');
+$page_id=wp_insert_post(array('post_title'=>'Additional charge integration portal','post_name'=>'extra-integration-portal','post_content'=>'[mathlin_manage]','post_status'=>'publish','post_type'=>'page'));
+extra_it_assert($page_id,'Create isolated portal page');
+update_option('mbs_extra_browser_fixture',array('booking_ref'=>$booking_ref,'invoice_ref'=>$api_issued['invoice_ref'],'credit_ref'=>$cn,'portal_url'=>get_permalink($page_id)),false);
