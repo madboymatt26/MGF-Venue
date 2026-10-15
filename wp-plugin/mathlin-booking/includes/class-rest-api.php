@@ -262,6 +262,17 @@ class MBS_Rest_API {
             'permission_callback' => array( $this, 'booking_manager_permission' ),
         ) );
 
+        register_rest_route( self::API_NAMESPACE, '/admin/additional-charges', array(
+            array( 'methods' => 'GET', 'callback' => array( $this, 'get_admin_additional_charges' ), 'permission_callback' => array( $this, 'booking_manager_permission' ) ),
+            array( 'methods' => 'POST', 'callback' => array( $this, 'mutate_admin_additional_charge' ), 'permission_callback' => array( $this, 'booking_manager_permission' ) ),
+        ) );
+        register_rest_route( self::API_NAMESPACE, '/admin/additional-charges/(?P<invoice_ref>[A-Z0-9\-]+)', array(
+            'methods' => 'GET', 'callback' => array( $this, 'get_admin_additional_charge' ), 'permission_callback' => array( $this, 'booking_manager_permission' ),
+        ) );
+        register_rest_route( self::API_NAMESPACE, '/admin/additional-charges/(?P<invoice_ref>[A-Z0-9\-]+)/document', array(
+            'methods' => 'GET', 'callback' => array( $this, 'get_admin_additional_charge_document' ), 'permission_callback' => array( $this, 'booking_manager_permission' ),
+        ) );
+
         register_rest_route( self::API_NAMESPACE, '/admin/invoices/(?P<invoice_ref>[A-Z0-9\-]+)', array(
             'methods'             => 'GET',
             'callback'            => array( $this, 'get_admin_invoice' ),
@@ -999,10 +1010,11 @@ class MBS_Rest_API {
 
     public function get_admin_capabilities() {
         $is_admin = current_user_can( 'manage_options' );
-        $actions  = array_merge( array( 'create_booking' ), array_keys( $this->get_admin_action_handlers() ) );
+        $actions  = array_merge( array( 'create_booking', 'manage_additional_charge' ), array_keys( $this->get_admin_action_handlers() ) );
         $reads    = array(
             'bookings', 'booking', 'availability', 'audit', 'global_audit',
             'dashboard', 'blocked_dates', 'series', 'series_list', 'invoices', 'invoice', 'requests', 'analytics',
+            'additional_charges', 'additional_charge', 'additional_charge_document',
         );
 
         if ( $is_admin ) {
@@ -1168,6 +1180,113 @@ class MBS_Rest_API {
         $params[] = min( 500, max( 1, absint( $request->get_param( 'limit' ) ?: 100 ) ) );
         $rows = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$table} WHERE " . implode( ' AND ', $where ) . ' ORDER BY created_at DESC LIMIT %d', $params ) );
         return rest_ensure_response( array( 'items' => array_map( array( $this, 'format_admin_invoice' ), $rows ) ) );
+    }
+
+    private function additional_charge_response( $invoice ) {
+        global $wpdb;
+        $meta = MBS_Additional_Charges::metadata( $invoice );
+        $documents = $wpdb->get_results( $wpdb->prepare(
+            'SELECT d.id,d.invoice_number,d.document_type,d.issued_at FROM ' . $wpdb->prefix . MBS_INVOICE_DOCUMENTS_TABLE . ' d INNER JOIN ' . $wpdb->prefix . MBS_INVOICE_TABLE . " i ON i.id=d.invoice_id WHERE (i.id=%d OR i.parent_invoice_id=%d) AND d.status='issued' ORDER BY d.id",
+            $invoice->id, $invoice->id
+        ), ARRAY_A );
+        return array( 'invoice' => $this->format_admin_invoice( $invoice ),
+            'charge' => array_intersect_key( $meta, array_flip( array( 'related_ref','related_kind','category','notes','automatic_reminders' ) ) ),
+            'items' => array_map( array( $this, 'format_admin_invoice_item' ), MBS_Billing_Ledger::get_items( $invoice->id ) ),
+            'transactions' => $this->get_safe_invoice_transactions( $invoice->id ), 'documents' => $documents,
+            'payment_state' => MBS_Additional_Charges::payment_state( $invoice ),
+            'reminders_enabled' => MBS_Additional_Charges::reminders_enabled( $invoice ),
+            'delivery' => MBS_Additional_Charges::delivery_history( $invoice ),
+            'cash_refund_review_minor' => max( 0, (int) $invoice->paid_minor + (int) $invoice->credited_minor - (int) $invoice->total_minor ),
+            'audit' => $wpdb->get_results( $wpdb->prepare( 'SELECT action,details,user_name,created_at FROM ' . $wpdb->prefix . 'mathlin_audit_log WHERE ref=%s ORDER BY id DESC LIMIT 100', $invoice->invoice_ref ), ARRAY_A ),
+        );
+    }
+
+    public function get_admin_additional_charges( WP_REST_Request $request ) {
+        global $wpdb;
+        if ( ! $this->booking_manager_permission() ) return new WP_Error( 'forbidden', 'Booking-manager access required.', array( 'status' => 403 ) );
+        $table = $wpdb->prefix . MBS_INVOICE_TABLE;
+        $items = $wpdb->prefix . MBS_INVOICE_ITEM_TABLE;
+        $where = array( "i.billing_mode='additional_charge'", "i.document_type='invoice'" ); $args = array();
+        $related = sanitize_text_field( $request->get_param( 'related_ref' ) ?? '' );
+        $status = sanitize_key( $request->get_param( 'status' ) ?? '' );
+        if ( $related ) { $where[] = "EXISTS (SELECT 1 FROM {$items} ci WHERE ci.invoice_id=i.id AND ci.pricing_snapshot_json LIKE %s)"; $args[] = '%"related_ref":' . $wpdb->esc_like( wp_json_encode( $related ) ) . '%'; }
+        if ( $status === 'overdue' ) { $where[] = "i.status IN ('issued','part_paid','overdue') AND i.total_minor>i.paid_minor+i.credited_minor AND i.due_at<%s"; $args[] = current_time( 'mysql' ); }
+        elseif ( $status === 'payment_review' ) { $where[] = "EXISTS (SELECT 1 FROM " . $wpdb->prefix . MBS_PAYMENT_RESERVATION_TABLE . " cr WHERE cr.invoice_ref=i.invoice_ref AND cr.status IN ('bound','reconciliation_required'))"; }
+        elseif ( $status ) { $where[] = 'i.status=%s'; $args[] = $status; }
+        $limit = min( 200, max( 1, absint( $request->get_param( 'limit' ) ?: 50 ) ) );
+        $offset = absint( $request->get_param( 'offset' ) ?? 0 );
+        $args[] = $limit + 1; $args[] = $offset;
+        $rows = $wpdb->get_results( $wpdb->prepare( "SELECT i.* FROM {$table} i WHERE " . implode( ' AND ', $where ) . ' ORDER BY i.id DESC LIMIT %d OFFSET %d', $args ) );
+        $more = count( $rows ) > $limit; $rows = array_slice( $rows, 0, $limit );
+        return rest_ensure_response( array( 'items' => array_map( function( $invoice ) { return array( 'invoice' => $this->format_admin_invoice( $invoice ), 'payment_state' => MBS_Additional_Charges::payment_state( $invoice ), 'reminders_enabled' => MBS_Additional_Charges::reminders_enabled( $invoice ), 'charge' => array_intersect_key( MBS_Additional_Charges::metadata( $invoice ), array_flip( array( 'related_ref','related_kind','category','automatic_reminders' ) ) ) ); }, $rows ), 'has_more' => $more, 'next_offset' => $more ? $offset + $limit : null ) );
+    }
+
+    public function get_admin_additional_charge( WP_REST_Request $request ) {
+        if ( ! $this->booking_manager_permission() ) return new WP_Error( 'forbidden', 'Booking-manager access required.', array( 'status' => 403 ) );
+        $invoice = MBS_Billing_Ledger::get_invoice( sanitize_text_field( $request->get_param( 'invoice_ref' ) ) );
+        if ( ! MBS_Additional_Charges::is_charge( $invoice ) || $invoice->document_type !== 'invoice' ) return new WP_Error( 'not_found', 'Additional charge not found.', array( 'status' => 404 ) );
+        return rest_ensure_response( $this->additional_charge_response( $invoice ) );
+    }
+
+    public function mutate_admin_additional_charge( WP_REST_Request $request ) {
+        if ( ! $this->booking_manager_permission() ) return new WP_Error( 'forbidden', 'Booking-manager access required.', array( 'status' => 403 ) );
+        $data = $request->get_json_params();
+        if ( ! is_array( $data ) ) return new WP_Error( 'invalid_charge_request', 'A JSON object is required.', array( 'status' => 400 ) );
+        if ( array_diff( array_keys( $data ), array( 'operation','invoice_ref','expected_version','idempotency_key','confirm_send','amount_minor','reason','fields','document_ref','enabled' ) ) ) return new WP_Error( 'unknown_charge_fields', 'Unknown charge request field.', array( 'status' => 400 ) );
+        $operation = $data['operation'] ?? '';
+        if ( ! in_array( $operation, array( 'create','edit','issue','send','resend','send_credit','set_reminders','discard','credit' ), true ) ) return new WP_Error( 'invalid_charge_operation', 'Unknown additional-charge operation.', array( 'status' => 400 ) );
+        if ( $operation !== 'create' && ( ! isset( $data['expected_version'] ) || ! is_int( $data['expected_version'] ) || $data['expected_version'] < 1 || empty( $data['invoice_ref'] ) ) ) return new WP_Error( 'charge_precondition_required', 'invoice_ref and a positive integer expected_version are required.', array( 'status' => 400 ) );
+        // Sending is a separate explicit operation, never a creation/issue side effect.
+        if ( in_array( $operation, array( 'send','resend','send_credit' ), true ) && ( $data['confirm_send'] ?? false ) !== true ) return new WP_Error( 'charge_send_confirmation_required', 'Sending customer mail requires confirm_send=true.', array( 'status' => 400 ) );
+        if ( $operation === 'set_reminders' && ! is_bool( $data['enabled'] ?? null ) ) return new WP_Error( 'invalid_reminder_flag', 'enabled must be a JSON boolean.', array( 'status' => 400 ) );
+        if ( $operation === 'send_credit' && ( ! is_string( $data['document_ref'] ?? null ) || ! $data['document_ref'] ) ) return new WP_Error( 'credit_reference_required', 'document_ref is required.', array( 'status' => 400 ) );
+        $key = $this->integration_idempotency_transient( 'additional_charge', $data['idempotency_key'] ?? '', $data );
+        if ( is_wp_error( $key ) ) return $key;
+        $replay = get_transient( $key );
+        if ( is_array( $replay ) ) { $replay['idempotent_replay'] = true; return rest_ensure_response( $replay ); }
+        $ref = sanitize_text_field( $data['invoice_ref'] ?? '' ); $version = $data['expected_version'] ?? 0;
+        if ( in_array( $operation, array( 'create','edit' ), true ) ) {
+            $fields = $data['fields'] ?? array();
+            if ( ! is_array( $fields ) ) return new WP_Error( 'invalid_charge_fields', 'fields must be an object.', array( 'status' => 400 ) );
+            if ( array_diff( array_keys( $fields ), array( 'related_ref','category','description','amount','service_date','due_date','contact_name','contact_email','contact_organisation','contact_address','notes','automatic_reminders' ) ) ) return new WP_Error( 'unknown_charge_fields', 'Unknown draft charge field.', array( 'status' => 400 ) );
+            if ( $operation === 'edit' && array_key_exists( 'related_ref', $fields ) ) return new WP_Error( 'immutable_charge_association', 'An existing charge cannot be relinked; omit related_ref when editing.', array( 'status' => 400 ) );
+            if ( isset( $fields['automatic_reminders'] ) && ! is_bool( $fields['automatic_reminders'] ) ) return new WP_Error( 'invalid_reminder_flag', 'automatic_reminders must be a JSON boolean.', array( 'status' => 400 ) );
+            $result = $operation === 'create' ? MBS_Additional_Charges::create( $fields, $data['idempotency_key'] ) : MBS_Additional_Charges::update_draft( $ref, $fields, $version );
+        } elseif ( $operation === 'credit' ) {
+            $amount = MBS_Money::minor( $data['amount_minor'] ?? null );
+            if ( is_wp_error( $amount ) || $amount <= 0 ) return new WP_Error( 'invalid_credit_amount', 'Credit requires positive integer minor units.', array( 'status' => 400 ) );
+            $result = MBS_Additional_Charges::credit( $ref, $amount, sanitize_text_field( $data['reason'] ?? '' ), $version, $data['idempotency_key'] );
+        } elseif ( $operation === 'set_reminders' ) {
+            $result = MBS_Additional_Charges::set_reminders( $ref, $version, $data['enabled'] );
+        } elseif ( $operation === 'send_credit' ) {
+            $result = MBS_Additional_Charges::send_credit( $ref, $version, sanitize_text_field( $data['document_ref'] ), $data['idempotency_key'] );
+        } elseif ( in_array( $operation, array( 'send','resend' ), true ) ) {
+            $result = call_user_func( array( 'MBS_Additional_Charges', $operation ), $ref, $version, $data['idempotency_key'] );
+        } else { $result = call_user_func( array( 'MBS_Additional_Charges', $operation ), $ref, $version ); }
+        if ( is_wp_error( $result ) ) return $result;
+        $response = $this->additional_charge_response( $result );
+        $response['idempotent_replay'] = false; $response['email_queued'] = in_array( $operation, array( 'send','resend','send_credit' ), true );
+        set_transient( $key, $response, DAY_IN_SECONDS );
+        return rest_ensure_response( $response );
+    }
+
+    public function get_admin_additional_charge_document( WP_REST_Request $request ) {
+        global $wpdb;
+        if ( ! $this->booking_manager_permission() ) return new WP_Error( 'forbidden', 'Booking-manager access required.', array( 'status' => 403 ) );
+        $invoice = MBS_Billing_Ledger::get_invoice( sanitize_text_field( $request->get_param( 'invoice_ref' ) ) );
+        if ( ! MBS_Additional_Charges::is_charge( $invoice ) || $invoice->document_type !== 'invoice' ) return new WP_Error( 'not_found', 'Additional charge not found.', array( 'status' => 404 ) );
+        $document_ref = sanitize_text_field( $request->get_param( 'document_ref' ) ?: $invoice->invoice_ref );
+        $document_invoice = MBS_Billing_Ledger::get_invoice( $document_ref );
+        if ( ! $document_invoice || ( (int) $document_invoice->id !== (int) $invoice->id && (int) $document_invoice->parent_invoice_id !== (int) $invoice->id ) ) return new WP_Error( 'wrong_charge_document', 'Document does not belong to this charge.', array( 'status' => 404 ) );
+        $doc = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT id FROM ' . $wpdb->prefix . MBS_INVOICE_DOCUMENTS_TABLE . " WHERE invoice_id=%d AND status='issued' ORDER BY revision DESC,id DESC LIMIT 1", $document_invoice->id ) );
+        if ( ! $doc ) return new WP_Error( 'charge_document_unissued', 'No issued document exists.', array( 'status' => 404 ) );
+        $format = $request->get_param( 'format' ) ?: 'html';
+        if ( ! in_array( $format, array( 'html','pdf' ), true ) ) return new WP_Error( 'invalid_format', 'Use html or pdf.', array( 'status' => 400 ) );
+        $model = MBS_Invoice_Document_Builder::build_from_document( $doc, 'issued' );
+        if ( is_wp_error( $model ) ) return $model;
+        $content = $format === 'pdf' ? MBS_PDF_Renderer::render( $model ) : MBS_HTML_Renderer::render( $model );
+        if ( is_wp_error( $content ) ) return $content;
+        return rest_ensure_response( array( 'document_id' => $doc, 'document_ref' => $document_ref, 'format' => $format, 'html' => $format === 'html' ? $content : null, 'pdf_base64' => $format === 'pdf' ? base64_encode( $content ) : null ) );
     }
 
     public function get_admin_invoice( WP_REST_Request $request ) {

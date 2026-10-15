@@ -6,6 +6,23 @@ It calls the authenticated WordPress REST API at `/wp-json/mathlin/v1/admin/...`
 
 ## Tools
 
+Bridge 0.4.0 adds five additional-charge tools (requires plugin 3.28.0):
+`list_additional_charges`, `get_additional_charge`, `manage_additional_charge`,
+`get_additional_charge_document` and `export_additional_charge_pdf`.
+The manage operation covers create/edit/issue/send/resend/send_credit/set_reminders/discard/credit. Use a stable
+idempotency key and the latest invoice version. All three email operations additionally require
+explicit customer-send approval and `confirm_send=true`; issuing never sends.
+`send_credit` requires the credit-note `document_ref`; `set_reminders` requires
+an `enabled` boolean and never resets the one-reminder cap. List/detail reads
+expose payment-processing state, reminder preference and, on detail, delivery
+history. Filter `payment_review` finds bound or unreconciled checkouts.
+Existing `record_invoice_payment` handles offline payments. Credits do not
+refund cash. PDF export accepts an absolute local filename, never overwrites,
+and returns a path/hash rather than the PDF payload. Ordinary reads never
+generate payment links or expose bearer tokens. Do not install the candidate
+bridge against an older production plugin; update the plugin first and restart
+the desktop client after refreshing its separate bridge file.
+
 - `list_bookings` — filter and paginate bookings.
 - `get_booking` — retrieve one current booking.
 - `check_availability` — check blocked dates and booking conflicts.

@@ -6,6 +6,23 @@ class MBS_Invoice_Reservation {
     const TTL = 1200;
 
     public static function acquire( $invoice, $existing_ref = '' ) {
+        // Serialize extra-charge checkout with credit and manual settlement.
+        if ( class_exists( 'MBS_Additional_Charges' ) && MBS_Additional_Charges::is_charge( $invoice ) ) {
+            global $wpdb;
+            if ( $wpdb->query( 'START TRANSACTION' ) === false ) return new WP_Error( 'transaction_start_failed', 'Could not reserve charge checkout.' );
+            $fresh = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . $wpdb->prefix . MBS_INVOICE_TABLE . ' WHERE invoice_ref=%s FOR UPDATE', $invoice->invoice_ref ) );
+            if ( ! $fresh || (int) $fresh->version !== (int) $invoice->version ) {
+                $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'charge_changed', 'Reload the charge before paying.' );
+            }
+            $result = self::acquire_core( $fresh, $existing_ref );
+            if ( is_wp_error( $result ) ) { $wpdb->query( 'ROLLBACK' ); return $result; }
+            if ( $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'commit_failed', 'Could not commit charge checkout.' ); }
+            return $result;
+        }
+        return self::acquire_core( $invoice, $existing_ref );
+    }
+
+    private static function acquire_core( $invoice, $existing_ref = '' ) {
         global $wpdb;
         if ( ! MBS_Invoice_Payment::is_payable( $invoice ) ) return new WP_Error( 'invoice_not_payable', 'This invoice is not available for payment.' );
 	        $table = self::table(); $now = self::utc_now(); $expires = self::utc_after( self::TTL );

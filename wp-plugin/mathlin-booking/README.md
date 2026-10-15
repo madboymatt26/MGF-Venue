@@ -4,7 +4,43 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.27.0
+**Current Version:** 3.28.0 (local build; not released)
+
+## 3.28.0 Additional charges
+
+Staff can create independent cleaning, damage or other extra-charge drafts linked
+to an existing booking or series, including archived hires. See
+`ADDITIONAL-CHARGES-SPEC.md` at the repository root for the full design/release gates.
+The Additional charges screen is linked from booking/series details. Drafts are
+private to staff; issuing freezes a separate PDF invoice without emailing it.
+The explicit send action queues a PDF and secure website payment link. Issued
+charges appear in the recipient's authenticated portal with PDF/payment history.
+Original hire amounts, statuses, availability and access remain unchanged.
+
+Staff can filter/search charges, inspect payment/audit/email-queue history,
+explicitly resend an invoice using its current balance, email a credit note,
+and change post-issue reminder preferences without editing issued documents.
+Invoice/credit wording is configurable under Email Templates. Active or held
+payment processing suppresses payment-request emails and automatic reminders.
+Verified Guest Quick Lookup also lists charges; the signed-in portal and guest
+lookup both offer related credit-note PDFs without exposing internal notes.
+The local candidate still requires isolated WordPress/WooCommerce concurrency
+and browser acceptance verification before release.
+
+Reminders default off. Offline payments and credits require explicit staff
+actions. Credit does not return cash; use the original provider's refund flow.
+Credits/offline payments are blocked while an online checkout is outstanding.
+Additional-charge transactions are not automatically exported to OSM. Existing
+accounting CSV export includes them as separate additional-charge entries.
+
+MCP bridge 0.4.0 adds charge listing/details, create/edit/issue/send/discard/credit
+operations, immutable HTML viewing and non-overwriting local invoice/credit PDF
+export. Existing offline invoice payment tools remain available. Reads do not
+return payment tokens. Sending requires a separate confirm_send=true operation.
+Deploy the plugin before updating/restarting the separate local MCP bridge.
+Guest Quick Lookup discovery and a configurable extra-charge email template
+remain follow-ups. Cash refunds continue through the original provider.
+Real WordPress/WooCommerce integration and browser checks must pass before release.
 
 ## 3.27.0 Hirer series change and cancellation requests
 

@@ -14,7 +14,7 @@ $list = $responses | Where-Object { $_.id -eq 2 }
 if ( $null -eq $list -or $null -eq $list.result.tools ) { throw 'tools/list did not return tools.' }
 
 $tools = @($list.result.tools)
-if ( $tools.Count -ne 18 ) { throw "Expected 18 MCP tools; found $($tools.Count)." }
+if ( $tools.Count -ne 23 ) { throw "Expected 23 MCP tools; found $($tools.Count)." }
 
 $create = $tools | Where-Object { $_.name -eq 'create_booking' }
 if ( $null -eq $create ) { throw 'create_booking tool is missing.' }
@@ -55,4 +55,16 @@ foreach ( $resource in @('dashboard', 'global_audit') ) {
     }
 }
 
-Write-Output 'MCP_TOOL_SCHEMA_SMOKE_OK: 18 tools'
+$chargeWrite = $tools | Where-Object { $_.name -eq 'manage_additional_charge' }
+if ($null -eq $chargeWrite -or $chargeWrite.annotations.readOnlyHint -ne $false -or $chargeWrite.annotations.destructiveHint -ne $true) { throw 'Charge writes need explicit write annotations.' }
+foreach ($operation in @('create','edit','issue','send','resend','send_credit','set_reminders','discard','credit')) {
+    if ($chargeWrite.inputSchema.properties.operation.enum -notcontains $operation) { throw "Missing charge operation $operation." }
+}
+if ($chargeWrite.inputSchema.required -notcontains 'idempotency_key' -or $chargeWrite.inputSchema.properties.confirm_send.default -ne $false) { throw 'Charge write retry/send safety schema is incomplete.' }
+foreach ($toolName in @('list_additional_charges','get_additional_charge','get_additional_charge_document')) {
+    $tool = $tools | Where-Object { $_.name -eq $toolName }
+    if ($null -eq $tool -or $tool.annotations.readOnlyHint -ne $true) { throw "Charge read tool $toolName is missing or unsafe." }
+}
+$pdfExport = $tools | Where-Object { $_.name -eq 'export_additional_charge_pdf' }
+if ($null -eq $pdfExport -or $pdfExport.inputSchema.required -notcontains 'output_path') { throw 'Charge PDF export must require an explicit path.' }
+Write-Output 'MCP_TOOL_SCHEMA_SMOKE_OK: 23 tools'

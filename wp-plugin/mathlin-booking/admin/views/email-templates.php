@@ -95,6 +95,8 @@ $chase     = MBS_Email_Templates::get_chase_settings();
                         <code>{purpose}</code> — Purpose<br>
                         <code>{amount}</code> — Amount (£)<br>
                         <code>{invoice}</code> — Invoice number<br>
+                        <code>{description}</code> — Additional-charge description<br>
+                        <code>{credit}</code>, <code>{credit_amount}</code> — Additional-charge credit reference and amount<br>
                         <code>{admin_email}</code> — Contact email<br>
                         <code>{phone}</code> — Contact phone<br>
                         <code>{org_name}</code> — Organisation name<br>

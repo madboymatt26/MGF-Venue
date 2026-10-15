@@ -1,4 +1,22 @@
 /* NM Scouts Booking – Public JS */
+window.NMSAdditionalCharges = function(charges) {
+    var $ = jQuery, root = $('<div>');
+    if (!Array.isArray(charges) || !charges.length) return root;
+    root.append($('<h3>').text('Additional charges — separate from hire'));
+    charges.forEach(function(charge) {
+        var card = $('<section>').addClass('nms-form-section');
+        card.append($('<h4>').text(charge.invoice_ref + ' — ' + charge.status));
+        card.append($('<p>').text(charge.description));
+        card.append($('<p>').text('Total ' + charge.total + ' · Balance ' + charge.balance + ' · Due ' + charge.due_date));
+        if (charge.payment_under_review) card.append($('<p>').text('Your payment is being checked. Please do not pay again while we review it.'));
+        (charge.documents || []).forEach(function(doc) {
+            card.append($('<p>').append($('<a>').attr('href', doc.pdf_url).text('Download ' + doc.type.replace('_', ' ') + ' ' + doc.reference)));
+        });
+        if (charge.payment_url && !charge.payment_under_review) card.append($('<a>').attr('href', charge.payment_url).addClass('nms-btn').text('Pay additional charge'));
+        root.append(card);
+    });
+    return root;
+};
 jQuery(function ($) {
 
     // ── Calendar ───────────────────────────────────────────────────────────────

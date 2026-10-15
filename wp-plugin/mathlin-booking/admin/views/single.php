@@ -1,5 +1,6 @@
 <?php if ( ! defined( 'ABSPATH' ) ) exit;
 $spaces = MBS_Bookings::get_spaces();
+echo '<p><a class="button" href="' . esc_url( admin_url( 'admin.php?page=mathlin-additional-charges&related_ref=' . rawurlencode( $booking->ref ) ) ) . '">Additional charges for this booking</a></p>';
 $is_daily = ! empty( $booking->all_day );
 $time_str = $is_daily ? 'All day' : ( $booking->start_time . ' – ' . $booking->end_time );
 $pricing_tier  = MBS_Bookings::get_booking_tier( $booking );

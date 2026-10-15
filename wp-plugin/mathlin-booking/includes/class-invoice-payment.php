@@ -127,6 +127,10 @@ class MBS_Invoice_Payment {
         $amount = MBS_Money::minor( $amount_minor );
         if ( is_wp_error( $amount ) ) return $amount;
         if ( $amount <= 0 ) return new WP_Error( 'invalid_manual_amount', 'Manual payment must be positive.' );
+        if ( class_exists( 'MBS_Additional_Charges' ) && MBS_Additional_Charges::is_charge( $invoice ) ) {
+            $claim = MBS_Invoice_Reservation::get( $invoice_ref );
+            if ( $claim && in_array( $claim->status, array( 'active','bound','reconciliation_required' ), true ) ) return new WP_Error( 'charge_checkout_active', 'Resolve the online checkout before recording an offline payment.' );
+        }
         $result = MBS_Billing_Ledger::record_transaction( $invoice_ref, array(
             'provider' => 'manual', 'transaction_type' => 'payment', 'status' => 'completed',
             'amount_minor' => $amount, 'idempotency_key' => $idempotency_key,
@@ -180,6 +184,11 @@ class MBS_Invoice_Payment {
             $wpdb->query( 'ROLLBACK' );
             return array( 'sent' => false, 'no_op' => true, 'reason' => 'not_outstanding' );
         }
+        if ( class_exists( 'MBS_Additional_Charges' ) && MBS_Additional_Charges::is_charge( $invoice )
+            && ( ! MBS_Additional_Charges::reminders_enabled( $invoice ) || MBS_Additional_Charges::communications_held( $invoice ) ) ) {
+            $wpdb->query( 'ROLLBACK' );
+            return array( 'sent' => false, 'no_op' => true, 'reason' => 'additional_charge_reminders_disabled' );
+        }
         if ( (int) $invoice->reminder_count >= 1 ) {
             $wpdb->query( 'ROLLBACK' );
             return array( 'sent' => false, 'no_op' => true, 'reason' => 'already_reminded' );
@@ -208,14 +217,21 @@ class MBS_Invoice_Payment {
         global $wpdb;
         $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
         $series_table = $wpdb->prefix . MBS_SERIES_TABLE;
+        $charge_item_table = $wpdb->prefix . MBS_INVOICE_ITEM_TABLE;
+        $reservation_table = $wpdb->prefix . MBS_PAYMENT_RESERVATION_TABLE;
         $rows = $wpdb->get_results( $wpdb->prepare(
             "SELECT i.invoice_ref FROM {$invoice_table} i
              LEFT JOIN {$series_table} s ON s.series_ref = i.series_ref
+             LEFT JOIN {$wpdb->options} co ON co.option_name = CONCAT('mbs_charge_reminders_',i.id)
              WHERE i.document_type = 'invoice' AND i.status IN ('issued','part_paid','overdue')
              AND i.due_at <= %s AND i.reminder_count = 0
              AND (s.series_ref IS NULL OR s.automatic_reminders = 1)
+             AND (i.billing_mode <> 'additional_charge' OR NOT EXISTS (SELECT 1 FROM {$reservation_table} cr WHERE cr.invoice_ref=i.invoice_ref AND cr.status IN ('active','bound','reconciliation_required')))
+             AND (i.billing_mode <> 'additional_charge' OR co.option_value='1' OR (co.option_name IS NULL AND EXISTS (
+                 SELECT 1 FROM {$charge_item_table} ci WHERE ci.invoice_id = i.id
+                 AND ci.pricing_snapshot_json LIKE %s)))
              ORDER BY i.due_at ASC LIMIT 20",
-            current_time( 'mysql' )
+            current_time( 'mysql' ), '%"automatic_reminders":true%'
         ) );
         $results = array();
         foreach ( $rows as $row ) $results[ $row->invoice_ref ] = self::send_invoice_reminder( $row->invoice_ref );
@@ -224,6 +240,7 @@ class MBS_Invoice_Payment {
 
     private static function mark_covered_occurrences_paid( $invoice ) {
         global $wpdb;
+        if ( class_exists( 'MBS_Additional_Charges' ) && MBS_Additional_Charges::is_charge( $invoice ) ) return true;
         if ( MBS_Billing_Ledger::balance_minor( $invoice ) > 0 ) return false;
         $allocation_table = $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE;
         $booking_table = $wpdb->prefix . MBS_TABLE;
@@ -253,6 +270,9 @@ class MBS_Invoice_Payment {
 
     /** Allocate a Woo refund to invoice items, latest service date first unless explicitly supplied. */
     private static function refund_allocations( $invoice, $amount_minor, $requested ) {
+        if ( class_exists( 'MBS_Additional_Charges' ) && MBS_Additional_Charges::is_charge( $invoice ) ) {
+            return $requested ? new WP_Error( 'charge_has_no_hire_allocations', 'Additional-charge refunds cannot change hire allocations.' ) : array();
+        }
         global $wpdb;
         $remaining = (int) $amount_minor;
         $result = array();

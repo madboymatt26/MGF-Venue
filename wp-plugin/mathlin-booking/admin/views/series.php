@@ -1,6 +1,7 @@
 <?php if ( ! defined( 'ABSPATH' ) ) exit; ?>
 <div class="wrap nms-admin-wrap">
     <h1><?php echo MBS_Admin::brand_mark(); ?> Recurring Series</h1>
+    <?php if ( ! empty( $series ) ) : ?><p><a class="button" href="<?php echo esc_url( admin_url( 'admin.php?page=mathlin-additional-charges&related_ref=' . rawurlencode( $series->series_ref ) ) ); ?>">Additional charges for this series</a></p><?php endif; ?>
 
     <?php if ( ! empty( $scout_series_redirect ) ) : ?>
         <div class="notice notice-info"><p>This is a no-charge Scout series. <a href="<?php echo esc_url( $scout_series_redirect ); ?>">Manage it in Scout Nights</a>.</p></div>

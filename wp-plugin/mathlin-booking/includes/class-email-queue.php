@@ -279,6 +279,19 @@ class MBS_Email_Queue {
         $failed = 0;
 
         foreach ( $claimed as $email ) {
+            // A queued request can become stale while awaiting PDF rendering/retry.
+            if ( class_exists( 'MBS_Additional_Charges' ) && $email->reference_type === 'invoice'
+                && in_array( $email->message_type, array( 'invoice_issued','invoice_reminder' ), true ) ) {
+                $source_invoice = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . $wpdb->prefix . MBS_INVOICE_TABLE . ' WHERE id=%d', $email->reference_id ) );
+                if ( MBS_Additional_Charges::is_charge( $source_invoice ) ) {
+                    $hold_reason = MBS_Additional_Charges::queued_delivery_error( $source_invoice, json_decode( $email->attachment_meta ?: '{}', true ) ?: array() );
+                    if ( $hold_reason ) {
+                        self::release_for_retry( $email->id, $worker_id, $hold_reason );
+                        $failed++;
+                        continue;
+                    }
+                }
+            }
             $headers = json_decode( $email->headers, true ) ?: array();
             $attachments = array();
             $temp_file = null;

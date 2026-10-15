@@ -101,7 +101,7 @@ class MBS_Accounting_Export {
                 'invoice_number' => $row->invoice_ref, 'invoice_date' => $row->issued_at ?: $row->created_at,
                 'due_date' => $row->due_at ?: $row->issued_at, 'total_decimal' => MBS_Money::decimal( (int) $row->line_total_minor ),
                 'description' => $row->description, 'booking_ref' => $row->booking_ref ?: $row->item_ref,
-                'purpose' => $row->document_type === 'credit_note' ? 'Credit note' : 'Venue hire',
+                'purpose' => $row->document_type === 'credit_note' ? 'Credit note' : ( $row->billing_mode === 'additional_charge' ? 'Additional charge' : 'Venue hire' ),
                 'document_type' => $row->document_type, 'currency' => strtoupper( (string)$row->currency ),
             );
         }

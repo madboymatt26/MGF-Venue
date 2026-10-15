@@ -96,6 +96,16 @@ class MBS_Email_Templates {
                 'subject' => 'Recurring Booking Approved – {ref}',
                 'body'    => "Hi {name},\n\nYour recurring booking series has been approved. The confirmed schedule and billing arrangement are shown below.",
             ),
+            'additional_charge_invoice' => array(
+                'label' => 'Additional charge invoice',
+                'subject' => 'Additional charge invoice {invoice} — {org_name}',
+                'body' => "Hi {name},\n\nPlease find your separate additional-charge invoice attached for {description}.\nThe outstanding balance is {balance}, due {due_date}.\n\nKind Regards,\n{org_name}",
+            ),
+            'additional_charge_credit' => array(
+                'label' => 'Additional charge credit note',
+                'subject' => 'Credit note {credit} — {org_name}',
+                'body' => "Hi {name},\n\nPlease find credit note {credit} for {credit_amount} attached, relating to additional-charge invoice {invoice}.\n\nKind Regards,\n{org_name}",
+            ),
             'invoice_issued' => array(
                 'label'   => 'Consolidated Invoice Issued (to booker)',
                 'subject' => 'Invoice {invoice} – {amount}',
