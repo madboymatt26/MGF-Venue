@@ -26,7 +26,7 @@ try {
     await staff.getByRole('button',{name:'Filter',exact:true}).click();
     await staff.getByRole('heading',{name:'Additional charges',exact:true}).waitFor();
     await staff.screenshot({path:'browser-artifacts/staff-charges.png',fullPage:true});
-    await staff.goto(base+'/wp-admin/admin.php?page=mathlin-email-templates');
+    await staff.goto(base+'/wp-admin/admin.php?page=mathlin-emails');
     await staff.locator('.mbs-tpl-subject[data-type="additional_charge_invoice"]').waitFor();
     await staff.locator('.mbs-tpl-body[data-type="additional_charge_credit"]').waitFor();
     const owner=await browser.newContext(); const portal=await owner.newPage(); watch(portal);
