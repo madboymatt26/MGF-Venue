@@ -22,7 +22,7 @@ try {
     await staff.goto(base+'/wp-admin/admin.php?page=mathlin-additional-charges');
     await staff.getByRole('heading',{name:'Additional charges',exact:true}).waitFor();
     await staff.getByLabel('Organisation (optional)').waitFor();
-    await staff.getByLabel('Status',{exact:true}).selectOption('payment_review');
+    await staff.locator('select[name="charge_status"]').selectOption('payment_review');
     await staff.getByRole('button',{name:'Filter',exact:true}).click();
     await staff.getByRole('heading',{name:'Additional charges',exact:true}).waitFor();
     await staff.screenshot({path:'browser-artifacts/staff-charges.png',fullPage:true});
@@ -49,4 +49,11 @@ try {
     await lookup.screenshot({path:'browser-artifacts/guest-charges.png',fullPage:true});
     assert.deepEqual(errors,[],'No browser JavaScript errors');
     console.log('ADDITIONAL_CHARGE_BROWSER_OK: staff filters/templates, owner credit PDF, guest charge/credit discovery');
+} catch(error) {
+    let index=0;
+    for(const context of browser.contexts())for(const page of context.pages()){
+        await page.screenshot({path:'browser-artifacts/failure-'+(++index)+'.png',fullPage:true}).catch(()=>{});
+        console.error('Browser failure page:',page.url(),(await page.locator('body').innerText().catch(()=>'' )).slice(-8000));
+    }
+    throw error;
 } finally {await browser.close();}
