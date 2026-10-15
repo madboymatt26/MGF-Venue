@@ -52,7 +52,7 @@ class MBS_Additional_Charges {
         $stored = $wpdb->query( $wpdb->prepare( "INSERT INTO {$wpdb->options} (option_name,option_value,autoload) VALUES (%s,%s,'no') ON DUPLICATE KEY UPDATE option_value=VALUES(option_value)", $option, $enabled ? '1' : '0' ) );
         $changed = $wpdb->query( $wpdb->prepare( 'UPDATE ' . $wpdb->prefix . MBS_INVOICE_TABLE . ' SET version=version+1,updated_at=%s WHERE id=%d AND version=%d', current_time( 'mysql' ), $invoice->id, $version ) );
         if ( $stored === false || $changed !== 1 ) return self::rollback( new WP_Error( 'reminder_update_failed', 'Could not change reminder preference.' ) );
-        $result = self::finish( $invoice, 'additional_charge_reminders_changed', $enabled ? 'Automatic overdue reminder enabled.' : 'Automatic overdue reminder disabled.' );
+        $result = self::finish( $invoice, 'additional_charge_reminders', $enabled ? 'Automatic overdue reminder enabled.' : 'Automatic overdue reminder disabled.' );
         wp_cache_delete( $option, 'options' ); wp_cache_delete( 'notoptions', 'options' );
         return $result;
     }
@@ -283,7 +283,7 @@ class MBS_Additional_Charges {
             'additional_charge:' . hash( 'sha256', $ref . ':doc' . $doc . ':' . ( $key ?: 'version-' . $version ) ), $hash, $attachment,
             array( 'message_type' => $credit ? 'additional_charge_credit' : 'invoice_issued', 'reference_type' => 'invoice', 'reference_id' => (int) $invoice->id ) );
         if ( is_wp_error( $queued ) ) return self::rollback( $queued );
-        return self::finish( $invoice, 'additional_charge_delivery_queued', 'Invoice delivery queued (not proof of delivery).' );
+        return self::finish( $invoice, 'additional_charge_email_queued', 'Invoice delivery queued (not proof of delivery).' );
     }
 
     private static function lock( $ref, $version ) {
