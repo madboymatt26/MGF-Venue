@@ -4,7 +4,17 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.28.0 (local build; not released)
+**Current Version:** 3.28.1
+
+## 3.28.1 Prompt invoice email delivery
+
+Explicit additional-charge Send/Resend/Credit-email actions now attempt their
+own committed outbox row immediately, retaining retry/CAS protections. Send
+reuses a matching pending or accepted invoice instead of making duplicates;
+Resend remains the explicit new-message action. Retry scheduling migrates from
+hourly to five-minute WP-Cron. Targeted dispatch never drains or cleans up an
+unrelated batch. The invoice worker's database reference is fixed, and actual
+worker/PDF dispatch is exercised in isolated integration tests.
 
 ## 3.28.0 Additional charges
 

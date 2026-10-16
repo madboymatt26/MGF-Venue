@@ -23,6 +23,8 @@ class MBS_Bookings { public static function get_admin_email(){return 'staff@exam
 class MBS_Audit_Log { public static function log(...$args){return true;} }
 class MBS_Email_Queue {
     public static $rows=array();
+    public static $dispatches=array();
+    public static function dispatch_message($id){self::$dispatches[]=$id;return array('sent'=>1,'failed'=>0);}
     public static function compute_payload_hash(...$args){return hash('sha256',serialize($args));}
     public static function enqueue($to,$subject,$body,$headers,$key,$hash,$attachment,$context){
         if(isset(self::$rows[$key])&&self::$rows[$key]['hash']!==$hash)return new WP_Error('payload_conflict');
@@ -43,6 +45,7 @@ foreach(array('active','bound','reconciliation_required') as $status){
 check_delivery(count(MBS_Email_Queue::$rows)===0,'Held payment creates no queued email');
 MBS_Invoice_Reservation::$status='released';
 check_delivery(!is_wp_error(MBS_Additional_Charges::send('INV-TEST',1,'first-send-key')),'Explicit invoice send works');
+check_delivery(count(MBS_Email_Queue::$dispatches)===1,'Explicit send dispatches its committed row immediately');
 check_delivery(!is_wp_error(MBS_Additional_Charges::send('INV-TEST',1,'first-send-key'))&&count(MBS_Email_Queue::$rows)===1,'Identical send deduplicates');
 $GLOBALS['invoice']->paid_minor=500;
 check_delivery(!is_wp_error(MBS_Additional_Charges::resend('INV-TEST',1,'explicit-resend-key')),'Explicit partial-payment resend works');

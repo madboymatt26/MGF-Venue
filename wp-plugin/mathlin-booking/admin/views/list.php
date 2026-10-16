@@ -1,6 +1,7 @@
 <?php if ( ! defined( 'ABSPATH' ) ) exit; ?>
 <div class="wrap mbs-admin">
     <h1 class="wp-heading-inline"><?php echo MBS_Admin::brand_mark(); ?>MGF Venue</h1>
+    <a class="page-title-action" href="<?php echo esc_url(MBS_Additional_Charges::admin_url()); ?>">Additional charges</a>
     <hr class="wp-header-end">
 
     <!-- Stats -->
