@@ -40,6 +40,7 @@ try {
     await staff.getByRole('button',{name:'Filter',exact:true}).click();
     await staff.locator('h1').filter({hasText:'Additional charges'}).waitFor();
     await staff.screenshot({path:'browser-artifacts/staff-charges.png',fullPage:true});
+    await staff.goto(base+'/wp-admin/admin.php?page=mathlin-additional-charges');
     await staff.getByRole('link',{name:'Archived',exact:true}).click();
     await staff.getByRole('link',{name:fixture.archive_ref,exact:true}).click();
     await staff.getByRole('button',{name:'Restore charge',exact:true}).waitFor();
