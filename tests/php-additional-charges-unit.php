@@ -29,6 +29,8 @@ foreach ( array( 'category' => 'hire', 'description' => '', 'contact_email' => '
 }
 charge_assert( is_wp_error( MBS_Additional_Charges::create( $data, 'synthetic-key' ) ), 'Create denied before any DB access for non-manager.' );
 charge_assert( is_wp_error( MBS_Additional_Charges::issue( 'INV-SYNTHETIC', 1 ) ), 'Issue denied for non-manager.' );
+charge_assert( is_wp_error( MBS_Additional_Charges::cancel( 'INV-SYNTHETIC', 1, 'Synthetic', 'synthetic-key' ) ), 'Cancellation denied before DB reads for non-manager.' );
+charge_assert( is_wp_error( MBS_Additional_Charges::archive( 'INV-SYNTHETIC', 1 ) ), 'Archive denied before DB reads for non-manager.' );
 $charge = (object) array( 'billing_mode' => 'additional_charge' );
 $settle = new ReflectionMethod( 'MBS_Invoice_Payment', 'mark_covered_occurrences_paid' );
 if ( PHP_VERSION_ID < 80100 ) $settle->setAccessible( true );
@@ -64,11 +66,20 @@ charge_assert(!is_wp_error(MBS_Additional_Charges::validate(array_merge($data,ar
 charge_assert(is_wp_error(MBS_Additional_Charges::validate(array_merge($data,array('description'=>str_repeat('X',501))))),'501 byte description rejected');
 define('MBS_INVOICE_TABLE','invoices');
 class ChargeReminderDb { public $prefix='fake_'; public function query($sql){return 1;} public function prepare($sql,...$args){return $sql;} public function get_row($sql){return $GLOBALS['reminder_invoice'];} }
-class MBS_Billing_Ledger { public static function balance_minor($i){return 2500;} }
+class MBS_Billing_Ledger { public static function balance_minor($i){return isset($i->total_minor)?$i->total_minor-$i->paid_minor-$i->credited_minor:2500;} }
 $wpdb=new ChargeReminderDb();
 $charge->document_type='invoice';$charge->status='issued';
 $GLOBALS['reminder_invoice']=$charge;
 MBS_Invoice_Reservation::$claim=(object)array('status'=>'reconciliation_required','order_id'=>42);
 $reminder=MBS_Invoice_Payment::send_invoice_reminder('INV-SYNTHETIC');
 charge_assert(!is_wp_error($reminder)&&$reminder['no_op']===true,'Actual reminder service suppresses unreconciled payment even when opted in');
+MBS_Invoice_Reservation::$claim=null;
+$settled=clone $charge;$settled->status='paid';$settled->total_minor=2500;$settled->paid_minor=2500;$settled->credited_minor=0;
+charge_assert(MBS_Additional_Charges::can_archive($settled),'Settled paid charge can be archived');
+$settled->status='credited';$settled->credited_minor=2500;
+charge_assert(!MBS_Additional_Charges::can_archive($settled),'Unrefunded credit cannot be hidden');
+$settled->paid_minor=0;
+charge_assert(MBS_Additional_Charges::can_archive($settled),'Fully credited unpaid charge can be archived');
+MBS_Invoice_Reservation::$claim=(object)array('status'=>'active');
+charge_assert(!MBS_Additional_Charges::can_archive($settled),'Active checkout prevents archive');
 echo "Additional charge unit tests passed ($checks checks).\n";

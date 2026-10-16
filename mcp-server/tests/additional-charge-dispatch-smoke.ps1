@@ -14,6 +14,12 @@ function Invoke-VenueApi {
 }
 Invoke-MgfVenueTool -Name list_additional_charges -Arguments ([pscustomobject]@{related_ref='MBS-SYNTHETIC';limit=1;offset=2}) | Out-Null
 if ($script:calls[-1].method -ne 'GET' -or $script:calls[-1].path -notmatch 'related_ref=MBS-SYNTHETIC') { throw 'List routing failed.' }
+Invoke-MgfVenueTool -Name list_additional_charges -Arguments ([pscustomobject]@{archive_view='archived'}) | Out-Null
+if ($script:calls[-1].path -notmatch 'archive_view=archived') { throw 'Archive filter routing failed.' }
+foreach($op in @('cancel','archive','restore')) {
+    Invoke-MgfVenueTool -Name manage_additional_charge -Arguments ([pscustomobject]@{operation=$op;invoice_ref='INV-SYNTHETIC';expected_version=2;reason='Synthetic';idempotency_key=('synthetic-'+$op)}) | Out-Null
+    if ($script:calls[-1].body.operation -ne $op) { throw 'Archive/cancellation routing changed request.' }
+}
 Invoke-MgfVenueTool -Name manage_additional_charge -Arguments ([pscustomobject]@{operation='issue';invoice_ref='INV-SYNTHETIC';expected_version=2;idempotency_key='synthetic-request'}) | Out-Null
 if ($script:calls[-1].method -ne 'POST' -or $script:calls[-1].body.operation -ne 'issue') { throw 'Mutation routing changed request.' }
 Invoke-MgfVenueTool -Name get_additional_charge_document -Arguments ([pscustomobject]@{invoice_ref='INV-SYNTHETIC';document_ref='CN-SYNTHETIC'}) | Out-Null

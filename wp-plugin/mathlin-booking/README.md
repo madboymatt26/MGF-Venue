@@ -4,7 +4,18 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.28.1
+**Current Version:** 3.28.2
+
+## 3.28.2 Additional charge cancellation and archive
+
+Staff lists default to Active, with Archived and All charges views. Open a charge
+to Archive/Restore it; only settled or discarded charges without checkout or
+cash-refund review can be archived. This staff-only preference preserves customer
+records, invoice/credit PDFs, reporting and the original booking. Cancel charge
+issues a full credit note with a required reason, without emailing or refunding
+cash; partial credits remain a separate action. REST/MCP expose cancel, archive,
+restore and archive_view. Source MCP bridge 0.4.1 needs a separate refresh/restart.
+No schema change and no hard-delete operation.
 
 ## 3.28.1 Prompt invoice email delivery
 
