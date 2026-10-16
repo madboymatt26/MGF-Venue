@@ -20,7 +20,7 @@ try {
     const admin=await browser.newContext(); const staff=await admin.newPage(); watch(staff);
     await login(staff,'admin');
     await staff.goto(base+'/wp-admin/admin.php?page=mathlin-additional-charges');
-    await staff.getByRole('heading',{name:'Additional charges',exact:true}).waitFor();
+    await staff.locator('h1').filter({hasText:'Additional charges'}).waitFor();
     assert.equal(await staff.locator('input[name="amount"]').count(),0,'List has no create form');
     await staff.getByRole('columnheader',{name:'Original booking',exact:true}).waitFor();
     await staff.getByRole('link',{name:fixture.booking_ref,exact:true}).first().waitFor();
@@ -37,7 +37,7 @@ try {
     await staff.goto(base+'/wp-admin/admin.php?page=mathlin-additional-charges');
     await staff.locator('select[name="charge_status"]').selectOption('payment_review');
     await staff.getByRole('button',{name:'Filter',exact:true}).click();
-    await staff.getByRole('heading',{name:'Additional charges',exact:true}).waitFor();
+    await staff.locator('h1').filter({hasText:'Additional charges'}).waitFor();
     await staff.screenshot({path:'browser-artifacts/staff-charges.png',fullPage:true});
     await staff.goto(base+'/wp-admin/admin.php?page=mathlin-emails');
     await staff.locator('.mbs-tpl-subject[data-type="additional_charge_invoice"]').waitFor();
