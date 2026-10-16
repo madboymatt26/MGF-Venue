@@ -27,6 +27,7 @@ try {
     await staff.getByRole('link',{name:fixture.invoice_ref,exact:true}).click();
     await staff.getByRole('link',{name:fixture.booking_ref,exact:true}).waitFor();
     await staff.getByRole('button',{name:'Confirm and send invoice now',exact:true}).waitFor();
+    await staff.getByRole('button',{name:'Cancel charge — issue full credit note',exact:true}).waitFor();
     await staff.getByRole('link',{name:fixture.booking_ref,exact:true}).click();
     await staff.getByRole('heading',{name:'Additional charges',exact:true}).waitFor();
     await staff.getByRole('link',{name:fixture.invoice_ref,exact:true}).waitFor();
@@ -39,6 +40,11 @@ try {
     await staff.getByRole('button',{name:'Filter',exact:true}).click();
     await staff.locator('h1').filter({hasText:'Additional charges'}).waitFor();
     await staff.screenshot({path:'browser-artifacts/staff-charges.png',fullPage:true});
+    await staff.goto(base+'/wp-admin/admin.php?page=mathlin-additional-charges');
+    await staff.getByRole('navigation',{name:'Charge archive views',exact:true}).getByRole('link',{name:'Archived',exact:true}).click();
+    await staff.getByRole('link',{name:fixture.archive_ref,exact:true}).click();
+    await staff.getByRole('button',{name:'Restore charge',exact:true}).waitFor();
+    await staff.screenshot({path:'browser-artifacts/archived-charge.png',fullPage:true});
     await staff.goto(base+'/wp-admin/admin.php?page=mathlin-emails');
     await staff.locator('.mbs-tpl-subject[data-type="additional_charge_invoice"]').waitFor();
     await staff.locator('.mbs-tpl-body[data-type="additional_charge_credit"]').waitFor();

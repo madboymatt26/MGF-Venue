@@ -1190,6 +1190,7 @@ class MBS_Rest_API {
             $invoice->id, $invoice->id
         ), ARRAY_A );
         return array( 'invoice' => $this->format_admin_invoice( $invoice ),
+            'archived' => MBS_Additional_Charges::is_archived( $invoice ),
             'charge' => array_intersect_key( $meta, array_flip( array( 'related_ref','related_kind','category','notes','automatic_reminders' ) ) ),
             'items' => array_map( array( $this, 'format_admin_invoice_item' ), MBS_Billing_Ledger::get_items( $invoice->id ) ),
             'transactions' => $this->get_safe_invoice_transactions( $invoice->id ), 'documents' => $documents,
@@ -1207,6 +1208,9 @@ class MBS_Rest_API {
         $table = $wpdb->prefix . MBS_INVOICE_TABLE;
         $items = $wpdb->prefix . MBS_INVOICE_ITEM_TABLE;
         $where = array( "i.billing_mode='additional_charge'", "i.document_type='invoice'" ); $args = array();
+        $archive_view = sanitize_key( $request->get_param( 'archive_view' ) ?? 'active' );
+        if ( ! in_array( $archive_view, array( 'active','archived','all' ), true ) ) return new WP_Error( 'invalid_archive_view', 'Choose active, archived or all.', array( 'status'=>400 ) );
+        $where[] = MBS_Additional_Charges::archive_filter_sql( $archive_view );
         $related = sanitize_text_field( $request->get_param( 'related_ref' ) ?? '' );
         $status = sanitize_key( $request->get_param( 'status' ) ?? '' );
         if ( $related ) { $where[] = "EXISTS (SELECT 1 FROM {$items} ci WHERE ci.invoice_id=i.id AND ci.pricing_snapshot_json LIKE %s)"; $args[] = '%"related_ref":' . $wpdb->esc_like( wp_json_encode( $related ) ) . '%'; }
@@ -1218,7 +1222,7 @@ class MBS_Rest_API {
         $args[] = $limit + 1; $args[] = $offset;
         $rows = $wpdb->get_results( $wpdb->prepare( "SELECT i.* FROM {$table} i WHERE " . implode( ' AND ', $where ) . ' ORDER BY i.id DESC LIMIT %d OFFSET %d', $args ) );
         $more = count( $rows ) > $limit; $rows = array_slice( $rows, 0, $limit );
-        return rest_ensure_response( array( 'items' => array_map( function( $invoice ) { return array( 'invoice' => $this->format_admin_invoice( $invoice ), 'payment_state' => MBS_Additional_Charges::payment_state( $invoice ), 'reminders_enabled' => MBS_Additional_Charges::reminders_enabled( $invoice ), 'charge' => array_intersect_key( MBS_Additional_Charges::metadata( $invoice ), array_flip( array( 'related_ref','related_kind','category','automatic_reminders' ) ) ) ); }, $rows ), 'has_more' => $more, 'next_offset' => $more ? $offset + $limit : null ) );
+        return rest_ensure_response( array( 'items' => array_map( function( $invoice ) { return array( 'invoice' => $this->format_admin_invoice( $invoice ), 'archived' => MBS_Additional_Charges::is_archived( $invoice ), 'payment_state' => MBS_Additional_Charges::payment_state( $invoice ), 'reminders_enabled' => MBS_Additional_Charges::reminders_enabled( $invoice ), 'charge' => array_intersect_key( MBS_Additional_Charges::metadata( $invoice ), array_flip( array( 'related_ref','related_kind','category','automatic_reminders' ) ) ) ); }, $rows ), 'has_more' => $more, 'next_offset' => $more ? $offset + $limit : null ) );
     }
 
     public function get_admin_additional_charge( WP_REST_Request $request ) {
@@ -1234,7 +1238,7 @@ class MBS_Rest_API {
         if ( ! is_array( $data ) ) return new WP_Error( 'invalid_charge_request', 'A JSON object is required.', array( 'status' => 400 ) );
         if ( array_diff( array_keys( $data ), array( 'operation','invoice_ref','expected_version','idempotency_key','confirm_send','amount_minor','reason','fields','document_ref','enabled' ) ) ) return new WP_Error( 'unknown_charge_fields', 'Unknown charge request field.', array( 'status' => 400 ) );
         $operation = $data['operation'] ?? '';
-        if ( ! in_array( $operation, array( 'create','edit','issue','send','resend','send_credit','set_reminders','discard','credit' ), true ) ) return new WP_Error( 'invalid_charge_operation', 'Unknown additional-charge operation.', array( 'status' => 400 ) );
+        if ( ! in_array( $operation, array( 'create','edit','issue','send','resend','send_credit','set_reminders','discard','credit','cancel','archive','restore' ), true ) ) return new WP_Error( 'invalid_charge_operation', 'Unknown additional-charge operation.', array( 'status' => 400 ) );
         if ( $operation !== 'create' && ( ! isset( $data['expected_version'] ) || ! is_int( $data['expected_version'] ) || $data['expected_version'] < 1 || empty( $data['invoice_ref'] ) ) ) return new WP_Error( 'charge_precondition_required', 'invoice_ref and a positive integer expected_version are required.', array( 'status' => 400 ) );
         // Sending is a separate explicit operation, never a creation/issue side effect.
         if ( in_array( $operation, array( 'send','resend','send_credit' ), true ) && ( $data['confirm_send'] ?? false ) !== true ) return new WP_Error( 'charge_send_confirmation_required', 'Sending customer mail requires confirm_send=true.', array( 'status' => 400 ) );
@@ -1256,6 +1260,8 @@ class MBS_Rest_API {
             $amount = MBS_Money::minor( $data['amount_minor'] ?? null );
             if ( is_wp_error( $amount ) || $amount <= 0 ) return new WP_Error( 'invalid_credit_amount', 'Credit requires positive integer minor units.', array( 'status' => 400 ) );
             $result = MBS_Additional_Charges::credit( $ref, $amount, sanitize_text_field( $data['reason'] ?? '' ), $version, $data['idempotency_key'] );
+        } elseif ( $operation === 'cancel' ) {
+            $result = MBS_Additional_Charges::cancel( $ref, $version, sanitize_text_field( $data['reason'] ?? '' ), $data['idempotency_key'] );
         } elseif ( $operation === 'set_reminders' ) {
             $result = MBS_Additional_Charges::set_reminders( $ref, $version, $data['enabled'] );
         } elseif ( $operation === 'send_credit' ) {

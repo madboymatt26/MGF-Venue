@@ -15,6 +15,7 @@ function add_query_arg($args,$url){return $url.'?'.http_build_query($args);}
 function wp_json_encode($v){return json_encode($v);}
 function selected($a,$b,$echo=true){$s=$a===$b?'selected':'';if($echo)echo $s;return $s;}
 function current_time($format){return '2026-10-15 22:00:00';}
+function get_option($key,$default=false){return $default;}
 class MBS_Admin {public static function brand_mark(){return '<span>MGF Venue</span>';}}
 class MBS_Bookings {public static function get($ref){return $ref==='MBS-TEST'?(object)array('ref'=>$ref,'name'=>'Synthetic','purpose'=>'Synthetic hire','booking_date'=>'2026-10-14','space'=>'Hall','status'=>'archived'):null;}}
 class MBS_Series {public static function get($ref){return $ref==='SER-SCOUT'?(object)array('scout_use'=>1,'contact_name'=>'Synthetic Scout','purpose'=>'Training','space'=>'Hall'):null;}}
@@ -23,7 +24,7 @@ class MBS_Billing_Ledger {
     public static function balance_minor($invoice){return $invoice->total_minor-$invoice->paid_minor-$invoice->credited_minor;}
 }
 class MBS_Invoice_Payment {public static function is_payable($i){return $i->status==='issued'&&MBS_Billing_Ledger::balance_minor($i)>0;}}
-class ChargeUiDb {public $prefix='fake_';public $calls=0;public function prepare($sql,...$args){return $sql;}public function esc_like($s){return addcslashes($s,'_%');}public function get_results($sql,$mode=null){$this->calls++;return strpos($sql,'mathlin_email_queue')!==false?array():array($GLOBALS['invoice']);}}
+class ChargeUiDb {public $prefix='fake_';public $options='fake_options';public $calls=0;public function prepare($sql,...$args){return $sql;}public function esc_like($s){return addcslashes($s,'_%');}public function get_results($sql,$mode=null){$this->calls++;return strpos($sql,'mathlin_email_queue')!==false?array():array($GLOBALS['invoice']);}}
 $wpdb=new ChargeUiDb();$GLOBALS['manager']=true;
 $GLOBALS['invoice']=(object)array('id'=>1,'invoice_ref'=>'INV-TEST','billing_mode'=>'additional_charge','status'=>'issued','total_minor'=>2500,'paid_minor'=>0,'credited_minor'=>0,'contact_name'=>'Synthetic','contact_organisation'=>'Test','due_at'=>'2026-10-29 23:59:59');
 require MBS_PLUGIN_DIR.'includes/class-money.php';
@@ -37,6 +38,9 @@ ui_assert(strpos(html_entity_decode($html),'page=mathlin-booking&action=view&ref
 ui_assert(strpos($html,'invoice_ref=INV-TEST')!==false,'Invoice opens a dedicated charge detail');
 ui_assert(strpos($html,'Cleaning &lt;unsafe&gt;')!==false,'List description escaped');
 ui_assert(strpos($html,'view=create')!==false,'Creation is a separate explicit view');
+ui_assert(strpos($html,'archive_view=archived')!==false&&strpos($html,'archive_view=all')!==false,'Archived and all views available');
+ui_assert(strpos(MBS_Additional_Charges::archive_filter_sql(),'NOT EXISTS')!==false,'Active excludes archived charges');
+ui_assert(strpos(MBS_Additional_Charges::archive_filter_sql('archived'),'NOT EXISTS')===false,'Archive explicitly selects archived charges');
 $context=MBS_Additional_Charges::related_context('SER-SCOUT');
 ui_assert(strpos($context['url'],'mathlin-scout-nights')!==false,'Scout series links to the Scout detail view');
 $context=MBS_Additional_Charges::related_context('MISSING');ui_assert($context['url']==='','Deleted booking does not create a fake link');

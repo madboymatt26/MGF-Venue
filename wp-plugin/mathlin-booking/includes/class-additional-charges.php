@@ -41,6 +41,48 @@ class MBS_Additional_Charges {
         return $override !== null ? (string) $override === '1' : ! empty( self::metadata( $invoice )['automatic_reminders'] );
     }
 
+    public static function is_archived( $invoice ) {
+        return (string) get_option( 'mbs_charge_archived_' . (int) $invoice->id, '0' ) === '1';
+    }
+
+    public static function can_archive( $invoice ) {
+        return self::is_charge( $invoice ) && in_array( $invoice->status, array( 'void','paid','credited' ), true )
+            && MBS_Billing_Ledger::balance_minor( $invoice ) === 0 && ! self::communications_held( $invoice );
+    }
+
+    /** Staff-list preference only: never delete financial or customer history. */
+    public static function set_archived( $ref, $version, $archived ) {
+        global $wpdb;
+        $invoice = self::lock( $ref, $version );
+        if ( is_wp_error( $invoice ) ) return $invoice;
+        if ( $archived && ! self::can_archive( $invoice ) ) return self::rollback( new WP_Error( 'charge_archive_blocked', 'Discard drafts or cancel outstanding charges first. Resolve any checkout or cash-refund review before archiving.' ) );
+        $option = 'mbs_charge_archived_' . (int) $invoice->id;
+        $stored = $wpdb->query( $wpdb->prepare( "INSERT INTO {$wpdb->options} (option_name,option_value,autoload) VALUES (%s,%s,'no') ON DUPLICATE KEY UPDATE option_value=VALUES(option_value)", $option, $archived ? '1' : '0' ) );
+        $changed = $wpdb->query( $wpdb->prepare( 'UPDATE ' . $wpdb->prefix . MBS_INVOICE_TABLE . ' SET version=version+1,updated_at=%s WHERE id=%d AND version=%d', current_time( 'mysql' ), $invoice->id, $version ) );
+        if ( $stored === false || $changed !== 1 ) return self::rollback( new WP_Error( 'charge_archive_failed', 'Could not change archive preference.' ) );
+        $result = self::finish( $invoice, $archived ? 'additional_charge_archived' : 'additional_charge_restored', $archived ? 'Hidden from active staff list; invoice, customer records and money unchanged.' : 'Restored to active staff list; money unchanged.' );
+        wp_cache_delete( $option, 'options' ); wp_cache_delete( 'notoptions', 'options' );
+        return $result;
+    }
+
+    public static function archive( $ref, $version ) { return self::set_archived( $ref, $version, true ); }
+    public static function restore( $ref, $version ) { return self::set_archived( $ref, $version, false ); }
+
+    /** Full cancellation uses the existing version-locked credit-note service. */
+    public static function cancel( $ref, $version, $reason, $key ) {
+        if ( ! current_user_can( 'mbs_manage_bookings' ) ) return new WP_Error( 'forbidden', 'Booking-manager access required.' );
+        $invoice = MBS_Billing_Ledger::get_invoice( $ref );
+        if ( ! self::is_charge( $invoice ) || ! in_array( $invoice->status, array( 'issued','part_paid','paid','overdue' ), true ) ) return new WP_Error( 'charge_not_cancellable', 'Only an issued, not fully credited charge can be cancelled.' );
+        return self::credit( $ref, (int) $invoice->total_minor - (int) $invoice->credited_minor, $reason, $version, $key );
+    }
+
+    public static function archive_filter_sql( $view = 'active' ) {
+        global $wpdb;
+        $exists = "EXISTS (SELECT 1 FROM {$wpdb->options} ca WHERE ca.option_name=CONCAT('mbs_charge_archived_',i.id) AND ca.option_value='1')";
+        $needs_review = "(i.status NOT IN ('void','paid','credited') OR i.total_minor<>i.paid_minor+i.credited_minor OR EXISTS (SELECT 1 FROM " . $wpdb->prefix . MBS_PAYMENT_RESERVATION_TABLE . " ar WHERE ar.invoice_ref=i.invoice_ref AND ar.status IN ('active','bound','reconciliation_required')))";
+        return $view === 'all' ? '1=1' : ( $view === 'archived' ? $exists : '(NOT ' . $exists . ' OR ' . $needs_review . ')' );
+    }
+
     /** Operational preference only; immutable invoice money/documents stay untouched. */
     public static function set_reminders( $ref, $version, $enabled ) {
         global $wpdb;
@@ -341,6 +383,8 @@ class MBS_Additional_Charges {
         elseif ( $op === 'send_credit' ) $result = self::send_credit( $ref, $version, sanitize_text_field( $data['document_ref'] ?? '' ), $key );
         elseif ( $op === 'set_reminders' ) $result = self::set_reminders( $ref, $version, ! empty( $data['enabled'] ) );
         elseif ( $op === 'discard' ) $result = self::discard( $ref, $version );
+        elseif ( $op === 'archive' || $op === 'restore' ) $result = self::$op( $ref, $version );
+        elseif ( $op === 'cancel' ) $result = self::cancel( $ref, $version, sanitize_text_field( $data['reason'] ?? '' ), $key );
         elseif ( $op === 'credit' ) {
             $amount = MBS_Money::from_decimal_string( (string) ( $data['credit_amount'] ?? '' ) );
             $result = is_wp_error( $amount ) ? $amount : self::credit( $ref, $amount, sanitize_text_field( $data['reason'] ?? '' ), $version, $key );
@@ -369,10 +413,11 @@ class MBS_Additional_Charges {
         return array('url'=>'','label'=>$ref ?: 'Association missing','summary'=>'Original booking unavailable; invoice retained.');
     }
 
-    private static function list_rows( $related, $search = '', $status = '', $page = 1, $limit = 50 ) {
+    private static function list_rows( $related, $search = '', $status = '', $page = 1, $limit = 50, $archive_view = 'active' ) {
         global $wpdb;
         $table=$wpdb->prefix.MBS_INVOICE_TABLE; $items=$wpdb->prefix.MBS_INVOICE_ITEM_TABLE;
         $where=array("i.billing_mode='additional_charge'","i.document_type='invoice'");$args=array();
+        $where[]=self::archive_filter_sql($archive_view);
         if($related){$where[]="EXISTS (SELECT 1 FROM {$items} ci WHERE ci.invoice_id=i.id AND ci.pricing_snapshot_json LIKE %s)";$args[]='%"related_ref":'.$wpdb->esc_like(wp_json_encode($related)).'%';}
         if($search!==''){$where[]='(i.invoice_ref LIKE %s OR i.contact_name LIKE %s OR i.contact_email LIKE %s OR EXISTS (SELECT 1 FROM '.$items.' si WHERE si.invoice_id=i.id AND (si.description LIKE %s OR si.pricing_snapshot_json LIKE %s)))';$like='%'.$wpdb->esc_like($search).'%';for($n=0;$n<5;$n++)$args[]=$like;}
         if($status==='overdue'){$where[]="i.status IN ('issued','part_paid','overdue') AND i.total_minor>i.paid_minor+i.credited_minor AND i.due_at<%s";$args[]=current_time('mysql');}
@@ -390,7 +435,7 @@ class MBS_Additional_Charges {
 
     public static function render_related( $ref ) {
         if(!current_user_can('mbs_manage_bookings'))return;
-        $rows=self::list_rows($ref,'','',1,10);
+        $rows=self::list_rows($ref,'','',1,10,'all');
         echo '<section class="nms-card mbs-related-charges"><div class="nms-card-header"><h2>Additional charges</h2></div><div class="mbs-charge-card-body"><p class="nms-muted">Separate from the original hire invoice and access arrangements.</p><p><a class="button button-primary" href="'.esc_url(self::admin_url(array('view'=>'create','related_ref'=>$ref))).'">Add additional charge</a> <a class="button" href="'.esc_url(self::admin_url(array('related_ref'=>$ref))).'">View all linked charges</a></p>';
         if(!$rows)echo '<p>No additional charges for this booking.</p>';
         else{echo '<div class="mbs-series-table-wrap"><table class="widefat striped"><thead><tr><th>Invoice</th><th>Description</th><th>Amount</th><th>Balance</th><th>Status</th></tr></thead><tbody>';
@@ -423,7 +468,8 @@ class MBS_Additional_Charges {
         if($related){$context=self::related_context($related);echo '<p class="mbs-charge-context">For '.($context['url']?'<a href="'.esc_url($context['url']).'">'.esc_html($context['label']).'</a>':esc_html($context['label'])).' — '.esc_html($context['summary']).'</p>';}
         if($view!=='create'&&!$selected_ref){
             $search=sanitize_text_field(wp_unslash($_GET['charge_search']??''));$filter_status=sanitize_key($_GET['charge_status']??'');$page=max(1,absint($_GET['charge_page']??1));
-            $rows=self::list_rows($related,$search,$filter_status,$page);$has_next=count($rows)>50;$rows=array_slice($rows,0,50);
+            $archive_view=sanitize_key($_GET['archive_view']??'active');if(!in_array($archive_view,array('active','archived','all'),true))$archive_view='active';
+            $rows=self::list_rows($related,$search,$filter_status,$page,50,$archive_view);$has_next=count($rows)>50;$rows=array_slice($rows,0,50);
             include MBS_PLUGIN_DIR.'admin/views/additional-charges.php';echo '</div>';return;
         }
         if($view==='create'){
@@ -460,6 +506,11 @@ class MBS_Additional_Charges {
             }
             if ( (int) $invoice->paid_minor + (int) $invoice->credited_minor > (int) $invoice->total_minor ) echo '<p><strong>Cash refund review required: ' . esc_html( MBS_Money::format( (int) $invoice->paid_minor + (int) $invoice->credited_minor - (int) $invoice->total_minor ) ) . '.</strong> Credit alone does not return money.</p>';
             echo '<div class="mbs-charge-action-grid">';
+            if(self::is_archived($invoice)){
+                self::form_start($invoice);echo '<p>Archived from staff lists only. Customer invoice records are retained.</p><button class="button" name="operation" value="restore">Restore charge</button></form>';
+            }elseif(self::can_archive($invoice)){
+                self::form_start($invoice);echo '<p>Hide from the active staff list without deleting invoice history or changing money.</p><button class="button" name="operation" value="archive">Archive charge</button></form>';
+            }else{echo '<p>To archive, discard a draft or cancel the outstanding charge first. Resolve any checkout or cash-refund review.</p>';}
             if ( $invoice->status === 'draft' ) {
                 self::form_start( $invoice, 'mbs-charge-edit-form' );
                 foreach ( array( 'contact_name','contact_email' ) as $field ) self::field( $field, $field, $invoice->$field, $field === 'contact_email' ? 'email' : 'text' );
@@ -477,7 +528,8 @@ class MBS_Additional_Charges {
                 self::form_start( $invoice ); self::field( 'payment_amount', 'Offline payment received (GBP)' ); self::field( 'reason', 'Payment reference / note' ); echo '<button class="button" name="operation" value="manual_payment">Confirm money received</button></form>';
             }
             if ( in_array( $invoice->status, array( 'issued','part_paid','paid','overdue','credited' ), true ) && (int) $invoice->total_minor > (int) $invoice->credited_minor ) {
-                self::form_start( $invoice ); self::field( 'credit_amount', 'Credit amount (GBP)' ); self::field( 'reason', 'Credit reason' ); echo '<p>A credit note is not a cash refund. Refund actual money separately through the original payment provider.</p><button class="button" name="operation" value="credit">Confirm credit note</button></form>';
+                self::form_start( $invoice ); self::field( 'reason', 'Cancellation reason' ); echo '<p>Cancel the full remaining charge by issuing a credit note for '.esc_html(MBS_Money::format((int)$invoice->total_minor-(int)$invoice->credited_minor)).'. This retains the original invoice and does not send an email or refund money. Any money already paid needs a separate refund review.</p><button class="button" name="operation" value="cancel">Cancel charge — issue full credit note</button></form>';
+                self::form_start( $invoice ); self::field( 'credit_amount', 'Partial credit amount (GBP)' ); self::field( 'reason', 'Credit reason' ); echo '<p>Reduce only part of the charge. A credit note is not a cash refund.</p><button class="button" name="operation" value="credit">Issue partial credit note</button></form>';
             }
             echo '</div>';
             $state = self::payment_state( $invoice );

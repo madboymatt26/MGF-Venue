@@ -29,6 +29,10 @@ class MBS_Billing_Ledger {
 class MBS_Hirer_Portal { public static function invoice_transactions($id){return array();} }
 class MBS_Additional_Charges {
     public static $calls=array();
+    public static function is_archived($i){return false;}
+    public static function archive($r,$v){return self::result('archive');}
+    public static function restore($r,$v){return self::result('restore');}
+    public static function cancel($r,$v,$reason,$key){return self::result('cancel');}
     public static function payment_state($i){return array('status'=>'none');}
     public static function reminders_enabled($i){return false;}
     public static function delivery_history($i){return array();}
@@ -69,7 +73,7 @@ $edit=array('operation'=>'edit','invoice_ref'=>'INV-TEST','expected_version'=>2,
 api_assert($api->mutate_admin_additional_charge(new WP_REST_Request($edit))->get_error_code()==='immutable_charge_association','Cannot relink a draft');
 $create=array('operation'=>'create','idempotency_key'=>'create-test-key','fields'=>array('automatic_reminders'=>'false'));
 api_assert($api->mutate_admin_additional_charge(new WP_REST_Request($create))->get_error_code()==='invalid_reminder_flag','String false cannot opt in reminders');
-foreach(array('issue','discard','credit') as $op){
+foreach(array('issue','discard','credit','archive','restore','cancel') as $op){
     $data=array('operation'=>$op,'invoice_ref'=>'INV-TEST','expected_version'=>2,'idempotency_key'=>'test-action-'.$op,'amount_minor'=>'2500','reason'=>'Synthetic');
     $r=$api->mutate_admin_additional_charge(new WP_REST_Request($data));
     api_assert(!is_wp_error($r)&&$r['email_queued']===false,'No email from '.$op);

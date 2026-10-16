@@ -133,9 +133,44 @@ wp_set_current_user(1);
 echo "OK: typed REST creation, issue/replay, explicit-send guard, safe detail/HTML/PDF reads and permission gates.\n";
 
 // Disposable browser fixtures only; never run against a real venue site.
+$archive_draft=MBS_Additional_Charges::create($data,wp_generate_uuid4());extra_it_assert($archive_draft,'Create archive test draft');
+extra_it_assert(is_wp_error(MBS_Additional_Charges::archive($archive_draft->invoice_ref,$archive_draft->version)),'Live draft cannot be hidden');
+$archive_issued=MBS_Additional_Charges::issue($archive_draft->invoice_ref,$archive_draft->version);extra_it_assert($archive_issued,'Issue cancellation fixture');
+extra_it_assert(is_wp_error(MBS_Additional_Charges::archive($archive_issued->invoice_ref,$archive_issued->version)),'Outstanding charge cannot be hidden');
+extra_it_assert(is_wp_error(MBS_Additional_Charges::cancel($archive_issued->invoice_ref,$archive_issued->version,'',wp_generate_uuid4())),'Cancellation requires reason');
+$cancel_body=array('operation'=>'cancel','invoice_ref'=>$archive_issued->invoice_ref,'expected_version'=>(int)$archive_issued->version,'reason'=>'Synthetic cancellation','idempotency_key'=>wp_generate_uuid4());
+$cancel_response=extra_rest('POST','',$cancel_body);extra_it_assert($cancel_response->get_status()<400,'REST full cancel succeeds');
+$cancelled=MBS_Billing_Ledger::get_invoice($archive_issued->invoice_ref);
+extra_it_assert($cancelled->status==='credited'&&MBS_Billing_Ledger::balance_minor($cancelled)===0,'Full cancellation leaves zero balance');
+extra_it_assert(count(MBS_Additional_Charges::documents($cancelled))===2,'Original invoice and credit PDF retained');
+extra_it_assert(count(MBS_Additional_Charges::delivery_history($cancelled))===0,'Cancellation sends no email');
+extra_it_assert(extra_rest('POST','',$cancel_body)->get_data()['idempotent_replay'],'REST cancel replay creates no duplicate credit');
+$archive_body=array('operation'=>'archive','invoice_ref'=>$cancelled->invoice_ref,'expected_version'=>(int)$cancelled->version,'idempotency_key'=>wp_generate_uuid4());
+$archived_response=extra_rest('POST','',$archive_body);extra_it_assert($archived_response->get_status()<400&&$archived_response->get_data()['archived'],'Archive through REST');
+$archived=MBS_Billing_Ledger::get_invoice($cancelled->invoice_ref);
+extra_it_assert(is_wp_error(MBS_Additional_Charges::restore($archived->invoice_ref,$cancelled->version)),'Stale restore rejected');
+foreach(array('active'=>false,'archived'=>true,'all'=>true) as $archive_view=>$expected){
+    $list_request=new WP_REST_Request('GET','/mathlin/v1/admin/additional-charges');$list_request->set_param('archive_view',$archive_view);$list_request->set_param('limit',200);
+    $list_data=rest_do_request($list_request)->get_data();$refs=array_column(array_column($list_data['items'],'invoice'),'invoice_ref');
+    extra_it_assert(in_array($archived->invoice_ref,$refs,true)===$expected,'Correct archive visibility: '.$archive_view);
+}
+$restored=MBS_Additional_Charges::restore($archived->invoice_ref,$archived->version);extra_it_assert($restored&&!MBS_Additional_Charges::is_archived($restored),'Restore reversible');
+extra_it_assert((int)$restored->credited_minor===2500&&(int)$restored->paid_minor===0&&MBS_Bookings::get($booking_ref)->updated_at===$before->updated_at,'Archive/restore leaves money and booking untouched');
+extra_it_assert(is_wp_error(MBS_Additional_Charges::archive($refund_replay['invoice']->invoice_ref,$refund_replay['invoice']->version)),'Cash refund review cannot be archived');
+$discard_draft=MBS_Additional_Charges::create($data,wp_generate_uuid4());$discarded=MBS_Additional_Charges::discard($discard_draft->invoice_ref,$discard_draft->version);
+extra_it_assert(MBS_Additional_Charges::archive($discarded->invoice_ref,$discarded->version),'Discarded draft can be archived');
+echo "OK: cancel/archive/restore REST lifecycle, replay, stale version, visibility and financial history guards.\n";
+$reopen_draft=MBS_Additional_Charges::create($data,wp_generate_uuid4());$reopen_issued=MBS_Additional_Charges::issue($reopen_draft->invoice_ref,$reopen_draft->version);
+$reopen_payment=MBS_Invoice_Payment::record_gateway_payment($reopen_issued->invoice_ref,'25.00',99900003);extra_it_assert($reopen_payment,'Pay archive fixture');
+extra_it_assert(MBS_Additional_Charges::archive($reopen_issued->invoice_ref,$reopen_payment['invoice']->version),'Paid invoice archived');
+$reopen_refund=MBS_Invoice_Payment::record_gateway_refund($reopen_issued->invoice_ref,'25.00',99900003,99900004);extra_it_assert($reopen_refund,'Later refund of archived charge');
+$active_request=new WP_REST_Request('GET','/mathlin/v1/admin/additional-charges');$active_request->set_param('limit',200);
+$active_refs=array_column(array_column(rest_do_request($active_request)->get_data()['items'],'invoice'),'invoice_ref');
+extra_it_assert(in_array($reopen_issued->invoice_ref,$active_refs,true),'Archived charge with reopened balance resurfaces for review');
+
 $browser_user = username_exists('extra-browser');
 if (!$browser_user) $browser_user=wp_insert_user(array('user_login'=>'extra-browser','user_pass'=>'integration-only','user_email'=>$data['contact_email'],'role'=>'subscriber'));
 extra_it_assert($browser_user,'Create synthetic browser owner');
 $page_id=wp_insert_post(array('post_title'=>'Additional charge integration portal','post_name'=>'extra-integration-portal','post_content'=>'[mathlin_manage]','post_status'=>'publish','post_type'=>'page'));
 extra_it_assert($page_id,'Create isolated portal page');
-update_option('mbs_extra_browser_fixture',array('booking_ref'=>$booking_ref,'invoice_ref'=>$api_issued['invoice_ref'],'credit_ref'=>$cn,'portal_url'=>get_permalink($page_id)),false);
+update_option('mbs_extra_browser_fixture',array('booking_ref'=>$booking_ref,'invoice_ref'=>$api_issued['invoice_ref'],'archive_ref'=>$discarded->invoice_ref,'credit_ref'=>$cn,'portal_url'=>get_permalink($page_id)),false);

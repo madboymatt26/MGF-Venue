@@ -11,7 +11,7 @@ $InformationPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 
 $script:ServerName = 'mgf-venue'
-$script:ServerVersion = '0.4.0'
+$script:ServerVersion = '0.4.1'
 $script:DefaultProtocolVersion = '2025-06-18'
 
 function Get-PropertyValue {
@@ -420,6 +420,7 @@ $script:Tools = @(
         description = 'Read booking/series-linked extra charges, including staff-only drafts, with pagination. No payment links or customer email are generated.'
         inputSchema = @{ type = 'object'; properties = @{
             related_ref = @{ type = 'string' }; status = @{ type = 'string'; enum = @('draft','issued','part_paid','paid','overdue','credited','void','payment_review') }
+            archive_view = @{ type = 'string'; enum = @('active','archived','all'); default = 'active'; description = 'Staff archive visibility; financial status remains separate.' }
             limit = @{ type = 'integer'; minimum = 1; maximum = 200 }; offset = @{ type = 'integer'; minimum = 0 }
         }; additionalProperties = $false }
         annotations = @{ readOnlyHint = $true; destructiveHint = $false; idempotentHint = $true; openWorldHint = $true }
@@ -436,14 +437,14 @@ $script:Tools = @(
         title = 'Manage an additional charge'
         description = 'Explicitly create/edit a staff draft, issue its separate invoice, send/resend an invoice or credit PDF, change post-issue reminders, discard a draft or issue a credit. Read current state first. Non-create actions require invoice_ref and expected_version. All require a stable idempotency_key. Issue never sends email; send/resend/send_credit require customer-send approval and confirm_send=true. send_credit requires document_ref; set_reminders requires enabled boolean and does not reset the one-reminder limit. Credits do not refund cash. No action changes the original hire.'
         inputSchema = @{ type = 'object'; properties = @{
-            operation = @{ type = 'string'; enum = @('create','edit','issue','send','resend','send_credit','set_reminders','discard','credit') }
+            operation = @{ type = 'string'; enum = @('create','edit','issue','send','resend','send_credit','set_reminders','discard','credit','cancel','archive','restore') }
             document_ref = @{ type = 'string'; description = 'Credit note reference for send_credit.' }
             enabled = @{ type = 'boolean'; description = 'Required for set_reminders. Does not reset an already sent reminder.' }
             invoice_ref = @{ type = 'string' }; expected_version = @{ type = 'integer'; minimum = 1 }
             idempotency_key = @{ type = 'string'; minLength = 8; maxLength = 128 }
             confirm_send = @{ type = 'boolean'; default = $false }
             amount_minor = @{ type = 'string'; pattern = '^[0-9]+$'; description = 'Positive credit amount in pence, e.g. 2500.' }
-            reason = @{ type = 'string'; description = 'Required for credit.' }
+            reason = @{ type = 'string'; description = 'Required for credit or cancel. Cancel credits the full uncredited amount, never refunds cash or emails automatically. Archive only hides settled/discarded charges from staff lists; restore reverses that.' }
             fields = @{ type = 'object'; properties = @{
                 related_ref = @{ type = 'string'; description = 'Required for create; booking or series reference.' }
                 category = @{ type = 'string'; enum = @('cleaning','damage','other') }
@@ -652,7 +653,7 @@ function Invoke-MgfVenueTool {
         }
         'list_additional_charges' {
             $values = @{}
-            foreach ($key in @('related_ref','status','limit','offset')) { $value = Get-PropertyValue $Arguments $key $null; if ($null -ne $value) { $values[$key] = $value } }
+            foreach ($key in @('related_ref','status','limit','offset','archive_view')) { $value = Get-PropertyValue $Arguments $key $null; if ($null -ne $value) { $values[$key] = $value } }
             $query = ConvertTo-QueryString $values
             $path = '/admin/additional-charges'; if ($query) { $path += "?${query}" }
             return Invoke-VenueApi -Method GET -Path $path
