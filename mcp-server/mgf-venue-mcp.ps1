@@ -6,6 +6,10 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $InformationPreference = 'SilentlyContinue'
 
+# Preserve the deployed Windows STDIO fix: metadata contains non-ASCII text.
+[Console]::InputEncoding = [Text.UTF8Encoding]::new($false)
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+
 $script:ServerName = 'mgf-venue'
 $script:ServerVersion = '0.4.0'
 $script:DefaultProtocolVersion = '2025-06-18'

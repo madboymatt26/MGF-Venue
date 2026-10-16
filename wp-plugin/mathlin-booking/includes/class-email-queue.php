@@ -22,10 +22,26 @@ class MBS_Email_Queue {
 
     public function init() {
         add_action( 'mbs_process_email_queue', array( $this, 'process_queue' ) );
-
-        if ( ! wp_next_scheduled( 'mbs_process_email_queue' ) ) {
-            wp_schedule_event( time() + 300, 'hourly', 'mbs_process_email_queue' );
+        add_filter( 'cron_schedules', array( $this, 'cron_schedules' ) );
+        $event = wp_get_scheduled_event( 'mbs_process_email_queue' );
+        if ( $event && $event->schedule !== 'mbs_email_five_minutes' ) {
+            wp_clear_scheduled_hook( 'mbs_process_email_queue' );
+            $event = false;
         }
+        if ( ! $event ) {
+            wp_schedule_event( time() + 60, 'mbs_email_five_minutes', 'mbs_process_email_queue' );
+        }
+    }
+
+    public function cron_schedules( $schedules ) {
+        $schedules['mbs_email_five_minutes'] = array( 'interval' => 300, 'display' => 'Every five minutes (MGF email retries)' );
+        return $schedules;
+    }
+
+    /** Dispatch exactly one committed outbox row, never an unrelated batch. */
+    public static function dispatch_message( $message_id ) {
+        if ( ! is_int( $message_id ) || $message_id < 1 ) return new WP_Error( 'invalid_email_id', 'A positive outbox message ID is required.' );
+        return ( new self() )->process_queue( $message_id );
     }
 
     public static function deactivate() {
@@ -154,17 +170,19 @@ class MBS_Email_Queue {
      * @param int    $limit      Maximum rows to claim.
      * @return array Claimed row objects.
      */
-    public static function claim_pending_batch( $worker_id, $limit = 10 ) {
+    public static function claim_pending_batch( $worker_id, $limit = 10, $message_id = 0 ) {
         global $wpdb;
         $table = self::table();
         $now = current_time( 'mysql' );
         $lease_expires = wp_date( 'Y-m-d H:i:s', time() + self::LEASE_SECONDS );
+        $target = $message_id > 0 ? $wpdb->prepare( ' AND id=%d', $message_id ) : '';
 
         // Claim rows atomically
         $wpdb->query( $wpdb->prepare(
             "UPDATE {$table}
              SET status = 'processing', claimed_at = %s, lease_expires_at = %s, worker_id = %s
              WHERE status = 'pending' AND (next_retry IS NULL OR next_retry <= %s)
+             {$target}
              ORDER BY created_at ASC LIMIT %d",
             $now, $lease_expires, sanitize_text_field( $worker_id ), $now, (int) $limit
         ) );
@@ -240,18 +258,19 @@ class MBS_Email_Queue {
     /**
      * Recover stale processing leases (worker crashed/timed out).
      */
-    public static function recover_stale_leases() {
+    public static function recover_stale_leases( $message_id = 0 ) {
         global $wpdb;
         $table = self::table();
         $now = current_time( 'mysql' );
 
+        $target = $message_id > 0 ? $wpdb->prepare( ' AND id=%d', $message_id ) : '';
         $recovered = $wpdb->query( $wpdb->prepare(
             "UPDATE {$table}
              SET status = 'pending', attempts = attempts + 1,
                  last_error = 'Worker lease expired — released for retry.',
                  claimed_at = NULL, lease_expires_at = NULL, worker_id = NULL,
                  next_retry = %s
-             WHERE status = 'processing' AND lease_expires_at IS NOT NULL AND lease_expires_at < %s",
+             WHERE status = 'processing' AND lease_expires_at IS NOT NULL AND lease_expires_at < %s {$target}",
             $now, $now
         ) );
 
@@ -263,17 +282,19 @@ class MBS_Email_Queue {
     // ── Queue Processing (Cron Worker) ─────────────────────────────────────────
 
     /**
-     * Process the email queue — called hourly by WP-Cron.
+     * Process the queue on its retry schedule, or exactly one committed row.
      * Handles both legacy file-path entries and new attachment_meta entries.
      */
-    public function process_queue() {
+    public function process_queue( $message_id = 0 ) {
+        global $wpdb;
+        if ( ! is_int( $message_id ) || $message_id < 0 ) return new WP_Error( 'invalid_email_id', 'Invalid outbox message ID.' );
         // First recover any stale leases from crashed workers
-        self::recover_stale_leases();
+        self::recover_stale_leases( $message_id );
 
         $worker_id = 'mbs-' . substr( md5( uniqid( '', true ) ), 0, 12 );
-        $claimed = self::claim_pending_batch( $worker_id, 20 );
+        $claimed = self::claim_pending_batch( $worker_id, $message_id ? 1 : 20, $message_id );
 
-        if ( empty( $claimed ) ) return;
+        if ( empty( $claimed ) ) return array( 'sent' => 0, 'failed' => 0 );
 
         $sent = 0;
         $failed = 0;
@@ -406,7 +427,8 @@ class MBS_Email_Queue {
             error_log( "[MGF Venue] Email queue: {$sent} sent, {$failed} failed/retrying." );
         }
 
-        self::cleanup();
+        if ( ! $message_id ) self::cleanup();
+        return array( 'sent' => $sent, 'failed' => $failed );
     }
 
     /**

@@ -14,6 +14,22 @@
 .nms-admin { max-width: 1400px; }
 
 /* Stats */
+.mbs-charge-breadcrumbs { margin: 14px 0; }
+.mbs-charge-context { padding: 12px 16px; background: #f5f0ff; border-left: 3px solid var(--scout-purple); }
+.mbs-charge-card-body { padding: 1.25rem 1.5rem; }
+.mbs-charge-table { min-width: 1080px; table-layout: auto; }
+.mbs-charge-table th, .mbs-charge-table td { vertical-align: top; }
+.mbs-charge-table td:nth-child(1), .mbs-charge-table td:nth-child(3) { min-width: 175px; max-width: 280px; }
+.mbs-charge-table td:nth-child(4), .mbs-charge-table td:nth-child(5), .mbs-charge-table td:nth-child(6) { white-space: nowrap; }
+.mbs-charge-editor > form, .mbs-charge-action-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(260px,1fr)); gap: 16px; align-items: start; }
+.mbs-charge-editor .mbs-charge-field, .mbs-charge-action-grid .mbs-charge-field { margin: 0 0 12px; }
+.mbs-charge-field input, .mbs-charge-editor textarea { width: 100%; max-width: 100%; }
+.mbs-charge-editor-footer { grid-column: 1 / -1; }
+.mbs-charge-action-grid { margin: 18px 0; }
+.mbs-charge-action-grid > form { padding: 18px; border: 1px solid var(--border); background: #faf9fc; border-radius: 8px; }
+.mbs-charge-action-grid > .mbs-charge-edit-form { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit,minmax(260px,1fr)); gap: 16px; }
+.mbs-related-charges { margin: 18px 0; }
+@media(max-width:600px) { .mbs-charge-card-body { padding: 14px; } .mbs-charge-editor > form, .mbs-charge-action-grid { grid-template-columns: 1fr; } }
 .nms-stats-row {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));

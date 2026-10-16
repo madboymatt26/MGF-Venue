@@ -100,6 +100,7 @@ $status_label = static function ( $row, $summary ) use ( $today ) {
         $detail_label = $status_label( $series, $detail_summary );
     ?>
         <p><a href="<?php echo esc_url( admin_url( 'admin.php?page=mathlin-scout-nights' ) ); ?>">← All Scout series</a></p>
+        <?php MBS_Additional_Charges::render_related($series->series_ref); ?>
 
         <div class="mbs-series-detail-grid">
             <section class="postbox mbs-series-panel">
