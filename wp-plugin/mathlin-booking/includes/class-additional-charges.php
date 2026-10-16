@@ -79,7 +79,8 @@ class MBS_Additional_Charges {
     public static function archive_filter_sql( $view = 'active' ) {
         global $wpdb;
         $exists = "EXISTS (SELECT 1 FROM {$wpdb->options} ca WHERE ca.option_name=CONCAT('mbs_charge_archived_',i.id) AND ca.option_value='1')";
-        return $view === 'all' ? '1=1' : ( $view === 'archived' ? $exists : 'NOT ' . $exists );
+        $needs_review = "(i.status NOT IN ('void','paid','credited') OR i.total_minor<>i.paid_minor+i.credited_minor OR EXISTS (SELECT 1 FROM " . $wpdb->prefix . MBS_PAYMENT_RESERVATION_TABLE . " ar WHERE ar.invoice_ref=i.invoice_ref AND ar.status IN ('active','bound','reconciliation_required')))";
+        return $view === 'all' ? '1=1' : ( $view === 'archived' ? $exists : '(NOT ' . $exists . ' OR ' . $needs_review . ')' );
     }
 
     /** Operational preference only; immutable invoice money/documents stay untouched. */

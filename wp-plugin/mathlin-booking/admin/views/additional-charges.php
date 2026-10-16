@@ -40,7 +40,7 @@
         <td data-label="Paid"><?php echo esc_html(MBS_Money::format((int)$invoice->paid_minor)); ?></td>
         <td data-label="Balance"><strong><?php echo esc_html($invoice->status==='draft'?'—':MBS_Money::format(MBS_Billing_Ledger::balance_minor($invoice))); ?></strong></td>
         <td data-label="Due"><?php echo esc_html(substr($invoice->due_at,0,10)); ?></td>
-        <td data-label="Status"><span class="mbs-series-badge"><?php echo esc_html(self::status_label($invoice)); ?></span><?php if(self::is_archived($invoice)): ?><br><small>Archived</small><?php endif; ?></td>
+        <td data-label="Status"><span class="mbs-series-badge"><?php echo esc_html(self::status_label($invoice)); ?></span><?php if(self::is_archived($invoice)): ?><br><small><?php echo self::can_archive($invoice)?'Archived':'Archived — needs attention'; ?></small><?php endif; ?></td>
         <td data-label="Email"><span title="Accepted means mail-server acceptance, not proof of inbox delivery."><?php echo esc_html($email_status); ?></span></td>
         <td data-label="Actions"><a class="button button-small" href="<?php echo esc_url($detail); ?>">View charge</a></td>
     </tr><?php endforeach; ?>

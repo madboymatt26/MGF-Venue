@@ -160,6 +160,13 @@ extra_it_assert(is_wp_error(MBS_Additional_Charges::archive($refund_replay['invo
 $discard_draft=MBS_Additional_Charges::create($data,wp_generate_uuid4());$discarded=MBS_Additional_Charges::discard($discard_draft->invoice_ref,$discard_draft->version);
 extra_it_assert(MBS_Additional_Charges::archive($discarded->invoice_ref,$discarded->version),'Discarded draft can be archived');
 echo "OK: cancel/archive/restore REST lifecycle, replay, stale version, visibility and financial history guards.\n";
+$reopen_draft=MBS_Additional_Charges::create($data,wp_generate_uuid4());$reopen_issued=MBS_Additional_Charges::issue($reopen_draft->invoice_ref,$reopen_draft->version);
+$reopen_payment=MBS_Invoice_Payment::record_gateway_payment($reopen_issued->invoice_ref,'25.00',99900003);extra_it_assert($reopen_payment,'Pay archive fixture');
+extra_it_assert(MBS_Additional_Charges::archive($reopen_issued->invoice_ref,$reopen_payment['invoice']->version),'Paid invoice archived');
+$reopen_refund=MBS_Invoice_Payment::record_gateway_refund($reopen_issued->invoice_ref,'25.00',99900003,99900004);extra_it_assert($reopen_refund,'Later refund of archived charge');
+$active_request=new WP_REST_Request('GET','/mathlin/v1/admin/additional-charges');$active_request->set_param('limit',200);
+$active_refs=array_column(array_column(rest_do_request($active_request)->get_data()['items'],'invoice'),'invoice_ref');
+extra_it_assert(in_array($reopen_issued->invoice_ref,$active_refs,true),'Archived charge with reopened balance resurfaces for review');
 
 $browser_user = username_exists('extra-browser');
 if (!$browser_user) $browser_user=wp_insert_user(array('user_login'=>'extra-browser','user_pass'=>'integration-only','user_email'=>$data['contact_email'],'role'=>'subscriber'));

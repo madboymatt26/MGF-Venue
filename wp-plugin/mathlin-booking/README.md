@@ -11,7 +11,9 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 Staff lists default to Active, with Archived and All charges views. Open a charge
 to Archive/Restore it; only settled or discarded charges without checkout or
 cash-refund review can be archived. This staff-only preference preserves customer
-records, invoice/credit PDFs, reporting and the original booking. Cancel charge
+records, invoice/credit PDFs, reporting and the original booking.
+If later payment/refund changes require attention, an archived charge reappears
+in the active list rather than hiding the problem. Cancel charge
 issues a full credit note with a required reason, without emailing or refunding
 cash; partial credits remain a separate action. REST/MCP expose cancel, archive,
 restore and archive_view. Source MCP bridge 0.4.1 needs a separate refresh/restart.
