@@ -17,7 +17,7 @@
 </div>
 <div class="mbs-series-table-wrap mbs-charge-table-wrap">
 <table class="wp-list-table widefat striped nms-bookings-table mbs-charge-table">
-    <thead><tr><th>Invoice / description</th><th>Hirer</th><th>Original booking</th><th>Amount</th><th>Paid</th><th>Balance</th><th>Due</th><th>Status</th><th>Email</th><th>Actions</th></tr></thead><tbody>
+    <thead><tr><th scope="col">Invoice / description</th><th scope="col">Hirer</th><th scope="col">Original booking</th><th scope="col">Amount</th><th scope="col">Paid</th><th scope="col">Balance</th><th scope="col">Due</th><th scope="col">Status</th><th scope="col">Email</th><th scope="col">Actions</th></tr></thead><tbody>
     <?php if(!$rows): ?><tr><td colspan="10"><div class="nms-empty">No additional charges match this filter.</div></td></tr><?php endif; ?>
     <?php foreach($rows as $invoice):
         $meta=self::metadata($invoice);$items=MBS_Billing_Ledger::get_items($invoice->id);$item=$items?$items[0]:null;
