@@ -517,7 +517,10 @@ class MBS_Rest_API {
             return new WP_Error( 'date_range_too_long', 'A booking cannot span more than 367 days.', array( 'status' => 400 ) );
         }
         if ( $repeat_until ) {
-            $recurrence_check = MBS_Recurrence::weekly_dates( array( 'booking_date' => $date_from, 'booking_date_end' => $date_to ), $repeat_until );
+            $recurrence_data = array( 'booking_date' => $date_from, 'booking_date_end' => $date_to );
+            if ( $request->get_param( 'recurrence_pattern' ) ) $recurrence_data['recurrence_pattern'] = sanitize_key( $request->get_param( 'recurrence_pattern' ) );
+            if ( $request->get_param( 'recurrence_dates' ) ) $recurrence_data['recurrence_dates'] = $request->get_param( 'recurrence_dates' );
+            $recurrence_check = MBS_Recurrence::dates( $recurrence_data, $repeat_until );
             if ( is_wp_error( $recurrence_check ) ) {
                 $recurrence_check->add_data( array( 'status' => 400 ) );
                 return $recurrence_check;
@@ -579,6 +582,10 @@ class MBS_Rest_API {
             'booking_span'     => sanitize_key( $request->get_param( 'booking_span' ) ?: 'daily' ),
             'campsite_exception' => rest_sanitize_boolean( $request->get_param( 'campsite_exception' ) ),
         );
+        if ( $repeat_until ) {
+            $data['recurrence_pattern'] = sanitize_key( $request->get_param( 'recurrence_pattern' ) ?: 'weekly' );
+            $data['recurrence_dates'] = $request->get_param( 'recurrence_dates' ) ?: '';
+        }
 
         $custom_amount = $request->get_param( 'custom_amount' );
         if ( $custom_amount !== null && $custom_amount !== '' ) {

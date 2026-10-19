@@ -1,6 +1,7 @@
 <?php if ( ! defined( 'ABSPATH' ) ) exit; $free_campsite = class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled(); ?>
 <div class="wrap mbs-admin">
     <h1 class="wp-heading-inline"><?php echo MBS_Admin::brand_mark(); ?>MGF Venue</h1>
+    <a class="page-title-action" href="<?php echo esc_url( admin_url( 'admin.php?page=mathlin-add-booking' ) ); ?>">Add booking</a>
     <?php if ( MBS_Payment_Features::enabled( 'additional_charges' ) ) : ?><a class="page-title-action" href="<?php echo esc_url(MBS_Additional_Charges::admin_url()); ?>">Additional charges</a><?php endif; ?>
     <hr class="wp-header-end">
     <nav aria-label="Booking pages" style="display:flex;gap:12px;align-items:center;margin:16px 0;">

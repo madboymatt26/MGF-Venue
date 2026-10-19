@@ -524,7 +524,12 @@ class MBS_Bookings {
         $insert['is_public'] = ! empty( $data['is_public'] ) ? 1 : 0;
 
         // Link to logged-in user if applicable
-        if ( is_user_logged_in() ) {
+        if ( $trusted_admin_context ) {
+            // Staff act for the contact, not as the hirer. Never expose staff-created
+            // reservations in the operator's customer portal by attaching their ID.
+            $contact_user = get_user_by( 'email', $insert['email'] );
+            $insert['user_id'] = $contact_user ? (int) $contact_user->ID : 0;
+        } elseif ( is_user_logged_in() ) {
             $insert['user_id'] = get_current_user_id();
         }
 

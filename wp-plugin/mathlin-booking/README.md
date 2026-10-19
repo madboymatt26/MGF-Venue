@@ -4,7 +4,16 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.31.0
+**Current Version:** 3.32.0
+
+## 3.32.0 Staff booking entry (development)
+
+All Bookings → Add booking provides staff entry with a separate read-only review
+and explicit save/email choice. Supports one-off, multi-day and recurring dates,
+contact ownership, configured custom fields, live pricing and related-space conflicts.
+Campsites offer estate reservations and explained scheduling exceptions without
+overriding occupied/blocked dates. Paid recurring hires start pending for billing review.
+See `docs/admin-booking-entry.md` in the repository for the workflow and safeguards.
 
 ## 3.31.0 Protected calendar sync and shared-code integration
 
