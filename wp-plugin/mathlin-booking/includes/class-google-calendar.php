@@ -71,7 +71,7 @@ class MBS_Google_Calendar {
     }
     private static function access_token() {
         $s = self::settings();
-        if ( empty( $s['refresh'] ) ) self::error( 'Connect the Google account that can edit Haughley Park Bookings first.' );
+        if ( empty( $s['refresh'] ) ) self::error( 'Connect the Google account that can edit the intended shared calendar first.' );
         if ( empty( $s['access'] ) || (int) ( $s['expires'] ?? 0 ) <= time() ) {
             $d = self::token_request( array( 'grant_type' => 'refresh_token', 'refresh_token' => self::unseal( $s['refresh'] ) ) ); return $d['access_token'];
         }
@@ -117,7 +117,7 @@ class MBS_Google_Calendar {
     private static function events_path() { $s = self::settings(); return 'calendars/' . rawurlencode( $s['calendar'] ?? '' ) . '/events'; }
     private static function bookings() {
         global $wpdb;
-        // A complete deterministic source snapshot: cancelled/archived rows are needed for safe removals.
+        // A complete source snapshot: cancelled/archived rows become retained-event review items.
         $table = $wpdb->prefix . MBS_TABLE;
         $rows = $wpdb->get_results( "SELECT * FROM {$table} ORDER BY id ASC LIMIT 20001" );
         if ( $wpdb->last_error || ! is_array( $rows ) || count( $rows ) > 20000 ) self::error( 'Booking data could not be read completely. No calendar changes made.' );
@@ -250,7 +250,7 @@ class MBS_Google_Calendar {
         $midnight = new DateTimeImmutable( $today, wp_timezone() );
         $events = self::listing( self::events_path() . '?singleEvents=true&showDeleted=false&timeMin=' . rawurlencode( $midnight->format( DATE_RFC3339 ) ) . '&timeMax=' . rawurlencode( $midnight->modify( '+5 years' )->format( DATE_RFC3339 ) ) );
         $present = array_fill_keys( array_column( $events, 'id' ), true );
-        // Remember adopted IDs too. Moving/deleting an estate event must not silently create a duplicate.
+        // Remember protected references too. A missing estate event never silently creates a duplicate.
         foreach ( (array) ( $s['links'] ?? array() ) as $key => $link ) {
             if ( isset( $present[$link['id']] ) || ( $link['until'] ?? '' ) < $today ) continue;
             $event = self::api( 'GET', self::events_path() . '/' . rawurlencode( $link['id'] ), null, '', true );
@@ -399,7 +399,7 @@ class MBS_Google_Calendar {
             foreach ( explode( ' ', self::SCOPES ) as $scope ) if ( ! in_array( $scope, $granted, true ) ) self::error( 'Google did not grant both required permissions. Reconnect and grant calendar access.' );
             $s = self::settings(); $s['enabled'] = false; self::save( $s );
             if ( empty( $s['refresh'] ) ) self::error( 'No offline token was returned. Reconnect with consent.' );
-            self::notice( 'Connected. Select the existing Haughley Park Bookings calendar with edit access, then preview. Sync is still off.' );
+            self::notice( 'Connected. Select the intended existing shared calendar, then preview. Sync is still off.' );
         } catch ( Throwable $e ) { $s = self::settings(); $s['enabled'] = false; unset( $s['refresh'], $s['access'] ); self::save( $s ); self::notice( $e->getMessage() ); }
         finally { self::unlock(); }
         self::bounce();

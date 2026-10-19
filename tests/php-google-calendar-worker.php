@@ -22,7 +22,7 @@ if(!function_exists('openssl_decrypt')){function openssl_decrypt(...$args){retur
 require __DIR__.'/../wp-plugin/mathlin-booking/includes/class-google-calendar.php';
 class FixtureDB{public $prefix='wp_';public $last_error='';public $rows=[];public function get_results($sql){return $this->rows;}}
 $wpdb=new FixtureDB();
-function invoke($name,...$args){$r=new ReflectionMethod(MBS_Google_Calendar::class,$name);return $r->invokeArgs(null,$args);}
+function invoke($name,...$args){$r=new ReflectionMethod(MBS_Google_Calendar::class,$name);if(PHP_VERSION_ID<80100)$r->setAccessible(true);return $r->invokeArgs(null,$args);}
 function check($v,$msg){global $assertions;$assertions++;if(!$v)throw new RuntimeException($msg);}
 function fixture(){return (object)['ref'=>'MBS-F1','status'=>'confirmed','booking_date'=>'2026-10-24','booking_date_end'=>'2026-10-24','all_day'=>0,'start_time'=>'19:00:00','end_time'=>'21:00:00','space'=>'Cabin','organisation'=>'Group','custom_fields'=>'{}'];}
 function reset_fixture(){global $wpdb,$options,$requests,$queue;$wpdb->rows=[fixture()];$wpdb->last_error='';$requests=[];$queue=[];$options=['mbs_google_calendar'=>['calendar'=>'target','access'=>base64_encode(str_repeat('x',40)),'refresh'=>'fixture','expires'=>time()+9999]];}
