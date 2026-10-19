@@ -302,6 +302,16 @@ jQuery(function ($) {
     });
 
     // ── Save settings ──────────────────────────────────────────────────────────
+    $(document).on('submit', '.mbs-campsite-series-edit', function (event) {
+        event.preventDefault();
+        var $form = $(this), payload = $form.serializeArray();
+        payload.push({name:'action',value:'mbs_edit_scout_series'},{name:'nonce',value:MBS_Admin.nonce});
+        var $button = $form.find('button'); $button.prop('disabled',true);
+        $.post(MBS_Admin.ajax_url,payload,function(result){
+            if(result.success) location.reload(); else { alert(result.data || 'The schedule could not be changed.'); $button.prop('disabled',false); }
+        }).fail(function(){alert('The update could not be verified. Refresh and review before retrying.');$button.prop('disabled',false);});
+    });
+
     $('#nms-save-all').on('click', function () {
         var $btn = $(this);
         var $msg = $('#nms-save-msg');
@@ -343,6 +353,9 @@ jQuery(function ($) {
             nonce:           MBS_Admin.nonce,
             ha_webhook_url:  $('#ha_webhook_url').val(),
             min_notice_days: $('#min_notice_days').val(),
+            campsite_mode:   $('#campsite_mode').val(),
+            campsite_roles:  ($('#campsite_roles').val() || []).join(','),
+            campsite_slots:  $('#campsite_slots').val(),
             min_duration_hours: $('#min_duration_hours').val(),
             github_token:    $('#github_token').val(),
             admin_email:     $('#admin_email').val(),
@@ -700,7 +713,7 @@ jQuery(function ($) {
                 var s = res.data;
 
                 // Scout/no-charge: approve directly without billing review
-                if (s.scout_use) {
+                if (s.scout_use || (MBS_Admin.free_campsite && Number(s.price_per_booking) === 0)) {
                     if (!confirm('Approve this no-charge Scout series?')) return;
                     $.post(MBS_Admin.ajax_url, {
                         action: 'mbs_approve_series_with_billing',
@@ -1054,7 +1067,7 @@ jQuery(function ($) {
         var isScout = $btn.data('scout') === 1 || $btn.data('scout') === '1';
         var expectedVersion = parseInt($btn.data('expected-version'), 10) || 0;
 
-        if (isScout) {
+        if (isScout || MBS_Admin.free_campsite) {
             // Scout/no-charge: approve directly without billing review
             if (!confirm('Approve this no-charge Scout series?')) return;
             $.post(MBS_Admin.ajax_url, {

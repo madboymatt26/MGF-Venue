@@ -62,12 +62,16 @@ class MBS_Public {
                 'pricing_tier'    => MBS_Bookings::get_user_tier(),
                 'pricing_tiers'   => MBS_Bookings::get_pricing_tiers(),
                 'deposit_settings' => MBS_Bookings::get_deposit_settings(),
+                'free_campsite'   => class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled(),
             ) );
         }
     }
 
     // ── Shortcode: full booking form ───────────────────────────────────────────
     public function shortcode_booking( $atts ) {
+        if ( class_exists( 'MBS_Campsite_Policy' ) && ! MBS_Campsite_Policy::can_book() ) {
+            return '<p class="nms-alert">' . esc_html( MBS_Campsite_Policy::access_error()->get_error_message() ) . '</p>';
+        }
         ob_start();
         include MBS_PLUGIN_DIR . 'public/views/booking-form.php';
         return ob_get_clean();
@@ -75,6 +79,7 @@ class MBS_Public {
 
     // ── Shortcode: calendar only ───────────────────────────────────────────────
     public function shortcode_calendar( $atts ) {
+        if ( class_exists( 'MBS_Campsite_Policy' ) && ! MBS_Campsite_Policy::can_book() ) return '<p>' . esc_html( MBS_Campsite_Policy::access_error()->get_error_message() ) . '</p>';
         // Set a flag so the view and JS know this is read-only mode
         $GLOBALS['mbs_calendar_mode'] = 'readonly';
         ob_start();
@@ -203,6 +208,9 @@ class MBS_Public {
     // ── AJAX: submit booking ───────────────────────────────────────────────────
     public function ajax_submit() {
         check_ajax_referer( 'mbs_public_nonce', 'nonce' );
+        if ( class_exists( 'MBS_Campsite_Policy' ) && ! MBS_Campsite_Policy::can_book() ) {
+            wp_send_json_error( array( 'message' => MBS_Campsite_Policy::access_error()->get_error_message() ), 403 );
+        }
 
         // Honeypot: if the hidden field is filled, it's a bot — reject silently
         if ( ! empty( $_POST['mbs_hp_field'] ) ) {
@@ -210,6 +218,10 @@ class MBS_Public {
         }
 
         $required = array( 'name', 'email', 'phone', 'address', 'space', 'booking_date', 'attendees', 'purpose' );
+        if ( class_exists( 'MBS_Payment_Features' ) && MBS_Payment_Features::free_hire() ) $required = array_diff( $required, array( 'address' ) );
+        if ( class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ) {
+            $required = array_diff( $required, array( 'phone', 'address' ) );
+        }
         foreach ( $required as $field ) {
             if ( empty( $_POST[ $field ] ) ) {
                 wp_send_json_error( array( 'message' => 'Please fill in all required fields.' ) );
@@ -271,7 +283,8 @@ class MBS_Public {
             if ( ! preg_match( '/^\d{2}:\d{2}$/', $start ) || ! preg_match( '/^\d{2}:\d{2}$/', $end ) ) {
                 wp_send_json_error( array( 'message' => 'Invalid time format. Please use HH:MM.' ) );
             }
-            if ( strtotime( $end ) <= strtotime( $start ) ) {
+            $continuous_stay = class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() && ( $_POST['booking_span'] ?? '' ) === 'continuous' && ( $_POST['booking_date_end'] ?? '' ) > $date;
+            if ( ! $continuous_stay && strtotime( $end ) <= strtotime( $start ) ) {
                 wp_send_json_error( array( 'message' => 'End time must be after start time.' ) );
             }
 
@@ -295,6 +308,10 @@ class MBS_Public {
         }
 
         // Check blocked dates for entire range
+        if ( class_exists( 'MBS_Campsite_Policy' ) ) {
+            $schedule = MBS_Campsite_Policy::validate_schedule( $_POST );
+            if ( is_wp_error( $schedule ) ) wp_send_json_error( array( 'message' => $schedule->get_error_message() ), 400 );
+        }
         $check_end = $date_end ?: $date;
         $check_date = strtotime( $date );
         $check_end_ts = strtotime( $check_end );
@@ -314,11 +331,12 @@ class MBS_Public {
         $check_end_ts = strtotime( $check_end );
         while ( $check_date <= $check_end_ts ) {
             $check_str = wp_date( 'Y-m-d', $check_date );
+            $interval = class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ? MBS_Campsite_Policy::request_interval( $_POST, $check_str ) : array( $_POST['start_time'] ?? '', $_POST['end_time'] ?? '' );
             $conflicts = MBS_Bookings::check_conflicts(
                 $space,
                 $check_str,
-                $all_day ? null : sanitize_text_field( $_POST['start_time'] ?? '' ),
-                $all_day ? null : sanitize_text_field( $_POST['end_time'] ?? '' ),
+                $all_day ? null : sanitize_text_field( $interval[0] ),
+                $all_day ? null : sanitize_text_field( $interval[1] ),
                 $all_day
             );
             if ( ! empty( $conflicts ) ) {
@@ -389,6 +407,7 @@ class MBS_Public {
     // ── AJAX: get calendar data for a month ────────────────────────────────────
     public function ajax_calendar() {
         check_ajax_referer( 'mbs_public_nonce', 'nonce' );
+        if ( class_exists( 'MBS_Campsite_Policy' ) && ! MBS_Campsite_Policy::can_book() ) wp_send_json_error( array( 'message' => MBS_Campsite_Policy::access_error()->get_error_message() ), 403 );
         $year  = absint( $_POST['year']  ?? wp_date('Y') );
         $month = absint( $_POST['month'] ?? wp_date('n') );
         $dates = MBS_Bookings::get_booked_dates( $year, $month );
@@ -398,6 +417,7 @@ class MBS_Public {
     // ── AJAX: get blocked dates for a specific month ───────────────────────────
     public function ajax_get_blocked_dates() {
         check_ajax_referer( 'mbs_public_nonce', 'nonce' );
+        if ( class_exists( 'MBS_Campsite_Policy' ) && ! MBS_Campsite_Policy::can_book() ) wp_send_json_error( array( 'message' => MBS_Campsite_Policy::access_error()->get_error_message() ), 403 );
         $year  = absint( $_POST['year']  ?? wp_date('Y') );
         $month = absint( $_POST['month'] ?? wp_date('n') );
 
@@ -426,14 +446,16 @@ class MBS_Public {
     // ── AJAX: get bookings for a specific day ──────────────────────────────────
     public function ajax_get_day() {
         check_ajax_referer( 'mbs_public_nonce', 'nonce' );
+        if ( class_exists( 'MBS_Campsite_Policy' ) && ! MBS_Campsite_Policy::can_book() ) wp_send_json_error( array( 'message' => MBS_Campsite_Policy::access_error()->get_error_message() ), 403 );
         $date     = sanitize_text_field( $_POST['date'] ?? '' );
         $bookings = MBS_Bookings::get_by_date( $date );
         // Return only non-sensitive info for public display
-        $safe = array_map( function( $b ) {
+        $safe = array_map( function( $b ) use ( $date ) {
+            $interval = class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ? MBS_Campsite_Policy::interval( $b, $date ) : array( $b->start_time, $b->end_time );
             $data = array(
                 'space'      => $b->space,
-                'start_time' => $b->start_time,
-                'end_time'   => $b->end_time,
+                'start_time' => $interval[0],
+                'end_time'   => $interval[1],
                 'all_day'    => ! empty( $b->all_day ),
                 'is_public'  => ! empty( $b->is_public ),
             );

@@ -35,7 +35,8 @@ if ( preg_match( '/FOREIGN\s+KEY\s*\(/i', $database ) ) {
     exit( 1 );
 }
 
-contains_text( $series, "'billing_treatment'    => \$is_scout ? 'none' : 'invoice_managed'", 'New external series default to invoice-managed monthly billing.' );
+contains_text( $series, "'billing_treatment'    => \$no_billing ? 'none' : 'invoice_managed'", 'Chargeable external series default to invoice-managed monthly billing.' );
+contains_text( $series, "\$no_billing = \$is_scout || ( class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() )", 'Only Scout use or explicitly configured free campsite mode suppresses series billing.' );
 contains_text( $series, "hash( 'sha256'", 'Terms content is hashed.' );
 contains_text( $public, 'notify_admin_series', 'Public submission sends one series-level admin notification.' );
 contains_text( $public, 'notify_recurring_summary', 'Public submission sends one series-level request receipt.' );

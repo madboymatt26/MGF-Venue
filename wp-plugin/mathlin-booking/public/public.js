@@ -769,6 +769,23 @@ jQuery(function ($) {
     });
 
     // ── Helpers ────────────────────────────────────────────────────────────────
+    function campsiteSchedule() {
+        if (!NMS.free_campsite) return;
+        var daily = $('#nms-campsite-span').val() !== 'continuous';
+        var allDay = $('#nms-allday').val() === '1';
+        $('#nms-campsite-slot-group').toggle(daily && !allDay);
+        $('#nms-start, #nms-end').prop('readOnly', daily && !allDay);
+        if (daily && !allDay) {
+            var slot = ($('#nms-campsite-slot').val() || '').split('|');
+            $('#nms-start').val(slot[0] || ''); $('#nms-end').val(slot[1] || '');
+        }
+        $('#nms-recurring').prop('disabled', !daily);
+        if (!daily) $('#nms-recurring').val('none').trigger('change');
+        updateCost();
+    }
+    $('#nms-campsite-span, #nms-campsite-slot, #nms-allday').on('change', campsiteSchedule);
+    campsiteSchedule();
+
     function pad(n) { return String(n).padStart(2, '0'); }
 
     function timeToMins(t) {

@@ -3,7 +3,7 @@
  * Plugin Name: MGF Venue
  * Plugin URI:  https://github.com/madboymatt26/MGF-Venue
  * Description: Venue booking and management system with Home Assistant integration.
- * Version:     3.28.2
+ * Version:     3.31.0
  * Author:      MGF Venue
  * License:     GPL-2.0+
  * Text Domain: mathlin-booking
@@ -11,7 +11,7 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'MBS_VERSION',    '3.28.2' );
+define( 'MBS_VERSION',    '3.31.0' );
 define( 'MBS_DB_VERSION', '3.26.0-schema-11' );
 define( 'MBS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MBS_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -39,6 +39,13 @@ require_once MBS_PLUGIN_DIR . 'includes/class-billing-engine.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-invoice-payment.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-invoice-reservation.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-bookings.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-campsite-policy.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-payment-features.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-campsite-migration.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-campsite-consolidation.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-campsite-multiday.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-legacy-read-only.php';
+MBS_Legacy_Read_Only::init();
 require_once MBS_PLUGIN_DIR . 'includes/class-email.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-invoice.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-rest-api.php';
@@ -49,6 +56,7 @@ require_once MBS_PLUGIN_DIR . 'includes/class-reminders.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-access-details.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-feedback.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-ical.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-google-calendar.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-csv-export.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-dashboard-widget.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-audit-log.php';
@@ -90,6 +98,7 @@ register_deactivation_hook( __FILE__, array( 'MBS_Payment_Chaser', 'deactivate' 
 register_deactivation_hook( __FILE__, array( 'MBS_Billing_Engine', 'deactivate' ) );
 register_deactivation_hook( __FILE__, array( 'MBS_Email_Queue', 'deactivate' ) );
 register_deactivation_hook( __FILE__, array( 'MBS_Hirer_Portal', 'deactivate' ) );
+register_deactivation_hook( __FILE__, array( 'MBS_Google_Calendar', 'deactivate' ) );
 
 // ── GDPR Privacy Hooks ─────────────────────────────────────────────────────────
 add_filter( 'wp_privacy_personal_data_erasers', 'mbs_register_privacy_eraser' );
@@ -161,8 +170,13 @@ function mbs_init() {
     $woo_ux = new MBS_Woo_UX();
 
     $admin->init();
+    ( new MBS_Google_Calendar() )->init();
     ( new MBS_Additional_Charges() )->init();
     $public->init();
+    ( new MBS_Campsite_Migration() )->init();
+    ( new MBS_Payment_Features() )->init();
+    ( new MBS_Campsite_Consolidation() )->init();
+    ( new MBS_Campsite_Multiday() )->init();
     $api->init();
     $updater->init();
     $reminders->init();

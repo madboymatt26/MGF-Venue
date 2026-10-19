@@ -122,6 +122,7 @@ class MBS_Invoice_Payment {
 
     /** Capability is enforced by the caller; version and idempotency here. */
     public static function record_manual_payment( $invoice_ref, $amount_minor, $idempotency_key, $expected_version, $note = '' ) {
+        if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'manual' ) ) return MBS_Payment_Features::error( 'manual' );
         $invoice = MBS_Billing_Ledger::get_invoice( $invoice_ref );
         if ( ! $invoice ) return new WP_Error( 'invoice_not_found', 'Invoice not found.' );
         $amount = MBS_Money::minor( $amount_minor );
@@ -172,6 +173,7 @@ class MBS_Invoice_Payment {
 
     /** Claim and send the single allowed reminder for an invoice. */
     public static function send_invoice_reminder( $invoice_ref ) {
+        if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'reminders' ) ) return MBS_Payment_Features::error( 'reminders' );
         global $wpdb;
         $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
         if ( $wpdb->query( 'START TRANSACTION' ) === false ) return new WP_Error( 'transaction_start_failed', 'Could not start the reminder-claim transaction.' );
@@ -214,6 +216,7 @@ class MBS_Invoice_Payment {
     }
 
     public static function send_due_reminders() {
+        if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'reminders' ) ) return;
         global $wpdb;
         $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
         $series_table = $wpdb->prefix . MBS_SERIES_TABLE;

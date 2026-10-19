@@ -102,8 +102,8 @@ class MBS_Dashboard_Widget {
                 <div class="mbs-dw-stat-label">Today</div>
             </div>
             <div class="mbs-dw-stat">
-                <div class="mbs-dw-stat-val">&pound;<?php echo number_format( $stats['revenue_fy'], 0 ); ?></div>
-                <div class="mbs-dw-stat-label">Revenue FY</div>
+                <div class="mbs-dw-stat-val"><?php echo class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'reports' ) ? (int) $stats['total'] : '&pound;' . number_format( $stats['revenue_fy'], 0 ); ?></div>
+                <div class="mbs-dw-stat-label"><?php echo class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'reports' ) ? 'Active Bookings' : 'Revenue FY'; ?></div>
             </div>
         </div>
 

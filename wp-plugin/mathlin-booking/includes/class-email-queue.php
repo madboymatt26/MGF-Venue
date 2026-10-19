@@ -300,11 +300,22 @@ class MBS_Email_Queue {
         $failed = 0;
 
         foreach ( $claimed as $email ) {
+            // Pause disabled payment requests without consuming retries. Receipts
+            // and gateway reconciliation remain available for captured payments.
+            $feature = $email->message_type === 'invoice_reminder' ? 'reminders' : ( $email->message_type === 'invoice_issued' ? 'invoices' : '' );
+            if ( $feature && class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( $feature ) ) {
+                $wpdb->query( $wpdb->prepare( "UPDATE " . self::table() . " SET status='pending',next_retry=%s,last_error=%s,claimed_at=NULL,lease_expires_at=NULL,worker_id=NULL WHERE id=%d AND worker_id=%s AND status='processing'", wp_date( 'Y-m-d H:i:s', time() + HOUR_IN_SECONDS ), 'Payment feature disabled; delivery paused.', $email->id, $worker_id ) );
+                continue;
+            }
             // A queued request can become stale while awaiting PDF rendering/retry.
             if ( class_exists( 'MBS_Additional_Charges' ) && $email->reference_type === 'invoice'
                 && in_array( $email->message_type, array( 'invoice_issued','invoice_reminder' ), true ) ) {
                 $source_invoice = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . $wpdb->prefix . MBS_INVOICE_TABLE . ' WHERE id=%d', $email->reference_id ) );
                 if ( MBS_Additional_Charges::is_charge( $source_invoice ) ) {
+                    if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'additional_charges' ) ) {
+                        $wpdb->query( $wpdb->prepare( "UPDATE " . self::table() . " SET status='pending',next_retry=%s,last_error=%s,claimed_at=NULL,lease_expires_at=NULL,worker_id=NULL WHERE id=%d AND worker_id=%s AND status='processing'", wp_date( 'Y-m-d H:i:s', time() + HOUR_IN_SECONDS ), 'Additional charges disabled; delivery paused.', $email->id, $worker_id ) );
+                        continue;
+                    }
                     $hold_reason = MBS_Additional_Charges::queued_delivery_error( $source_invoice, json_decode( $email->attachment_meta ?: '{}', true ) ?: array() );
                     if ( $hold_reason ) {
                         self::release_for_retry( $email->id, $worker_id, $hold_reason );

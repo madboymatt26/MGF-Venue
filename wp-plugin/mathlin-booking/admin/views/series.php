@@ -1,4 +1,7 @@
-<?php if ( ! defined( 'ABSPATH' ) ) exit; ?>
+<?php if ( ! defined( 'ABSPATH' ) ) exit; $free_campsite = class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled();
+$billing_enabled = MBS_Payment_Features::enabled( 'invoices' ) && ! $free_campsite;
+$pattern_label = static function( $item ) { $schedule = json_decode( (string) $item->schedule_json, true ) ?: array(); $labels = array( 'selected' => 'Selected dates', 'daily' => 'Daily', 'weekly' => 'Weekly', 'fortnightly' => 'Every two weeks', 'monthly_date' => 'Monthly (same date)', 'monthly_weekday' => 'Monthly (same weekday)' ); return $labels[$schedule['pattern'] ?? 'weekly'] ?? 'Selected dates'; };
+?>
 <div class="wrap nms-admin-wrap">
     <h1><?php echo MBS_Admin::brand_mark(); ?> Recurring Series</h1>
 
@@ -19,16 +22,16 @@
             <button class="button">Filter</button>
         </form>
         <table class="widefat striped">
-            <thead><tr><th>Series</th><th>Customer</th><th>Schedule</th><th>Dates</th><th>Billing</th><th>Status</th></tr></thead>
+            <thead><tr><th>Series</th><th>Customer</th><th>Schedule</th><th>Dates</th><?php if ( MBS_Payment_Features::enabled() ) : ?><th>Billing</th><?php endif; ?><th>Status</th></tr></thead>
             <tbody>
             <?php if ( ! $series_rows ) : ?><tr><td colspan="6">No first-class recurring series match this filter.</td></tr><?php endif; ?>
             <?php foreach ( $series_rows as $row ) : ?>
                 <tr>
                     <td><a href="<?php echo esc_url( admin_url( 'admin.php?page=mathlin-series&ref=' . rawurlencode( $row->series_ref ) ) ); ?>"><strong><?php echo esc_html( $row->series_ref ); ?></strong></a><br><?php echo esc_html( $row->space ); ?></td>
                     <td><?php echo esc_html( $row->contact_name ); ?><br><small><?php echo esc_html( $row->contact_organisation ?: $row->contact_email ); ?></small></td>
-                    <td>Weekly · <?php echo esc_html( $row->all_day ? 'all day' : substr( $row->start_time, 0, 5 ) . '–' . substr( $row->end_time, 0, 5 ) ); ?><br><small><?php echo esc_html( wp_date( 'j M Y', strtotime( $row->start_date ) ) . '–' . wp_date( 'j M Y', strtotime( $row->repeat_until ) ) ); ?></small></td>
+                    <td><?php echo $free_campsite ? 'Grouped dates' : 'Weekly'; ?> · <?php echo esc_html( $row->all_day ? 'all day' : substr( $row->start_time, 0, 5 ) . '–' . substr( $row->end_time, 0, 5 ) ); ?><br><small><?php echo esc_html( wp_date( 'j M Y', strtotime( $row->start_date ) ) . '–' . wp_date( 'j M Y', strtotime( $row->repeat_until ) ) ); ?></small></td>
                     <td><?php echo (int) $row->accepted_count; ?> accepted<br><small><?php echo (int) $row->requested_count - (int) $row->accepted_count; ?> skipped</small></td>
-                    <td><?php echo esc_html( ucfirst( str_replace( '_', ' ', $row->billing_mode ) ) ); ?><br><small><?php echo esc_html( ucfirst( str_replace( '_', ' ', $row->payment_method ) ) ); ?></small></td>
+                    <?php if ( MBS_Payment_Features::enabled() ) : ?><td><?php echo esc_html( ucfirst( str_replace( '_', ' ', $row->billing_mode ) ) ); ?><br><small><?php echo esc_html( ucfirst( str_replace( '_', ' ', $row->payment_method ) ) ); ?></small></td><?php endif; ?>
                     <td><strong><?php echo esc_html( ucfirst( str_replace( '_', ' ', $row->status ) ) ); ?></strong></td>
                 </tr>
             <?php endforeach; ?>
@@ -37,17 +40,29 @@
     <?php else : ?>
         <p><a href="<?php echo esc_url( admin_url( 'admin.php?page=mathlin-series' ) ); ?>">← All recurring series</a></p>
         <?php MBS_Additional_Charges::render_related($series->series_ref); ?>
+        <?php if ( class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() && $series->billing_treatment === 'none' ) : ?>
+        <details class="postbox" style="padding:16px;"><summary style="cursor:pointer;font-weight:600;">Change future campsite sessions</summary>
+            <form class="mbs-campsite-series-edit" style="display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin-top:12px;">
+                <input type="hidden" name="series_id" value="<?php echo esc_attr( $series->series_ref ); ?>"><input type="hidden" name="expected_version" value="<?php echo (int) $series->version; ?>">
+                <label>Space <select name="space"><?php foreach ( MBS_Bookings::get_spaces() as $name => $info ) : ?><option <?php selected( $series->space, $name ); ?>><?php echo esc_html( $name ); ?></option><?php endforeach; ?></select></label>
+                <?php if ( ! $series->all_day ) : ?><label>Start <input type="time" name="start_time" value="<?php echo esc_attr( substr( $series->start_time, 0, 5 ) ); ?>"></label><label>End <input type="time" name="end_time" value="<?php echo esc_attr( substr( $series->end_time, 0, 5 ) ); ?>"></label><?php endif; ?>
+                <label>Purpose <input name="purpose" value="<?php echo esc_attr( $series->purpose ); ?>"></label>
+                <label><input type="checkbox" name="campsite_exception" value="1"> Earlier/short-notice access specifically agreed through the coordinator</label>
+                <label><input type="checkbox" name="notify_hirer" value="1" checked> Email updated schedule</label><button class="button button-primary">Save future sessions</button>
+            </form><p>Only active future sessions change. All conflicts and rules are checked before anything is saved. No hire invoices are generated.</p>
+        </details>
+        <?php endif; ?>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;">
             <section class="postbox" style="padding:16px;">
                 <h2 style="margin-top:0;"><?php echo esc_html( $series->series_ref ); ?> · <?php echo esc_html( ucfirst( str_replace( '_', ' ', $series->status ) ) ); ?></h2>
                 <p><strong><?php echo esc_html( $series->contact_name ); ?></strong><?php echo $series->contact_organisation ? '<br>' . esc_html( $series->contact_organisation ) : ''; ?><br><a href="mailto:<?php echo esc_attr( $series->contact_email ); ?>"><?php echo esc_html( $series->contact_email ); ?></a><br><?php echo esc_html( $series->contact_phone ); ?></p>
-                <p><strong><?php echo esc_html( $series->space ); ?></strong><?php echo $series->kitchen ? ' + kitchen' : ''; ?><br>Weekly, <?php echo esc_html( $series->all_day ? 'all day' : substr( $series->start_time, 0, 5 ) . '–' . substr( $series->end_time, 0, 5 ) ); ?><br><?php echo esc_html( wp_date( 'j M Y', strtotime( $series->start_date ) ) . '–' . wp_date( 'j M Y', strtotime( $series->repeat_until ) ) ); ?></p>
-                <p><?php echo (int) $series->accepted_count; ?> accepted of <?php echo (int) $series->requested_count; ?> requested · £<?php echo esc_html( number_format( (float) $series->price_per_booking, 2 ) ); ?> per occurrence · estimated £<?php echo esc_html( number_format( (float) $series->estimated_total, 2 ) ); ?></p>
+                <p><strong><?php echo esc_html( $series->space ); ?></strong><?php echo $series->kitchen ? ' + kitchen' : ''; ?><br><?php echo esc_html( $pattern_label( $series ) ); ?>, <?php echo esc_html( $series->all_day ? 'all day' : substr( $series->start_time, 0, 5 ) . '–' . substr( $series->end_time, 0, 5 ) ); ?><br><?php echo esc_html( wp_date( 'j M Y', strtotime( $series->start_date ) ) . '–' . wp_date( 'j M Y', strtotime( $series->repeat_until ) ) ); ?></p>
+                <p><?php echo (int) $series->accepted_count; ?> accepted of <?php echo (int) $series->requested_count; ?> requested · <?php if ( $free_campsite ) : ?>No hire charge<?php else : ?>£<?php echo esc_html( number_format( (float) $series->price_per_booking, 2 ) ); ?> per occurrence · estimated £<?php echo esc_html( number_format( (float) $series->estimated_total, 2 ) ); ?><?php endif; ?></p>
                 <p><strong>Deposit:</strong> <?php echo esc_html( $series->deposit_policy === 'none' ? 'None' : ucfirst( str_replace( '_', ' ', $series->deposit_policy ) ) ); ?> · <strong>Terms accepted:</strong> <?php echo $series->terms_accepted_at ? esc_html( wp_date( 'j M Y H:i', strtotime( $series->terms_accepted_at ) ) ) : 'Not recorded'; ?></p>
                 <?php if ( ! empty( $series->metadata_incomplete ) ) : ?><div class="notice notice-warning inline"><p>This series was registered from older occurrence records. Skipped dates, original terms acceptance and historic billing intent are unknown and have not been inferred.</p></div><?php endif; ?>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">
                     <?php if ( $series->status === 'pending' ) : ?><button class="button button-primary nms-btn-review-approve" data-series="<?php echo esc_attr( $series->series_ref ); ?>" data-expected-version="<?php echo (int) $series->version; ?>" data-scout="<?php echo $series->scout_use ? '1' : '0'; ?>">Review &amp; Approve</button><?php endif; ?>
-                    <?php if ( $series->status === 'confirmed' ) : ?><button class="button nms-btn-series-pause" data-series="<?php echo esc_attr( $series->series_ref ); ?>" data-paused="1" data-expected-status="confirmed" data-expected-version="<?php echo (int) $series->version; ?>">Pause billing</button><?php endif; ?>
+                    <?php if ( ! $free_campsite && $series->status === 'confirmed' ) : ?><button class="button nms-btn-series-pause" data-series="<?php echo esc_attr( $series->series_ref ); ?>" data-paused="1" data-expected-status="confirmed" data-expected-version="<?php echo (int) $series->version; ?>">Pause billing</button><?php endif; ?>
                     <?php if ( $series->status === 'paused' ) : ?><button class="button button-primary nms-btn-series-pause" data-series="<?php echo esc_attr( $series->series_ref ); ?>" data-paused="0" data-expected-status="paused" data-expected-version="<?php echo (int) $series->version; ?>">Resume billing</button><?php endif; ?>
                     <?php if ( $series->status === 'confirmed' ) : ?><button class="button nms-btn-resend-series" data-series="<?php echo esc_attr( $series->series_ref ); ?>">Resend confirmation</button><?php endif; ?>
                     <?php if ( ! in_array( $series->status, array( 'cancelled', 'cancelled_future' ), true ) ) : ?><button class="button nms-btn-series-status" data-series="<?php echo esc_attr( $series->series_ref ); ?>" data-status="cancelled" data-scope="future" data-expected-status="<?php echo esc_attr( $series->status ); ?>" data-expected-version="<?php echo (int) $series->version; ?>">Cancel future dates</button><?php endif; ?>
@@ -57,13 +72,13 @@
                 <div class="nms-cancel-from-date" style="margin-top:12px;">
                     <label>Cancel bookings on or after <input type="date" class="nms-cancel-date" min="<?php echo esc_attr( wp_date( 'Y-m-d' ) ); ?>" required></label>
                     <button type="button" class="button nms-btn-series-status" data-series="<?php echo esc_attr( $series->series_ref ); ?>" data-status="cancelled" data-scope="from_date" data-expected-status="<?php echo esc_attr( $series->status ); ?>" data-expected-version="<?php echo (int) $series->version; ?>">Cancel from date</button>
-                    <p class="description">The selected date is inclusive. Earlier sessions stay booked. Issued invoices are reconciled with credit notes; no cash refund is made automatically. The hirer receives an updated schedule.</p>
+                    <p class="description">The selected date is inclusive. Earlier sessions stay booked. <?php echo $free_campsite ? 'No hire payment or refund is involved.' : 'Issued invoices are reconciled with credit notes; no cash refund is made automatically.'; ?> The hirer receives an updated schedule.</p>
                 </div>
                 <?php endif; ?>
                 <?php if ( ! in_array( $series->status, array( 'cancelled', 'cancelled_future' ), true ) ) : ?><form class="nms-extend-external-series" style="margin-top:12px;display:flex;gap:8px;align-items:center;"><input type="hidden" name="series_ref" value="<?php echo esc_attr( $series->series_ref ); ?>"><input type="hidden" name="expected_version" value="<?php echo (int) $series->version; ?>"><label>Extend to <input type="date" name="repeat_until" min="<?php echo esc_attr( wp_date( 'Y-m-d', strtotime( $series->repeat_until . ' +1 day' ) ) ); ?>" max="<?php echo esc_attr( wp_date( 'Y-m-d', strtotime( $series->start_date . ' +1 year' ) ) ); ?>" required></label><button class="button">Extend series</button></form><?php endif; ?>
             </section>
 
-            <section class="postbox" style="padding:16px;">
+            <?php if ( $billing_enabled ) : ?><section class="postbox" style="padding:16px;">
                 <h2 style="margin-top:0;">Billing arrangement</h2>
                 <?php if ( $series->billing_treatment === 'manual_consolidated' ) : ?><div class="notice notice-warning inline"><p>Automatic occurrence reminders are suspended. Switch to invoice managed when you are ready for consolidated invoices.</p></div><?php endif; ?>
                 <form class="nms-series-billing-form">
@@ -100,18 +115,18 @@
                     </tbody></table>
                     <button class="button button-primary" type="submit">Save billing arrangement</button> <span class="nms-series-billing-message"></span>
                 </form>
-            </section>
+            </section><?php else : ?><section class="postbox" style="padding:16px;"><h2>No hire charge</h2><p>These campsite bookings do not generate hire invoices, deposits or payment reminders. Use the schedule controls to manage dates.</p></section><?php endif; ?>
         </div>
 
-        <section class="postbox" style="padding:16px;">
+        <?php if ( $billing_enabled ) : ?><section class="postbox" style="padding:16px;">
             <h2 style="margin-top:0;">Invoice preview</h2>
             <?php if ( is_wp_error( $preview ) ) : ?><div class="notice notice-error inline"><p><?php echo esc_html( $preview->get_error_message() ); ?></p></div>
             <?php elseif ( empty( $preview['periods'] ) ) : ?><p>No invoice periods apply.</p>
             <?php else : ?><div class="mbs-preview-table-wrap"><table class="widefat striped mbs-preview-table"><thead><tr><th>Period</th><th>Issue</th><th>Due</th><th>Dates</th><th>Total</th></tr></thead><tbody><?php foreach ( $preview['periods'] as $period ) : ?><tr><td data-label="Period"><?php echo esc_html( $period['label'] ); ?></td><td data-label="Issue"><?php echo esc_html( wp_date( 'j M Y', strtotime( $period['issue_on'] ) ) ); ?></td><td data-label="Due"><?php echo esc_html( wp_date( 'j M Y', strtotime( $period['due_on'] ) ) ); ?></td><td data-label="Dates"><?php echo (int) $period['occurrence_count']; ?></td><td data-label="Total"><?php echo esc_html( MBS_Money::format( $period['total_minor'] ) ); ?></td></tr><?php endforeach; ?></tbody></table></div><?php endif; ?>
             <?php if ( $series->status === 'confirmed' && $series->billing_treatment === 'invoice_managed' ) : ?><p><button class="button nms-series-catch-up">Generate all invoices due today</button></p><?php endif; ?>
-        </section>
+        </section><?php endif; ?>
 
-        <section class="postbox" style="padding:16px;">
+        <?php if ( $billing_enabled || $invoices ) : ?><section class="postbox" style="padding:16px;">
             <h2 style="margin-top:0;">Invoices &amp; payments</h2>
             <?php if ( ! $invoices ) : ?><p>No consolidated invoices yet.</p><?php endif; ?>
             <?php foreach ( $invoices as $invoice ) : $balance = MBS_Billing_Ledger::balance_minor( $invoice ); $document_id = $invoice_documents[ (int) $invoice->id ] ?? null; ?>
@@ -159,7 +174,7 @@
                     <?php endif; ?>
                 </div>
             <?php endforeach; ?>
-        </section>
+        </section><?php endif; ?>
 
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;">
             <section class="postbox" style="padding:16px;"><h2 style="margin-top:0;">Occurrences &amp; exceptions</h2><details><summary><?php echo count( $occurrences ); ?> occurrence records</summary><ul><?php foreach ( $occurrences as $occurrence ) : ?><li><a href="<?php echo esc_url( admin_url( 'admin.php?page=mathlin-booking&action=view&ref=' . rawurlencode( $occurrence->ref ) ) ); ?>"><?php echo esc_html( wp_date( 'D j M Y', strtotime( $occurrence->booking_date ) ) . ' · ' . $occurrence->ref ); ?></a> — <?php echo esc_html( MBS_Bookings::status_label( $occurrence->status ) ); ?></li><?php endforeach; ?></ul></details><?php if ( $exceptions ) : ?><h3>Skipped dates</h3><ul><?php foreach ( $exceptions as $exception ) : ?><li><?php echo esc_html( wp_date( 'j M Y', strtotime( $exception['date'] ) ) . ' — ' . $exception['message'] ); ?></li><?php endforeach; ?></ul><?php endif; ?></section>

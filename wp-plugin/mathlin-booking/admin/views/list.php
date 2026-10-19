@@ -1,8 +1,13 @@
-<?php if ( ! defined( 'ABSPATH' ) ) exit; ?>
+<?php if ( ! defined( 'ABSPATH' ) ) exit; $free_campsite = class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled(); ?>
 <div class="wrap mbs-admin">
     <h1 class="wp-heading-inline"><?php echo MBS_Admin::brand_mark(); ?>MGF Venue</h1>
-    <a class="page-title-action" href="<?php echo esc_url(MBS_Additional_Charges::admin_url()); ?>">Additional charges</a>
+    <?php if ( MBS_Payment_Features::enabled( 'additional_charges' ) ) : ?><a class="page-title-action" href="<?php echo esc_url(MBS_Additional_Charges::admin_url()); ?>">Additional charges</a><?php endif; ?>
     <hr class="wp-header-end">
+    <nav aria-label="Booking pages" style="display:flex;gap:12px;align-items:center;margin:16px 0;">
+        <?php if ( ( $bookings_page ?? 1 ) > 1 ) : ?><a class="button" href="<?php echo esc_url( add_query_arg( array( 'page' => 'mathlin-booking', 's' => $search, 'status' => $status, 'paged' => $bookings_page - 1 ), admin_url( 'admin.php' ) ) ); ?>">Previous page</a><?php endif; ?>
+        <span>Page <?php echo (int) ( $bookings_page ?? 1 ); ?> · up to 50 reservations per page</span>
+        <?php if ( ! empty( $bookings_has_next ) ) : ?><a class="button" href="<?php echo esc_url( add_query_arg( array( 'page' => 'mathlin-booking', 's' => $search, 'status' => $status, 'paged' => ( $bookings_page ?? 1 ) + 1 ), admin_url( 'admin.php' ) ) ); ?>">Next page</a><?php endif; ?>
+    </nav>
 
     <!-- Stats -->
     <div class="nms-stats-row">
@@ -18,7 +23,7 @@
             <div class="nms-stat-val"><?php echo esc_html( $stats['confirmed'] ); ?></div>
             <div class="nms-stat-label">Confirmed</div>
         </div>
-        <div class="nms-stat-card nms-stat-paid">
+        <?php if ( MBS_Payment_Features::enabled( 'reports' ) ) : ?><div class="nms-stat-card nms-stat-paid">
             <div class="nms-stat-val"><?php echo esc_html( $stats['paid'] ); ?></div>
             <div class="nms-stat-label">Paid</div>
         </div>
@@ -26,6 +31,7 @@
             <div class="nms-stat-val">&pound;<?php echo number_format( $stats['revenue_fy'], 2 ); ?></div>
             <div class="nms-stat-label">Revenue FY <?php echo esc_html( $stats['fy_label'] ); ?></div>
         </div>
+        <?php endif; ?>
     </div>
 
     <!-- Filters -->
@@ -37,8 +43,8 @@
                 <option value="">All Statuses</option>
                 <option value="pending"   <?php selected( $status, 'pending' ); ?>>Pending</option>
                 <option value="confirmed" <?php selected( $status, 'confirmed' ); ?>>Confirmed</option>
-                <option value="deposit_paid" <?php selected( $status, 'deposit_paid' ); ?>>Deposit Paid</option>
-                <option value="paid" <?php selected( $status, 'paid' ); ?>>Paid</option>
+                <?php if ( MBS_Payment_Features::enabled() ) : ?><option value="deposit_paid" <?php selected( $status, 'deposit_paid' ); ?>>Deposit Paid</option>
+                <option value="paid" <?php selected( $status, 'paid' ); ?>>Paid</option><?php endif; ?>
                 <option value="cancelled" <?php selected( $status, 'cancelled' ); ?>>Cancelled</option>
             </select>
             <button type="submit" class="button">Filter</button>
@@ -75,7 +81,7 @@
         <select id="nms-bulk-action" style="min-width:160px;">
             <option value="">Bulk Actions</option>
             <option value="confirmed">✓ Confirm Selected</option>
-            <option value="paid">💰 Mark Paid</option>
+            <?php if ( MBS_Payment_Features::enabled( 'manual' ) ) : ?><option value="paid">💰 Mark Paid</option><?php endif; ?>
             <option value="cancelled">✗ Cancel Selected</option>
             <option value="archived">📦 Archive Selected</option>
         </select>
@@ -94,8 +100,7 @@
                 <th>Date</th>
                 <th>Time</th>
                 <th>Attendees</th>
-                <th>Amount</th>
-                <th>Paid</th>
+                <?php if ( MBS_Payment_Features::enabled() ) : ?><th>Amount</th><th>Paid</th><?php endif; ?>
                 <th>Status</th>
                 <th>Actions</th>
             </tr>
@@ -148,12 +153,11 @@
                     <td><?php echo esc_html( $b->space ); ?></td>
                     <td>
                         <?php echo esc_html( date( 'j M', strtotime( $first_date ) ) ); ?> – <?php echo esc_html( date( 'j M Y', strtotime( $last_date ) ) ); ?>
-                        <br><small class="nms-muted">Weekly × <?php echo $series_count; ?></small>
+                        <br><small class="nms-muted"><?php echo $free_campsite ? 'Grouped dates × ' : 'Weekly × '; ?><?php echo $series_count; ?></small>
                     </td>
                     <td><?php echo $is_daily ? 'All day' : esc_html( $b->start_time . ' – ' . $b->end_time ); ?></td>
                     <td><?php echo esc_html( $b->attendees ); ?></td>
-                    <td><strong>&pound;<?php echo number_format( $series_total, 2 ); ?></strong></td>
-                    <td>—</td>
+                    <?php if ( MBS_Payment_Features::enabled() ) : ?><td><strong>&pound;<?php echo number_format( $series_total, 2 ); ?></strong></td><td>—</td><?php endif; ?>
                     <td><span class="nms-status nms-status-<?php echo esc_attr( $series_status ); ?>"><?php echo esc_html( MBS_Bookings::status_label( $series_status ) ); ?></span></td>
                     <td>
                         <div class="nms-action-btns">
@@ -186,10 +190,10 @@
                     <td style="padding-left:24px;"><small><?php echo esc_html( $sb->ref ); ?></small></td>
                     <td></td>
                     <td></td>
-                    <td><?php echo esc_html( wp_date( 'D j M Y', strtotime( $sb->booking_date ) ) ); ?></td>
+                    <td><?php echo esc_html( wp_date( 'D j M Y', strtotime( $sb->booking_date ) ) . ( ! empty( $sb->booking_date_end ) && $sb->booking_date_end !== $sb->booking_date ? ' – ' . wp_date( 'D j M Y', strtotime( $sb->booking_date_end ) ) : '' ) ); ?></td>
                     <td><?php echo ! empty( $sb->all_day ) ? 'All day' : esc_html( $sb->start_time . ' – ' . $sb->end_time ); ?></td>
                     <td></td>
-                    <td>&pound;<?php echo number_format( $sb->amount, 2 ); ?></td>
+                    <?php if ( MBS_Payment_Features::enabled() ) : ?><td>&pound;<?php echo number_format( $sb->amount, 2 ); ?></td>
                     <td>
                         <?php
                         $sb_paid = (float) ( $sb->amount_paid ?? 0 );
@@ -202,7 +206,7 @@
                             <span style="color:#6b7280;">—</span>
                         <?php endif; ?>
                     </td>
-                    <td><span class="nms-status nms-status-<?php echo esc_attr( $sb->status ); ?>"><?php echo esc_html( MBS_Bookings::status_label( $sb->status ) ); ?></span></td>
+                    <?php endif; ?><td><span class="nms-status nms-status-<?php echo esc_attr( $sb->status ); ?>"><?php echo esc_html( MBS_Bookings::status_label( $sb->status ) ); ?></span></td>
                     <td><a href="?page=mathlin-booking&action=view&ref=<?php echo esc_attr( $sb->ref ); ?>" class="button button-small">View occurrence</a></td>
                 </tr>
                 <?php } ?>
@@ -219,10 +223,10 @@
                         <?php } ?>
                     </td>
                     <td data-label="Space"><?php echo esc_html( $b->space ); ?></td>
-                    <td data-label="Date"><?php echo esc_html( wp_date( 'D j M Y', strtotime( $b->booking_date ) ) ); ?></td>
+                    <td data-label="Date"><?php echo esc_html( wp_date( 'D j M Y', strtotime( $b->booking_date ) ) . ( ! empty( $b->booking_date_end ) && $b->booking_date_end !== $b->booking_date ? ' – ' . wp_date( 'D j M Y', strtotime( $b->booking_date_end ) ) : '' ) ); ?></td>
                     <td data-label="Time"><?php echo $is_daily ? 'All day' : esc_html( $b->start_time . ' – ' . $b->end_time ); ?></td>
                     <td data-label="Guests"><?php echo esc_html( $b->attendees ); ?></td>
-                    <td data-label="Amount"><strong>&pound;<?php echo number_format( $b->amount, 2 ); ?></strong></td>
+                    <?php if ( MBS_Payment_Features::enabled() ) : ?><td data-label="Amount"><strong>&pound;<?php echo number_format( $b->amount, 2 ); ?></strong></td>
                     <td data-label="Paid">
                         <?php
                         $paid = (float) ( $b->amount_paid ?? 0 );
@@ -239,7 +243,7 @@
                             <span style="color:#6b7280;">—</span>
                         <?php endif; ?>
                     </td>
-                    <td data-label="Status">
+                    <?php endif; ?><td data-label="Status">
                         <span class="nms-status nms-status-<?php echo esc_attr( $b->status ); ?>">
                             <?php echo esc_html( MBS_Bookings::status_label( $b->status ) ); ?>
                         </span>
@@ -247,22 +251,22 @@
                     <td data-label="Actions">
                         <div class="nms-action-btns">
                             <a href="?page=mathlin-booking&action=view&ref=<?php echo esc_attr( $b->ref ); ?>" class="button button-small">View</a>
-                            <a href="?page=mathlin-booking&action=invoice&ref=<?php echo esc_attr( $b->ref ); ?>" class="button button-small">Invoice</a>
+                            <?php if ( MBS_Payment_Features::enabled( 'invoices' ) && ! $free_campsite ) : ?><a href="?page=mathlin-booking&action=invoice&ref=<?php echo esc_attr( $b->ref ); ?>" class="button button-small">Invoice</a><?php endif; ?>
                             <?php if ( $b->status === 'pending' ) { ?>
                                 <button class="button button-small button-primary nms-btn-confirm" data-ref="<?php echo esc_attr( $b->ref ); ?>">Confirm</button>
                             <?php } ?>
                             <?php
                             $list_dep_settings = MBS_Bookings::get_deposit_settings();
-                            if ( $b->status === 'confirmed' && $list_dep_settings['enabled'] && ! MBS_Bookings::requires_full_payment( $b->booking_date ) ) { ?>
+                            if ( MBS_Payment_Features::enabled( 'manual' ) && ! $free_campsite && $b->status === 'confirmed' && $list_dep_settings['enabled'] && ! MBS_Bookings::requires_full_payment( $b->booking_date ) ) { ?>
                                 <button class="button button-small nms-btn-deposit-paid" data-ref="<?php echo esc_attr( $b->ref ); ?>" style="background:#f59e0b;color:#fff;border-color:#d97706;">Deposit Paid</button>
                             <?php } ?>
-                            <?php if ( $b->status === 'confirmed' || $b->status === 'deposit_paid' ) { ?>
+                            <?php if ( MBS_Payment_Features::enabled( 'manual' ) && ! $free_campsite && ( $b->status === 'confirmed' || $b->status === 'deposit_paid' ) ) { ?>
                                 <button class="button button-small nms-btn-paid" data-ref="<?php echo esc_attr( $b->ref ); ?>">Fully Paid</button>
                             <?php } ?>
-                            <?php if ( $b->status === 'paid' ) { ?>
+                            <?php if ( MBS_Payment_Features::enabled( 'manual' ) && $b->status === 'paid' ) { ?>
                                 <button class="button button-small nms-btn-unpaid" data-ref="<?php echo esc_attr( $b->ref ); ?>">Undo Paid</button>
                             <?php } ?>
-                            <?php if ( $b->status === 'deposit_paid' ) { ?>
+                            <?php if ( MBS_Payment_Features::enabled( 'manual' ) && $b->status === 'deposit_paid' ) { ?>
                                 <button class="button button-small nms-btn-undo-deposit" data-ref="<?php echo esc_attr( $b->ref ); ?>">Undo Deposit</button>
                             <?php } ?>
                             <?php if ( $b->status !== 'cancelled' && $b->status !== 'archived' && $b->status !== 'paid' && $b->status !== 'deposit_paid' ) { ?>

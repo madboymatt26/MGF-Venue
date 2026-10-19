@@ -8,6 +8,7 @@ $bookings = MBS_Hirer_Portal::get_bookings_for_email( $email );
 $series   = MBS_Hirer_Portal::get_series_for_email( $email );
 $invoices = MBS_Hirer_Portal::get_invoices_for_email( $email );
 $spaces  = MBS_Bookings::get_spaces();
+$free_campsite = MBS_Payment_Features::free_hire();
 $series_refs = array();
 foreach ( $series as $series_row ) $series_refs[ $series_row->series_ref ] = true;
 $legacy_bookings = array_values( array_filter( $bookings, static function ( $booking ) use ( $series_refs ) {
@@ -48,16 +49,16 @@ foreach ( $invoices as $invoice ) $invoices_by_series[ $invoice->series_ref ][] 
             <div style="font-size:1.75rem;font-weight:800;color:#2ecc71;"><?php echo $stats['total']; ?></div>
             <div style="font-size:0.8rem;color:#6b7280;">Total Bookings</div>
         </div>
-        <div class="nms-form-section" style="text-align:center;padding:1rem;">
+        <?php if ( ! $free_campsite ) : ?><div class="nms-form-section" style="text-align:center;padding:1rem;">
             <div style="font-size:1.75rem;font-weight:800;color:#7413DC;"><?php echo esc_html( MBS_Money::format( $stats['total_spent_minor'] ) ); ?></div>
             <div style="font-size:0.8rem;color:#6b7280;">Actually Paid</div>
-        </div>
+        </div><?php endif; ?>
     </div>
 
     <?php if ( $series ) : ?>
     <div class="nms-form-section" style="margin-bottom:1.5rem;">
         <h3>Your Recurring Bookings</h3>
-        <p class="nms-muted">Each series is grouped here. Billing and payment are handled per invoice, not per date.</p>
+        <p class="nms-muted"><?php echo $free_campsite ? 'Your grouped dates are shown together. There is no hire charge. Changes and cancellations are reviewed by the bookings manager.' : 'Each series is grouped here. Billing and payment are handled per invoice, not per date.'; ?></p>
         <?php foreach ( $series as $s ) :
             $occurrences = MBS_Series::occurrences( $s->series_ref, false );
             $series_invoices = $invoices_by_series[ $s->series_ref ] ?? array();
@@ -78,14 +79,15 @@ foreach ( $invoices as $invoice ) $invoices_by_series[ $invoice->series_ref ][] 
         <article style="border:1px solid #e0d0f0;border-radius:8px;padding:1rem;margin:1rem 0;">
             <div style="display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
                 <div><strong><?php echo esc_html( $s->space ); ?></strong><br><span class="nms-muted"><?php echo esc_html( $s->series_ref ); ?> · <?php echo esc_html( ucfirst( str_replace( '_', ' ', $s->status ) ) ); ?></span></div>
-                <div style="text-align:right;"><strong><?php echo esc_html( MBS_Money::format( MBS_Money::from_decimal_string( (string) $s->price_per_booking ) ) ); ?></strong> per booking<br><span class="nms-muted"><?php echo esc_html( ucfirst( str_replace( '_', ' ', $s->billing_mode ) ) ); ?> billing</span></div>
+                <?php if ( $free_campsite ) : ?><div>No hire charge</div><?php else : ?>
+                <div style="text-align:right;"><strong><?php echo esc_html( MBS_Money::format( MBS_Money::from_decimal_string( (string) $s->price_per_booking ) ) ); ?></strong> per booking<br><span class="nms-muted"><?php echo esc_html( ucfirst( str_replace( '_', ' ', $s->billing_mode ) ) ); ?> billing</span></div><?php endif; ?>
             </div>
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0.75rem;margin-top:1rem;">
-                <div><span class="nms-muted">Schedule</span><br>Weekly, <?php echo esc_html( $s->all_day ? 'all day' : substr( $s->start_time, 0, 5 ) . '–' . substr( $s->end_time, 0, 5 ) ); ?></div>
+                <div><span class="nms-muted">Schedule</span><br><?php $schedule = json_decode( $s->schedule_json, true ) ?: array(); echo esc_html( ucfirst( str_replace( '_', ' ', $schedule['pattern'] ?? 'selected dates' ) ) ); ?>, <?php echo esc_html( $s->all_day ? 'all day' : substr( $s->start_time, 0, 5 ) . '–' . substr( $s->end_time, 0, 5 ) ); ?></div>
                 <div><span class="nms-muted">Next date</span><br><?php echo $next_occurrence ? esc_html( wp_date( 'j M Y', strtotime( $next_occurrence->booking_date ) ) ) : 'No future date'; ?></div>
-                <div><span class="nms-muted">Estimated series value</span><br><?php echo esc_html( '£' . number_format( (float) $s->estimated_total, 2 ) ); ?></div>
+                <?php if ( ! $free_campsite ) : ?><div><span class="nms-muted">Estimated series value</span><br><?php echo esc_html( '£' . number_format( (float) $s->estimated_total, 2 ) ); ?></div>
                 <div><span class="nms-muted">Outstanding</span><br><?php echo esc_html( MBS_Money::format( $outstanding ) ); ?></div>
-                <div><span class="nms-muted">Next invoice</span><br><?php echo $next_invoice ? esc_html( $next_invoice->invoice_ref . ' · due ' . wp_date( 'j M Y', strtotime( $next_invoice->due_at ) ) ) : 'None outstanding'; ?></div>
+                <div><span class="nms-muted">Next invoice</span><br><?php echo $next_invoice ? esc_html( $next_invoice->invoice_ref . ' · due ' . wp_date( 'j M Y', strtotime( $next_invoice->due_at ) ) ) : 'None outstanding'; ?></div><?php endif; ?>
             </div>
             <details style="margin-top:1rem;">
                 <summary style="cursor:pointer;font-weight:600;">View <?php echo (int) count( $occurrences ); ?> booking dates</summary>
@@ -128,7 +130,7 @@ foreach ( $invoices as $invoice ) $invoices_by_series[ $invoice->series_ref ][] 
             <div style="text-align:right;"><strong>Balance <?php echo esc_html( MBS_Money::format( $balance, $invoice->currency ) ); ?></strong><br>
                 <?php if ( $invoice_pdf_url ) : ?><a href="<?php echo esc_url( $invoice_pdf_url ); ?>" class="nms-btn nms-btn-sm" style="background:#f5f0ff;color:#7413DC;border-color:#e0d0f0;">Download PDF</a><?php endif; ?>
                 <?php if ( $pay_url ) : ?><a href="<?php echo esc_url( $pay_url ); ?>" class="nms-btn nms-btn-sm" style="background:#2ecc71;color:#fff;border-color:#2ecc71;">Pay this invoice</a>
-                <?php elseif ( $balance > 0 && $invoice_series && $invoice_series->payment_method === 'offline_bacs' ) : ?><span class="nms-muted">Pay by BACS using <?php echo esc_html( $invoice->invoice_ref ); ?></span><?php endif; ?>
+                <?php elseif ( MBS_Payment_Features::enabled() && $balance > 0 && $invoice_series && $invoice_series->payment_method === 'offline_bacs' ) : ?><span class="nms-muted">Pay by BACS using <?php echo esc_html( $invoice->invoice_ref ); ?></span><?php endif; ?>
             </div>
         </div>
         <?php endforeach; ?>
@@ -180,10 +182,10 @@ foreach ( $invoices as $invoice ) $invoices_by_series[ $invoice->series_ref ][] 
                         <tr style="border-bottom:1px solid #f0f0f0;<?php echo $is_past ? 'opacity:0.6;' : ''; ?>">
                             <td style="padding:10px 8px;font-weight:600;"><?php echo esc_html( $b->ref ); ?></td>
                             <td style="padding:10px 8px;"><?php echo esc_html( $b->space ); ?></td>
-                            <td style="padding:10px 8px;"><?php echo esc_html( date( 'D j M Y', strtotime( $b->booking_date ) ) ); ?></td>
+                            <td style="padding:10px 8px;"><?php echo esc_html( date( 'D j M Y', strtotime( $b->booking_date ) ) . ( ! empty( $b->booking_date_end ) && $b->booking_date_end !== $b->booking_date ? ' – ' . date( 'D j M Y', strtotime( $b->booking_date_end ) ) : '' ) ); ?></td>
                             <td style="padding:10px 8px;"><?php echo esc_html( $time_str ); ?></td>
                             <td style="padding:10px 8px;">
-                                &pound;<?php echo number_format( $b->amount, 2 ); ?>
+                                <?php echo $free_campsite ? 'No hire charge' : '&pound;' . number_format( $b->amount, 2 ); ?>
                                 <?php if ( $amount_paid_val > 0 && $amount_paid_val < $total_amount ) : ?>
                                     <br><span style="font-size:0.65rem;color:#92400e;">Paid: &pound;<?php echo number_format( $amount_paid_val, 2 ); ?> | Due: &pound;<?php echo number_format( $total_amount - $amount_paid_val, 2 ); ?></span>
                                 <?php elseif ( $amount_paid_val > $total_amount + 0.01 ) : ?>
@@ -219,7 +221,7 @@ foreach ( $invoices as $invoice ) $invoices_by_series[ $invoice->series_ref ][] 
                                     ?>
                                         <a href="<?php echo esc_url( $booking_pdf_url ); ?>" class="nms-btn nms-btn-sm" style="background:#f5f0ff;color:#7413DC;border-color:#e0d0f0;font-size:0.7rem;">Invoice PDF</a>
                                     <?php endif; ?>
-                                    <a href="<?php echo esc_url( rest_url( 'mathlin/v1/bookings/' . $b->ref . '/ical' ) ); ?>" class="nms-btn nms-btn-sm" style="background:#f5f0ff;color:#7413DC;border-color:#e0d0f0;font-size:0.7rem;">📅</a>
+                                    <a href="<?php $ical_url = rest_url( 'mathlin/v1/bookings/' . $b->ref . '/ical' ); echo esc_url( $free_campsite ? add_query_arg( '_wpnonce', wp_create_nonce( 'wp_rest' ), $ical_url ) : $ical_url ); ?>" class="nms-btn nms-btn-sm" style="background:#f5f0ff;color:#7413DC;border-color:#e0d0f0;font-size:0.7rem;">📅</a>
                                     <?php
                                     $mod_url = MBS_Modification::get_modification_url( $b );
                                     if ( $mod_url && ! in_array( $b->status, array( 'cancelled' ) ) && ! $is_past ) :

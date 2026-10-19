@@ -73,7 +73,7 @@ class MBS_Bookings {
      */
     public static function get_deposit_settings() {
         return array(
-            'enabled'         => (bool) get_option( 'mbs_deposit_enabled', false ),
+            'enabled'         => ( ! class_exists( 'MBS_Payment_Features' ) || MBS_Payment_Features::enabled() ) && (bool) get_option( 'mbs_deposit_enabled', false ),
             'percentage'      => (float) get_option( 'mbs_deposit_percentage', 25 ),
             'balance_days'    => (int) get_option( 'mbs_deposit_balance_days', 7 ),
         );
@@ -341,6 +341,8 @@ class MBS_Bookings {
     }
 
     public static function calculate_cost( $space, $start_time, $end_time, $kitchen = false, $all_day = false, $num_days = 1, $scout_use = false, $tier = 'standard' ) {
+        if ( class_exists( 'MBS_Payment_Features' ) && MBS_Payment_Features::free_hire() ) return 0;
+        if ( class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ) return 0;
         // Scout use bookings are free
         if ( $scout_use ) return 0;
 
@@ -414,6 +416,12 @@ class MBS_Bookings {
      *                                     set an explicit non-negative amount.
      */
     public static function create( $data, $trusted_admin_context = false, $manage_transaction = true ) {
+        if ( class_exists( 'MBS_Campsite_Policy' ) ) {
+            $policy = MBS_Campsite_Policy::validate( $data, $trusted_admin_context );
+            if ( is_wp_error( $policy ) ) return $policy;
+            $schedule = MBS_Campsite_Policy::validate_schedule( $data, $trusted_admin_context );
+            if ( is_wp_error( $schedule ) ) return $schedule;
+        }
         global $wpdb;
         $table = $wpdb->prefix . MBS_TABLE;
 
@@ -467,14 +475,18 @@ class MBS_Bookings {
             $cost = max( 0, round( (float) $data['custom_amount'], 2 ) );
         }
 
+        $free_campsite = class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled();
+        $free_hire = $free_campsite || ( class_exists( 'MBS_Payment_Features' ) && MBS_Payment_Features::free_hire() );
+        if ( $free_hire ) $cost = 0;
+
         $insert = array(
             'ref'              => $ref,
             'status'           => 'pending',
             'name'             => sanitize_text_field( $data['name'] ),
             'organisation'     => sanitize_text_field( $data['organisation'] ?? '' ),
             'email'            => sanitize_email( $data['email'] ),
-            'phone'            => sanitize_text_field( $data['phone'] ),
-            'address'          => sanitize_textarea_field( $data['address'] ),
+            'phone'            => sanitize_text_field( $data['phone'] ?? '' ),
+            'address'          => sanitize_textarea_field( $data['address'] ?? '' ),
             'space'            => sanitize_text_field( $data['space'] ),
             'kitchen'          => ! empty( $data['kitchen'] ) ? 1 : 0,
             'booking_date'     => $date_from,
@@ -488,7 +500,7 @@ class MBS_Bookings {
             'purpose'          => sanitize_text_field( $data['purpose'] ),
             'notes'            => sanitize_textarea_field( $data['notes'] ?? '' ),
             'amount'           => $cost,
-            'invoice_number'   => $scout_use ? '' : 'INV-' . $ref,
+            'invoice_number'   => ( $scout_use || $free_hire ) ? '' : 'INV-' . $ref,
         );
 
         // Store custom field responses
@@ -500,6 +512,12 @@ class MBS_Bookings {
         }
 
         // Generate modification token
+        if ( $free_campsite ) {
+            $stored_fields = json_decode( $insert['custom_fields'] ?? '{}', true ) ?: array();
+            $stored_fields['_mbs_campsite_span'] = $data['booking_span'] ?? 'daily';
+            $insert['custom_fields'] = wp_json_encode( $stored_fields );
+        }
+
         $insert['modification_token'] = wp_generate_password( 32, false );
 
         // Public/private visibility
@@ -541,11 +559,12 @@ class MBS_Bookings {
                 return new WP_Error( 'blocked_date', 'The venue is blocked on ' . $check_date . ( $blocked->reason ? ': ' . $blocked->reason : '.' ) );
             }
 
+            $interval = $free_campsite ? MBS_Campsite_Policy::request_interval( $data, $check_date ) : array( $data['start_time'] ?? '', $data['end_time'] ?? '' );
             $tx_conflicts = self::check_conflicts(
                 $space_val,
                 $check_date,
-                $all_day ? null : ( $data['start_time'] ?? '' ),
-                $all_day ? null : ( $data['end_time'] ?? '' ),
+                $all_day ? null : $interval[0],
+                $all_day ? null : $interval[1],
                 $all_day
             );
             if ( ! empty( $tx_conflicts ) ) {
@@ -655,8 +674,8 @@ class MBS_Bookings {
         global $wpdb;
         $table = $wpdb->prefix . MBS_TABLE;
         return $wpdb->get_results( $wpdb->prepare(
-            "SELECT * FROM {$table} WHERE booking_date = %s AND status NOT IN ('cancelled', 'archived') ORDER BY start_time ASC",
-            $date
+            "SELECT * FROM {$table} WHERE booking_date <= %s AND COALESCE(NULLIF(booking_date_end,''),booking_date) >= %s AND status NOT IN ('cancelled', 'archived') ORDER BY start_time ASC",
+            $date, $date
         ) );
     }
 
@@ -699,6 +718,8 @@ class MBS_Bookings {
         if ( ! in_array( $status, $allowed ) ) return false;
         $current = self::get( $ref );
         if ( ! $current ) return false;
+        $replacement_meta = json_decode( (string) ( $current->custom_fields ?? '' ), true );
+        if ( ( ! empty( $replacement_meta['_mbs_whole_park_replacement'] ) || ! empty( $replacement_meta['_mbs_multiday_replacement'] ) ) && $status !== 'archived' ) return false;
 
         // Idempotent: already at the requested status — no-op success.
         if ( $current->status === $status ) return true;
@@ -770,7 +791,7 @@ class MBS_Bookings {
 
                 // Auto-promote £0 bookings (scout use / free) straight to paid
                 $total_minor = MBS_Money::from_decimal_string( (string) $booking->amount );
-                if ( ! is_wp_error( $total_minor ) && $total_minor <= 0 ) {
+                if ( ! is_wp_error( $total_minor ) && $total_minor <= 0 && ! ( class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ) && ! ( class_exists( 'MBS_Payment_Features' ) && MBS_Payment_Features::free_hire() ) ) {
                     $wpdb->update( $table, array( 'status' => 'paid' ), array( 'ref' => $ref ) );
                     MBS_Audit_Log::log( $ref, 'paid', 'Auto-marked as Paid (£0 booking — no payment required)' );
                     do_action( 'mbs_booking_paid', self::get( $ref ), 0 );
@@ -928,6 +949,11 @@ class MBS_Bookings {
 
         $conflicts = array();
         foreach ( $existing as $b ) {
+            if ( class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::span( $b ) === 'continuous' ) {
+                $interval = MBS_Campsite_Policy::interval( $b, $date );
+                if ( $start_time !== null && $end_time !== null && substr( $start_time, 0, 5 ) < $interval[1] && substr( $end_time, 0, 5 ) > $interval[0] ) $conflicts[] = $b;
+                continue;
+            }
             // Existing all-day booking conflicts with any timed booking
             if ( $b->all_day ) {
                 $conflicts[] = $b;

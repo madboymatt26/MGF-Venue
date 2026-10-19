@@ -97,7 +97,7 @@ class MBS_Admin {
         add_submenu_page( 'mathlin-booking', 'Settings', 'Settings', $admin_cap, 'mathlin-settings', array( $this, 'render_settings' ) );
         add_submenu_page( 'mathlin-booking', 'Email Templates', 'Email Templates', $admin_cap, 'mathlin-emails', array( $this, 'render_email_templates' ) );
         add_submenu_page( 'mathlin-booking', 'Custom Fields', 'Custom Fields', $admin_cap, 'mathlin-custom-fields', array( $this, 'render_custom_fields' ) );
-        add_submenu_page( 'mathlin-booking', 'OSM Integration', 'OSM Integration', $admin_cap, 'mathlin-osm', array( $this, 'render_osm_settings' ) );
+        if ( MBS_Payment_Features::enabled( 'reports' ) ) add_submenu_page( 'mathlin-booking', 'OSM Integration', 'OSM Integration', $admin_cap, 'mathlin-osm', array( $this, 'render_osm_settings' ) );
 
         // Booking management pages — accessible to Booking Managers
         add_submenu_page( 'mathlin-booking', 'Reports & Analytics', 'Reports', $booking_cap, 'mathlin-analytics', array( $this, 'render_analytics' ) );
@@ -166,10 +166,13 @@ class MBS_Admin {
         if ( strpos( $hook, 'mathlin' ) === false ) return;
         wp_enqueue_style(  'mbs-admin', MBS_PLUGIN_URL . 'admin/admin.css', array(), MBS_VERSION );
         wp_enqueue_script( 'mbs-admin', MBS_PLUGIN_URL . 'admin/admin.js',  array( 'jquery' ), MBS_VERSION, true );
+        wp_enqueue_script( 'mbs-payment-features', MBS_PLUGIN_URL . 'admin/payment-features.js', array( 'mbs-admin' ), MBS_VERSION, true );
         wp_localize_script( 'mbs-admin', 'MBS_Admin', array(
+            'payment_features' => MBS_Payment_Features::state(),
             'ajax_url' => admin_url( 'admin-ajax.php' ),
             'nonce'    => wp_create_nonce( 'mbs_admin_nonce' ),
             'doc_nonce' => wp_create_nonce( 'mbs_invoice_document_nonce' ),
+            'free_campsite' => class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled(),
         ) );
         // Enqueue media library for logo upload
         if ( strpos( $hook, 'mathlin-emails' ) !== false ) {
@@ -197,7 +200,22 @@ class MBS_Admin {
         $stats    = MBS_Bookings::get_stats( true ); // exclude internal Scout bookings from the counters
         $status   = isset( $_GET['status'] ) ? sanitize_text_field( $_GET['status'] ) : '';
         $search   = isset( $_GET['s'] )      ? sanitize_text_field( $_GET['s'] )      : '';
-        $bookings = MBS_Bookings::get_all( array( 'status' => $status, 'search' => $search, 'orderby' => 'booking_date', 'order' => 'ASC', 'exclude_scout' => true ) );
+        $bookings_page = max( 1, absint( $_GET['paged'] ?? 1 ) );
+        $bookings = MBS_Bookings::get_all( array( 'status' => $status, 'search' => $search, 'orderby' => 'booking_date', 'order' => 'ASC', 'exclude_scout' => true, 'limit' => 51, 'offset' => ( $bookings_page - 1 ) * 50 ) );
+        $bookings_has_next = count( $bookings ) > 50;
+        $bookings = array_slice( $bookings, 0, 50 );
+        if ( class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ) {
+            // Page complete requests, not raw dates: never split a migrated group at row 50.
+            $requests = array();
+            for ( $offset = 0; ; $offset += 200 ) {
+                $batch = MBS_Bookings::get_all( array( 'status' => $status, 'search' => $search, 'orderby' => 'booking_date', 'order' => 'ASC', 'exclude_scout' => true, 'limit' => 200, 'offset' => $offset ) );
+                foreach ( $batch as $booking_row ) $requests[ ! empty( $booking_row->series_id ) ? $booking_row->series_id : $booking_row->ref ][] = $booking_row;
+                if ( count( $batch ) < 200 ) break;
+            }
+            $bookings_has_next = count( $requests ) > $bookings_page * 50;
+            $bookings = array();
+            foreach ( array_slice( array_values( $requests ), ( $bookings_page - 1 ) * 50, 50 ) as $group ) $bookings = array_merge( $bookings, $group );
+        }
         include MBS_PLUGIN_DIR . 'admin/views/list.php';
     }
 
@@ -482,6 +500,9 @@ class MBS_Admin {
         $status = sanitize_text_field( $_POST['status'] ?? 'confirmed' );
         $booking = MBS_Bookings::get( $ref );
         if ( ! $booking ) wp_send_json_error( 'Booking not found.' );
+        $replacement_meta = json_decode( (string) ( $booking->custom_fields ?? '' ), true );
+        $replacement_ref = $replacement_meta['_mbs_whole_park_replacement'] ?? $replacement_meta['_mbs_multiday_replacement'] ?? '';
+        if ( ! empty( $replacement_ref ) ) wp_send_json_error( 'This record was consolidated into ' . $replacement_ref . '. Use the replacement booking; do not restore the archived duplicate.', 409 );
         if ( MBS_Bookings::has_financial_history( $ref ) ) wp_send_json_error( 'A booking with financial history cannot be restored directly. Use credit and replacement records.', 409 );
         if ( self::invoice_manages_occurrence( $booking ) && in_array( $status, array( 'deposit_paid', 'paid' ), true ) ) {
             wp_send_json_error( 'Restore consolidated-series payment state through the invoice ledger.', 409 );
@@ -688,6 +709,18 @@ class MBS_Admin {
     public function ajax_save_settings() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
         if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
+        // Safe partial update for MCP clients; do not reset unrelated settings.
+        if ( isset( $_POST['payment_features'] ) ) {
+            if ( ! is_array( $_POST['payment_features'] ) ) wp_send_json_error( 'Payment features must be an object.', 400 );
+            $feature_result = MBS_Payment_Features::save( wp_unslash( $_POST['payment_features'] ) );
+            if ( is_wp_error( $feature_result ) ) wp_send_json_error( $feature_result->get_error_message(), 400 );
+            wp_send_json_success( array( 'payment_features' => $feature_result ) );
+            return;
+        }
+        if ( class_exists( 'MBS_Campsite_Policy' ) ) {
+            $policy_save = MBS_Campsite_Policy::save_settings( $_POST );
+            if ( is_wp_error( $policy_save ) ) wp_send_json_error( $policy_save->get_error_message(), 400 );
+        }
 
         $webhook      = esc_url_raw( $_POST['ha_webhook_url'] ?? '' );
         $notice_days  = absint( $_POST['min_notice_days'] ?? 1 );
@@ -769,9 +802,9 @@ class MBS_Admin {
             update_option( 'mbs_github_token', $github_token );
         }
 
-        if ( ! empty( $bank_sort_code ) ) update_option( 'mbs_bank_sort_code', $bank_sort_code );
-        if ( ! empty( $bank_account_number ) ) update_option( 'mbs_bank_account_number', $bank_account_number );
-        if ( ! empty( $bank_account_name ) ) update_option( 'mbs_bank_account_name', $bank_account_name );
+        if ( array_key_exists( 'bank_sort_code', $_POST ) ) update_option( 'mbs_bank_sort_code', $bank_sort_code );
+        if ( array_key_exists( 'bank_account_number', $_POST ) ) update_option( 'mbs_bank_account_number', $bank_account_number );
+        if ( array_key_exists( 'bank_account_name', $_POST ) ) update_option( 'mbs_bank_account_name', $bank_account_name );
         update_option( 'mbs_payment_terms_days', $payment_terms_days );
 
         // Save spaces if provided
@@ -954,6 +987,7 @@ class MBS_Admin {
     }
 
     public function render_analytics() {
+        if ( ! MBS_Payment_Features::enabled( 'reports' ) ) { include MBS_PLUGIN_DIR . 'admin/views/usage-report.php'; return; }
         include MBS_PLUGIN_DIR . 'admin/views/analytics.php';
     }
 
@@ -962,6 +996,7 @@ class MBS_Admin {
     }
 
     public function render_osm_settings() {
+        if ( ! MBS_Payment_Features::enabled( 'reports' ) ) { echo '<div class="wrap"><h1>Accounting integration disabled</h1><p>Enable financial reports in MGF Venue Settings to use accounting integration.</p></div>'; return; }
         include MBS_PLUGIN_DIR . 'admin/views/osm-settings-v2.php';
     }
 
@@ -1431,7 +1466,9 @@ class MBS_Admin {
 
         if ( empty( $fields ) ) wp_send_json_error( 'No changes were provided.' );
 
-        $result = MBS_Bookings::update_series_future( $series_id, $fields );
+        $result = class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled()
+            ? MBS_Campsite_Policy::edit_series( $series_id, $fields, absint( $_POST['expected_version'] ?? 0 ), ! empty( $_POST['notify_hirer'] ), ! empty( $_POST['campsite_exception'] ) )
+            : MBS_Bookings::update_series_future( $series_id, $fields );
         if ( is_wp_error( $result ) ) {
             wp_send_json_error( $result->get_error_message() );
         }
@@ -1648,6 +1685,7 @@ class MBS_Admin {
         // QA-007: Custom price override
         $calculated_amount = $new_amount;
         $is_custom_price   = ! empty( $_POST['custom_price'] );
+        if ( ! MBS_Payment_Features::enabled() && $is_custom_price && (float) ( $_POST['custom_amount'] ?? 0 ) !== 0.0 ) wp_send_json_error( 'Payments are disabled; a charge cannot be added to this booking.', 409 );
         if ( $is_custom_price ) {
             $new_amount = max( 0, round( floatval( $_POST['custom_amount'] ?? 0 ), 2 ) );
         }
@@ -1717,6 +1755,11 @@ class MBS_Admin {
             'amount'       => $new_amount,
         );
 
+        if ( class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ) {
+            if ( $new_amount !== 0.0 && $new_amount !== 0 ) wp_send_json_error( 'Campsite hire must remain free.' );
+            $valid = MBS_Campsite_Policy::validate_amendment( $booking, $update, ! empty( $_POST['campsite_exception'] ) );
+            if ( is_wp_error( $valid ) ) wp_send_json_error( $valid->get_error_message() );
+        }
         $wpdb->update( $table, $update, array( 'ref' => $ref ) );
 
         // Auto-update status if cost changed and there's now a balance due

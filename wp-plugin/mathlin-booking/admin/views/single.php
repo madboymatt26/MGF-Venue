@@ -53,7 +53,7 @@ $invoice_pdf_url = $invoice_document_id ? add_query_arg( array(
             $amount_paid = (float) ( $booking->amount_paid ?? 0 );
 
             $balance = (float) $booking->amount - $amount_paid;
-            if ( $amount_paid > 0 && abs( $balance ) > 0.01 ) :
+            if ( MBS_Payment_Features::enabled( 'manual' ) && $amount_paid > 0 && abs( $balance ) > 0.01 ) :
                 if ( $balance > 0 ) : ?>
                     <div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:6px;padding:12px 16px;margin:0 1.5rem 1rem;color:#991b1b;font-weight:bold;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
                         <span>
@@ -75,7 +75,9 @@ $invoice_pdf_url = $invoice_document_id ? add_query_arg( array(
             ?>
             <div id="nms-view-mode" class="nms-detail-grid">
                 <div class="nms-detail-item"><label>Reference</label><span><?php echo esc_html( $booking->ref ); ?></span></div>
-                <?php if ( $uses_consolidated_billing ) : ?>
+                <?php if ( $uses_consolidated_billing && $billing_treatment === 'none' ) : ?>
+                <div class="nms-detail-item"><label>Schedule</label><span><a href="<?php echo esc_url( $series_admin_url ); ?>">View grouped dates</a></span></div>
+                <?php elseif ( $uses_consolidated_billing ) : ?>
                 <div class="nms-detail-item"><label>Billing</label><span>Consolidated at series level<?php if ( $series_admin_url ) : ?> — <a href="<?php echo esc_url( $series_admin_url ); ?>">view series invoices</a><?php endif; ?></span></div>
                 <?php else : ?>
                 <div class="nms-detail-item"><label>Invoice No.</label><span><?php echo esc_html( $booking->invoice_number ); ?></span></div>
@@ -85,7 +87,7 @@ $invoice_pdf_url = $invoice_document_id ? add_query_arg( array(
                 <div class="nms-detail-item"><label>Email</label><span><a href="mailto:<?php echo esc_attr( $booking->email ); ?>"><?php echo esc_html( $booking->email ); ?></a></span></div>
                 <div class="nms-detail-item"><label>Phone</label><span><?php echo esc_html( $booking->phone ); ?></span></div>
                 <div class="nms-detail-item"><label>Space</label><span><?php echo esc_html( $booking->space ); ?></span></div>
-                <div class="nms-detail-item"><label>Date</label><span><?php echo esc_html( date( 'l j F Y', strtotime( $booking->booking_date ) ) ); ?></span></div>
+                <div class="nms-detail-item"><label>Date</label><span><?php echo esc_html( wp_date( 'l j F Y', strtotime( $booking->booking_date ) ) . ( ! empty( $booking->booking_date_end ) && $booking->booking_date_end !== $booking->booking_date ? ' – ' . wp_date( 'l j F Y', strtotime( $booking->booking_date_end ) ) : '' ) ); ?></span></div>
                 <div class="nms-detail-item"><label>Time</label><span><?php echo esc_html( $time_str ); ?></span></div>
                 <div class="nms-detail-item"><label>Attendees</label><span><?php echo esc_html( $booking->attendees ); ?></span></div>
                 <div class="nms-detail-item"><label>Kitchen</label><span><?php echo $booking->kitchen ? 'Yes' : 'No'; ?></span></div>
@@ -183,7 +185,7 @@ $invoice_pdf_url = $invoice_document_id ? add_query_arg( array(
                 </div>
 
                 <!-- Cost preview -->
-                <div id="nms-edit-cost-preview" style="margin-top:16px;padding:12px 16px;background:#f9f7ff;border-radius:8px;border:1px solid #e0d0f0;">
+                <div id="nms-edit-cost-preview" <?php if ( ! MBS_Payment_Features::enabled() ) echo 'hidden'; ?> style="margin-top:16px;padding:12px 16px;background:#f9f7ff;border-radius:8px;border:1px solid #e0d0f0;">
                     <div style="display:flex;justify-content:space-between;font-size:0.9rem;">
                         <span>Original amount:</span>
                         <span>&pound;<?php echo number_format( $booking->amount, 2 ); ?></span>
@@ -242,7 +244,7 @@ $invoice_pdf_url = $invoice_document_id ? add_query_arg( array(
                 <?php if ( $booking->status === 'pending' ) : ?>
                     <button class="button button-primary nms-btn-confirm" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">✓ Confirm Booking</button>
                 <?php endif; ?>
-                <?php if ( $booking->status === 'confirmed' || $booking->status === 'deposit_paid' ) : ?>
+                <?php if ( ( MBS_Payment_Features::enabled( 'manual' ) || MBS_Payment_Features::enabled( 'reminders' ) ) && ( $booking->status === 'confirmed' || $booking->status === 'deposit_paid' ) ) : ?>
                     <?php
                     $dep_settings = MBS_Bookings::get_deposit_settings();
                     $dep_amount   = MBS_Bookings::calculate_deposit( (float) $booking->amount );
@@ -255,7 +257,7 @@ $invoice_pdf_url = $invoice_document_id ? add_query_arg( array(
                         <button class="button nms-btn-deposit-paid" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1" style="background:#f59e0b;color:#fff;border-color:#d97706;">💰 Mark Deposit Paid (£<?php echo number_format( $dep_amount, 2 ); ?>)</button>
                     <?php endif; ?>
                     <button class="button button-primary nms-btn-paid" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">💰 Mark Fully Paid (£<?php echo number_format( $bal_amount, 2 ); ?>)</button>
-                    <button class="button nms-btn-chase" data-ref="<?php echo esc_attr( $booking->ref ); ?>">📧 Chase Payment</button>
+                    <?php if ( MBS_Payment_Features::enabled( 'reminders' ) ) : ?><button class="button nms-btn-chase" data-ref="<?php echo esc_attr( $booking->ref ); ?>">📧 Chase Payment</button><?php endif; ?>
                     <?php if ( $booking->chase_count > 0 ) : ?>
                         <small class="nms-muted" style="display:block;margin-top:4px;"><?php echo esc_html( $booking->chase_count ); ?> chase(s) sent<?php if ( $booking->last_chased ) echo ' — last: ' . esc_html( date( 'j M H:i', strtotime( $booking->last_chased ) ) ); ?></small>
                     <?php endif; ?>
@@ -264,10 +266,10 @@ $invoice_pdf_url = $invoice_document_id ? add_query_arg( array(
                     <?php endif; ?>
                     <?php endif; ?>
                 <?php endif; ?>
-                <?php if ( $booking->status === 'paid' && ! $uses_consolidated_billing ) : ?>
+                <?php if ( MBS_Payment_Features::enabled( 'manual' ) && $booking->status === 'paid' && ! $uses_consolidated_billing ) : ?>
                     <button class="button nms-btn-unpaid" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">↩ Undo Paid</button>
                 <?php endif; ?>
-                <?php if ( $booking->status === 'deposit_paid' && ! $uses_consolidated_billing ) : ?>
+                <?php if ( MBS_Payment_Features::enabled( 'manual' ) && $booking->status === 'deposit_paid' && ! $uses_consolidated_billing ) : ?>
                     <button class="button nms-btn-undo-deposit" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">↩ Undo Deposit</button>
                 <?php endif; ?>
                 <?php if ( ! in_array( $booking->status, array( 'cancelled', 'archived', 'paid', 'deposit_paid' ) ) ) : ?>
@@ -282,7 +284,7 @@ $invoice_pdf_url = $invoice_document_id ? add_query_arg( array(
                 <?php if ( in_array( $booking->status, array( 'confirmed', 'deposit_paid', 'paid', 'cancelled' ) ) ) : ?>
                     <button class="button nms-btn-archive" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-redirect="1">📦 Archive</button>
                 <?php endif; ?>
-                <?php if ( $uses_consolidated_billing ) : ?>
+                <?php if ( $uses_consolidated_billing && MBS_Payment_Features::enabled( 'invoices' ) && $billing_treatment !== 'none' ) : ?>
                     <?php if ( $series_admin_url ) : ?><a href="<?php echo esc_url( $series_admin_url ); ?>" class="button">🧾 Manage consolidated invoices</a><?php endif; ?>
                 <?php elseif ( $invoice_document_id ) : ?>
                     <a href="<?php echo esc_url( $invoice_view_url ); ?>" class="button" target="_blank" rel="noopener">🧾 View issued invoice</a>

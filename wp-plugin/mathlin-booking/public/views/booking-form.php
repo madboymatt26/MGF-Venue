@@ -1,6 +1,8 @@
-<?php if ( ! defined( 'ABSPATH' ) ) exit; ?>
+<?php if ( ! defined( 'ABSPATH' ) ) exit;
+$free_campsite = class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled(); ?>
 
 <div class="nms-wrap" id="nms-booking-wrap">
+    <?php if ( $free_campsite && ! get_option( 'mbs_campsite_booking_open', true ) ) : ?><p class="nms-alert">Preview only: this replacement form is closed while the migration is checked. Please continue using the existing booking page.</p><?php endif; ?>
 
     <!-- Calendar -->
     <?php include __DIR__ . '/calendar.php'; ?>
@@ -8,7 +10,7 @@
     <!-- Booking Form -->
     <div class="nms-form-wrap" id="nms-form-section">
         <h2 class="nms-section-title">Make a Booking</h2>
-        <p class="nms-section-sub">Complete the form below. You'll receive a confirmation email and invoice once your booking is approved.</p>
+        <p class="nms-section-sub"><?php echo MBS_Payment_Features::free_hire() ? 'Request your booking below. There is no hire charge. Your booking is not confirmed until approved by the booking coordinator.' : "Complete the form below. You'll receive a confirmation email once your booking is approved."; ?></p>
 
         <?php
         // Show booking notice if configured
@@ -67,7 +69,7 @@
                     </div>
                     <div class="nms-form-group">
                         <label for="nms-org">Organisation / Group</label>
-                        <input type="text" id="nms-org" name="organisation" placeholder="e.g. Acme Ltd"
+                        <input type="text" id="nms-org" name="organisation" placeholder="<?php echo $free_campsite ? 'Scout group or district' : 'e.g. Acme Ltd'; ?>"
                                value="<?php echo esc_attr( $hirer['organisation'] ?? '' ); ?>">
                     </div>
                 </div>
@@ -78,19 +80,28 @@
                                value="<?php echo esc_attr( $hirer['email'] ?? '' ); ?>">
                     </div>
                     <div class="nms-form-group">
-                        <label for="nms-phone">Phone Number <span class="nms-req">*</span></label>
-                        <input type="tel" id="nms-phone" name="phone" placeholder="07700 900000" required
+                        <label for="nms-phone">Phone Number <?php if ( ! $free_campsite ) : ?><span class="nms-req">*</span><?php endif; ?></label>
+                        <input type="tel" id="nms-phone" name="phone" placeholder="07700 900000" <?php if ( ! $free_campsite ) echo 'required'; ?>
                                value="<?php echo esc_attr( $hirer['phone'] ?? '' ); ?>">
                     </div>
                 </div>
-                <div class="nms-form-group">
+                <?php if ( ! MBS_Payment_Features::free_hire() ) : ?><div class="nms-form-group">
                     <label for="nms-address">Billing Address <span class="nms-req">*</span></label>
                     <textarea id="nms-address" name="address" rows="3" placeholder="123 High Street, Anytown, AB1 2CD" required><?php echo esc_textarea( $hirer['address'] ?? '' ); ?></textarea>
-                </div>
+                </div><?php endif; ?>
             </div>
 
             <div class="nms-form-section">
                 <h3>Booking Details</h3>
+                <?php if ( $free_campsite ) : ?>
+                <div class="nms-form-group"><label for="nms-campsite-span">Booking arrangement</label>
+                    <select id="nms-campsite-span" name="booking_span"><option value="daily">Day session — same slot on each selected day</option><option value="continuous">Continuous stay — arrival to departure</option></select>
+                    <p class="nms-field-hint">For separate dates use Choose specific dates below. For overnight camping choose Continuous stay and enter the departure date. Weekday arrival is from 17:00; earlier access needs an agreed exception.</p>
+                </div>
+                <div class="nms-form-group" id="nms-campsite-slot-group"><label for="nms-campsite-slot">Day-session time slot</label><select id="nms-campsite-slot">
+                    <?php foreach ( MBS_Campsite_Policy::slots() as $slot ) : ?><option value="<?php echo esc_attr( $slot['start'] . '|' . $slot['end'] ); ?>"><?php echo esc_html( $slot['label'] ); ?></option><?php endforeach; ?>
+                </select></div>
+                <?php endif; ?>
                 <div class="nms-form-row">
                     <div class="nms-form-group">
                         <label for="nms-space">Space Required <span class="nms-req">*</span></label>
@@ -102,6 +113,7 @@
                                 $hourly = isset( $info['rate_hourly'] ) ? $info['rate_hourly'] : ( $info['rate'] ?? 0 );
                                 $daily  = isset( $info['rate_daily'] ) ? $info['rate_daily'] : 0;
                                 $price_label = '£' . number_format( $hourly, 0 ) . '/hr or £' . number_format( $daily, 0 ) . '/day';
+                                if ( MBS_Payment_Features::free_hire() ) $price_label = 'No hire charge';
                                 $cap_label   = ! empty( $info['capacity'] ) ? ', up to ' . $info['capacity'] . ' people' : '';
                             ?>
                             <option value="<?php echo esc_attr( $name ); ?>"><?php echo esc_html( $name . ' (' . $price_label . $cap_label . ')' ); ?></option>
@@ -230,7 +242,8 @@
             <!-- Cost preview -->
             <?php MBS_Custom_Fields::render_form_fields(); ?>
 
-            <div class="nms-form-section" id="nms-cost-section">
+            <?php if ( $free_campsite ) : ?><p class="nms-venue-notice">No hire charge or payment is required. All requested dates remain subject to approval.</p><?php endif; ?>
+            <div class="nms-form-section" id="nms-cost-section" <?php if ( MBS_Payment_Features::free_hire() ) echo 'hidden'; ?>>
                 <h3>Cost Estimate</h3>
                 <div class="nms-cost-table">
                     <div class="nms-cost-row">

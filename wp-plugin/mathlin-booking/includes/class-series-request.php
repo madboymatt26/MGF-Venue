@@ -71,6 +71,7 @@ class MBS_Series_Request {
     }
 
     public static function submit( $input ) {
+        if ( class_exists( 'MBS_Campsite_Policy' ) && ! MBS_Campsite_Policy::can_book() ) return MBS_Campsite_Policy::access_error();
         global $wpdb;
         foreach ( array( 'series_ref', 'kind', 'scope', 'from_date', 'notes' ) as $key ) {
             if ( isset( $input[ $key ] ) && ! is_scalar( $input[ $key ] ) ) return new WP_Error( 'invalid_input', 'Invalid request details.' );

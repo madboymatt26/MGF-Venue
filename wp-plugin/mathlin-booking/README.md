@@ -4,7 +4,66 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.28.2
+**Current Version:** 3.31.0
+
+## 3.31.0 Protected calendar sync and shared-code integration
+
+Calendar Sync now has paginated Needs review, Linked entries, Estate-only,
+History and Connection settings views. Compare MGF and Google side by side,
+including candidate locations, inclusive all-day dates and local timed dates.
+Saving reviewed matches saves references in WordPress only, keeps sync paused
+and never changes the estate event. Enabling add-only sync is a separate action.
+
+Google is authoritative for existing estate entries. No Google PATCH, UPDATE
+or DELETE event operation is permitted, including for events originally created
+by MGF. Later changes/cancellations become review items, not automatic edits.
+New missing bookings can be added, without invitations. Missing linked events
+are never recreated blindly. Changed source/estate snapshots stop stale matches.
+Old sync configurations require explicit protected-policy approval before running.
+History is bounded to 100 identifier/result records and excludes secrets/contacts.
+
+This shared source also incorporates the previously site-only campsite mode,
+payment-feature switches, original-plugin read-only safeguards, custom-field
+display fix and multi-day repair. These are opt-in/configured per installation;
+the migration/repair POST routes remain administrator-only and Stowmarket-host
+guarded. An ordinary update never runs imports or repairs, changes approval,
+connects Google or starts sync. Needham's paid-venue defaults remain unchanged.
+The multi-day repair retains private before-images and archived source records.
+
+## 3.30.1 Calendar connection disclosures
+
+The calendar connection screen links the site-specific public information and
+privacy notice when those pages exist and are published. This adds disclosure
+before authorisation without changing tokens, permissions, sync state or bookings.
+
+## 3.30.0 Google Calendar (opt-in)
+
+MGF Venue → Google Calendar provides a one-way connection to an existing shared
+calendar. Configure a Google Web application OAuth client with Calendar API
+enabled and use the exact redirect URI displayed in the admin page. Secrets and
+offline tokens are authenticated-encrypted with WordPress salts (OpenSSL needed).
+Only calendars with owner/writer permission can be selected. Do not use a Google
+OAuth app left in short-lived testing mode for unattended production operation.
+
+Select the calendar, generate a read-only preview and explicitly review overlaps
+with manually maintained events before enabling. From 3.31.0 manual events are
+referenced locally only; no Google event is edited or deleted. Pending bookings are optional and
+labelled Provisional. Contact details, names, free-text purposes and private notes
+are not exported. Attendees and recurring Google events are never modified.
+Stable event IDs, persisted adopted links, conditional ETags, complete-source and
+pagination checks, an atomic worker lock and per-write booking revalidation guard
+against duplicates and stale changes. Past history is retained. Deleted/missing
+links need review; retargeting after any writes requires a migration review.
+
+WordPress cron reconciles every five minutes in batches of 20 safe writes; a real
+server cron is needed for reliable timing. Pause/disconnect retains events. Status
+is available through configuration and administrator GET
+`/mathlin/v1/admin/google-calendar`; `?preview=1` provides a redacted read-only
+plan. OAuth and first-sync consent remain administrator UI operations. No bookings,
+booking approvals, customer messages, new calendars or financial data are changed.
+
+The historical 3.29/3.30 builds were Stowmarket-only; 3.31.0 integrates them into
+the common codebase. Site configuration and booking data are never shared.
 
 ## 3.28.2 Additional charge cancellation and archive
 

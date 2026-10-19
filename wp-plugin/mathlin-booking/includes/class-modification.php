@@ -276,6 +276,10 @@ class MBS_Modification {
 	                            if ( is_wp_error( $dur ) ) { $wpdb->query( 'ROLLBACK' ); return $dur; }
 	                        }
 
+                            if ( class_exists( 'MBS_Campsite_Policy' ) ) {
+                                $valid = MBS_Campsite_Policy::validate_amendment( $locked_booking, $update );
+                                if ( is_wp_error( $valid ) ) { $wpdb->query( 'ROLLBACK' ); return $valid; }
+                            }
 	                        // Recalculate amount from locked state
 	                        $rc_space = $update['space'] ?? $locked_booking->space;
 	                        $rc_start = $update['start_time'] ?? $locked_booking->start_time;
@@ -288,7 +292,7 @@ class MBS_Modification {
 	                        $new_amount = MBS_Bookings::calculate_cost( $rc_space, $rc_start, $rc_end, (bool) $rc_kitchen, (bool) $rc_allday, $rc_days, (bool) $locked_booking->scout_use, MBS_Bookings::get_booking_tier( $locked_booking ) );
 	                        $update['amount'] = $new_amount;
 	                        $lk_paid = (float) ( $locked_booking->amount_paid ?? 0 );
-	                        $update['status'] = ( $lk_paid >= (float) $new_amount ) ? 'paid' : 'confirmed';
+	                        $update['status'] = ( class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ) ? $locked_booking->status : ( ( $lk_paid >= (float) $new_amount ) ? 'paid' : 'confirmed' );
 
 	                        $booking_updated = $wpdb->update( $table, $update, array( 'ref' => $request->booking_ref ) );
 	                        if ( $booking_updated === false ) {

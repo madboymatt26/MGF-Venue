@@ -84,6 +84,7 @@ class MBS_Series {
         $scope = sanitize_key( $args['scope'] ?? '' );
         $limit = max( 1, min( 500, (int) ( $args['limit'] ?? 100 ) ) );
         $where = array( '1=1' );
+        if ( $status !== 'archived' ) $where[] = "status != 'archived'";
         $params = array();
         if ( $status ) {
             $where[] = 'status = %s';
@@ -167,6 +168,7 @@ class MBS_Series {
         }
 
         $is_scout = ! empty( $first->scout_use );
+        $no_billing = $is_scout || ( class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ) || ( class_exists( 'MBS_Payment_Features' ) && MBS_Payment_Features::free_hire() );
         $tier = MBS_Bookings::get_booking_tier( $first );
         $terms_text = (string) get_option( 'mbs_terms_text', MBS_Bookings::get_default_terms() );
         $accepted_terms = ! empty( $data['accept_terms'] );
@@ -220,11 +222,11 @@ class MBS_Series {
             'blocked_count'        => $counts['blocked'],
             'error_count'          => $counts['error'],
             'exceptions_json'      => wp_json_encode( $exceptions ),
-            'billing_mode'         => $is_scout ? 'none' : 'monthly',
-            'billing_treatment'    => $is_scout ? 'none' : 'invoice_managed',
+            'billing_mode'         => $no_billing ? 'none' : 'monthly',
+            'billing_treatment'    => $no_billing ? 'none' : 'invoice_managed',
             'deposit_policy'       => 'none',
-            'payment_method'       => $is_scout ? 'none' : ( MBS_Bookings::tier_is_offline( $tier ) ? 'offline_bacs' : 'online' ),
-            'automatic_reminders'  => $is_scout ? 0 : 1,
+            'payment_method'       => $no_billing ? 'none' : ( MBS_Bookings::tier_is_offline( $tier ) ? 'offline_bacs' : 'online' ),
+            'automatic_reminders'  => $no_billing ? 0 : 1,
             'invoice_lead_days'    => max( 0, (int) get_option( 'mbs_series_invoice_lead_days', 28 ) ),
             'payment_terms_days'   => max( 0, (int) get_option( 'mbs_payment_terms_days', 14 ) ),
             'billing_schedule_json'=> wp_json_encode( array() ),
@@ -602,6 +604,9 @@ class MBS_Series {
             // Every normal pending series — including one being set to no-charge by an
             // administrator — must go through Approval_Service for atomic billing save.
             $is_genuine_scout = (bool) $preflight_series->scout_use;
+            if ( ! $is_genuine_scout && ( ( class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ) || ( class_exists( 'MBS_Payment_Features' ) && MBS_Payment_Features::free_hire() ) ) && (float) $preflight_series->price_per_booking === 0.0 ) {
+                $billing_config = array( 'billing_mode' => 'none', 'billing_treatment' => 'none', 'payment_method' => 'none' );
+            }
 
             if ( ! $is_genuine_scout ) {
                 // If inline billing_config provided (MCP/REST/admin), delegate to Approval_Service
@@ -899,7 +904,7 @@ class MBS_Series {
             if ( ( $scope === 'from_date' || $scope === 'selected' ) && $new_status !== 'cancelled_future' ) {
                 MBS_Email::notify_series_changed( $fresh, self::active_occurrences( $series_ref ) );
             } else {
-                MBS_Email::notify_series_cancelled( $fresh, self::active_occurrences( $series_ref ) );
+                MBS_Email::notify_series_cancelled( $fresh, class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ? $affected : self::active_occurrences( $series_ref ) );
             }
         }
         return array(
