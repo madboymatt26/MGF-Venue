@@ -719,7 +719,7 @@ class MBS_Bookings {
         $current = self::get( $ref );
         if ( ! $current ) return false;
         $replacement_meta = json_decode( (string) ( $current->custom_fields ?? '' ), true );
-        if ( ! empty( $replacement_meta['_mbs_whole_park_replacement'] ) && $status !== 'archived' ) return false;
+        if ( ( ! empty( $replacement_meta['_mbs_whole_park_replacement'] ) || ! empty( $replacement_meta['_mbs_multiday_replacement'] ) ) && $status !== 'archived' ) return false;
 
         // Idempotent: already at the requested status — no-op success.
         if ( $current->status === $status ) return true;

@@ -501,7 +501,8 @@ class MBS_Admin {
         $booking = MBS_Bookings::get( $ref );
         if ( ! $booking ) wp_send_json_error( 'Booking not found.' );
         $replacement_meta = json_decode( (string) ( $booking->custom_fields ?? '' ), true );
-        if ( ! empty( $replacement_meta['_mbs_whole_park_replacement'] ) ) wp_send_json_error( 'This record was consolidated into ' . $replacement_meta['_mbs_whole_park_replacement'] . '. Use the replacement booking; do not restore the archived duplicate.', 409 );
+        $replacement_ref = $replacement_meta['_mbs_whole_park_replacement'] ?? $replacement_meta['_mbs_multiday_replacement'] ?? '';
+        if ( ! empty( $replacement_ref ) ) wp_send_json_error( 'This record was consolidated into ' . $replacement_ref . '. Use the replacement booking; do not restore the archived duplicate.', 409 );
         if ( MBS_Bookings::has_financial_history( $ref ) ) wp_send_json_error( 'A booking with financial history cannot be restored directly. Use credit and replacement records.', 409 );
         if ( self::invoice_manages_occurrence( $booking ) && in_array( $status, array( 'deposit_paid', 'paid' ), true ) ) {
             wp_send_json_error( 'Restore consolidated-series payment state through the invoice ledger.', 409 );

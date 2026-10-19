@@ -31,4 +31,20 @@ ok(strpos(json_encode($event),'test@example')===false,'No customer contact expor
 $r=$rows;foreach($r as $i=>&$b){$b['ref']='MBS-W'.strtoupper(substr(hash('sha256',(string)$i),0,12));$b['series_id']='SER-WFAMILY';$b['custom_fields']=json_encode(['_mbs_whole_park_sources'=>['source-'.$i],'_mbs_whole_park_batch'=>'batch']);$b['space']='Whole Park';$b['admin_notes']='Migrated from Booking Calendar #1. Original approval and local time endpoints preserved.' . "\nWhole Park consolidation: MBS-L".$i.'-261024. Original records archived, approvals/times retained; no customer notification.';}unset($b);
 ok(count(select($r))===1,'Previously consolidated Whole Park days can become one stay');
 $r[1]['admin_notes'].="\nSeparate instruction";ok(!select($r),'Coordinator notes must not be lost');
+// Superseded daily sources must not be restored through any status API.
+define('MBS_TABLE', 'bookings');
+require __DIR__.'/../wp-plugin/mathlin-booking/includes/class-bookings.php';
+$wpdb = new class {
+    public $prefix = 'wp_';
+    public $row;
+    public function prepare($sql, $ref) { return $sql; }
+    public function get_row($sql) { return $this->row; }
+};
+foreach (['_mbs_whole_park_replacement', '_mbs_multiday_replacement'] as $pointer) {
+    $wpdb->row = (object)['status'=>'archived', 'custom_fields'=>json_encode([$pointer=>'MBS-SURVIVOR'])];
+    foreach (['pending','confirmed','cancelled','paid','deposit_paid'] as $status) {
+        ok(MBS_Bookings::update_status('MBS-OLD', $status, false) === false, $pointer.' blocks '.$status);
+    }
+    ok(MBS_Bookings::update_status('MBS-OLD', 'archived', false) === true, 'Already archived remains idempotent');
+}
 echo "OK: $checks multiday repair assertions passed\n";
