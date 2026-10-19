@@ -8,7 +8,7 @@ foreach ( array( 'mbs_campsite_mode', 'mbs_payments_enabled', 'mbs_min_notice_da
 $admin = get_user_by( 'login', 'admin' ); wp_set_current_user( $admin->ID );
 $actor = new MBS_Admin_Booking_Entry();
 function entry_request( $method, $data ) { $r = new WP_REST_Request( 'POST' ); foreach ( $data as $k => $v ) $r->set_param( $k, $v ); if ( $method === 'preview' ) { $r->set_header( 'Content-Type', 'application/json' ); $r->set_body( wp_json_encode( $data ) ); } return $r; }
-function entry_preview( $data ) { global $actor; $r = $actor->preview( entry_request( 'preview', $data ) ); entry_ok( ! is_wp_error( $r ), is_wp_error( $r ) ? $r->get_error_message() : 'preview' ); return $r->get_data(); }
+function entry_preview( $data ) { $r = ( new MBS_Admin_Booking_Entry() )->preview( entry_request( 'preview', $data ) ); entry_ok( ! is_wp_error( $r ), is_wp_error( $r ) ? $r->get_error_message() : 'preview' ); return $r->get_data(); }
 try {
     update_option( 'mbs_campsite_mode', 0 ); update_option( 'mbs_payments_enabled', 1 ); update_option( 'mbs_min_duration_hours', 2 );
     update_option( 'mbs_spaces', array( 'Entry Test' => array( 'capacity'=>100, 'rate_hourly'=>15, 'rate_daily'=>100 ), 'Entry Child' => array( 'capacity'=>20, 'rate_hourly'=>10, 'rate_daily'=>60, 'parent'=>'Entry Test' ) ) );
@@ -33,6 +33,12 @@ try {
     $r = $actor->commit( entry_request( 'commit', array( 'token'=>$p['token'], 'confirm'=>true ) ) ); entry_ok( ! is_wp_error( $r ), is_wp_error( $r ) ? $r->get_error_message() : 'series saved' );
     $series = $r->get_data()['series']; entry_ok( $series['count'] === 3 && ! $series['skipped'], 'Correct series saved through normal API' );
     foreach ( MBS_Bookings::get_series( $series['series_id'] ) as $row ) entry_ok( $row->status === 'pending' && (float) $row->amount === 0.0 && ! $row->scout_use, 'Estate stays in general booking list, not Scout nights' );
+    $stay = $estate; $stay['recurrence_pattern']=''; $stay['booking_date']=wp_date( 'Y-m-d', strtotime( $estate['booking_date'].' +40 days' ) ); $stay['booking_date_end']=wp_date( 'Y-m-d', strtotime( $stay['booking_date'].' +2 days' ) ); $stay['booking_span']='continuous'; $stay['start_time']='18:00'; $stay['end_time']='09:00'; $stay['status']='confirmed';
+    $p = entry_preview( $stay ); entry_ok( count($p['plan']['schedule'])===1,'Multi-day estate stay is one reservation' );
+    $r = $actor->commit( entry_request( 'commit', array('token'=>$p['token'],'confirm'=>true) ) ); entry_ok( !is_wp_error($r), is_wp_error($r)?$r->get_error_message():'confirmed stay' );
+    $stay_row = MBS_Bookings::get($r->get_data()['booking']['ref']); entry_ok($stay_row->status==='confirmed' && $stay_row->booking_date_end===$stay['booking_date_end'],'Free continuous stay remains confirmed, not Paid');
+    $selected = $estate; $selected['booking_date']=wp_date('Y-m-d',strtotime($stay['booking_date'].' +10 days')); $selected['repeat_until']=wp_date('Y-m-d',strtotime($selected['booking_date'].' +5 days')); $selected['recurrence_pattern']='selected'; $selected['recurrence_dates']=$selected['booking_date'].','.$selected['repeat_until'];
+    entry_ok(count(entry_preview($selected)['plan']['schedule'])===2,'Selected-date recurrence');
     $estate['notify_hirer']=true; entry_ok( is_wp_error( MBS_Admin_Booking_Entry::plan( $estate ) ), 'Coordinator-only customer email forbidden' );
     wp_set_current_user( 0 ); entry_ok( ! $actor->allowed(), 'Anonymous callers denied' );
     echo "STAFF_BOOKING_ENTRY_INTEGRATION_OK\n";

@@ -48,6 +48,28 @@ try {
     await staff.goto(base+'/wp-admin/admin.php?page=mathlin-emails');
     await staff.locator('.mbs-tpl-subject[data-type="additional_charge_invoice"]').waitFor();
     await staff.locator('.mbs-tpl-body[data-type="additional_charge_credit"]').waitFor();
+    // The new staff entry screen uses the same signed-in operator, real REST nonce
+    // and disposable WordPress database. No customer notification is selected.
+    await staff.goto(base+'/wp-admin/admin.php?page=mathlin-add-booking');
+    await staff.getByRole('heading',{name:'Add booking',exact:true}).waitFor();
+    await staff.locator('#entry-purpose').fill('Synthetic browser staff booking');
+    await staff.locator('#entry-name').fill('Synthetic staff contact');
+    await staff.locator('#entry-email').fill('staff-browser@example.invalid');
+    await staff.locator('#entry-space').selectOption({index:1});
+    await staff.locator('#entry-attendees').fill('8');
+    const staffDate=new Date(Date.now()+260*86400000).toISOString().slice(0,10);
+    await staff.locator('#entry-date').fill(staffDate);
+    await staff.locator('#entry-start').fill('18:00');
+    await staff.locator('#entry-end').fill('20:00');
+    await staff.getByRole('button',{name:'Check dates and review',exact:true}).click();
+    await staff.getByText('Review ready. Nothing has been created.',{exact:true}).waitFor();
+    assert.equal(await staff.locator('#entry-save').isEnabled(),false,'Explicit review confirmation required');
+    await staff.locator('#entry-confirm').check();
+    await staff.screenshot({path:'browser-artifacts/staff-booking-review.png',fullPage:true});
+    await staff.locator('#entry-save').click();
+    await staff.getByText('Saved. Do not resubmit this reservation.',{exact:true}).waitFor();
+    await staff.getByRole('link',{name:'View saved booking',exact:true}).click();
+    await staff.getByText('Synthetic browser staff booking',{exact:true}).first().waitFor();
     const owner=await browser.newContext(); const portal=await owner.newPage(); watch(portal);
     await login(portal,'extra-browser'); await portal.goto(fixture.portal_url);
     await portal.getByText(fixture.invoice_ref,{exact:true}).waitFor();
