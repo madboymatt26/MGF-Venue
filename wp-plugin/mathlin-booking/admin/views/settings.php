@@ -5,6 +5,62 @@
     <div id="nms-settings-global-msg" class="nms-settings-msg" style="margin-bottom:16px;font-size:14px;"></div>
 
     <div class="nms-settings-layout">
+        <div class="nms-card">
+            <div class="nms-card-header"><h2>Google Calendar</h2></div>
+            <p>Synchronise bookings one-way to an existing shared calendar. Preview manual events first to prevent duplicates; private booking/contact details are not exported.</p>
+            <p><?php $gcal = MBS_Google_Calendar::status(); echo esc_html( ( $gcal['enabled'] ? 'Sync enabled: ' : 'Sync off: ' ) . ( $gcal['calendar'] ?: 'not connected' ) ); ?></p>
+            <a class="button" href="<?php echo esc_url( admin_url( 'admin.php?page=mathlin-google-calendar' ) ); ?>">Configure and review Google Calendar</a>
+        </div>
+        <div class="nms-card" id="mbs-payment-features">
+            <div class="nms-card-header"><h2>Payment features</h2></div>
+            <p>Turn payments off for a free venue. Existing financial records are retained; new invoices, charges, checkout and payment reminders are stopped. Payment-provider reconciliation for payments already in progress continues.</p>
+            <table class="form-table">
+            <?php foreach ( MBS_Payment_Features::state() as $feature => $setting ) : $key = $feature === 'payments' ? 'payments_enabled' : 'payment_feature_' . $feature; ?>
+                <tr><th><label for="<?php echo esc_attr( $key ); ?>"><?php echo esc_html( $setting['label'] ); ?></label></th><td>
+                    <select class="mbs-payment-switch" id="<?php echo esc_attr( $key ); ?>" data-key="<?php echo esc_attr( $key ); ?>">
+                        <option value="0" <?php selected( $setting['configured'], false ); ?>>Disabled</option>
+                        <option value="1" <?php selected( $setting['configured'], true ); ?>>Enabled</option>
+                    </select>
+                    <?php if ( $feature !== 'payments' && ! $setting['enabled'] ) : ?><span class="description">Currently inactive. Requires Payments and billing<?php echo $feature === 'additional_charges' ? ' and Invoices' : ''; ?>.</span><?php endif; ?>
+                </td></tr>
+            <?php endforeach; ?>
+            </table>
+            <p><button class="button button-primary" id="mbs-save-payment-features" type="button">Save payment features</button> <span id="mbs-payment-features-result" role="status"></span></p>
+            <p class="description">These switches save separately from the other settings below. Reload after saving to show only the enabled settings. Turning a feature off does not erase its configuration.</p>
+        </div>
+        <script>
+        jQuery(function($){ $('#mbs-save-payment-features').on('click',function(){
+            var data={action:'mbs_save_payment_features',nonce:MBS_Admin.nonce};
+            $('.mbs-payment-switch').each(function(){data[$(this).data('key')]=$(this).val();});
+            var button=$(this).prop('disabled',true);
+            $.post(ajaxurl,data).done(function(r){if(r.success){location.reload();}else{$('#mbs-payment-features-result').text(r.data || 'Could not save.');}}).fail(function(xhr){$('#mbs-payment-features-result').text(xhr.responseJSON && xhr.responseJSON.data || 'Could not save payment features.');}).always(function(){button.prop('disabled',false);});
+        });});
+        </script>
+        <div class="nms-card">
+            <div class="nms-card-header"><h2>Campsite Workflow</h2></div>
+            <p>Optional site-wide free campsite bookings. Existing paid-venue behaviour stays unchanged when disabled. Enabling this does not approve bookings, migrate old reservations or publish pages.</p>
+            <table class="form-table">
+                <tr><th><label for="campsite_mode">Booking workflow</label></th><td>
+                    <select id="campsite_mode">
+                        <option value="0" <?php selected( get_option( 'mbs_campsite_mode', 0 ), 0 ); ?>>Standard venue hire</option>
+                        <option value="1" <?php selected( get_option( 'mbs_campsite_mode', 0 ), 1 ); ?>>Free campsite — approved accounts only</option>
+                    </select>
+                    <p class="description">No hire charges or invoices for new campsite bookings. Phone is optional; no billing address is collected. Disable the kitchen add-on first. Additional charges require the payment switches above to be enabled explicitly.</p>
+                </td></tr>
+                <tr><th><label for="campsite_roles">Allowed booking roles</label></th><td>
+                    <select id="campsite_roles" multiple size="6">
+                        <?php foreach ( wp_roles()->roles as $role_key => $role_info ) : ?>
+                        <option value="<?php echo esc_attr( $role_key ); ?>" <?php selected( in_array( $role_key, (array) get_option( 'mbs_campsite_roles', array() ), true ) ); ?>><?php echo esc_html( $role_info['name'] ); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <p class="description">No roles selected means only administrators and booking managers may submit. Ultimate Member accounts must also be approved. A posted contact email never grants access.</p>
+                </td></tr>
+                <tr><th><label for="campsite_slots">Day-session time slots</label></th><td>
+                    <textarea id="campsite_slots" rows="6" class="large-text code"><?php echo esc_textarea( implode( "\n", array_map( static function( $slot ) { return $slot['start'] . '|' . $slot['end'] . '|' . $slot['label']; }, MBS_Campsite_Policy::slots() ) ) ); ?></textarea>
+                    <p class="description">One start|end|label per line, e.g. 18:00|21:00|18:00–21:00. Day sessions must use these slots. Continuous stays use arrival/departure times. Weekday arrival before 17:00 requires a manager-recorded agreed exception.</p>
+                </td></tr>
+            </table>
+        </div>
 
         <!-- Bookable Spaces / Resources -->
         <div class="nms-card">
@@ -103,11 +159,11 @@
                 </tr>
             </table>
 
-            <p><strong>Note:</strong> When a booking is confirmed, the invoice is automatically attached to the confirmation email sent to the booker.</p>
+            <p><strong>Note:</strong> Confirmations include an invoice only for chargeable bookings when invoicing is enabled.</p>
         </div>
 
         <!-- Payment & Invoice Settings -->
-        <div class="nms-card">
+        <div class="nms-card" <?php if ( ! MBS_Payment_Features::enabled( 'invoices' ) ) echo 'hidden'; ?>>
             <div class="nms-card-header">
                 <h2>💳 Payment &amp; Invoice Settings</h2>
             </div>
@@ -617,7 +673,7 @@ rest:
         </div>
 
         <!-- Deposit Management -->
-        <div class="nms-card">
+        <div class="nms-card" <?php if ( ! MBS_Payment_Features::enabled() ) echo 'hidden'; ?>>
             <div class="nms-card-header"><h2>💰 Payment &amp; Deposits</h2></div>
             <p>Configure how and when payment is collected from hirers.</p>
             <table class="form-table">
@@ -655,7 +711,7 @@ rest:
         </div>
 
         <!-- Pricing Tiers -->
-        <div class="nms-card">
+        <div class="nms-card" <?php if ( ! MBS_Payment_Features::enabled() ) echo 'hidden'; ?>>
             <div class="nms-card-header"><h2>🏷️ Pricing Tiers</h2></div>
             <p>Configure pricing multipliers for different customer types. Assign tiers to hirers via their WordPress user profile.</p>
             <?php $tiers = MBS_Bookings::get_pricing_tiers(); ?>

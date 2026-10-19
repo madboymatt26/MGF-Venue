@@ -27,6 +27,7 @@ class MBS_Billing_Engine {
 
     /** Configure a first-class series with optimistic concurrency. */
     public static function configure_series( $series_ref, $configuration, $expected_version ) {
+        if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'invoices' ) && ( ( $configuration['billing_mode'] ?? '' ) !== 'none' || ( $configuration['billing_treatment'] ?? '' ) !== 'none' ) ) return MBS_Payment_Features::error( 'invoices' );
         global $wpdb;
         $table = $wpdb->prefix . MBS_SERIES_TABLE;
         $current = MBS_Series::get( $series_ref );
@@ -265,6 +266,7 @@ class MBS_Billing_Engine {
 
     /** Catch up every due invoice period, safely repeatable by cron or admin. */
     public static function catch_up( $as_of ) {
+        if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'invoices' ) ) return array( 'generated' => 0, 'disabled' => true );
         global $wpdb;
         $as_of_date = DateTimeImmutable::createFromFormat( '!Y-m-d', (string) $as_of, wp_timezone() );
         if ( ! $as_of_date || $as_of_date->format( 'Y-m-d' ) !== $as_of ) return new WP_Error( 'invalid_as_of_date', 'Catch-up date must be a real YYYY-MM-DD date.' );

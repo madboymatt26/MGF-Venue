@@ -23,6 +23,12 @@ class MBS_Rest_API {
 
     public function init() {
         add_action( 'rest_api_init', array( $this, 'register_routes' ) );
+        add_filter( 'rest_pre_dispatch', array( $this, 'campsite_public_permission' ), 10, 3 );
+    }
+
+    public function campsite_public_permission( $result, $server, $request ) {
+        if ( class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() && preg_match( '#^/mathlin/v1/bookings/(upcoming|today|calendar|date/|ical|[A-Z0-9-]+/ical)#', $request->get_route() ) && ! MBS_Campsite_Policy::can_book() ) return new WP_Error( 'campsite_access_denied', 'Sign in with an approved campsite account.', array( 'status' => 403 ) );
+        return $result;
     }
 
     public function register_routes() {
@@ -530,7 +536,8 @@ class MBS_Rest_API {
             if ( ! $this->is_valid_time( $start_time ) || ! $this->is_valid_time( $end_time ) ) {
                 return new WP_Error( 'invalid_time', 'Timed bookings require HH:MM start and end times.', array( 'status' => 400 ) );
             }
-            if ( strtotime( $end_time ) <= strtotime( $start_time ) ) {
+            $continuous_stay = class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() && $request->get_param( 'booking_span' ) === 'continuous' && $date_to > $date_from;
+            if ( ! $continuous_stay && strtotime( $end_time ) <= strtotime( $start_time ) ) {
                 return new WP_Error( 'invalid_time_range', 'end_time must be after start_time.', array( 'status' => 400 ) );
             }
         }
@@ -569,6 +576,8 @@ class MBS_Rest_API {
             'notes'            => sanitize_textarea_field( $request->get_param( 'notes' ) ?? '' ),
             'is_public'        => rest_sanitize_boolean( $request->get_param( 'is_public' ) ),
             'custom_fields'    => $custom_fields,
+            'booking_span'     => sanitize_key( $request->get_param( 'booking_span' ) ?: 'daily' ),
+            'campsite_exception' => rest_sanitize_boolean( $request->get_param( 'campsite_exception' ) ),
         );
 
         $custom_amount = $request->get_param( 'custom_amount' );
@@ -1011,6 +1020,7 @@ class MBS_Rest_API {
     public function get_admin_capabilities() {
         $is_admin = current_user_can( 'manage_options' );
         $actions  = array_merge( array( 'create_booking', 'manage_additional_charge' ), array_keys( $this->get_admin_action_handlers() ) );
+        if ( class_exists( 'MBS_Payment_Features' ) ) $actions = array_values( array_filter( $actions, static function( $action ) { $feature = MBS_Payment_Features::action_feature( $action ); return ! $feature || MBS_Payment_Features::enabled( $feature ); } ) );
         $reads    = array(
             'bookings', 'booking', 'availability', 'audit', 'global_audit',
             'dashboard', 'blocked_dates', 'series', 'series_list', 'invoices', 'invoice', 'requests', 'analytics',
@@ -1034,6 +1044,7 @@ class MBS_Rest_API {
 
         return rest_ensure_response( array(
             'plugin_version' => MBS_VERSION,
+            'payment_features' => class_exists( 'MBS_Payment_Features' ) ? MBS_Payment_Features::state() : array(),
             'role'           => $is_admin ? 'administrator' : 'booking_manager',
             'actions'        => $actions,
             'reads'          => $reads,
@@ -1328,6 +1339,8 @@ class MBS_Rest_API {
 
     public function get_admin_configuration() {
         $keys = array(
+            'mbs_campsite_mode', 'mbs_campsite_roles',
+            'mbs_campsite_booking_open', 'mbs_campsite_slots',
             'mbs_min_notice_days', 'mbs_min_duration_hours', 'mbs_kitchen_price',
             'mbs_kitchen_enabled', 'mbs_reminder_hours', 'mbs_terms_page_id',
             'mbs_auto_archive_days', 'mbs_additional_emails', 'mbs_auto_chase_enabled',
@@ -1345,6 +1358,9 @@ class MBS_Rest_API {
         $values = array();
         foreach ( $keys as $key ) $values[ $key ] = get_option( $key, null );
         $values['spaces']             = MBS_Bookings::get_spaces();
+        $values['payment_features']   = MBS_Payment_Features::state();
+        $values['google_calendar']    = MBS_Google_Calendar::status();
+        $values['legacy_calendar_reference'] = array( 'original_plugin' => true, 'read_only' => MBS_Legacy_Read_Only::enabled(), 'admin_page' => 'admin.php?page=wpbc', 'read_route' => '/mathlin/v1/admin/legacy-plugin' );
         $values['pricing_tiers']      = MBS_Bookings::get_pricing_tiers();
         $values['ha_webhook_configured'] = (bool) get_option( 'mbs_ha_webhook_url', '' );
         $values['github_token_configured'] = (bool) get_option( 'mbs_github_token', '' );
@@ -1388,6 +1404,10 @@ class MBS_Rest_API {
      * intact because the page contains a broad set of derived charts and tables.
      */
     public function get_admin_analytics( WP_REST_Request $request ) {
+        if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'reports' ) ) {
+            $stats = MBS_Bookings::get_stats( false );
+            return rest_ensure_response( array( 'financial_reporting_enabled' => false, 'summary' => array( 'bookings' => (int) ( $stats['total'] ?? 0 ), 'pending' => (int) ( $stats['pending'] ?? 0 ), 'confirmed' => (int) ( $stats['confirmed'] ?? 0 ) ) ) );
+        }
         $previous = array( 'report_from' => $_GET['report_from'] ?? null, 'report_to' => $_GET['report_to'] ?? null );
         foreach ( array( 'report_from', 'report_to' ) as $key ) {
             $value = sanitize_text_field( (string) $request->get_param( $key ) );

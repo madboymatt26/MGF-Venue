@@ -85,6 +85,10 @@ class MBS_Hirer_Portal {
      * Portal shortcode — shows login/register or the hirer dashboard.
      */
     public function shortcode_portal( $atts ) {
+        if ( class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ) {
+            if ( ! is_user_logged_in() ) return '<div class="nms-wrap"><h2>Manage campsite bookings</h2><p>Sign in using your existing approved Stowmarket Scouts account.</p><p><a class="nms-btn nms-btn-primary" href="' . esc_url( wp_login_url( get_permalink() ) ) . '">Sign in securely</a></p></div>';
+            if ( ! MBS_Campsite_Policy::can_book() ) return '<p>' . esc_html( MBS_Campsite_Policy::access_error()->get_error_message() ) . '</p>';
+        }
         ob_start();
 
         if ( is_user_logged_in() ) {
@@ -112,7 +116,7 @@ class MBS_Hirer_Portal {
         global $wpdb;
         $table = $wpdb->prefix . MBS_SERIES_TABLE;
         return $wpdb->get_results( $wpdb->prepare(
-            "SELECT * FROM {$table} WHERE contact_email = %s ORDER BY start_date DESC",
+            "SELECT * FROM {$table} WHERE contact_email = %s AND status != 'archived' ORDER BY start_date DESC",
             sanitize_email( $email )
         ) );
     }
@@ -178,6 +182,7 @@ class MBS_Hirer_Portal {
      */
     public function ajax_register() {
         check_ajax_referer( 'mbs_public_nonce', 'nonce' );
+        if ( class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ) wp_send_json_error( array( 'message' => 'Please contact the booking coordinator for a campsite account, or sign in with your existing approved website account.' ), 403 );
 
         // SEC-005: Rate limit registrations by IP
         $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
@@ -233,6 +238,7 @@ class MBS_Hirer_Portal {
      */
     public function ajax_login() {
         check_ajax_referer( 'mbs_public_nonce', 'nonce' );
+        if ( class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ) wp_send_json_error( array( 'message' => 'Please use the website sign-in page so all account security checks can run.', 'login_url' => wp_login_url() ), 400 );
 
         // Follow the same authentication path as wp-login.php.  Keep accepting
         // the legacy `email` field so cached/older portal markup still works.

@@ -8,6 +8,13 @@ if ( ! defined( 'ABSPATH' ) ) exit;
  * Triggered via admin AJAX action.
  */
 class MBS_CSV_Export {
+    private static function write_row( $output, $fields ) {
+        if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'reports' ) ) {
+            foreach ( array( 6, 18, 19 ) as $index ) unset( $fields[$index] );
+            $fields = array_values( $fields );
+        }
+        fputcsv( $output, $fields, ',', '"', '\\' );
+    }
 
     /**
      * Register the export handler.
@@ -60,7 +67,7 @@ class MBS_CSV_Export {
         fwrite( $output, "\xEF\xBB\xBF" );
 
         // Header row
-        fputcsv( $output, array(
+        self::write_row( $output, array(
             'Reference',
             'Status',
             'Name',
@@ -87,7 +94,7 @@ class MBS_CSV_Export {
 
         // Data rows
         foreach ( $bookings as $b ) {
-            fputcsv( $output, array(
+            self::write_row( $output, array(
                 $b->ref,
                 ucfirst( $b->status ),
                 $b->name,

@@ -1,0 +1,416 @@
+<?php
+/** Protected, add-only Google projection. Existing estate events are never rewritten or deleted. */
+if ( ! defined( 'ABSPATH' ) ) exit;
+
+class MBS_Google_Calendar {
+    const OPTION = 'mbs_google_calendar';
+    const HOOK = 'mbs_google_calendar_tick';
+    const SCOPES = 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly';
+
+    public function init() {
+        add_filter( 'cron_schedules', array( $this, 'schedules' ) );
+        add_action( self::HOOK, array( $this, 'tick' ) );
+        add_action( 'admin_menu', function() { add_submenu_page( 'mathlin-booking', 'Calendar Sync', 'Calendar Sync', 'manage_options', 'mathlin-google-calendar', array( $this, 'render' ) ); } );
+        add_action( 'admin_post_mbs_gcal', array( $this, 'handle' ) );
+        add_action( 'admin_post_mbs_gcal_oauth_callback', array( $this, 'callback' ) );
+        add_action( 'rest_api_init', function() {
+            register_rest_route( 'mathlin/v1', '/admin/google-calendar', array( 'methods' => 'GET', 'permission_callback' => function() { return current_user_can( 'manage_options' ); }, 'callback' => function( $request ) {
+                if ( ! $request->get_param( 'preview' ) ) return rest_ensure_response( self::status() );
+                try {
+                    $snapshot = self::snapshot();
+                    // Deliberately redact Google descriptions/attendees/private metadata from the API.
+                    return rest_ensure_response( array( 'status' => self::status(), 'items' => array_map( function( $op ) { $e = $op['want'] ?: $op['event']; return array( 'booking_ref' => $op['ref'], 'action' => $op['action'], 'reason' => $op['reason'], 'summary' => $e['summary'] ?? '', 'start' => $e['start'] ?? null, 'end' => $e['end'] ?? null, 'google_event' => self::display_event( $op['event'] ), 'candidates' => array_map( array( __CLASS__, 'display_event' ), $op['candidates'] ), 'overlapping_events' => count( $op['candidates'] ) ); }, $snapshot['ops'] ), 'estate_only' => array_map( array( __CLASS__, 'display_event' ), self::estate_only( $snapshot ) ), 'history' => self::history() ) );
+                } catch ( Throwable $e ) { return new WP_Error( 'google_calendar_unavailable', $e->getMessage(), array( 'status' => 503 ) ); }
+            } ) );
+        } );
+        if ( ! wp_next_scheduled( self::HOOK ) ) wp_schedule_event( time() + 300, 'mbs_gcal_five_minutes', self::HOOK );
+    }
+    public function schedules( $s ) { $s['mbs_gcal_five_minutes'] = array( 'interval' => 300, 'display' => 'MGF Calendar: every five minutes' ); return $s; }
+    public static function deactivate() { wp_clear_scheduled_hook( self::HOOK ); }
+    private static function settings() { return (array) get_option( self::OPTION, array() ); }
+    private static function save( $s ) { update_option( self::OPTION, $s, false ); }
+    public static function status() {
+        $s = self::settings();
+        $crypto = false;
+        if ( function_exists( 'openssl_encrypt' ) && function_exists( 'openssl_decrypt' ) ) {
+            try { $crypto = self::unseal( self::seal( 'MGF calendar encryption self-check' ) ) === 'MGF calendar encryption self-check'; } catch ( Throwable $e ) { $crypto = false; }
+        }
+        return array( 'secure_storage_ready' => $crypto, 'configured' => ! empty( $s['client_id'] ) && ! empty( $s['secret'] ), 'connected' => ! empty( $s['refresh'] ), 'enabled' => ! empty( $s['enabled'] ) && ( $s['policy'] ?? '' ) === 'protected-v1', 'policy' => 'Protected estate calendar: add only; never edit or delete Google events', 'calendar' => $s['calendar_name'] ?? '', 'calendar_id' => $s['calendar'] ?? '', 'include_pending' => ! empty( $s['pending'] ), 'last_attempt' => $s['last_attempt'] ?? '', 'last_success' => $s['last_success'] ?? '', 'last_result' => $s['last_result'] ?? ( ! empty( $s['refresh'] ) ? 'Connected. No sync has run.' : 'Not connected. No Google events have been changed.' ), 'redirect_uri' => self::redirect_uri() );
+    }
+    private static function redirect_uri() { return admin_url( 'admin-post.php?action=mbs_gcal_oauth_callback', 'https' ); }
+    private static function page() { return admin_url( 'admin.php?page=mathlin-google-calendar' ); }
+    private static function site_key() { return hash( 'sha256', untrailingslashit( home_url( '/' ) ) ); }
+    private static function error( $text ) { throw new RuntimeException( $text ); }
+
+    /** Secrets are authenticated-encrypted at rest. No plaintext fallback. */
+    public static function seal( $plain ) {
+        if ( ! function_exists( 'openssl_encrypt' ) ) self::error( 'OpenSSL is required to store Google credentials securely.' );
+        $iv = random_bytes( 12 ); $tag = '';
+        $cipher = openssl_encrypt( $plain, 'aes-256-gcm', hash( 'sha256', wp_salt( 'auth' ), true ), OPENSSL_RAW_DATA, $iv, $tag, 'MGF Google Calendar' );
+        if ( $cipher === false ) self::error( 'Could not encrypt Google credentials.' );
+        return base64_encode( $iv . $tag . $cipher );
+    }
+    public static function unseal( $sealed ) {
+        $raw = base64_decode( $sealed, true );
+        if ( $raw === false || strlen( $raw ) < 29 ) self::error( 'Google credentials unavailable. Reconnect the calendar.' );
+        $plain = openssl_decrypt( substr( $raw, 28 ), 'aes-256-gcm', hash( 'sha256', wp_salt( 'auth' ), true ), OPENSSL_RAW_DATA, substr( $raw, 0, 12 ), substr( $raw, 12, 16 ), 'MGF Google Calendar' );
+        if ( $plain === false ) self::error( 'Google credentials cannot be decrypted. Reconnect after a WordPress salt change.' );
+        return $plain;
+    }
+    private static function token_request( $fields ) {
+        $s = self::settings();
+        $fields['client_id'] = $s['client_id'] ?? '';
+        $fields['client_secret'] = self::unseal( $s['secret'] ?? '' );
+        $r = wp_remote_post( 'https://oauth2.googleapis.com/token', array( 'timeout' => 20, 'redirection' => 0, 'body' => $fields ) );
+        if ( is_wp_error( $r ) ) self::error( 'Google authentication timed out or could not be reached. Retry or reconnect.' );
+        $data = json_decode( wp_remote_retrieve_body( $r ), true );
+        if ( wp_remote_retrieve_response_code( $r ) !== 200 || empty( $data['access_token'] ) ) self::error( 'Google did not authorise access. Check the OAuth client and reconnect.' );
+        $s['access'] = self::seal( $data['access_token'] ); $s['expires'] = time() + max( 60, (int) ( $data['expires_in'] ?? 3600 ) ) - 60;
+        if ( ! empty( $data['refresh_token'] ) ) $s['refresh'] = self::seal( $data['refresh_token'] );
+        self::save( $s ); return $data;
+    }
+    private static function access_token() {
+        $s = self::settings();
+        if ( empty( $s['refresh'] ) ) self::error( 'Connect the Google account that can edit Haughley Park Bookings first.' );
+        if ( empty( $s['access'] ) || (int) ( $s['expires'] ?? 0 ) <= time() ) {
+            $d = self::token_request( array( 'grant_type' => 'refresh_token', 'refresh_token' => self::unseal( $s['refresh'] ) ) ); return $d['access_token'];
+        }
+        return self::unseal( $s['access'] );
+    }
+    private static function api( $method, $path, $body = null, $etag = '', $allow_missing = false ) {
+        // Transport-level invariant, also covering old workers, forged operations and stale previews.
+        if ( $method !== 'GET' && ! ( $method === 'POST' && $path === self::events_path() . '?sendUpdates=none' ) ) self::error( 'Protected calendar: existing Google events cannot be changed or deleted.' );
+        $headers = array( 'Authorization' => 'Bearer ' . self::access_token(), 'Accept' => 'application/json' );
+        if ( $etag ) $headers['If-Match'] = $etag;
+        $args = array( 'method' => $method, 'timeout' => 20, 'redirection' => 0, 'headers' => $headers );
+        if ( $body !== null ) { $args['headers']['Content-Type'] = 'application/json'; $args['body'] = wp_json_encode( $body ); }
+        $r = wp_remote_request( 'https://www.googleapis.com/calendar/v3/' . $path, $args );
+        if ( is_wp_error( $r ) ) self::error( 'Google Calendar request failed or timed out. No uncertain write will be blindly repeated.' );
+        $code = wp_remote_retrieve_response_code( $r );
+        if ( $allow_missing && in_array( $code, array( 404, 410 ), true ) ) return null;
+        if ( $code < 200 || $code >= 300 ) self::error( 'Google Calendar returned HTTP ' . $code . '. Review permissions, quota or concurrent calendar changes, then preview again.' );
+        if ( $code === 204 ) return array();
+        $data = json_decode( wp_remote_retrieve_body( $r ), true );
+        if ( ! is_array( $data ) ) self::error( 'Google returned an unreadable response. Sync stopped safely.' );
+        return $data;
+    }
+    private static function listing( $path ) {
+        $items = array(); $page = ''; $seen = array();
+        for ( $i = 0; $i < 50; $i++ ) {
+            $r = self::api( 'GET', $path . ( strpos( $path, '?' ) === false ? '?' : '&' ) . 'maxResults=250' . ( $page ? '&pageToken=' . rawurlencode( $page ) : '' ) );
+            if ( ! isset( $r['items'] ) || ! is_array( $r['items'] ) ) { if ( isset( $r['kind'] ) ) $r['items'] = array(); else self::error( 'Calendar listing incomplete; no changes made.' ); }
+            $items = array_merge( $items, $r['items'] ); $page = $r['nextPageToken'] ?? '';
+            if ( ! $page ) return $items;
+            if ( isset( $seen[$page] ) ) self::error( 'Google repeated a page; no changes made.' );
+            $seen[$page] = true;
+        }
+        self::error( 'Calendar listing is too large. No partial sync was applied.' );
+    }
+    private static function calendars() {
+        return array_values( array_filter( self::listing( 'users/me/calendarList' ), function( $c ) { return in_array( $c['accessRole'] ?? '', array( 'owner', 'writer' ), true ) && empty( $c['deleted'] ); } ) );
+    }
+    private static function validate_calendar() {
+        $s = self::settings();
+        foreach ( self::calendars() as $c ) if ( ( $c['id'] ?? '' ) === ( $s['calendar'] ?? '' ) ) return $c;
+        self::error( 'The selected calendar is not available with edit permission. No events changed.' );
+    }
+    private static function events_path() { $s = self::settings(); return 'calendars/' . rawurlencode( $s['calendar'] ?? '' ) . '/events'; }
+    private static function bookings() {
+        global $wpdb;
+        // A complete deterministic source snapshot: cancelled/archived rows are needed for safe removals.
+        $table = $wpdb->prefix . MBS_TABLE;
+        $rows = $wpdb->get_results( "SELECT * FROM {$table} ORDER BY id ASC LIMIT 20001" );
+        if ( $wpdb->last_error || ! is_array( $rows ) || count( $rows ) > 20000 ) self::error( 'Booking data could not be read completely. No calendar changes made.' );
+        return $rows;
+    }
+
+    /** Minimal public fields only; intentionally never exports contact/name/purpose/notes. */
+    public static function project( $rows, $pending, $site, $calendar, $zone, $today ) {
+        $desired = array(); $source = array();
+        foreach ( $rows as $row ) {
+            $b = (object) $row; $ref = (string) $b->ref;
+            if ( isset( $source[$ref] ) ) self::error( 'Duplicate booking references. Resolve before syncing.' );
+            $source[$ref] = (string) $b->status;
+            if ( ! in_array( $b->status, $pending ? array( 'confirmed', 'paid', 'deposit_paid', 'pending' ) : array( 'confirmed', 'paid', 'deposit_paid' ), true ) ) continue;
+            $first = self::date( $b->booking_date, $zone ); $last = self::date( $b->booking_date_end ?: $b->booking_date, $zone );
+            if ( $last < $first || $first->diff( $last )->days > 730 ) self::error( 'Invalid booking date range: ' . $ref );
+            $meta = is_string( $b->custom_fields ?? null ) ? json_decode( $b->custom_fields, true ) : (array) ( $b->custom_fields ?? array() );
+            $continuous = ( $meta['_mbs_campsite_span'] ?? '' ) === 'continuous';
+            for ( $day = $first; $day <= $last; $day = $day->modify( '+1 day' ) ) {
+                $end_day = $continuous || ! empty( $b->all_day ) ? $last : $day;
+                $key = $ref . '|' . ( $continuous || ! empty( $b->all_day ) ? 'stay' : $day->format( 'Y-m-d' ) );
+                if ( ! empty( $b->all_day ) ) {
+                    $start = array( 'date' => $day->format( 'Y-m-d' ) ); $end = array( 'date' => $end_day->modify( '+1 day' )->format( 'Y-m-d' ) );
+                } else {
+                    $a = self::wall_time( $day, $b->start_time, $zone ); $z = self::wall_time( $end_day, $b->end_time, $zone );
+                    if ( $z <= $a && $end_day == $day ) $z = $z->modify( '+1 day' );
+                    if ( $z <= $a ) self::error( 'Invalid booking endpoints: ' . $ref );
+                    $start = array( 'dateTime' => $a->format( DATE_RFC3339 ), 'timeZone' => $zone->getName() ); $end = array( 'dateTime' => $z->format( DATE_RFC3339 ), 'timeZone' => $zone->getName() );
+                }
+                $end_instant = new DateTimeImmutable( $end['date'] ?? $end['dateTime'], $zone );
+                if ( $end_instant > new DateTimeImmutable( $today, $zone ) ) {
+                    $label = trim( wp_strip_all_tags( (string) $b->space ) );
+                    $group = trim( wp_strip_all_tags( (string) ( $b->organisation ?? '' ) ) );
+                    $summary = ( $b->status === 'pending' ? 'Provisional — ' : '' ) . $label . ( $group !== '' ? ' — ' . $group : '' );
+                    $desired[$key] = array( 'id' => 'mgf' . hash( 'sha256', $site . '|' . $calendar . '|' . $key ), 'summary' => function_exists( 'mb_substr' ) ? mb_substr( $summary, 0, 250 ) : $summary, 'start' => $start, 'end' => $end, 'status' => $b->status === 'pending' ? 'tentative' : 'confirmed', 'transparency' => 'opaque', 'extendedProperties' => array( 'private' => array( 'mgf_site' => $site, 'mgf_booking' => $key, 'mgf_ref' => $ref ) ) );
+                }
+                if ( $continuous || ! empty( $b->all_day ) ) break;
+            }
+        }
+        ksort( $desired ); return array( 'desired' => $desired, 'source' => $source );
+    }
+    private static function date( $text, $zone ) {
+        $d = DateTimeImmutable::createFromFormat( '!Y-m-d', (string) $text, $zone );
+        if ( ! $d || $d->format( 'Y-m-d' ) !== $text ) self::error( 'Invalid booking date; sync stopped.' );
+        return $d;
+    }
+    private static function wall_time( $day, $time, $zone ) {
+        if ( ! preg_match( '/^([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/', (string) $time ) ) self::error( 'Invalid booking time; sync stopped.' );
+        $text = $day->format( 'Y-m-d' ) . ' ' . ( strlen( $time ) === 5 ? $time . ':00' : $time );
+        $d = new DateTimeImmutable( $text, $zone );
+        if ( $d->format( 'Y-m-d H:i:s' ) !== $text ) self::error( 'Booking time falls in a daylight-saving gap. Review the booking.' );
+        return $d;
+    }
+    private static function endpoints( $e ) {
+        try {
+            if ( empty( $e['start']['dateTime'] ) && empty( $e['start']['date'] ) || empty( $e['end']['dateTime'] ) && empty( $e['end']['date'] ) ) return array( false, false );
+            return array( ( new DateTimeImmutable( $e['start']['dateTime'] ?? $e['start']['date'], wp_timezone() ) )->getTimestamp(), ( new DateTimeImmutable( $e['end']['dateTime'] ?? $e['end']['date'], wp_timezone() ) )->getTimestamp() );
+        } catch ( Throwable $e ) { return array( false, false ); }
+    }
+    private static function overlaps( $a, $b ) { list( $as, $ae ) = self::endpoints( $a ); list( $bs, $be ) = self::endpoints( $b ); return $as !== false && $bs !== false && $as < $be && $bs < $ae; }
+    private static function eligible( $e ) { return empty( $e['attendees'] ) && empty( $e['recurrence'] ) && empty( $e['recurringEventId'] ) && ( $e['eventType'] ?? 'default' ) === 'default' && ( $e['status'] ?? '' ) !== 'cancelled'; }
+    private static function fields( $e ) { return array( $e['summary'] ?? '', self::endpoints( $e ), isset( $e['start']['date'] ), $e['status'] ?? 'confirmed', $e['transparency'] ?? 'opaque' ); }
+
+    public static function display_event( $e ) {
+        if ( ! $e ) return null;
+        return array( 'summary' => $e['summary'] ?? '(untitled)', 'start' => $e['start'] ?? null, 'end' => $e['end'] ?? null, 'location' => $e['location'] ?? '' );
+    }
+    private static function event_hash( $e ) { return hash( 'sha256', wp_json_encode( array( self::fields( $e ), $e['etag'] ?? '', $e['location'] ?? '', $e['description'] ?? '' ) ) ); }
+    private static function history() { return array_slice( (array) get_option( 'mbs_gcal_history', array() ), -100 ); }
+    private static function record( $action, $ref, $result ) {
+        $history = self::history();
+        $history[] = array( 'at' => gmdate( DATE_RFC3339 ), 'action' => $action, 'ref' => $ref, 'result' => $result );
+        update_option( 'mbs_gcal_history', array_slice( $history, -100 ), false );
+    }
+    public static function estate_only( $snapshot ) {
+        $linked = array();
+        foreach ( $snapshot['ops'] as $op ) if ( $op['event'] ) $linked[$op['event']['id']] = true;
+        return array_values( array_filter( $snapshot['events'], static function( $e ) use ( $linked ) { return ! isset( $linked[$e['id']] ) && ( $e['status'] ?? '' ) !== 'cancelled'; } ) );
+    }
+
+    /** Build an ordered, read-only plan. Unmanaged events can never be removed. */
+    public static function plan( $projection, $events, $site, $today, $links = array() ) {
+        $owned = array(); $manual = array(); $ops = array(); $ids = array();
+        foreach ( $events as $e ) {
+            $ids[$e['id']] = $e; $p = $e['extendedProperties']['private'] ?? array();
+            if ( ( $p['mgf_site'] ?? '' ) === $site && ! empty( $p['mgf_booking'] ) ) $owned[$p['mgf_booking']][] = $e;
+            elseif ( ( $e['status'] ?? '' ) !== 'cancelled' ) $manual[] = $e;
+        }
+        foreach ( $projection['desired'] as $key => $want ) {
+            $matches = $owned[$key] ?? array(); unset( $owned[$key] );
+            $op = array( 'key' => $key, 'ref' => $want['extendedProperties']['private']['mgf_ref'], 'want' => $want, 'action' => 'create', 'event' => null, 'candidates' => array(), 'reason' => '' );
+            if ( isset( $links[$key] ) ) {
+                $link = $links[$key]; $event = $ids[$link['id']] ?? null;
+                $op['event'] = $event; $op['action'] = 'matched'; $op['reason'] = 'Protected link; Google entry is retained unchanged.';
+                if ( ! $event || ( $event['status'] ?? '' ) === 'cancelled' ) { $op['action'] = 'blocked'; $op['reason'] = 'Linked Google event missing or deleted. Never recreate automatically.'; }
+                elseif ( empty( $link['source_hash'] ) || $link['source_hash'] !== hash( 'sha256', wp_json_encode( $want ) ) || empty( $link['google_hash'] ) || $link['google_hash'] !== self::event_hash( $event ) ) { $op['action'] = 'difference'; $op['reason'] = 'Booking or estate entry changed. Google wins; review without overwriting it.'; }
+            }
+            elseif ( count( $matches ) > 1 ) { $op['action'] = 'blocked'; $op['reason'] = 'Multiple linked events: review in Google Calendar.'; }
+            elseif ( count( $matches ) === 1 ) {
+                $op['event'] = $matches[0];
+                if ( ! self::eligible( $matches[0] ) ) { $op['action'] = 'blocked'; $op['reason'] = 'Linked event has guests, recurrence or was deleted. Review before resuming.'; }
+                elseif ( self::fields( $want ) == self::fields( $matches[0] ) ) { $op['action'] = 'matched'; $op['reason'] = 'Existing MGF event retained unchanged.'; }
+                else { $op['action'] = 'difference'; $op['reason'] = 'Existing event differs. Protected mode never overwrites Google.'; }
+            } elseif ( isset( $ids[$want['id']] ) ) { $op['action'] = 'blocked'; $op['reason'] = 'Reserved event ID already exists without the expected link.'; }
+            else {
+                foreach ( $manual as $e ) if ( self::overlaps( $want, $e ) ) $op['candidates'][] = $e;
+                if ( $op['candidates'] ) { $op['action'] = 'review'; $op['reason'] = 'Existing calendar event overlaps. Choose a match or explicitly keep both.'; }
+            }
+            $ops[] = $op;
+        }
+        foreach ( $owned as $key => $events_for_key ) foreach ( $events_for_key as $e ) {
+            // Keep past history; missing source is not evidence of cancellation.
+            $endpoints = self::endpoints( $e );
+            if ( $endpoints[1] !== false && $endpoints[1] <= ( new DateTimeImmutable( $today, wp_timezone() ) )->getTimestamp() ) continue;
+            $ref = $e['extendedProperties']['private']['mgf_ref'] ?? explode( '|', $key )[0];
+            $status = $projection['source'][$ref] ?? null;
+            $ops[] = array( 'key' => $key, 'ref' => $ref, 'want' => null, 'action' => 'retained', 'event' => $e, 'candidates' => array(), 'reason' => 'Booking cancelled, archived, moved or no longer exported. Google entry retained; estate review required.' );
+        }
+        foreach ( $links as $key => $link ) {
+            if ( ( $link['until'] ?? '' ) < $today || isset( $projection['desired'][$key] ) || isset( $owned[$key] ) ) continue;
+            $ops[] = array( 'key' => $key, 'ref' => $link['ref'], 'want' => null, 'action' => 'retained', 'event' => $ids[$link['id']] ?? null, 'candidates' => array(), 'reason' => 'No current exported booking. Protected estate entry retained; manual review required.' );
+        }
+        foreach ( $ops as &$op ) $op['hash'] = hash( 'sha256', wp_json_encode( $op ) ); unset( $op );
+        return $ops;
+    }
+    private static function snapshot() {
+        self::validate_calendar(); $s = self::settings(); $today = wp_date( 'Y-m-d' );
+        $projection = self::project( self::bookings(), ! empty( $s['pending'] ), self::site_key(), $s['calendar'], wp_timezone(), $today );
+        // Expand recurring manual events so their individual overlaps are detected.
+        $midnight = new DateTimeImmutable( $today, wp_timezone() );
+        $events = self::listing( self::events_path() . '?singleEvents=true&showDeleted=false&timeMin=' . rawurlencode( $midnight->format( DATE_RFC3339 ) ) . '&timeMax=' . rawurlencode( $midnight->modify( '+5 years' )->format( DATE_RFC3339 ) ) );
+        $present = array_fill_keys( array_column( $events, 'id' ), true );
+        // Remember adopted IDs too. Moving/deleting an estate event must not silently create a duplicate.
+        foreach ( (array) ( $s['links'] ?? array() ) as $key => $link ) {
+            if ( isset( $present[$link['id']] ) || ( $link['until'] ?? '' ) < $today ) continue;
+            $event = self::api( 'GET', self::events_path() . '/' . rawurlencode( $link['id'] ), null, '', true );
+            $tags = array( 'mgf_site' => self::site_key(), 'mgf_booking' => $key, 'mgf_ref' => $link['ref'] );
+            if ( ! $event ) $event = array( 'id' => $link['id'], 'status' => 'cancelled', 'extendedProperties' => array( 'private' => $tags ), 'end' => array( 'date' => $link['until'] ) );
+            $events[] = $event;
+        }
+        foreach ( $projection['desired'] as $want ) if ( substr( $want['end']['date'] ?? $want['end']['dateTime'], 0, 10 ) >= $midnight->modify( '+5 years' )->format( 'Y-m-d' ) ) self::error( 'A booking is outside the five-year calendar review window. Review the booking before syncing.' );
+        usort( $events, function( $a, $b ) { return strcmp( $a['id'], $b['id'] ); } );
+        return array( 'projection' => $projection, 'events' => $events, 'ops' => self::plan( $projection, $events, self::site_key(), $today, (array) ( $s['links'] ?? array() ) ) );
+    }
+
+    /** Atomic database lease. Never steals a possibly in-flight request. */
+    private static function lock() {
+        if ( ! add_option( 'mbs_gcal_lock', array( 'at' => time(), 'token' => wp_generate_password( 32, false ) ), '', false ) ) self::error( 'A calendar operation is already running. If this persists, an administrator must check the sync lock.' );
+    }
+    private static function unlock() { delete_option( 'mbs_gcal_lock' ); }
+    private static function fingerprint( $snapshot ) { $s = self::settings(); return hash( 'sha256', wp_json_encode( array( $s['calendar'] ?? '', ! empty( $s['pending'] ), $snapshot ) ) ); }
+    private static function execute( $ops, $choices = array(), $allow_create = true ) {
+        $done = 0; $blocked = 0; $checked = 0; $used = array();
+        foreach ( (array) ( self::settings()['links'] ?? array() ) as $key => $link ) $used[$link['id']] = $key;
+        foreach ( $ops as $op ) {
+            if ( $allow_create && $done >= 20 ) break;
+            $checked++;
+            $action = $op['action']; $event = $op['event'];
+            if ( $action === 'difference' && $event && isset( $choices[$op['hash']] ) ) { $action = 'review'; $op['candidates'] = array( $event ); }
+            if ( $action === 'matched' ) continue;
+            if ( ! in_array( $action, array( 'create', 'review' ), true ) ) { $blocked++; continue; }
+            if ( $action === 'review' ) {
+                $choice = $choices[$op['hash']] ?? '';
+                if ( strpos( $choice, 'protect:' ) === 0 ) {
+                    foreach ( $op['candidates'] as $candidate ) if ( $candidate['id'] === substr( $choice, 8 ) && ( $candidate['status'] ?? '' ) !== 'cancelled' && ( ! isset( $used[$candidate['id']] ) || $used[$candidate['id']] === $op['key'] ) ) { $event = $candidate; $action = 'protect'; break; }
+                    if ( $action === 'review' ) { $blocked++; continue; }
+                } else { $blocked++; continue; }
+            }
+            if ( $action === 'create' && ! $allow_create ) continue;
+            // Revalidate changeable booking facts immediately before each write.
+            $s = self::settings();
+            $fresh = self::project( self::bookings(), ! empty( $s['pending'] ), self::site_key(), $s['calendar'], wp_timezone(), wp_date( 'Y-m-d' ) );
+            if ( $op['want'] !== ( $fresh['desired'][$op['key']] ?? null ) ) self::error( 'A booking changed during sync. Preview again; already completed operations are retained.' );
+            if ( $action === 'protect' ) {
+                $current = self::api( 'GET', self::events_path() . '/' . rawurlencode( $event['id'] ), null, '', true );
+                if ( ! $current || self::event_hash( $current ) !== self::event_hash( $event ) ) self::error( 'Estate event changed. Refresh the read-only comparison before saving a match.' );
+                $used[$event['id']] = $op['key'];
+            } else {
+                // Recheck the target interval just before insertion. A newly added estate event blocks it.
+                list( $start_at, $end_at ) = self::endpoints( $op['want'] );
+                $nearby = self::listing( self::events_path() . '?singleEvents=true&showDeleted=false&timeMin=' . rawurlencode( gmdate( DATE_RFC3339, $start_at ) ) . '&timeMax=' . rawurlencode( gmdate( DATE_RFC3339, $end_at ) ) );
+                foreach ( $nearby as $existing ) if ( self::overlaps( $op['want'], $existing ) ) self::error( 'An estate event now overlaps this booking. Refresh comparison; no duplicate was created.' );
+                // Stable IDs make a timed-out insert safe: a new preview finds the tagged event.
+                $body = $op['want']; $body['reminders'] = array( 'useDefault' => false );
+                $event = self::api( 'POST', self::events_path() . '?sendUpdates=none', $body );
+                if ( ( $event['id'] ?? '' ) !== $body['id'] || empty( $event['etag'] ) ) self::error( 'Google insert response was incomplete. Refresh preview; do not blindly create again.' );
+            }
+            $done++;
+            $s = self::settings(); $s['has_written'] = ! empty( $s['has_written'] ) || $action === 'create';
+            $s['links'][$op['key']] = array( 'id' => $event['id'], 'ref' => $op['ref'], 'origin' => $action === 'protect' ? 'estate' : 'mgf', 'source_hash' => hash( 'sha256', wp_json_encode( $op['want'] ) ), 'google_hash' => self::event_hash( $event ), 'until' => substr( $op['want']['end']['date'] ?? $op['want']['end']['dateTime'], 0, 10 ) );
+            self::save( $s );
+            self::record( $action, $op['ref'], $action === 'protect' ? 'Protected reference saved; Google unchanged.' : 'Created one MGF event; existing estate events unchanged.' );
+        }
+        return array( 'completed' => $done, 'needs_review' => $blocked, 'remaining' => max( 0, count( $ops ) - $checked ) );
+    }
+    public function tick() {
+        $s = self::settings(); if ( empty( $s['enabled'] ) || empty( $s['refresh'] ) || empty( $s['calendar'] ) || ( $s['policy'] ?? '' ) !== 'protected-v1' ) return;
+        try { self::lock(); } catch ( Throwable $e ) { return; }
+        try {
+            $s = self::settings(); $s['last_attempt'] = gmdate( DATE_RFC3339 ); self::save( $s );
+            $snapshot = self::snapshot();
+            $result = self::execute( $snapshot['ops'], (array) ( $s['choices'] ?? array() ) );
+            $s = self::settings(); $s['last_success'] = gmdate( DATE_RFC3339 ); $s['last_result'] = $result['completed'] . ' event changes; ' . $result['needs_review'] . ' need review; ' . $result['remaining'] . ' queued. Past history and unrelated events retained.'; self::save( $s );
+        } catch ( Throwable $e ) { $s = self::settings(); $s['last_result'] = $e->getMessage(); self::save( $s ); self::record( 'stopped', '', 'Sync stopped safely. See connection status; no estate entries changed.' ); }
+        finally { self::unlock(); }
+    }
+    private static function notice( $text ) { set_transient( 'mbs_gcal_notice_' . get_current_user_id(), $text, 300 ); }
+    private static function bounce() { wp_safe_redirect( self::page() ); exit; }
+    public function handle() {
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Administrator access required.', '', array( 'response' => 403 ) );
+        check_admin_referer( 'mbs_gcal' );
+        try { self::lock(); } catch ( Throwable $e ) { self::notice( $e->getMessage() ); self::bounce(); }
+        $redirect = '';
+        try {
+            $s = self::settings(); $op = sanitize_key( $_POST['operation'] ?? '' );
+            if ( $op === 'credentials' ) {
+                $id = trim( sanitize_text_field( wp_unslash( $_POST['client_id'] ?? '' ) ) );
+                $secret = trim( wp_unslash( $_POST['client_secret'] ?? '' ) );
+                if ( ! preg_match( '/^[a-zA-Z0-9_.-]+\.apps\.googleusercontent\.com$/', $id ) ) self::error( 'Enter a Google Web application OAuth client ID.' );
+                if ( ! $secret && ( empty( $s['secret'] ) || ( $s['client_id'] ?? '' ) !== $id ) ) self::error( 'Enter the OAuth client secret in this settings page, not in chat.' );
+                if ( $secret ) $s['secret'] = self::seal( $secret );
+                $s['client_id'] = $id; $s['enabled'] = false; unset( $s['refresh'], $s['access'], $s['expires'], $s['choices'] ); self::save( $s );
+                self::notice( 'Credentials saved securely. Connect the Google account next. Synchronisation remains off.' );
+            } elseif ( $op === 'connect' ) {
+                if ( empty( $s['client_id'] ) || empty( $s['secret'] ) ) self::error( 'Save OAuth credentials first.' );
+                $s['enabled'] = false; self::save( $s );
+                $state = bin2hex( random_bytes( 32 ) ); $verifier = bin2hex( random_bytes( 32 ) );
+                set_transient( 'mbs_gcal_oauth_' . hash( 'sha256', $state ), array( 'user' => get_current_user_id(), 'client' => $s['client_id'], 'verifier' => $verifier ), 900 );
+                $redirect = 'https://accounts.google.com/o/oauth2/v2/auth?' . http_build_query( array( 'client_id' => $s['client_id'], 'redirect_uri' => self::redirect_uri(), 'response_type' => 'code', 'scope' => self::SCOPES, 'access_type' => 'offline', 'prompt' => 'consent select_account', 'state' => $state, 'code_challenge' => rtrim( strtr( base64_encode( hash( 'sha256', $verifier, true ) ), '+/', '-_' ), '=' ), 'code_challenge_method' => 'S256' ), '', '&', PHP_QUERY_RFC3986 );
+            } elseif ( $op === 'target' ) {
+                $id = sanitize_text_field( wp_unslash( $_POST['calendar'] ?? '' ) ); $found = null;
+                foreach ( self::calendars() as $c ) if ( $c['id'] === $id ) $found = $c;
+                if ( ! $found ) self::error( 'Select a calendar with writer or owner permission.' );
+                if ( ( ! empty( $s['has_written'] ) || ! empty( $s['links'] ) ) && $id !== ( $s['calendar'] ?? '' ) ) self::error( 'This connection has existing links. Retargeting requires a separate migration review.' );
+                $s['calendar'] = $id; $s['calendar_name'] = $found['summary'] ?? $id; $s['pending'] = ! empty( $_POST['pending'] ); $s['enabled'] = false; $s['choices'] = array(); self::save( $s );
+                self::notice( 'Target saved. Preview and review before enabling sync.' );
+            } elseif ( $op === 'preview' ) {
+                $snapshot = self::snapshot();
+                set_transient( 'mbs_gcal_preview_' . get_current_user_id(), array( 'fingerprint' => self::fingerprint( $snapshot ), 'snapshot' => $snapshot ), 900 );
+                self::notice( 'Read-only preview ready. Nothing has been written to Google.' );
+            } elseif ( $op === 'apply' || $op === 'reconcile' ) {
+                if ( empty( $_POST['confirm'] ) ) self::error( 'Confirm the selected calendar and review before enabling.' );
+                $preview = get_transient( 'mbs_gcal_preview_' . get_current_user_id() );
+                $snapshot = self::snapshot();
+                if ( ! $preview || ! hash_equals( $preview['fingerprint'], self::fingerprint( $snapshot ) ) ) self::error( 'The preview expired or booking/calendar data changed. Generate a fresh preview.' );
+                $choices = array(); $claimed = array();
+                foreach ( $snapshot['ops'] as $item ) {
+                    $choice = sanitize_text_field( wp_unslash( $_POST['choice'][$item['hash']] ?? '' ) );
+                    if ( $choice && strpos( $choice, 'protect:' ) !== 0 ) self::error( 'Unsupported or old review choice. Generate a fresh protected preview.' );
+                    if ( strpos( $choice, 'protect:' ) === 0 ) { if ( isset( $claimed[$choice] ) ) self::error( 'An existing event cannot be linked to two bookings.' ); $claimed[$choice] = true; }
+                    if ( $choice ) $choices[$item['hash']] = $choice;
+                }
+                $s['choices'] = $choices; $s['policy'] = 'protected-v1'; $s['enabled'] = false; self::save( $s );
+                $result = self::execute( $snapshot['ops'], $choices, $op === 'apply' );
+                $s = self::settings(); $s['enabled'] = $op === 'apply'; $s['last_attempt'] = $s['last_success'] = gmdate( DATE_RFC3339 ); $s['last_result'] = $result['completed'] . ' completed; ' . $result['needs_review'] . ' need review; ' . $result['remaining'] . ' queued. Existing Google entries unchanged.'; self::save( $s );
+                delete_transient( 'mbs_gcal_preview_' . get_current_user_id() ); self::notice( $s['last_result'] . ( $op === 'apply' ? ' Protected add-only sync enabled.' : ' Matches saved; sync remains paused.' ) );
+            } elseif ( $op === 'pause' || $op === 'disconnect' ) {
+                $s['enabled'] = false;
+                if ( $op === 'disconnect' ) { unset( $s['refresh'], $s['access'], $s['expires'], $s['choices'] ); }
+                self::save( $s ); delete_transient( 'mbs_gcal_preview_' . get_current_user_id() );
+                self::notice( $op === 'pause' ? 'Sync paused. Calendar events retained.' : 'Google tokens removed from this site. Existing events retained. You can also revoke the app in your Google account permissions.' );
+            } else self::error( 'Unknown calendar operation.' );
+        } catch ( Throwable $e ) { self::notice( $e->getMessage() ); }
+        finally { self::unlock(); }
+        if ( $redirect ) { wp_redirect( $redirect ); exit; } // Fixed Google origin only, constructed above.
+        self::bounce();
+    }
+    public function callback() {
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Sign in as the connecting WordPress administrator and reconnect.' );
+        $state = sanitize_text_field( wp_unslash( $_GET['state'] ?? '' ) );
+        $key = 'mbs_gcal_oauth_' . hash( 'sha256', $state ); $saved = get_transient( $key ); delete_transient( $key );
+        $s = self::settings();
+        if ( ! $saved || $saved['user'] !== get_current_user_id() || $saved['client'] !== ( $s['client_id'] ?? '' ) ) { self::notice( 'OAuth state expired or did not match this administrator. Reconnect.' ); self::bounce(); }
+        try { self::lock(); } catch ( Throwable $e ) { self::notice( $e->getMessage() ); self::bounce(); }
+        try {
+            if ( ! empty( $_GET['error'] ) || empty( $_GET['code'] ) ) self::error( 'Google connection was declined or incomplete. No calendar events changed.' );
+            $d = self::token_request( array( 'grant_type' => 'authorization_code', 'code' => sanitize_text_field( wp_unslash( $_GET['code'] ) ), 'redirect_uri' => self::redirect_uri(), 'code_verifier' => $saved['verifier'] ) );
+            $granted = explode( ' ', $d['scope'] ?? '' );
+            foreach ( explode( ' ', self::SCOPES ) as $scope ) if ( ! in_array( $scope, $granted, true ) ) self::error( 'Google did not grant both required permissions. Reconnect and grant calendar access.' );
+            $s = self::settings(); $s['enabled'] = false; self::save( $s );
+            if ( empty( $s['refresh'] ) ) self::error( 'No offline token was returned. Reconnect with consent.' );
+            self::notice( 'Connected. Select the existing Haughley Park Bookings calendar with edit access, then preview. Sync is still off.' );
+        } catch ( Throwable $e ) { $s = self::settings(); $s['enabled'] = false; unset( $s['refresh'], $s['access'] ); self::save( $s ); self::notice( $e->getMessage() ); }
+        finally { self::unlock(); }
+        self::bounce();
+    }
+    private static function form_start( $operation ) { echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '"><input type="hidden" name="action" value="mbs_gcal"><input type="hidden" name="operation" value="' . esc_attr( $operation ) . '">'; wp_nonce_field( 'mbs_gcal' ); }
+    public function render() {
+        if ( ! current_user_can( 'manage_options' ) ) return;
+        $s = self::settings(); $status = self::status(); $notice = get_transient( 'mbs_gcal_notice_' . get_current_user_id() ); delete_transient( 'mbs_gcal_notice_' . get_current_user_id() );
+        $calendars = array(); $problem = '';
+        if ( $status['connected'] ) try { $calendars = self::calendars(); } catch ( Throwable $e ) { $problem = $e->getMessage(); }
+        $preview = get_transient( 'mbs_gcal_preview_' . get_current_user_id() );
+        include MBS_PLUGIN_DIR . 'admin/views/google-calendar.php';
+    }
+}

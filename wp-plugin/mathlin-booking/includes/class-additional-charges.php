@@ -37,6 +37,7 @@ class MBS_Additional_Charges {
     }
 
     public static function reminders_enabled( $invoice ) {
+        if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'reminders' ) ) return false;
         $override = get_option( 'mbs_charge_reminders_' . (int) $invoice->id, null );
         return $override !== null ? (string) $override === '1' : ! empty( self::metadata( $invoice )['automatic_reminders'] );
     }
@@ -113,6 +114,7 @@ class MBS_Additional_Charges {
 
     /** Invoked only after reference+email verification, and independently rechecked here. */
     public static function customer_for_booking( $booking, $email ) {
+        if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'additional_charges' ) ) return array();
         global $wpdb;
         if ( ! $booking || strcasecmp( $booking->email, $email ) !== 0 ) return array();
         $refs = array( $booking->ref ); if ( ! empty( $booking->series_id ) ) $refs[] = $booking->series_id;
@@ -173,6 +175,7 @@ class MBS_Additional_Charges {
 
     /** No current pricing/availability rules apply to an independently agreed extra. */
     public static function create( $data, $key ) {
+        if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'additional_charges' ) ) return MBS_Payment_Features::error( 'additional_charges' );
         global $wpdb;
         if ( ! current_user_can( 'mbs_manage_bookings' ) ) return new WP_Error( 'forbidden', 'Booking-manager access required.' );
         if ( ! is_string( $key ) || strlen( $key ) < 8 || strlen( $key ) > 128 ) return new WP_Error( 'invalid_charge_key', 'A stable 8-128 character request key is required.' );
@@ -346,6 +349,7 @@ class MBS_Additional_Charges {
     }
 
     private static function lock( $ref, $version ) {
+        if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'additional_charges' ) ) return MBS_Payment_Features::error( 'additional_charges' );
         global $wpdb;
         if ( ! current_user_can( 'mbs_manage_bookings' ) ) return new WP_Error( 'forbidden', 'Booking-manager access required.' );
         if ( $wpdb->query( 'START TRANSACTION' ) === false ) return new WP_Error( 'transaction_start_failed', 'Could not start charge operation.' );
@@ -364,6 +368,7 @@ class MBS_Additional_Charges {
     }
 
     public function menu() {
+        if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'additional_charges' ) ) return;
         add_submenu_page( 'mathlin-booking', 'Additional charges', 'Additional charges', 'mbs_manage_bookings', 'mathlin-additional-charges', array( $this, 'render' ) );
     }
 
@@ -434,6 +439,7 @@ class MBS_Additional_Charges {
     }
 
     public static function render_related( $ref ) {
+        if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'additional_charges' ) ) return;
         if(!current_user_can('mbs_manage_bookings'))return;
         $rows=self::list_rows($ref,'','',1,10,'all');
         echo '<section class="nms-card mbs-related-charges"><div class="nms-card-header"><h2>Additional charges</h2></div><div class="mbs-charge-card-body"><p class="nms-muted">Separate from the original hire invoice and access arrangements.</p><p><a class="button button-primary" href="'.esc_url(self::admin_url(array('view'=>'create','related_ref'=>$ref))).'">Add additional charge</a> <a class="button" href="'.esc_url(self::admin_url(array('related_ref'=>$ref))).'">View all linked charges</a></p>';
@@ -457,6 +463,7 @@ class MBS_Additional_Charges {
     }
 
     public function render() {
+        if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'additional_charges' ) ) { echo '<div class="wrap"><h1>Additional charges disabled</h1><p>Enable payments, invoicing and additional charges in MGF Venue Settings to use this feature. Existing records are retained.</p></div>'; return; }
         global $wpdb;
         if ( ! current_user_can( 'mbs_manage_bookings' ) ) return;
         $related = sanitize_text_field( wp_unslash( $_GET['related_ref'] ?? '' ) );

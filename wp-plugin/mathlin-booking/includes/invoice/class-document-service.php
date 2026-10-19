@@ -49,6 +49,7 @@ class MBS_Invoice_Document_Service {
      * @return array|WP_Error  {document_id, booking} on success.
      */
     public static function confirm_and_issue( $ref, $logo_ref = null, $notify_hirer = true ) {
+        if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'invoices' ) ) return MBS_Payment_Features::error( 'invoices' );
         global $wpdb;
         $booking_table = $wpdb->prefix . MBS_TABLE;
         $doc_table = $wpdb->prefix . MBS_INVOICE_DOCUMENTS_TABLE;
@@ -209,6 +210,7 @@ class MBS_Invoice_Document_Service {
      * @return int|WP_Error  New document ID on success.
      */
     public static function reissue_booking_document( $ref, $logo_ref = null ) {
+        if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'invoices' ) ) return MBS_Payment_Features::error( 'invoices' );
         global $wpdb;
         $booking_table = $wpdb->prefix . MBS_TABLE;
         $doc_table = $wpdb->prefix . MBS_INVOICE_DOCUMENTS_TABLE;
@@ -538,6 +540,7 @@ class MBS_Invoice_Document_Service {
      * @return int|WP_Error  Document ID.
      */
     public static function issue_booking_document( $booking ) {
+        if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'invoices' ) ) return MBS_Payment_Features::error( 'invoices' );
         global $wpdb;
         $doc_table = $wpdb->prefix . MBS_INVOICE_DOCUMENTS_TABLE;
         $booking_table = $wpdb->prefix . MBS_TABLE;

@@ -16,6 +16,7 @@ class MBS_ICal {
      * @return string  iCalendar formatted string
      */
     public static function generate( $booking ) {
+        if ( class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ) return self::campsite_calendar( array( $booking ) );
         $spaces = MBS_Bookings::get_spaces();
 
         // Determine start/end datetimes
@@ -78,6 +79,17 @@ class MBS_ICal {
      * Generate a full iCal feed with all upcoming confirmed bookings.
      */
     public static function generate_feed() {
+        if ( class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ) {
+            $all = array();
+            foreach ( array( 'confirmed', 'paid' ) as $status ) {
+                for ( $offset = 0; ; $offset += 200 ) {
+                    $page = MBS_Bookings::get_all( array( 'status' => $status, 'date_scope' => 'current', 'orderby' => 'booking_date', 'order' => 'ASC', 'limit' => 200, 'offset' => $offset ) );
+                    $all = array_merge( $all, $page );
+                    if ( count( $page ) < 200 ) break;
+                }
+            }
+            return self::campsite_calendar( $all );
+        }
         $bookings = MBS_Bookings::get_all( array(
             'status'    => 'confirmed',
             'date_from' => wp_date( 'Y-m-d' ),
@@ -139,6 +151,32 @@ class MBS_ICal {
     /**
      * Escape text for iCal format.
      */
+    /** Local wall-clock endpoints, including overnight stays and British Summer Time. */
+    public static function campsite_calendar( $bookings ) {
+        $ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//MGF Venue//EN\r\nCALSCALE:GREGORIAN\r\nMETHOD:PUBLISH\r\n";
+        $zone = wp_timezone(); $utc = new DateTimeZone( 'UTC' );
+        $org = MBS_Email_Templates::get_org_settings();
+        foreach ( $bookings as $booking ) {
+            $first = new DateTimeImmutable( $booking->booking_date, $zone );
+            $last = new DateTimeImmutable( $booking->booking_date_end ?: $booking->booking_date, $zone );
+            $continuous = MBS_Campsite_Policy::span( $booking ) === 'continuous';
+            for ( $day = $first; $day <= $last; $day = $day->modify( '+1 day' ) ) {
+                $end_day = $continuous || $booking->all_day ? $last : $day;
+                if ( $booking->all_day ) {
+                    $start = 'DTSTART;VALUE=DATE:' . $day->format( 'Ymd' );
+                    $end = 'DTEND;VALUE=DATE:' . $end_day->modify( '+1 day' )->format( 'Ymd' );
+                } else {
+                    $start = 'DTSTART:' . ( new DateTimeImmutable( $day->format( 'Y-m-d' ) . ' ' . $booking->start_time, $zone ) )->setTimezone( $utc )->format( 'Ymd\THis\Z' );
+                    $end = 'DTEND:' . ( new DateTimeImmutable( $end_day->format( 'Y-m-d' ) . ' ' . $booking->end_time, $zone ) )->setTimezone( $utc )->format( 'Ymd\THis\Z' );
+                }
+                $uid = self::escape( $booking->ref . '-' . $day->format( 'Ymd' ) . '@' . wp_parse_url( home_url(), PHP_URL_HOST ) );
+                $ics .= "BEGIN:VEVENT\r\nUID:{$uid}\r\nDTSTAMP:" . gmdate( 'Ymd\THis\Z' ) . "\r\n{$start}\r\n{$end}\r\nSUMMARY:" . self::escape( $booking->space . ' – ' . $booking->purpose ) . "\r\nLOCATION:" . self::escape( $org['address'] ?: get_bloginfo( 'name' ) ) . "\r\nSTATUS:" . ( $booking->status === 'cancelled' ? 'CANCELLED' : ( $booking->status === 'pending' ? 'TENTATIVE' : 'CONFIRMED' ) ) . "\r\nEND:VEVENT\r\n";
+                if ( $continuous || $booking->all_day ) break;
+            }
+        }
+        return $ics . "END:VCALENDAR\r\n";
+    }
+
     private static function escape( $text ) {
         $text = str_replace( '\\', '\\\\', $text );
         $text = str_replace( ',', '\\,', $text );

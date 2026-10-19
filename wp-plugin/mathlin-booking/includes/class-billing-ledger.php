@@ -41,6 +41,7 @@ class MBS_Billing_Ledger {
     }
 
     public static function create_draft_invoice( $data, $idempotency_key ) {
+        if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'invoices' ) ) return MBS_Payment_Features::error( 'invoices' );
         global $wpdb;
         $table = $wpdb->prefix . MBS_INVOICE_TABLE;
         $key = self::idempotency_hash( $idempotency_key );
@@ -173,6 +174,7 @@ class MBS_Billing_Ledger {
 
     /** Freeze item totals and issue a draft invoice. */
     public static function issue_invoice( $invoice_ref, $expected_version, $manage_transaction = true ) {
+        if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'invoices' ) ) return MBS_Payment_Features::error( 'invoices' );
         global $wpdb;
         $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
         $item_table = $wpdb->prefix . MBS_INVOICE_ITEM_TABLE;

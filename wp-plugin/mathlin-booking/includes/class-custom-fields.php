@@ -133,7 +133,14 @@ class MBS_Custom_Fields {
      */
     public static function render_admin_display( $booking ) {
         $responses = json_decode( $booking->custom_fields ?? '{}', true );
-        if ( empty( $responses ) ) return;
+        if ( ! is_array( $responses ) ) return;
+        // Migration and consolidation metadata shares this JSON column. It is
+        // not a customer answer and must never be indexed as label/value data.
+        $responses = array_filter( $responses, static function( $data, $id ) {
+            return strpos( (string) $id, '_' ) !== 0 && is_array( $data )
+                && isset( $data['label'], $data['value'] ) && is_scalar( $data['label'] ) && is_scalar( $data['value'] );
+        }, ARRAY_FILTER_USE_BOTH );
+        if ( ! $responses ) return;
 
         echo '<div class="nms-detail-item nms-detail-full" style="margin-top:0.5rem;">';
         echo '<label>Additional Information</label>';

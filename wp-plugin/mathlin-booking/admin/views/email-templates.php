@@ -1,5 +1,9 @@
 <?php if ( ! defined( 'ABSPATH' ) ) exit;
 $templates = MBS_Email_Templates::get_template_types();
+foreach ( array_keys( $templates ) as $type ) {
+    $feature = strpos( $type, 'additional_charge' ) === 0 ? 'additional_charges' : ( strpos( $type, 'chase_' ) === 0 || $type === 'invoice_reminder' ? 'reminders' : ( in_array( $type, array( 'invoice_issued', 'invoice_payment_received', 'payment_received' ), true ) ? 'invoices' : '' ) );
+    if ( $feature && ! MBS_Payment_Features::enabled( $feature ) ) unset( $templates[$type] );
+}
 $org       = MBS_Email_Templates::get_org_settings();
 $chase     = MBS_Email_Templates::get_chase_settings();
 ?>

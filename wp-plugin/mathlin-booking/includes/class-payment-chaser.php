@@ -27,6 +27,7 @@ class MBS_Payment_Chaser {
 
     /** Whether this individual booking is allowed through occurrence chasing. */
     public static function should_chase_occurrence( $booking ) {
+        if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'reminders' ) ) return false;
         $treatment = MBS_Series::billing_treatment_for_booking( $booking );
         return in_array( $treatment, array( 'one_off', 'legacy_per_occurrence' ), true );
     }
@@ -52,6 +53,7 @@ class MBS_Payment_Chaser {
      *   - At least 3 days between chase emails
      */
     public function auto_chase() {
+        if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'reminders' ) ) return;
         $enabled = get_option( 'mbs_auto_chase_enabled', 1 );
         if ( ! $enabled ) return;
 

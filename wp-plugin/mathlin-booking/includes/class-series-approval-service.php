@@ -27,6 +27,7 @@ class MBS_Series_Approval_Service {
      * @return array|WP_Error Result array with series, updated count, etc.
      */
     public static function approve_with_billing( $series_ref, $billing_config, $expected_version, $notify_hirer = true ) {
+        if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'invoices' ) && ( ( $billing_config['billing_mode'] ?? '' ) !== 'none' || ( $billing_config['billing_treatment'] ?? '' ) !== 'none' ) ) return MBS_Payment_Features::error( 'invoices' );
         global $wpdb;
         $series_table  = $wpdb->prefix . MBS_SERIES_TABLE;
         $booking_table = $wpdb->prefix . MBS_TABLE;
@@ -356,7 +357,11 @@ class MBS_Series_Approval_Service {
         $body .= '<p>Your recurring booking for <strong>' . esc_html( $series->space ) . '</strong> has been approved.</p>';
         $body .= '<p><strong>Schedule:</strong> Weekly, ' . esc_html( substr( $series->start_time, 0, 5 ) . '–' . substr( $series->end_time, 0, 5 ) ) . '</p>';
         $body .= '<p><strong>Dates:</strong> ' . count( $occurrences ) . ' sessions confirmed</p>';
-        $body .= '<p><strong>Billing:</strong> ' . esc_html( ucfirst( str_replace( '_', ' ', $series->billing_mode ) ) ) . ' in advance</p>';
+        if ( $series->billing_treatment === 'none' ) {
+            $body .= '<p>No hire charge or payment is required.</p>';
+        } else {
+            $body .= '<p><strong>Billing:</strong> ' . esc_html( ucfirst( str_replace( '_', ' ', $series->billing_mode ) ) ) . ' in advance</p>';
+        }
 
         if ( $series->billing_treatment === 'invoice_managed' ) {
             $body .= '<p>We will issue consolidated invoices covering each billing period. No annual lump sum or per-occurrence payment is required at this time.</p>';

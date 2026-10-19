@@ -47,6 +47,7 @@ class MBS_Woo_Payment {
      * Check if WooCommerce is available.
      */
     public static function is_available() {
+        if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'online' ) ) return false;
         return class_exists( 'WooCommerce' );
     }
 
@@ -54,6 +55,7 @@ class MBS_Woo_Payment {
      * Get or create the hidden booking payment product.
      */
     public static function get_payment_product_id() {
+        if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'online' ) ) return 0;
         $product_id = get_option( 'mbs_woo_product_id', 0 );
 
         // Check if product still exists
@@ -143,6 +145,7 @@ class MBS_Woo_Payment {
      * Hooked into template_redirect.
      */
     public static function handle_payment_redirect() {
+        if ( ( isset( $_GET['mbs_invoice_pay'] ) || isset( $_GET['mbs_pay'] ) ) && class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'online' ) ) wp_die( 'Online booking payments are currently disabled. Please contact the booking coordinator.', '', array( 'response' => 409 ) );
         if ( isset( $_GET['mbs_invoice_pay'] ) && $_GET['mbs_invoice_pay'] === '1' ) {
             self::handle_invoice_payment_redirect();
             return;
@@ -350,6 +353,9 @@ class MBS_Woo_Payment {
 
     /** Reject stale, mismatched or second-session invoice carts before order creation. */
     public function validate_invoice_checkout( $data, $errors ) {
+        if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'online' ) && function_exists( 'WC' ) && WC()->cart ) {
+            foreach ( WC()->cart->get_cart() as $item ) if ( ! empty( $item['mbs_invoice_ref'] ) || ! empty( $item['mbs_booking_ref'] ) ) $errors->add( 'venue_payments_disabled', 'Venue payments have been disabled. Please contact the booking coordinator.' );
+        }
         if ( ! WC()->cart ) return;
         $invoice_items = 0;
         foreach ( WC()->cart->get_cart() as $cart_item ) {

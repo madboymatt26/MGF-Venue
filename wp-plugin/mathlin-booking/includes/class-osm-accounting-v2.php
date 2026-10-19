@@ -34,7 +34,7 @@ class MBS_OSM_Integration {
         if ( $auth_source === 'gilbertweb' ) $auth_source = 'mgf_connect';
         if ( ! in_array( $auth_source, array( 'standalone', 'mgf_connect' ), true ) ) $auth_source = 'standalone';
         return array(
-            'enabled' => $v2_configured && $legacy_enabled,
+            'enabled' => $v2_configured && $legacy_enabled && ( ! class_exists( 'MBS_Payment_Features' ) || MBS_Payment_Features::enabled( 'reports' ) ),
             'upgrade_required' => ! $v2_configured && $legacy_enabled,
             'sandbox_mode' => (bool) get_option( 'mbs_osm_sandbox_mode', true ),
             'auth_source' => $auth_source,

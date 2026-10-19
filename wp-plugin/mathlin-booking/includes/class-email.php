@@ -193,7 +193,7 @@ class MBS_Email {
         if ( $is_offline && $total_amount > 0 ) {
             // B2B: show BACS / PO instructions instead of a card payment button
             $body .= self::offline_payment_block( $booking, $total_amount - $amount_paid_val );
-        } elseif ( MBS_Woo_Payment::is_available() ) {
+        } elseif ( $total_amount > 0 && MBS_Woo_Payment::is_available() ) {
             $pay_url = MBS_Woo_Payment::generate_payment_url( $booking );
             if ( $pay_url ) {
                 // Label the button appropriately
@@ -337,6 +337,9 @@ class MBS_Email {
         );
         $subject = MBS_Email_Templates::replace_placeholders( $template['subject'], $placeholder_data );
         $intro   = MBS_Email_Templates::replace_placeholders( $template['body'], $placeholder_data );
+        if ( $series->billing_treatment === 'none' && class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ) {
+            $intro = 'Thank you for your campsite booking request. The available dates listed below are awaiting approval by the booking coordinator. No hire charge or payment is required.';
+        }
 
         $body  = self::header();
         $body .= '<h2 style="color:#7413DC;">We’ve received your recurring request</h2>';
@@ -527,6 +530,10 @@ class MBS_Email {
             'Payment method'              => $series->payment_method === 'offline_bacs' ? 'Invoice (BACS / purchase order)' : ( $series->payment_method === 'none' ? 'No payment required' : 'Online invoice payment' ),
             'Amount due at submission'    => '&pound;0.00',
         );
+        if ( $series->billing_treatment === 'none' && class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ) {
+            unset( $rows['Price per booking'], $rows['Estimated full series value'], $rows['Billing frequency'], $rows['Payment method'], $rows['Amount due at submission'] );
+            $rows['Hire charge'] = 'No payment required';
+        }
         $html = '<table style="width:100%;border-collapse:collapse;margin:16px 0;">';
         foreach ( $rows as $label => $value ) {
             $html .= '<tr><td style="padding:8px 12px;background:#f5f0ff;font-weight:600;width:42%;border-bottom:1px solid #e0d0f0;">' . esc_html( $label ) . '</td><td style="padding:8px 12px;border-bottom:1px solid #e0d0f0;">' . wp_kses_post( $value ) . '</td></tr>';
@@ -619,15 +626,16 @@ class MBS_Email {
     }
 
     private static function booking_table( $b ) {
-        $time = ( $b['space'] === 'Outdoor Area' ) ? 'All day' : ( $b['start_time'] . ' – ' . $b['end_time'] );
-        return self::table_html( $b['ref'], $b['space'], $b['booking_date'], $time, $b['attendees'], $b['purpose'], $b['amount'] );
+        return self::booking_table_obj( (object) $b );
     }
 
     private static function booking_table_obj( $b ) {
         $spaces   = MBS_Bookings::get_spaces();
-        $is_daily = isset( $spaces[ $b->space ] ) && $spaces[ $b->space ]['unit'] === 'day';
+        $is_daily = ! empty( $b->all_day ) || ( isset( $spaces[ $b->space ] ) && ( $spaces[ $b->space ]['unit'] ?? '' ) === 'day' );
         $time     = $is_daily ? 'All day' : ( $b->start_time . ' – ' . $b->end_time );
-        return self::table_html( $b->ref, $b->space, $b->booking_date, $time, $b->attendees, $b->purpose, $b->amount );
+        $html = self::table_html( $b->ref, $b->space, $b->booking_date, $time, $b->attendees, $b->purpose, $b->amount );
+        if ( ! empty( $b->booking_date_end ) && $b->booking_date_end !== $b->booking_date ) $html .= '<p>Booking runs through ' . esc_html( date( 'l j F Y', strtotime( $b->booking_date_end ) ) ) . ' (' . esc_html( MBS_Campsite_Policy::span( $b ) === 'continuous' ? 'continuous stay' : 'same session each day' ) . ').</p>';
+        return $html;
     }
 
     private static function table_html( $ref, $space, $date, $time, $attendees, $purpose, $amount ) {
@@ -640,6 +648,10 @@ class MBS_Email {
             'Purpose'    => esc_html( $purpose ),
             'Amount Due' => '&pound;' . number_format( $amount, 2 ),
         );
+        if ( (float) $amount === 0.0 && class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ) {
+            unset( $rows['Amount Due'] );
+            $rows['Hire charge'] = 'No payment required';
+        }
         $html = '<table style="width:100%;border-collapse:collapse;margin:16px 0;">';
         foreach ( $rows as $label => $value ) {
             $html .= '<tr><td style="padding:8px 12px;background:#f5f0ff;font-weight:600;width:35%;border-bottom:1px solid #e0d0f0;">' . $label . '</td><td style="padding:8px 12px;border-bottom:1px solid #e0d0f0;">' . $value . '</td></tr>';
@@ -651,6 +663,7 @@ class MBS_Email {
      * Generate an "Add to Calendar" button for emails.
      */
     private static function ical_button( $booking ) {
+        if ( class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ) return '<p><a href="' . esc_url( get_permalink(1396) ) . '">Sign in to manage your booking or download its calendar entry</a></p>';
         $ical_url = rest_url( 'mathlin/v1/bookings/' . $booking->ref . '/ical' );
         $html = '<p style="margin-top:16px;">' .
             '<a href="' . esc_url( $ical_url ) . '" style="background:#7413DC;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold;font-size:14px;">📅 Add to Calendar</a>' .
