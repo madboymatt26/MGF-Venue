@@ -23,9 +23,11 @@ class MBS_Google_Calendar {
         $status=['enabled'=>false,'calendar'=>'Estate shared calendar','calendar_id'=>'test-calendar','connected'=>true,'configured'=>true,'secure_storage_ready'=>true,'last_result'=>'No Google entries changed.','last_success'=>'','redirect_uri'=>'https://example.invalid/callback'];
         $event=['id'=>'estate1','summary'=>'District camp <script>alert(1)</script>','start'=>['date'=>'2026-10-24'],'end'=>['date'=>'2026-10-27'],'location'=>'Cabin'];
         $want=$event;$want['summary']='Cabin — District Scouts';$ops=[];
-        for($i=1;$i<=28;$i++)$ops[]=['ref'=>'MBS-TEST'.$i,'action'=>'review','want'=>$want,'event'=>null,'reason'=>'Existing estate entry overlaps; review area and dates.','hash'=>'fixture'.$i,'candidates'=>[$event,array_merge($event,['id'=>'estate2','location'=>'Paddock'])]];
+        $family=[];for($i=1;$i<=6;$i++)$family[]=array_merge($event,['id'=>'family'.$i,'summary'=>'Example whole-site camp','location'=>'Whole park','htmlLink'=>'https://calendar.google.com/calendar/event?eid=fictional'.$i]);
+        foreach(['Cabin','Bomb Hole','Paddock','Woodland','Field','Campfire'] as $i=>$area)$ops[]=['ref'=>'MBS-GROUP'.($i+1),'action'=>'review','want'=>array_merge($want,['summary'=>$area.' — Example Scouts']),'event'=>null,'reason'=>'Overlaps require review.','hash'=>'family'.$i,'candidates'=>$family];
+        for($i=1;$i<=28;$i++)$ops[]=['ref'=>'MBS-TEST'.$i,'action'=>'review','want'=>$want,'event'=>null,'reason'=>'Existing estate entry overlaps; review area and dates.','hash'=>'fixture'.$i,'candidates'=>[$event,array_merge($event,['id'=>'estate'.$i.'-other','location'=>'Paddock'])]];
         $ops[]=['ref'=>'MBS-LINKED','action'=>'matched','want'=>$want,'event'=>$event,'reason'=>'Protected reference; estate unchanged.','hash'=>'linked','candidates'=>[]];
-        $preview=['snapshot'=>['ops'=>$ops,'events'=>[$event]]];
+        $preview=['snapshot'=>['ops'=>$ops,'events'=>array_merge([$event],$family)]];
         include MBS_PLUGIN_DIR.'admin/views/google-calendar.php';
     }
 }

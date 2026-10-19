@@ -6,6 +6,17 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 **Current Version:** 3.32.0
 
+## Unreleased — clearer calendar comparison groups
+
+Calendar Sync groups Google records with the same title, location and exact dates
+or times into expandable cards. Every original record remains inspectable by ID
+and, where available, its Google link. Reservations sharing the exact candidate
+ID set are displayed together and paginated as a complete group.
+
+These are presentation groups, not confirmed matches. Individual reference choices
+remain separate and unresolved by default; this does not introduce bulk/group
+linking or alter the sync worker, existing links, bookings or Google events.
+
 ## 3.32.0 Staff booking entry (development)
 
 All Bookings → Add booking provides staff entry with a separate read-only review
