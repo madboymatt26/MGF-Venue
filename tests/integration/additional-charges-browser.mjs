@@ -51,7 +51,7 @@ try {
     // The new staff entry screen uses the same signed-in operator, real REST nonce
     // and disposable WordPress database. No customer notification is selected.
     await staff.goto(base+'/wp-admin/admin.php?page=mathlin-add-booking');
-    await staff.getByRole('heading',{name:'Add booking',exact:true}).waitFor();
+    await staff.locator('h1').filter({hasText:'Add booking'}).waitFor();
     await staff.locator('#entry-purpose').fill('Synthetic browser staff booking');
     await staff.locator('#entry-name').fill('Synthetic staff contact');
     await staff.locator('#entry-email').fill('staff-browser@example.invalid');
