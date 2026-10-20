@@ -1,6 +1,7 @@
 <?php
 /** Disposable WordPress database only; never a production migration. */
 if (!defined('WP_CLI') || !WP_CLI || !preg_match('/localhost|wordpress|127\.0\.0\.1/', home_url())) throw new RuntimeException('Disposable integration host required.');
+global $wpdb;
 function ms_ok($v,$m){if(!$v)throw new RuntimeException($m);}
 function ms_created($data){$r=MBS_Bookings::create($data,true);ms_ok(!is_wp_error($r),is_wp_error($r)?$r->get_error_message():'create');return MBS_Bookings::get($r['ref']);}
 $original=[];
@@ -52,6 +53,15 @@ try{
  $parent=MBS_Series::get($series['series_id']);ms_ok($parent->space===$label,'Series snapshot retains full set');
  $extension=MBS_Series::extend($parent->series_ref,(new DateTimeImmutable($rec_date))->modify('+21 days')->format('Y-m-d'),$parent->version,false);ms_ok(!is_wp_error($extension),is_wp_error($extension)?$extension->get_error_message():'extension');
  ms_ok(count(MBS_Bookings::get_series($parent->series_ref))===4,'Extension preserves allocation model');
+ $parent=MBS_Series::get($parent->series_ref);$subset=MBS_Space_Selection::normalize(['MS Cabin','MS Plantation']);
+ $edited=MBS_Campsite_Policy::edit_series($parent->series_ref,['space'=>$subset],$parent->version,false,true);ms_ok(!is_wp_error($edited),is_wp_error($edited)?$edited->get_error_message():'series edit');
+ foreach(MBS_Bookings::get_series($parent->series_ref)as$row)ms_ok($row->space===$subset,'Edit all future sessions retains full new set');
+ ms_ok(!MBS_Bookings::check_conflicts('MS Bomb Hole',$rec_date,null,null,true),'Series edit releases removed member');ms_ok((bool)MBS_Bookings::check_conflicts('MS Whole Park',$rec_date,null,null,true),'Edited series still blocks parent');
+ $api_date=(new DateTimeImmutable($end))->modify('+130 days')->format('Y-m-d');$request=new WP_REST_Request('POST');
+ foreach(array_merge($base,['idempotency_key'=>'multi-api-'.wp_generate_uuid4(),'space'=>'MS Cabin','spaces'=>$selected,'booking_date'=>$api_date,'booking_date_end'=>$api_date,'all_day'=>true,'status'=>'pending','notify_hirer'=>false,'booking_span'=>'continuous'])as$k=>$v)$request->set_param($k,$v);
+ $api_result=$api->create_admin_booking($request);ms_ok(!is_wp_error($api_result),is_wp_error($api_result)?$api_result->get_error_message():'API create');ms_ok($api_result->get_data()['booking']['space']===$label,'MCP/API explicit spaces override single legacy field');
+ $preview_data=array_merge($camp,['space'=>'MS Cabin','spaces'=>$selected,'booking_date'=>(new DateTimeImmutable($api_date))->modify('+4 days')->format('Y-m-d'),'booking_date_end'=>(new DateTimeImmutable($api_date))->modify('+4 days')->format('Y-m-d'),'status'=>'pending']);
+ $preview=MBS_Admin_Booking_Entry::plan($preview_data);ms_ok(!is_wp_error($preview),is_wp_error($preview)?$preview->get_error_message():'staff preview');ms_ok($preview['data']['space']===$label,'Staff frozen preview uses same canonical set');
  $group=MBS_Bookings::get($group->ref);$projection=MBS_Google_Calendar::project([(array)$group],false,'https://example.invalid','fictional-calendar',new DateTimeZone('Europe/London'),wp_date('Y-m-d'));ms_ok(count($projection['desired'])===1,'One Google event for one combined stay');ms_ok(strpos(reset($projection['desired'])['summary'],$label)!==false,'Calendar names actual selected areas, not Whole Park');
  $removed=$spaces;unset($removed['MS Cabin']);ms_ok(is_wp_error(MBS_Space_Selection::validate_configuration($removed)),'Active allocation prevents area removal');
  $lock_key='mbs_spaces_'.substr(hash('sha256',$wpdb->prefix),0,32);
