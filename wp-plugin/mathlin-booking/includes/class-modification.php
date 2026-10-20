@@ -307,6 +307,7 @@ class MBS_Modification {
 	                        $lk_paid = (float) ( $locked_booking->amount_paid ?? 0 );
 	                        $update['status'] = ( class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ) ? $locked_booking->status : ( ( $lk_paid >= (float) $new_amount ) ? 'paid' : 'confirmed' );
 
+	                        if ( class_exists( 'MBS_Space_Selection' ) && isset( $update['space'] ) ) MBS_Space_Selection::record_selection( $update['space'] );
 	                        $booking_updated = $wpdb->update( $table, $update, array( 'ref' => $request->booking_ref ) );
 	                        if ( $booking_updated === false ) {
 	                            $wpdb->query( 'ROLLBACK' );
@@ -388,6 +389,7 @@ class MBS_Modification {
 
 	                    } else {
 	                        // Non-material or no existing document: simple update (no R2 needed)
+	                        if ( class_exists( 'MBS_Space_Selection' ) && isset( $update['space'] ) ) MBS_Space_Selection::record_selection( $update['space'] );
 	                        $booking_updated = $wpdb->update( $table, $update, array( 'ref' => $request->booking_ref ) );
 	                        if ( $booking_updated === false ) {
 	                            return new WP_Error( 'modification_update_failed', 'The booking change could not be saved.' );

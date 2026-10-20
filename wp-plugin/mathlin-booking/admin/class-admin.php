@@ -1802,6 +1802,7 @@ class MBS_Admin {
             $valid = MBS_Campsite_Policy::validate_amendment( $booking, $update, ! empty( $_POST['campsite_exception'] ) );
             if ( is_wp_error( $valid ) ) wp_send_json_error( $valid->get_error_message() );
         }
+        if ( class_exists( 'MBS_Space_Selection' ) && isset( $update['space'] ) ) MBS_Space_Selection::record_selection( $update['space'] );
         $wpdb->update( $table, $update, array( 'ref' => $ref ) );
 
         // Auto-update status if cost changed and there's now a balance due

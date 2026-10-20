@@ -180,7 +180,10 @@ class MBS_Campsite_Policy {
                 }
                 $changes[$booking->ref] = array_intersect_key( $proposed, array_flip( array( 'space', 'start_time', 'end_time', 'purpose' ) ) );
             }
-            foreach ( $changes as $booking_ref => $update ) if ( $wpdb->update( $wpdb->prefix . MBS_TABLE, $update, array( 'ref' => $booking_ref ) ) === false ) throw new RuntimeException( 'Could not save every session.' );
+            foreach ( $changes as $booking_ref => $update ) {
+                if ( class_exists( 'MBS_Space_Selection' ) ) MBS_Space_Selection::record_selection( $update['space'] );
+                if ( $wpdb->update( $wpdb->prefix . MBS_TABLE, $update, array( 'ref' => $booking_ref ) ) === false ) throw new RuntimeException( 'Could not save every session.' );
+            }
             $snapshot = reset( $changes ); $snapshot['version'] = (int) $series->version + 1; $snapshot['updated_at'] = current_time( 'mysql' );
             if ( $wpdb->update( $table, $snapshot, array( 'series_ref' => $ref, 'version' => (int) $version ) ) !== 1 ) throw new RuntimeException( 'The series changed concurrently. Nothing was saved.' );
             if ( $wpdb->query( 'COMMIT' ) === false ) throw new RuntimeException( 'Could not commit the schedule change.' );

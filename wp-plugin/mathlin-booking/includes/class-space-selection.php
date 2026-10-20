@@ -78,6 +78,10 @@ class MBS_Space_Selection {
         return MBS_Campsite_Policy::enabled() || get_option( 'mbs_multi_space_enabled', false ) || get_option( 'mbs_multi_space_ever_used', false );
     }
 
+    public static function record_selection( $space ) {
+        if ( count( self::members( $space ) ) > 1 ) update_option( 'mbs_multi_space_ever_used', 1, false );
+    }
+
     public static function validate_configuration( $proposed ) {
         if ( ! self::protect_allocations() ) return true;
         global $wpdb;
