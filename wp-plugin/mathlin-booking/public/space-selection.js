@@ -14,7 +14,7 @@
             root.appendChild(label);
             const box = document.createElement('fieldset'), legend = document.createElement('legend');
             legend.textContent = 'Areas used for the same dates and times'; box.appendChild(legend);
-            box.style.cssText = 'padding:12px;border:1px solid #ddd;margin:8px 0;display:grid;gap:8px'; root.appendChild(box);
+            box.style.cssText = 'padding:12px;border:1px solid #ddd;margin:8px 0;display:grid;gap:8px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr))'; root.appendChild(box);
             const choices = [];
             Object.keys(spaces).sort().forEach(function (name) {
                 const info = spaces[name];
@@ -24,11 +24,16 @@
                 const row = document.createElement('label'); row.append(input, document.createTextNode(' ' + name)); box.appendChild(row);
                 choices.push(input);
             });
-            const hint = document.createElement('p'); hint.setAttribute('aria-live', 'polite'); box.appendChild(hint);
+            const hint = document.createElement('p'); hint.setAttribute('aria-live', 'polite'); hint.style.gridColumn = '1 / -1'; box.appendChild(hint);
             let composite = !spaces[initial] ? Array.from(select.options).find(o => o.value === initial) : null, internal = false;
             function update() {
                 box.hidden = !toggle.checked; box.style.display = toggle.checked ? 'grid' : 'none';
-                if (!toggle.checked) { if (composite && select.value === composite.value) select.value = ''; return; }
+                if (!toggle.checked) {
+                    if (composite) { if (select.value === composite.value) select.value = ''; composite.remove(); composite = null; }
+                    choices.forEach(c => { c.checked = false; c.disabled = false; });
+                    internal = true; select.dispatchEvent(new Event('change', {bubbles:true})); internal = false;
+                    return;
+                }
                 const selected = choices.filter(c => c.checked).map(c => c.value).sort();
                 const parent = selected.length ? spaces[selected[0]].parent : null;
                 choices.forEach(c => { c.disabled = !!parent && spaces[c.value].parent !== parent && !c.checked; });
