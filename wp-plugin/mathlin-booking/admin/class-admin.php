@@ -526,6 +526,8 @@ class MBS_Admin {
         $allowed = array( 'confirmed', 'deposit_paid', 'paid' );
         if ( ! in_array( $status, $allowed ) ) $status = 'confirmed';
         if ( class_exists( 'MBS_Space_Selection' ) && MBS_Space_Selection::protect_allocations() ) {
+            $valid_selection = MBS_Space_Selection::normalize( $booking->space, true );
+            if ( is_wp_error( $valid_selection ) ) wp_send_json_error( 'Restore cannot use removed or reconfigured areas. Review the current resources first.', 409 );
             $last = $booking->booking_date_end ?: $booking->booking_date;
             for ( $day = new DateTimeImmutable( $booking->booking_date ); $day->format( 'Y-m-d' ) <= $last; $day = $day->modify( '+1 day' ) ) {
                 $ymd = $day->format( 'Y-m-d' ); $interval = MBS_Campsite_Policy::interval( $booking, $ymd );

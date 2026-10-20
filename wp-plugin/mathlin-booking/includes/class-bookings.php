@@ -748,6 +748,7 @@ class MBS_Bookings {
         // Idempotent: already at the requested status — no-op success.
         if ( $current->status === $status ) return true;
         if ( class_exists( 'MBS_Space_Selection' ) && MBS_Space_Selection::protect_allocations() && in_array( $current->status, array( 'cancelled', 'archived' ), true ) && ! in_array( $status, array( 'cancelled', 'archived' ), true ) ) {
+            if ( is_wp_error( MBS_Space_Selection::normalize( $current->space, true ) ) ) return false;
             $last = $current->booking_date_end ?: $current->booking_date;
             for ( $day = new DateTimeImmutable( $current->booking_date ); $day->format( 'Y-m-d' ) <= $last; $day = $day->modify( '+1 day' ) ) {
                 $ymd = $day->format( 'Y-m-d' ); $interval = MBS_Campsite_Policy::interval( $current, $ymd );

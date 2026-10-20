@@ -68,6 +68,7 @@ try{
  MBS_Space_Selection::locked(function()use($wpdb,$lock_key){$other=new wpdb(DB_USER,DB_PASSWORD,DB_NAME,DB_HOST);ms_ok((int)$other->get_var($other->prepare('SELECT GET_LOCK(%s,0)',$lock_key))===0,'Second DB connection cannot enter occupancy critical section');$other->close();});
  update_option('mbs_multi_space_enabled',0);ms_ok(is_wp_error(MBS_Bookings::create(array_merge($camp,['booking_date'=>(new DateTimeImmutable($end))->modify('+100 days')->format('Y-m-d'),'booking_date_end'=>(new DateTimeImmutable($end))->modify('+100 days')->format('Y-m-d')]),true)),'Disabled rejects new combined bookings');
  ms_ok((bool)MBS_Bookings::check_conflicts('MS Cabin',$date,null,null,true),'Disabled preserves existing occupancy');update_option('mbs_campsite_mode',0);ms_ok((bool)MBS_Bookings::check_conflicts('MS Whole Park',$date,null,null,true),'Both modes off still protect existing allocations');
+ MBS_Bookings::update_status($group->ref,'archived',false);$missing=$spaces;unset($missing['MS Cabin']);update_option('mbs_spaces',$missing);ms_ok(MBS_Bookings::update_status($group->ref,'confirmed',false)===false,'Historical selection cannot restore removed resources');update_option('mbs_spaces',$spaces);
  ms_ok($mail===0&&$http===0,'No notification or Google network activity');
  echo "MULTI_SPACE_WORDPRESS_OK\n";
 }finally{remove_filter('pre_wp_mail',$mail_guard);remove_filter('pre_http_request',$http_guard);foreach($original as$key=>$value){if($value===null)delete_option($key);else update_option($key,$value);}}
