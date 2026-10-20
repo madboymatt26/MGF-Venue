@@ -336,7 +336,7 @@ The payment chaser queries `deposit_paid` bookings where `booking_date <= today 
 - Spaces can optionally define `rate_hourly_[tier_key]` and `rate_daily_[tier_key]` for explicit tier rates
 
 ### Per-tier flags
-- `bypass_access_gate` — trusted tiers receive their keysafe code once *confirmed/deposit_paid/paid* rather than strictly *paid* (see Access Details)
+- `bypass_access_gate` — retained legacy metadata; no longer bypasses the access payment policy (see Access Details).
 - `offline_invoicing` — B2B (BACS/PO) tiers: suppresses all WooCommerce "Pay Now" buttons, and `MBS_Email::offline_payment_block()` injects the structured bank details (`mbs_bank_*` from Payment & Invoice Settings) plus the payment reference and any optional `mbs_offline_payment_instructions` notes; routes the payment chaser to a gentle statement reminder instead of the escalating chase. Helpers: `MBS_Bookings::tier_is_offline()` / `booking_is_offline()`.
 
 ### Resolution Order
@@ -398,11 +398,12 @@ The "future only, preserve the past" philosophy is deliberate. Only `delete_seri
 
 File: `includes/class-access-details.php`. WP-Cron job emails the keysafe code a configurable number of hours before the event.
 
-### Trust-based gating (`is_eligible_for_access()`)
-- Tiers with `bypass_access_gate` enabled → eligible at `confirmed`, `deposit_paid` or `paid`.
-- Standard tiers → strictly `paid` (100% settled).
-- `access_sent` column prevents duplicate sends; it is **reset to 0** on cancellation/refund (`on_order_refunded`, `update_status`) so a cancelled booker can't reuse a stale code.
-- The manual admin "Send Access Details" button (`MBS_Access_Details::resend()`) bypasses all status/tier checks.
+### Payment-aware gating (`is_eligible_for_access()`)
+- Payments enabled → strictly `paid` for every pricing tier.
+- Payments disabled → `confirmed`, `deposit_paid` or `paid`; pending/cancelled/archived never qualify.
+- Default 24-hour setting means previous local calendar day from 08:00. Hourly WP-Cron checks permit late approval/payment catch-up before start; server cron is needed for reliable timing.
+- Outbox keys deduplicate automatic requests. Retries recheck current approval/payment/contact/dates and render the current code; access_sent is set only after transport acceptance, not proof of inbox delivery.
+- Manual sends enforce the same approval/payment policy but bypass the automatic time window.
 - Keysafe codes are **never** exposed in public REST payloads.
 
 ---

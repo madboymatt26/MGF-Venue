@@ -420,7 +420,7 @@ rest:
         <!-- Access Details -->
         <div class="nms-card">
             <div class="nms-card-header"><h2>🔑 Access Details</h2></div>
-            <p>Send keysafe/access code to paid bookers before their event. Admin team also receives a booking reminder.</p>
+            <p>Send access details to approved bookings. When payments are enabled, full payment is required (including trusted pricing tiers). When payments are disabled, approval is sufficient. The admin team also receives a reminder after the mail service accepts the access email.</p>
             <table class="form-table">
                 <tr>
                     <th><label for="access_enabled">Access emails</label></th>
@@ -449,7 +449,7 @@ rest:
                     <th><label for="access_hours_before">Send</label></th>
                     <td>
                         <input type="number" id="access_hours_before" value="<?php echo esc_attr( get_option( 'mbs_access_hours_before', 24 ) ); ?>" min="1" max="168" style="width:80px"> hours before booking
-                        <p class="description">Only sent to paid or deposit-paid bookings.</p>
+                        <p class="description">24 means the previous calendar day from 08:00 in the site timezone. Other values use an hours-before window. Checked hourly through WP-Cron; late approvals/payments can catch up before the booking starts. Use server cron for reliable scheduling. Pending, cancelled and archived bookings never qualify.</p>
                     </td>
                 </tr>
                 <tr>
@@ -722,7 +722,7 @@ rest:
                         <th>Tier Key</th>
                         <th>Label</th>
                         <th>Rate Multiplier</th>
-                        <th>Bypass Payment Gate for Access Codes</th>
+                        <th>Legacy Access Bypass (inactive)</th>
                         <th>Offline Invoicing (BACS/PO)</th>
                         <th></th>
                     </tr>
@@ -733,7 +733,7 @@ rest:
                         <td><input type="text" class="nms-tier-key" value="<?php echo esc_attr( $key ); ?>" style="width:120px;" <?php echo $key === 'standard' ? 'readonly' : ''; ?>></td>
                         <td><input type="text" class="nms-tier-label" value="<?php echo esc_attr( $tier['label'] ); ?>" style="width:180px;"></td>
                         <td><input type="number" class="nms-tier-multiplier" value="<?php echo esc_attr( $tier['multiplier'] ); ?>" min="0" step="0.05" style="width:80px;"> ×</td>
-                        <td style="text-align:center;"><input type="checkbox" class="nms-tier-bypass" <?php checked( ! empty( $tier['bypass_access_gate'] ) ); ?>></td>
+                        <td style="text-align:center;"><input type="checkbox" class="nms-tier-bypass" disabled aria-label="Legacy access bypass (inactive)" <?php checked( ! empty( $tier['bypass_access_gate'] ) ); ?>></td>
                         <td style="text-align:center;"><input type="checkbox" class="nms-tier-offline" <?php checked( ! empty( $tier['offline_invoicing'] ) ); ?>></td>
                         <td><?php if ( $key !== 'standard' ) : ?><button type="button" class="button nms-remove-tier">&times;</button><?php endif; ?></td>
                     </tr>
@@ -743,7 +743,7 @@ rest:
             <p style="margin-top:12px;">
                 <button type="button" class="button" id="nms-add-tier">+ Add Tier</button>
             </p>
-            <p class="description">Standard (1.0×) is the base rate. Community (0.75×) = 25% discount. Commercial (1.5×) = 50% surcharge.<br>You can also set tier-specific rates per space by adding <code>rate_hourly_[tier_key]</code> and <code>rate_daily_[tier_key]</code> fields to the space config.<br><strong>Bypass Payment Gate:</strong> trusted tiers (e.g. Council, Commercial PO customers) receive their access code 24h before the event once <em>confirmed</em>, without needing to have paid in full. Leave unticked for public hirers (strict full-payment required).<br><strong>Offline Invoicing (BACS/PO):</strong> tick for councils/businesses who pay by bank transfer or purchase order. Suppresses all "Pay Now" card buttons, shows your BACS / PO instructions instead, and replaces aggressive payment chasers with a gentle statement reminder.</p>
+            <p class="description">Standard (1.0×) is the base rate. Community (0.75×) = 25% discount. Commercial (1.5×) = 50% surcharge.<br>You can also set tier-specific rates per space by adding <code>rate_hourly_[tier_key]</code> and <code>rate_daily_[tier_key]</code> fields to the space config.<br><strong>Access policy:</strong> full payment is required when payments are enabled, for every tier. Approval is sufficient when payments are disabled. Legacy bypass values are retained for compatibility only and no longer release access codes.<br><strong>Offline Invoicing (BACS/PO):</strong> tick for councils/businesses who pay by bank transfer or purchase order. Suppresses all "Pay Now" card buttons, shows your BACS / PO instructions instead, and replaces aggressive payment chasers with a gentle statement reminder.</p>
         </div>
 
         <!-- Single Save Button -->

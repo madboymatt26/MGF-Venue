@@ -138,6 +138,8 @@ jobs:
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/scout-series-admin.php --allow-root
       - name: Verify staff booking preview and creation
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/admin-booking-entry.php --allow-root
+      - name: Verify access payment policy and current-code outbox delivery
+        run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/access-details.php --allow-root
       - name: Verify reviewed park consolidation and rollback
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/reviewed-park-consolidation.php --allow-root
       - name: Verify multi-area bookings and unchanged whole-venue dependencies

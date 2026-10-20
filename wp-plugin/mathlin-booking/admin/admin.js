@@ -175,7 +175,7 @@ jQuery(function ($) {
     $(document).on('click', '.nms-btn-resend-access', function () {
         var $btn = $(this);
         var ref  = $btn.data('ref');
-        if (!confirm('Send access details (keysafe code) to the booker for ' + ref + '?')) return;
+        if (!confirm('Queue access details for the booker for ' + ref + '? Approval and payment eligibility will be checked again before sending.')) return;
         $btn.prop('disabled', true).text('Sending…');
         $.post(MBS_Admin.ajax_url, {
             action: 'mbs_resend_access',
@@ -183,7 +183,7 @@ jQuery(function ($) {
             ref:    ref
         }, function (res) {
             if (res.success) {
-                $btn.text('✓ Sent').css('color', '#2ecc71');
+                $btn.text('✓ Queued for sending').css('color', '#2ecc71');
             } else {
                 alert('Error: ' + (res.data || 'Could not send access details.'));
                 $btn.prop('disabled', false).text('🔑 Send Access Details');
@@ -444,7 +444,7 @@ jQuery(function ($) {
             '<td><input type="text" class="nms-tier-key" value="" style="width:120px;" placeholder="e.g. nonprofit"></td>' +
             '<td><input type="text" class="nms-tier-label" value="" style="width:180px;" placeholder="e.g. Non-Profit"></td>' +
             '<td><input type="number" class="nms-tier-multiplier" value="1.0" min="0" step="0.05" style="width:80px;"> ×</td>' +
-            '<td style="text-align:center;"><input type="checkbox" class="nms-tier-bypass"></td>' +
+            '<td style="text-align:center;"><input type="checkbox" class="nms-tier-bypass" disabled aria-label="Legacy access bypass (inactive)"></td>' +
             '<td style="text-align:center;"><input type="checkbox" class="nms-tier-offline"></td>' +
             '<td><button type="button" class="button nms-remove-tier">&times;</button></td>' +
             '</tr>';
