@@ -4,7 +4,16 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.32.1
+**Current Version:** 3.32.2
+
+## 3.32.2 Reviewed Whole Park consolidation
+
+Adds a Stowmarket-only administrator preview/rehearsal/commit endpoint for explicitly
+reviewed six-area legacy exceptions. Sources and private recovery snapshots are
+retained atomically, with date-range/conflict/financial checks and no Google or
+customer email changes. Nothing runs automatically on update. See
+`docs/reviewed-park-consolidation.md`. Partial-area booking sets are not Whole Park
+and remain unchanged pending a separate multi-area booking feature.
 
 ## 3.32.1 Clearer calendar comparison groups
 
