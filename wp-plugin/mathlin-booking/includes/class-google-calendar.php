@@ -29,6 +29,45 @@ class MBS_Google_Calendar {
     public static function deactivate() { wp_clear_scheduled_hook( self::HOOK ); }
     private static function settings() { return (array) get_option( self::OPTION, array() ); }
     private static function save( $s ) { update_option( self::OPTION, $s, false ); }
+    public static function colour_palette() {
+        return array( '' => 'Calendar default', '1' => 'Lavender', '2' => 'Sage', '3' => 'Grape', '4' => 'Flamingo', '5' => 'Banana', '6' => 'Tangerine', '7' => 'Peacock', '8' => 'Graphite', '9' => 'Blue (Blueberry)', '10' => 'Green (Basil)', '11' => 'Tomato' );
+    }
+    public static function colour_settings( $settings, $strict = false ) {
+        $raw = is_array( $settings['colours'] ?? null ) ? $settings['colours'] : array();
+        $out = array( 'enabled' => ! empty( $raw['enabled'] ), 'estate' => '10', 'scout' => '9', 'estate_groups' => array( 'HP Business', 'Estate' ) );
+        foreach ( array( 'estate', 'scout' ) as $kind ) {
+            $id = $raw[$kind] ?? $out[$kind];
+            if ( ! is_scalar( $id ) || ! array_key_exists( (string) $id, self::colour_palette() ) ) {
+                if ( $strict ) self::error( 'Select a valid Google event colour.' );
+                $id = ''; // Never send an invalid provider ID from corrupt settings.
+            }
+            $out[$kind] = (string) $id;
+        }
+        if ( isset( $raw['estate_groups'] ) ) {
+            $groups = is_array( $raw['estate_groups'] ) ? $raw['estate_groups'] : preg_split( '/\R/', (string) $raw['estate_groups'] );
+            $out['estate_groups'] = array();
+            foreach ( $groups as $group ) if ( is_string( $group ) && trim( $group ) !== '' ) $out['estate_groups'][] = trim( wp_strip_all_tags( $group ) );
+            $out['estate_groups'] = array_values( array_unique( $out['estate_groups'] ) );
+        }
+        return $out;
+    }
+    /** Colour is cosmetic, never a billing/Scout-use flag or permission decision. */
+    public static function booking_colour( $booking, $rules, $campsite ) {
+        $b = (object) $booking;
+        if ( empty( $rules['enabled'] ) ) return '';
+        $group = strtolower( trim( (string) ( $b->organisation ?? '' ) ) );
+        $estate = false;
+        foreach ( $rules['estate_groups'] as $label ) if ( $group === strtolower( $label ) ) $estate = true;
+        // Existing staff estate entries always carry this generated prefix, even with a custom organisation.
+        if ( strpos( (string) ( $b->notes ?? '' ), "Estate reservation entered by staff.\n" ) === 0 ) $estate = true;
+        if ( $campsite && $estate ) return $rules['estate'];
+        if ( $campsite || ! empty( $b->scout_use ) ) return $rules['scout'];
+        return ''; // Ordinary non-campsite paid hires retain their calendar's default.
+    }
+    private static function source_hash( $event ) {
+        unset( $event['colorId'] ); // New-event preferences must not invalidate existing protected links.
+        return hash( 'sha256', wp_json_encode( $event ) );
+    }
     public static function status() {
         $s = self::settings();
         $crypto = false;
@@ -125,8 +164,9 @@ class MBS_Google_Calendar {
     }
 
     /** Minimal public fields only; intentionally never exports contact/name/purpose/notes. */
-    public static function project( $rows, $pending, $site, $calendar, $zone, $today ) {
+    public static function project( $rows, $pending, $site, $calendar, $zone, $today, $colour_settings = array(), $campsite = false ) {
         $desired = array(); $source = array();
+        $colour_rules = self::colour_settings( $colour_settings );
         foreach ( $rows as $row ) {
             $b = (object) $row; $ref = (string) $b->ref;
             if ( isset( $source[$ref] ) ) self::error( 'Duplicate booking references. Resolve before syncing.' );
@@ -153,6 +193,8 @@ class MBS_Google_Calendar {
                     $group = trim( wp_strip_all_tags( (string) ( $b->organisation ?? '' ) ) );
                     $summary = ( $b->status === 'pending' ? 'Provisional — ' : '' ) . $label . ( $group !== '' ? ' — ' . $group : '' );
                     $desired[$key] = array( 'id' => 'mgf' . hash( 'sha256', $site . '|' . $calendar . '|' . $key ), 'summary' => function_exists( 'mb_substr' ) ? mb_substr( $summary, 0, 250 ) : $summary, 'start' => $start, 'end' => $end, 'status' => $b->status === 'pending' ? 'tentative' : 'confirmed', 'transparency' => 'opaque', 'extendedProperties' => array( 'private' => array( 'mgf_site' => $site, 'mgf_booking' => $key, 'mgf_ref' => $ref ) ) );
+                    $colour = self::booking_colour( $b, $colour_rules, $campsite );
+                    if ( $colour !== '' ) $desired[$key]['colorId'] = $colour;
                 }
                 if ( $continuous || ! empty( $b->all_day ) ) break;
             }
@@ -213,7 +255,7 @@ class MBS_Google_Calendar {
                 $link = $links[$key]; $event = $ids[$link['id']] ?? null;
                 $op['event'] = $event; $op['action'] = 'matched'; $op['reason'] = 'Protected link; Google entry is retained unchanged.';
                 if ( ! $event || ( $event['status'] ?? '' ) === 'cancelled' ) { $op['action'] = 'blocked'; $op['reason'] = 'Linked Google event missing or deleted. Never recreate automatically.'; }
-                elseif ( empty( $link['source_hash'] ) || $link['source_hash'] !== hash( 'sha256', wp_json_encode( $want ) ) || empty( $link['google_hash'] ) || $link['google_hash'] !== self::event_hash( $event ) ) { $op['action'] = 'difference'; $op['reason'] = 'Booking or estate entry changed. Google wins; review without overwriting it.'; }
+                elseif ( empty( $link['source_hash'] ) || $link['source_hash'] !== self::source_hash( $want ) || empty( $link['google_hash'] ) || $link['google_hash'] !== self::event_hash( $event ) ) { $op['action'] = 'difference'; $op['reason'] = 'Booking or estate entry changed. Google wins; review without overwriting it.'; }
             }
             elseif ( count( $matches ) > 1 ) { $op['action'] = 'blocked'; $op['reason'] = 'Multiple linked events: review in Google Calendar.'; }
             elseif ( count( $matches ) === 1 ) {
@@ -245,7 +287,7 @@ class MBS_Google_Calendar {
     }
     private static function snapshot() {
         self::validate_calendar(); $s = self::settings(); $today = wp_date( 'Y-m-d' );
-        $projection = self::project( self::bookings(), ! empty( $s['pending'] ), self::site_key(), $s['calendar'], wp_timezone(), $today );
+        $projection = self::project( self::bookings(), ! empty( $s['pending'] ), self::site_key(), $s['calendar'], wp_timezone(), $today, $s, ! empty( get_option( 'mbs_campsite_mode', false ) ) );
         // Expand recurring manual events so their individual overlaps are detected.
         $midnight = new DateTimeImmutable( $today, wp_timezone() );
         $events = self::listing( self::events_path() . '?singleEvents=true&showDeleted=false&timeMin=' . rawurlencode( $midnight->format( DATE_RFC3339 ) ) . '&timeMax=' . rawurlencode( $midnight->modify( '+5 years' )->format( DATE_RFC3339 ) ) );
@@ -289,7 +331,7 @@ class MBS_Google_Calendar {
             if ( $action === 'create' && ! $allow_create ) continue;
             // Revalidate changeable booking facts immediately before each write.
             $s = self::settings();
-            $fresh = self::project( self::bookings(), ! empty( $s['pending'] ), self::site_key(), $s['calendar'], wp_timezone(), wp_date( 'Y-m-d' ) );
+            $fresh = self::project( self::bookings(), ! empty( $s['pending'] ), self::site_key(), $s['calendar'], wp_timezone(), wp_date( 'Y-m-d' ), $s, ! empty( get_option( 'mbs_campsite_mode', false ) ) );
             if ( $op['want'] !== ( $fresh['desired'][$op['key']] ?? null ) ) self::error( 'A booking changed during sync. Preview again; already completed operations are retained.' );
             if ( $action === 'protect' ) {
                 $current = self::api( 'GET', self::events_path() . '/' . rawurlencode( $event['id'] ), null, '', true );
@@ -307,7 +349,7 @@ class MBS_Google_Calendar {
             }
             $done++;
             $s = self::settings(); $s['has_written'] = ! empty( $s['has_written'] ) || $action === 'create';
-            $s['links'][$op['key']] = array( 'id' => $event['id'], 'ref' => $op['ref'], 'origin' => $action === 'protect' ? 'estate' : 'mgf', 'source_hash' => hash( 'sha256', wp_json_encode( $op['want'] ) ), 'google_hash' => self::event_hash( $event ), 'until' => substr( $op['want']['end']['date'] ?? $op['want']['end']['dateTime'], 0, 10 ) );
+            $s['links'][$op['key']] = array( 'id' => $event['id'], 'ref' => $op['ref'], 'origin' => $action === 'protect' ? 'estate' : 'mgf', 'source_hash' => self::source_hash( $op['want'] ), 'google_hash' => self::event_hash( $event ), 'until' => substr( $op['want']['end']['date'] ?? $op['want']['end']['dateTime'], 0, 10 ) );
             self::save( $s );
             self::record( $action, $op['ref'], $action === 'protect' ? 'Protected reference saved; Google unchanged.' : 'Created one MGF event; existing estate events unchanged.' );
         }
@@ -354,6 +396,11 @@ class MBS_Google_Calendar {
                 if ( ( ! empty( $s['has_written'] ) || ! empty( $s['links'] ) ) && $id !== ( $s['calendar'] ?? '' ) ) self::error( 'This connection has existing links. Retargeting requires a separate migration review.' );
                 $s['calendar'] = $id; $s['calendar_name'] = $found['summary'] ?? $id; $s['pending'] = ! empty( $_POST['pending'] ); $s['enabled'] = false; $s['choices'] = array(); self::save( $s );
                 self::notice( 'Target saved. Preview and review before enabling sync.' );
+            } elseif ( $op === 'colours' ) {
+                $s['colours'] = self::colour_settings( array( 'colours' => wp_unslash( $_POST['colours'] ?? array() ) ), true );
+                $s['enabled'] = false; $s['choices'] = array(); self::save( $s );
+                delete_transient( 'mbs_gcal_preview_' . get_current_user_id() );
+                self::notice( 'New-event colours saved. Sync paused for a fresh comparison; existing Google events and colours unchanged.' );
             } elseif ( $op === 'preview' ) {
                 $snapshot = self::snapshot();
                 set_transient( 'mbs_gcal_preview_' . get_current_user_id(), array( 'fingerprint' => self::fingerprint( $snapshot ), 'snapshot' => $snapshot ), 900 );

@@ -4,7 +4,15 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.33.1
+**Current Version:** 3.34.0
+
+## 3.34.0 Colours for new Google events
+
+Opt-in, per-site estate/Scout Google event colours under Calendar Sync → Connection
+settings. Defaults are Green/Basil for estate bookings and Blue/Blueberry for
+Scout bookings. Existing Google events and colours remain untouched. Saving pauses
+sync for a fresh comparison; ordinary paid hires and disabled sites stay unchanged.
+No schema change. See `docs/google-calendar-colours.md` for classification and safety.
 
 ## 3.33.1 Existing-installation upgrade repair
 

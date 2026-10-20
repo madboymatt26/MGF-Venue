@@ -15,6 +15,8 @@ function checked($v){if($v)echo 'checked';}
 function get_page_by_path($p){return null;}
 class MBS_Admin {static function brand_mark(){return '<span aria-hidden="true">◆ </span>';}}
 class MBS_Google_Calendar {
+    static function colour_palette(){return [''=>'Calendar default','9'=>'Blue (Blueberry)','10'=>'Green (Basil)'];}
+    static function colour_settings($s){return ['enabled'=>false,'estate'=>'10','scout'=>'9','estate_groups'=>['HP Business','Estate']];}
     static function form_start($op){echo '<form method="post" action="/fixture-no-write"><input type="hidden" name="operation" value="'.esc_attr($op).'">';}
     static function history(){return [['at'=>'2026-10-19T12:00:00Z','action'=>'protect','ref'=>'MBS-TEST','result'=>'Protected reference saved; Google unchanged.']];}
     static function estate_only($s){return $s['events'];}

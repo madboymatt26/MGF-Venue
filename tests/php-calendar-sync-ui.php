@@ -23,6 +23,12 @@ foreach(['review','linked','estate','history','settings'] as $tab){
     }
     if($tab==='history')verify(strpos($html,'Protected reference saved')!==false,'History visible');
     if($tab==='estate')verify(strpos($html,'Nothing in this list will be removed')!==false,'Estate entries explicitly protected');
+    if($tab==='settings'){
+        verify(strpos($html,'Colours for new events')!==false,'New-event colour settings visible');
+        verify(strpos($html,'name="colours[estate]"')!==false&&strpos($html,'name="colours[scout]"')!==false,'Separate estate and Scout controls');
+        verify(strpos($html,'Existing Google entries keep their current colours')!==false,'No-recolour policy visible');
+        verify(strpos($html,'Save new-event colours and pause')!==false,'Colour save explicitly pauses sync');
+    }
 }
 $_GET=['sync_view'=>'review','sync_paged'=>2];ob_start();MBS_Google_Calendar::render();$html=ob_get_clean();verify(substr_count($html,'<a href="/admin.php?page=mathlin-booking')===4,'Second page contains remaining four groups');
 echo "Calendar Sync UI: $checks assertions passed.\n";
