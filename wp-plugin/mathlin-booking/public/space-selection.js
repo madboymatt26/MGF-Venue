@@ -9,6 +9,7 @@
             if (initial && !Array.from(select.options).some(o => o.value === initial)) select.add(new Option(initial, initial));
             select.value = initial;
             if (!config.enabled) return; // Existing allocations stay visible even when new ones are disabled.
+            if (!Array.from(select.options).some(o => o.value === '')) select.insertBefore(new Option('Select a space', ''), select.firstChild);
             const toggle = document.createElement('input'); toggle.type = 'checkbox';
             const label = document.createElement('label'); label.append(toggle, document.createTextNode(' Select several areas under one booking'));
             root.appendChild(label);
@@ -25,7 +26,7 @@
                 choices.push(input);
             });
             const hint = document.createElement('p'); hint.setAttribute('aria-live', 'polite'); hint.style.gridColumn = '1 / -1'; box.appendChild(hint);
-            let composite = !spaces[initial] ? Array.from(select.options).find(o => o.value === initial) : null, internal = false;
+            let composite = initial && !spaces[initial] && initial.includes(separator) ? Array.from(select.options).find(o => o.value === initial) : null, internal = false;
             function update() {
                 box.hidden = !toggle.checked; box.style.display = toggle.checked ? 'grid' : 'none';
                 if (!toggle.checked) {
