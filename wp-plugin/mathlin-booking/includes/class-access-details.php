@@ -113,7 +113,8 @@ class MBS_Access_Details {
         $settings = self::get_settings();
         if ( ! $settings['enabled'] || $settings['code'] === '' ) return new WP_Error( 'access_unconfigured', 'Access details are not configured.' );
         $snapshot = self::source_hash( $booking );
-        $key = 'access:' . $booking->ref . ':' . $snapshot . ( $manual ? ':' . wp_generate_uuid4() : '' );
+        // Existing queue keys are VARCHAR(100), including upgraded installs.
+        $key = 'access:' . $snapshot . ( $manual ? ':' . substr( hash( 'sha256', wp_generate_uuid4() ), 0, 16 ) : '' );
         $subject = 'Access details — ' . $booking->ref;
         $body = '<p>Access details will be prepared from current settings at dispatch.</p>';
         return MBS_Email_Queue::enqueue( $booking->email, $subject, $body, array(), $key,
@@ -129,7 +130,7 @@ class MBS_Access_Details {
         $start = new DateTimeImmutable( $booking->booking_date . ' ' . ( ! empty( $booking->all_day ) ? '00:00:00' : $booking->start_time ), wp_timezone() );
         if ( $email->message_type === 'access_details' && new DateTimeImmutable( 'now', wp_timezone() ) >= $start ) return new WP_Error( 'access_expired', 'Booking has already started.' );
         if ( ! $booking || ! self::is_eligible_for_access( $booking ) || ! $settings['enabled'] || $settings['code'] === '' ) return new WP_Error( 'access_ineligible', 'Access delivery paused: current booking/settings are not eligible.' );
-        if ( strpos( $email->message_key, 'access:' . $booking->ref . ':' . self::source_hash( $booking ) ) !== 0 ) return new WP_Error( 'access_stale', 'Booking changed; access email snapshot is stale.' );
+        if ( strpos( $email->message_key, 'access:' . self::source_hash( $booking ) ) !== 0 ) return new WP_Error( 'access_stale', 'Booking changed; access email snapshot is stale.' );
         if ( $email->message_type === 'access_details' && ! self::is_due( $booking ) ) return new WP_Error( 'access_not_due', 'Access email is not currently due.' );
         return self::build_message( $booking );
     }

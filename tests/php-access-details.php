@@ -9,7 +9,7 @@ function wp_date($f,$t=null){return (new DateTimeImmutable('@'.($t??time())))->s
 function wp_json_encode($v){return json_encode($v);}
 function sanitize_text_field($s){return trim(strip_tags($s));}
 function sanitize_textarea_field($s){return trim(strip_tags($s));}
-function wp_generate_uuid4(){return 'manual-test-uuid';}
+function wp_generate_uuid4(){return '938b201a-e2c3-43e9-a515-68731142a3d6';}
 function add_action(...$args){}
 function wp_get_scheduled_event($hook){return $GLOBALS['access_event']??false;}
 function wp_clear_scheduled_hook($hook){$GLOBALS['access_cleared']=$hook;}
@@ -44,6 +44,8 @@ $b->booking_date='2100-01-02';$b->all_day=1;expect_access(MBS_Access_Details::is
 $b->all_day=0;$options['mbs_access_hours_before']=48;expect_access(MBS_Access_Details::is_due($b,new DateTimeImmutable('2099-12-31 18:00',wp_timezone())),'Alternative hours window');$options['mbs_access_hours_before']=24;
 expect_access(MBS_Access_Details::queue($b)===true,'Queue accepted');MBS_Access_Details::queue($b);expect_access(count(MBS_Email_Queue::$rows)===1,'Repeated checks share key');$row=current(MBS_Email_Queue::$rows);expect_access(strpos(serialize($row),'SYNTHETIC-CODE')===false,'Code not stored in queued body');
 $email=(object)['reference_id'=>1,'message_key'=>$row['key'],'message_type'=>'access_manual'];$wpdb->rows=[$b];
+expect_access(strlen($row['key'])<=100,'Automatic key fits existing database column');
+MBS_Access_Details::resend($b);$manual_row=end(MBS_Email_Queue::$rows);expect_access(strlen($manual_row['key'])<=100&&$manual_row['key']!==$row['key'],'Manual key fits existing column and differs from automatic');
 $msg=MBS_Access_Details::queued_message($email);expect_access(!is_wp_error($msg)&&strpos($msg['body'],'SYNTHETIC-CODE')!==false,'Current code rendered at dispatch');
 $options['mbs_access_code']='ROTATED-FAKE';$msg=MBS_Access_Details::queued_message($email);expect_access(strpos($msg['body'],'ROTATED-FAKE')!==false,'Rotated code used at retry');
 $b->email='changed@example.invalid';expect_access(MBS_Access_Details::queued_message($email)->get_error_code()==='access_stale','Changed recipient blocks stale queue');$b->email='test@example.invalid';
