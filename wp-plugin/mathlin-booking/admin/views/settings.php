@@ -420,7 +420,7 @@ rest:
         <!-- Access Details -->
         <div class="nms-card">
             <div class="nms-card-header"><h2>🔑 Access Details</h2></div>
-            <p>Send keysafe/access code to paid bookers before their event. Admin team also receives a booking reminder.</p>
+            <p>Send access details to approved bookings. When payments are enabled, full payment is required (including trusted pricing tiers). When payments are disabled, approval is sufficient. The admin team also receives a reminder after the mail service accepts the access email.</p>
             <table class="form-table">
                 <tr>
                     <th><label for="access_enabled">Access emails</label></th>
@@ -449,7 +449,7 @@ rest:
                     <th><label for="access_hours_before">Send</label></th>
                     <td>
                         <input type="number" id="access_hours_before" value="<?php echo esc_attr( get_option( 'mbs_access_hours_before', 24 ) ); ?>" min="1" max="168" style="width:80px"> hours before booking
-                        <p class="description">Only sent to paid or deposit-paid bookings.</p>
+                        <p class="description">24 means the previous calendar day from 08:00 in the site timezone. Other values use an hours-before window. Checked hourly through WP-Cron; late approvals/payments can catch up before the booking starts. Use server cron for reliable scheduling. Pending, cancelled and archived bookings never qualify.</p>
                     </td>
                 </tr>
                 <tr>

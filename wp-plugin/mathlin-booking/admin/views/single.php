@@ -299,7 +299,7 @@ $invoice_pdf_url = $invoice_document_id ? add_query_arg( array(
                     <a href="?page=mathlin-booking&action=invoice&ref=<?php echo esc_attr( $booking->ref ); ?>" class="button">🧾 View legacy invoice preview</a>
                     <small class="nms-muted">This historical booking has no immutable PDF snapshot.</small>
                 <?php endif; ?>
-                <?php if ( get_option( 'mbs_access_enabled', 0 ) && in_array( $booking->status, array( 'paid', 'deposit_paid' ) ) ) : ?>
+                <?php if ( get_option( 'mbs_access_enabled', 0 ) && MBS_Access_Details::is_eligible_for_access( $booking ) ) : ?>
                 <button class="button nms-btn-resend-access" data-ref="<?php echo esc_attr( $booking->ref ); ?>">🔑 Send Access Details</button>
                 <?php if ( $booking->access_sent ) : ?>
                     <small class="nms-muted" style="display:block;margin-top:4px;">Access details previously sent ✓</small>

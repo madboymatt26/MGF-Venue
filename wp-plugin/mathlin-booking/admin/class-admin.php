@@ -581,11 +581,8 @@ class MBS_Admin {
             wp_send_json_error( 'Access details not configured. Set up the access code in Settings.' );
         }
 
-        MBS_Access_Details::resend( $booking );
-
-        // Mark as sent
-        global $wpdb;
-        $wpdb->update( $wpdb->prefix . MBS_TABLE, array( 'access_sent' => 1 ), array( 'ref' => $ref ) );
+        $result = MBS_Access_Details::resend( $booking );
+        if ( is_wp_error( $result ) ) wp_send_json_error( $result->get_error_message(), 409 );
 
         wp_send_json_success( array( 'ref' => $ref ) );
     }
@@ -728,6 +725,12 @@ class MBS_Admin {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
         if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
         // Safe partial update for MCP clients; do not reset unrelated settings.
+        if ( isset( $_POST['access_settings'] ) ) {
+            $result = MBS_Access_Details::save_settings( wp_unslash( $_POST['access_settings'] ) );
+            if ( is_wp_error( $result ) ) wp_send_json_error( $result->get_error_message(), 400 );
+            wp_send_json_success( array( 'access_settings' => $result ) );
+        }
+
         if ( isset( $_POST['space_selection'] ) ) {
             $patch = $_POST['space_selection'];
             if ( ! is_array( $patch ) || array_keys( $patch ) !== array( 'enabled' ) || ! in_array( $patch['enabled'], array( true, false, 0, 1, '0', '1' ), true ) ) wp_send_json_error( 'space_selection must contain only an enabled boolean.', 400 );

@@ -300,6 +300,21 @@ class MBS_Email_Queue {
         $failed = 0;
 
         foreach ( $claimed as $email ) {
+            if ( in_array( $email->message_type, array( 'access_details', 'access_manual' ), true ) ) {
+                $message = MBS_Access_Details::queued_message( $email );
+                if ( is_wp_error( $message ) ) {
+                    if ( in_array( $message->get_error_code(), array( 'access_inactive','access_expired','access_stale' ), true ) ) {
+                        self::mark_failed( $email->id, $worker_id );
+                    } else {
+                        // Policy/timing pauses do not exhaust transport retries.
+                        $wpdb->query( $wpdb->prepare( "UPDATE " . self::table() . " SET status='pending',next_retry=%s,last_error=%s,claimed_at=NULL,lease_expires_at=NULL,worker_id=NULL WHERE id=%d AND worker_id=%s AND status='processing'", wp_date( 'Y-m-d H:i:s', time() + HOUR_IN_SECONDS ), $message->get_error_message(), $email->id, $worker_id ) );
+                    }
+                    continue;
+                }
+                $email->subject = $message['subject'];
+                $email->body = $message['body'];
+                $email->headers = wp_json_encode( $message['headers'] );
+            }
             // Pause disabled payment requests without consuming retries. Receipts
             // and gateway reconciliation remain available for captured payments.
             $feature = $email->message_type === 'invoice_reminder' ? 'reminders' : ( $email->message_type === 'invoice_issued' ? 'invoices' : '' );
@@ -475,6 +490,15 @@ class MBS_Email_Queue {
         $now = current_time( 'mysql' );
 
         switch ( $email->message_type ) {
+            case 'access_details':
+            case 'access_manual':
+                $booking = MBS_Bookings::get_by_id( (int) $email->reference_id );
+                if ( $booking ) {
+                    $wpdb->update( $wpdb->prefix . MBS_TABLE, array( 'access_sent' => 1 ), array( 'id' => (int) $booking->id ) );
+                    MBS_Audit_Log::log( $booking->ref, 'access_sent', 'Access email accepted by the configured mail transport; inbox delivery not independently confirmed.' );
+                    if ( $email->message_type === 'access_details' ) MBS_Access_Details::send_admin_notification( $booking );
+                }
+                break;
             case 'series_confirmation':
                 if ( $email->reference_type === 'series' ) {
                     $wpdb->update(
