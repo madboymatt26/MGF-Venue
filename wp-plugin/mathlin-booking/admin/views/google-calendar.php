@@ -25,6 +25,7 @@ $print_event = static function( $e ) use ( $date_label ) {
     if ( ! $e ) { echo '<span class="description">Not linked yet</span>'; return; }
     echo '<strong>' . esc_html( $e['summary'] ?? '(untitled)' ) . '</strong><br>' . esc_html( $date_label( $e ) );
     if ( ! empty( $e['location'] ) ) echo '<br><span class="description">' . esc_html( $e['location'] ) . '</span>';
+    if ( isset( $e['colorId'] ) ) echo '<br><span class="sync-badge">Colour: ' . esc_html( MBS_Google_Calendar::colour_palette()[$e['colorId']] ?? 'Calendar default' ) . '</span>';
 };
 $print_groups = static function( $events ) use ( $print_event ) {
     foreach ( MBS_Calendar_Sync_View::event_groups( $events ) as $group ) {
@@ -70,6 +71,14 @@ $print_groups = static function( $events ) use ( $print_event ) {
 <?php if ( $status['connected'] ) : ?><?php self::form_start( 'disconnect' ); ?><p><button class="button">Disconnect Google — keep all events</button></p></form><?php endif; ?>
 <?php foreach ( array( 'haughley-park-calendar-privacy' => 'Calendar connection privacy notice', 'haughley-park-calendar-connection' => 'About this connection' ) as $path => $label ) : $p = get_page_by_path( $path ); if ( $p && $p->post_status === 'publish' ) : ?><p><a href="<?php echo esc_url( get_permalink( $p ) ); ?>"><?php echo esc_html( $label ); ?></a></p><?php endif; endforeach; ?>
 </section><?php if ( $status['connected'] && ! $problem ) : ?><section><h2>Target calendar</h2><?php self::form_start( 'target' ); ?><p><label>Existing shared calendar<br><select name="calendar" required><option value="">Select a calendar</option><?php foreach ( $calendars as $c ) : ?><option value="<?php echo esc_attr( $c['id'] ); ?>" <?php selected( $s['calendar'] ?? '', $c['id'] ); ?>><?php echo esc_html( ( $c['summary'] ?? $c['id'] ) . ' (' . $c['accessRole'] . ')' ); ?></option><?php endforeach; ?></select></label></p><p><label><input type="checkbox" name="pending" value="1" <?php checked( ! empty( $s['pending'] ) ); ?>> Include pending bookings as Provisional</label></p><button class="button">Save target and pause for review</button></form></section><?php endif; ?>
+<section><h2>Colours for new events</h2>
+<p>Applies only when MGF adds a new event. Existing Google entries keep their current colours, including manually linked entries. Saving pauses sync and requires a fresh comparison.</p>
+<?php $colour_rules = self::colour_settings( $s ); self::form_start( 'colours' ); ?>
+<p><label><input type="checkbox" name="colours[enabled]" value="1" <?php checked( $colour_rules['enabled'] ); ?>> Use booking-type colours for new Google events</label></p>
+<?php foreach ( array( 'estate' => 'Estate bookings', 'scout' => 'Scout bookings' ) as $kind => $label ) : ?><p><label><?php echo esc_html( $label ); ?><br><select name="colours[<?php echo esc_attr( $kind ); ?>]"><?php foreach ( self::colour_palette() as $id => $name ) : ?><option value="<?php echo esc_attr( $id ); ?>" <?php selected( $colour_rules[$kind], (string) $id ); ?>><?php echo esc_html( $name ); ?></option><?php endforeach; ?></select></label></p><?php endforeach; ?>
+<p><label>Estate organisation labels — one exact label per line<br><textarea name="colours[estate_groups]" rows="3" class="large-text"><?php echo esc_html( implode( "\n", $colour_rules['estate_groups'] ) ); ?></textarea></label></p>
+<p class="description">In campsite mode, staff estate entries and these exact organisation labels use the estate colour (case-insensitive). Other campsite bookings use the Scout colour; internal Scout-use bookings also use it. Ordinary paid venue hires retain the calendar default. This changes no booking type, price or access permission.</p>
+<button class="button">Save new-event colours and pause</button></form></section>
 <p>Checks run every five minutes when WordPress cron runs. Use server cron for reliable timing. No contact details, notes, purpose, attendees or invitations are exported.</p></div>
 <?php elseif ( $tab === 'history' ) : ?>
 <table class="widefat striped"><thead><tr><th>UTC time</th><th>Action</th><th>Booking</th><th>Result</th></tr></thead><tbody><?php foreach ( $display as $row ) : ?><tr><?php foreach ( array( 'at', 'action', 'ref', 'result' ) as $field ) : ?><td><?php echo esc_html( $row[$field] ); ?></td><?php endforeach; ?></tr><?php endforeach; ?><?php if ( ! $items ) : ?><tr><td colspan="4">No sync actions recorded. Read-only comparisons do not change Google.</td></tr><?php endif; ?></tbody></table>

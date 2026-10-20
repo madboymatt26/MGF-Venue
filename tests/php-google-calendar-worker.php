@@ -33,7 +33,7 @@ function ops($events=[]){return MBS_Google_Calendar::plan(projection(),$events,'
 // Private execute revalidates the real site identity, so fixture plan uses that identity.
 function home_url($x='/'){return 'https://fixture.test/';}
 function untrailingslashit($s){return rtrim($s,'/');}
-function actual_ops($events=[]){global $wpdb;$site=hash('sha256','https://fixture.test');$p=MBS_Google_Calendar::project($wpdb->rows,false,$site,'target',wp_timezone(),'2026-10-18');return MBS_Google_Calendar::plan($p,$events,$site,'2026-10-18');}
+function actual_ops($events=[]){global $wpdb;$site=hash('sha256','https://fixture.test');$p=MBS_Google_Calendar::project($wpdb->rows,false,$site,'target',wp_timezone(),'2026-10-18',get_option('mbs_google_calendar'),get_option('mbs_campsite_mode',false));return MBS_Google_Calendar::plan($p,$events,$site,'2026-10-18');}
 ready();$plan=actual_ops();$r=invoke('execute',$plan);
 check($r['completed']===1,'one create');check(count($requests)===2&&$requests[0][1]['method']==='GET','target interval rechecked before insert');
 check($requests[1][0]==='https://www.googleapis.com/calendar/v3/calendars/target/events?sendUpdates=none','fixed Google origin and no invitations');
@@ -60,4 +60,16 @@ ready();$wpdb->last_error='failure';try{invoke('bookings');check(false,'database
 ready();invoke('lock');try{invoke('lock');check(false,'overlap');}catch(RuntimeException $e){check(true,'atomic lock blocks simultaneous worker');}invoke('unlock');invoke('lock');invoke('unlock');check(true,'lock can be released');
 ready();$queue[]=['code'=>200,'body'=>'{"kind":"calendar#events","items":[],"nextPageToken":"again"}'];$queue[]=['code'=>200,'body'=>'{"kind":"calendar#events","items":[],"nextPageToken":"again"}'];try{invoke('listing','calendars/target/events');check(false,'pagination loop');}catch(RuntimeException $e){check(count($requests)===2,'incomplete pagination fails closed');}
 ready();$s=MBS_Google_Calendar::status();check(!isset($s['access'])&&!isset($s['refresh'])&&!isset($s['secret']),'status never exposes secrets');
+foreach(['HP Business'=>'10','District Section'=>'9'] as $group=>$colour){
+    ready();$options['mbs_campsite_mode']=true;$options['mbs_google_calendar']['colours']=['enabled'=>true];$wpdb->rows[0]->organisation=$group;
+    $plan=actual_ops();invoke('execute',$plan);$body=json_decode($requests[1][1]['body'],true);
+    check($body['colorId']===$colour&&$requests[1][1]['method']==='POST','only new inserts carry '.$group.' colour');
+    $old=$plan[0]['want'];$old['etag']='saved';$requests=[];
+    $options['mbs_google_calendar']['colours']['scout']='7';
+    $current=actual_ops();$projection=['desired'=>[$plan[0]['key']=>$current[0]['want']],'source'=>[]];
+    $linked=MBS_Google_Calendar::plan($projection,[$old],hash('sha256','https://fixture.test'),'2026-10-18',$options['mbs_google_calendar']['links']);
+    invoke('execute',$linked);check(count($requests)===0,'colour setting changes never recolour existing '.$group.' event');
+}
+ready();$options['mbs_campsite_mode']=true;$options['mbs_google_calendar']['colours']=['enabled'=>true];$plan=actual_ops();$options['mbs_google_calendar']['colours']['scout']='7';
+try{invoke('execute',$plan);check(false,'stale colour');}catch(RuntimeException $e){check(count($requests)===0,'changed colour preference blocks stale insertion');}
 echo "Google Calendar worker: $assertions assertions passed.\n";
