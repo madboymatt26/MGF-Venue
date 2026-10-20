@@ -3,7 +3,7 @@
  * Plugin Name: MGF Venue
  * Plugin URI:  https://github.com/madboymatt26/MGF-Venue
  * Description: Venue booking and management system with Home Assistant integration.
- * Version:     3.32.1
+ * Version:     3.32.2
  * Author:      MGF Venue
  * License:     GPL-2.0+
  * Text Domain: mathlin-booking
@@ -11,7 +11,7 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'MBS_VERSION',    '3.32.1' );
+define( 'MBS_VERSION',    '3.32.2' );
 define( 'MBS_DB_VERSION', '3.26.0-schema-11' );
 define( 'MBS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MBS_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -43,6 +43,7 @@ require_once MBS_PLUGIN_DIR . 'includes/class-campsite-policy.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-payment-features.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-campsite-migration.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-campsite-consolidation.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-reviewed-park-consolidation.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-campsite-multiday.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-legacy-read-only.php';
 MBS_Legacy_Read_Only::init();
@@ -178,6 +179,7 @@ function mbs_init() {
     ( new MBS_Campsite_Migration() )->init();
     ( new MBS_Payment_Features() )->init();
     ( new MBS_Campsite_Consolidation() )->init();
+    ( new MBS_Reviewed_Park_Consolidation() )->init();
     ( new MBS_Campsite_Multiday() )->init();
     $api->init();
     $updater->init();
