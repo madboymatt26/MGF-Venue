@@ -725,6 +725,11 @@ class MBS_Admin {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
         if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
         // Safe partial update for MCP clients; do not reset unrelated settings.
+        if ( isset( $_POST['reviewed_access_reset'] ) ) {
+            $result = MBS_Imported_Access_Reset::handle( wp_unslash( $_POST['reviewed_access_reset'] ) );
+            if ( is_wp_error( $result ) ) wp_send_json_error( $result->get_error_message(), 409 );
+            wp_send_json_success( array( 'reviewed_access_reset' => $result ) );
+        }
         if ( isset( $_POST['access_settings'] ) ) {
             $result = MBS_Access_Details::save_settings( wp_unslash( $_POST['access_settings'] ) );
             if ( is_wp_error( $result ) ) wp_send_json_error( $result->get_error_message(), 400 );

@@ -4,7 +4,14 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.34.1
+**Current Version:** 3.34.2
+
+## 3.34.2 Estate access exclusion and reviewed import flag repair
+
+Estate/HP Business campsite bookings never receive automatic or manual Scout
+access emails. Adds administrator-only, explicit-reference preview/commit repair
+for migration-set access flags on future approved Scout bookings. Existing mail
+or queue evidence is protected; no reset runs automatically on upgrade.
 
 ## 3.34.1 Payment-aware access emails
 

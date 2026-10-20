@@ -86,8 +86,17 @@ class MBS_Access_Details {
      * Pricing tiers cannot bypass this rule.
      */
     public static function is_eligible_for_access( $booking ) {
+        if ( self::is_estate_booking( $booking ) ) return false;
         if ( ! in_array( $booking->status, array( 'confirmed', 'deposit_paid', 'paid' ), true ) ) return false;
         return ! MBS_Payment_Features::enabled( 'payments' ) || $booking->status === 'paid';
+    }
+
+    /** Estate entries never receive Scout access mail, regardless of payment. */
+    public static function is_estate_booking( $booking ) {
+        if ( ! MBS_Campsite_Policy::enabled() ) return false;
+        $group = strtolower( trim( html_entity_decode( strip_tags( (string) ( $booking->organisation ?? '' ) ), ENT_QUOTES, 'UTF-8' ) ) );
+        return in_array( $group, array( 'hp business', 'estate' ), true )
+            || strpos( (string) ( $booking->notes ?? '' ), "Estate reservation entered by staff.\n" ) === 0;
     }
 
     /** Local calendar day before at 08:00 for the normal 24-hour setting.
@@ -126,6 +135,7 @@ class MBS_Access_Details {
     public static function queued_message( $email ) {
         $booking = MBS_Bookings::get_by_id( (int) $email->reference_id );
         $settings = self::get_settings();
+        if ( $booking && self::is_estate_booking( $booking ) ) return new WP_Error( 'access_estate', 'Estate bookings do not receive Scout access emails.' );
         if ( ! $booking || ! in_array( $booking->status, array( 'confirmed','deposit_paid','paid' ), true ) ) return new WP_Error( 'access_inactive', 'Access source is no longer approved.' );
         $start = new DateTimeImmutable( $booking->booking_date . ' ' . ( ! empty( $booking->all_day ) ? '00:00:00' : $booking->start_time ), wp_timezone() );
         if ( $email->message_type === 'access_details' && new DateTimeImmutable( 'now', wp_timezone() ) >= $start ) return new WP_Error( 'access_expired', 'Booking has already started.' );
