@@ -4,7 +4,14 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.32.2
+**Current Version:** 3.33.0
+
+## 3.33.0 Opt-in multi-area campsite bookings
+
+One booking reference can reserve several sibling areas with identical dates/times.
+Enable in Settings → Campsite → Multiple area bookings. Whole Park / Whole Centre
+remain exclusive parent selections; normal paid-venue behavior remains unchanged.
+Existing bookings are not migrated automatically. See `docs/multi-space-bookings.md`.
 
 ## 3.32.2 Reviewed Whole Park consolidation
 

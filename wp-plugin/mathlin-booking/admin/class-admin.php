@@ -493,6 +493,15 @@ class MBS_Admin {
      * Restore an archived/cancelled booking to a given status WITHOUT sending emails.
      */
     public function ajax_restore_booking() {
+        if ( class_exists( 'MBS_Space_Selection' ) ) {
+            $result = MBS_Space_Selection::locked( array( $this, 'restore_booking_locked' ) );
+            if ( is_wp_error( $result ) ) wp_send_json_error( $result->get_error_message(), 409 );
+            return;
+        }
+        return $this->restore_booking_locked();
+    }
+
+    public function restore_booking_locked() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
         if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
 
@@ -516,6 +525,15 @@ class MBS_Admin {
         // Only allow restoring to safe statuses
         $allowed = array( 'confirmed', 'deposit_paid', 'paid' );
         if ( ! in_array( $status, $allowed ) ) $status = 'confirmed';
+        if ( class_exists( 'MBS_Space_Selection' ) && MBS_Space_Selection::protect_allocations() ) {
+            $valid_selection = MBS_Space_Selection::normalize( $booking->space, true );
+            if ( is_wp_error( $valid_selection ) ) wp_send_json_error( 'Restore cannot use removed or reconfigured areas. Review the current resources first.', 409 );
+            $last = $booking->booking_date_end ?: $booking->booking_date;
+            for ( $day = new DateTimeImmutable( $booking->booking_date ); $day->format( 'Y-m-d' ) <= $last; $day = $day->modify( '+1 day' ) ) {
+                $ymd = $day->format( 'Y-m-d' ); $interval = MBS_Campsite_Policy::interval( $booking, $ymd );
+                if ( MBS_Blocked_Dates::is_blocked( $ymd, $booking->space ) || MBS_Bookings::check_conflicts( $booking->space, $ymd, $interval[0], $interval[1], (bool) $booking->all_day, $ref ) ) wp_send_json_error( 'Cannot restore: occupied or blocked on ' . $ymd, 409 );
+            }
+        }
 
         // Direct DB update — bypasses update_status() to avoid triggering emails/webhooks.
         // Scout occurrences keep their parent snapshot in the same transaction.
@@ -710,6 +728,14 @@ class MBS_Admin {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
         if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
         // Safe partial update for MCP clients; do not reset unrelated settings.
+        if ( isset( $_POST['space_selection'] ) ) {
+            $patch = $_POST['space_selection'];
+            if ( ! is_array( $patch ) || array_keys( $patch ) !== array( 'enabled' ) || ! in_array( $patch['enabled'], array( true, false, 0, 1, '0', '1' ), true ) ) wp_send_json_error( 'space_selection must contain only an enabled boolean.', 400 );
+            if ( ! MBS_Campsite_Policy::enabled() && ! empty( $patch['enabled'] ) ) wp_send_json_error( 'Multiple areas require free campsite mode.', 409 );
+            update_option( 'mbs_multi_space_enabled', ! empty( $patch['enabled'] ) ? 1 : 0 );
+            wp_send_json_success( array( 'space_selection' => array( 'enabled' => MBS_Space_Selection::enabled() ) ) );
+            return;
+        }
         if ( isset( $_POST['payment_features'] ) ) {
             if ( ! is_array( $_POST['payment_features'] ) ) wp_send_json_error( 'Payment features must be an object.', 400 );
             $feature_result = MBS_Payment_Features::save( wp_unslash( $_POST['payment_features'] ) );
@@ -827,6 +853,10 @@ class MBS_Admin {
                 );
             }
             if ( ! empty( $spaces ) ) {
+                if ( class_exists( 'MBS_Space_Selection' ) ) {
+                    $valid = MBS_Space_Selection::validate_configuration( $spaces );
+                    if ( is_wp_error( $valid ) ) wp_send_json_error( $valid->get_error_message(), 409 );
+                }
                 MBS_Bookings::save_spaces( $spaces );
             }
         }
@@ -1655,6 +1685,15 @@ class MBS_Admin {
     }
 
     public function ajax_edit_booking() {
+        if ( class_exists( 'MBS_Space_Selection' ) ) {
+            $result = MBS_Space_Selection::locked( array( $this, 'edit_booking_locked' ) );
+            if ( is_wp_error( $result ) ) wp_send_json_error( $result->get_error_message(), 409 );
+            return;
+        }
+        return $this->edit_booking_locked();
+    }
+
+    public function edit_booking_locked() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
         if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
 
@@ -1663,6 +1702,11 @@ class MBS_Admin {
         if ( ! $booking ) wp_send_json_error( 'Booking not found.' );
 
         $old_amount = (float) $booking->amount;
+        if ( class_exists( 'MBS_Space_Selection' ) && ( $_POST['space'] ?? '' ) !== $booking->space ) {
+            $selection = MBS_Space_Selection::normalize( $_POST['space'] ?? '' );
+            if ( is_wp_error( $selection ) ) wp_send_json_error( $selection->get_error_message(), 400 );
+            $_POST['space'] = $selection;
+        }
 
         // Recalculate cost with multi-day support
         $scout_use = ! empty( $_POST['scout_use'] );
@@ -1760,6 +1804,7 @@ class MBS_Admin {
             $valid = MBS_Campsite_Policy::validate_amendment( $booking, $update, ! empty( $_POST['campsite_exception'] ) );
             if ( is_wp_error( $valid ) ) wp_send_json_error( $valid->get_error_message() );
         }
+        if ( class_exists( 'MBS_Space_Selection' ) && isset( $update['space'] ) ) MBS_Space_Selection::record_selection( $update['space'] );
         $wpdb->update( $table, $update, array( 'ref' => $ref ) );
 
         // Auto-update status if cost changed and there's now a balance due

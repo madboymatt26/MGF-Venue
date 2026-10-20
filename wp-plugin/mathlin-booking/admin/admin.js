@@ -354,6 +354,7 @@ jQuery(function ($) {
             ha_webhook_url:  $('#ha_webhook_url').val(),
             min_notice_days: $('#min_notice_days').val(),
             campsite_mode:   $('#campsite_mode').val(),
+            multi_space_enabled: $('#multi_space_enabled').is(':checked') ? 1 : 0,
             campsite_roles:  ($('#campsite_roles').val() || []).join(','),
             campsite_slots:  $('#campsite_slots').val(),
             min_duration_hours: $('#min_duration_hours').val(),

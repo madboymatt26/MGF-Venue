@@ -28,7 +28,7 @@
             const m = k.match(/^custom_fields\[([^\]]+)\]$/);
             if (m) d.custom_fields[m[1]] = v; else d[k] = v;
         }
-        for (const el of form.querySelectorAll('input[type=checkbox]')) if (!el.name.startsWith('custom_fields[')) d[el.name] = el.checked;
+        for (const el of form.querySelectorAll('input[type=checkbox]')) if (el.name && !el.name.startsWith('custom_fields[')) d[el.name] = el.checked;
         return d;
     }
     async function request(action, body) {

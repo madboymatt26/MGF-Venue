@@ -74,6 +74,13 @@ class MBS_Blocked_Dates {
         global $wpdb;
         $table = self::table();
 
+        if ( class_exists( 'MBS_Space_Selection' ) && MBS_Space_Selection::protect_allocations() ) {
+            $blocks = self::get_for_range( $date, $date );
+            if ( ! is_array( $blocks ) || ! empty( $wpdb->last_error ) ) return (object) array( 'space' => '', 'reason' => 'Blocked dates could not be verified.' );
+            foreach ( $blocks as $block ) if ( $block->space === '' || $space === '' || MBS_Space_Selection::overlaps( $space, $block->space ) ) return $block;
+            return false;
+        }
+
         // Check for blocks that cover this date and either all spaces or this specific space
         $results = $wpdb->get_results( $wpdb->prepare(
             "SELECT * FROM {$table} WHERE date_from <= %s AND date_to >= %s AND (space = '' OR space = %s)",

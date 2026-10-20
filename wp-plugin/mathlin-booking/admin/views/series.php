@@ -44,7 +44,8 @@ $pattern_label = static function( $item ) { $schedule = json_decode( (string) $i
         <details class="postbox" style="padding:16px;"><summary style="cursor:pointer;font-weight:600;">Change future campsite sessions</summary>
             <form class="mbs-campsite-series-edit" style="display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin-top:12px;">
                 <input type="hidden" name="series_id" value="<?php echo esc_attr( $series->series_ref ); ?>"><input type="hidden" name="expected_version" value="<?php echo (int) $series->version; ?>">
-                <label>Space <select name="space"><?php foreach ( MBS_Bookings::get_spaces() as $name => $info ) : ?><option <?php selected( $series->space, $name ); ?>><?php echo esc_html( $name ); ?></option><?php endforeach; ?></select></label>
+                <label>Space <select id="mbs-series-space" name="space"><?php if ( ! isset( MBS_Bookings::get_spaces()[$series->space] ) ) : ?><option selected><?php echo esc_html( $series->space ); ?></option><?php endif; ?><?php foreach ( MBS_Bookings::get_spaces() as $name => $info ) : ?><option <?php selected( $series->space, $name ); ?>><?php echo esc_html( $name ); ?></option><?php endforeach; ?></select></label>
+                <?php if ( class_exists( 'MBS_Space_Selection' ) ) MBS_Space_Selection::selector( 'mbs-series-space', $series->space ); ?>
                 <?php if ( ! $series->all_day ) : ?><label>Start <input type="time" name="start_time" value="<?php echo esc_attr( substr( $series->start_time, 0, 5 ) ); ?>"></label><label>End <input type="time" name="end_time" value="<?php echo esc_attr( substr( $series->end_time, 0, 5 ) ); ?>"></label><?php endif; ?>
                 <label>Purpose <input name="purpose" value="<?php echo esc_attr( $series->purpose ); ?>"></label>
                 <label><input type="checkbox" name="campsite_exception" value="1"> Earlier/short-notice access specifically agreed through the coordinator</label>

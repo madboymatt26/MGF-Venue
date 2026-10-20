@@ -31,7 +31,8 @@ class MBS_Campsite_Policy {
         if ( ! empty( $data['kitchen'] ) ) return new WP_Error( 'campsite_kitchen', 'Kitchen hire is not available in free campsite mode.' );
         if ( isset( $data['custom_amount'] ) && (float) $data['custom_amount'] !== 0.0 ) return new WP_Error( 'campsite_amount', 'Free campsite bookings cannot include a hire charge.' );
         if ( isset( $data['attendees'] ) ) {
-            $space = MBS_Bookings::get_spaces()[ $data['space'] ?? '' ] ?? array();
+            $space = class_exists( 'MBS_Space_Selection' ) ? MBS_Space_Selection::info( $data['space'] ?? '' ) : ( MBS_Bookings::get_spaces()[ $data['space'] ?? '' ] ?? array() );
+            if ( ! $space ) return new WP_Error( 'campsite_space', 'Choose a valid area selection.' );
             if ( (int) $data['attendees'] < 1 || ( ! empty( $space['capacity'] ) && (int) $data['attendees'] > (int) $space['capacity'] ) ) return new WP_Error( 'campsite_capacity', 'Enter a positive attendance within the selected area capacity.' );
         }
         return true;
@@ -119,8 +120,16 @@ class MBS_Campsite_Policy {
     public static function validate_amendment( $booking, $update, $exception = false ) {
         if ( ! self::enabled() ) return true;
         $proposed = array_merge( (array) $booking, $update );
+        if ( class_exists( 'MBS_Space_Selection' ) && $proposed['space'] !== $booking->space ) {
+            $selection = MBS_Space_Selection::normalize( $proposed['space'] ); if ( is_wp_error( $selection ) ) return $selection;
+            $proposed['space'] = $selection;
+        }
         $proposed['booking_span'] = self::span( $booking );
         $proposed['campsite_exception'] = $exception;
+        if ( class_exists( 'MBS_Space_Selection' ) && ( $proposed['space'] !== $booking->space || (string) ( $proposed['attendees'] ?? '' ) !== (string) ( $booking->attendees ?? '' ) ) ) {
+            $info = MBS_Space_Selection::info( $proposed['space'] );
+            if ( ! $info || (int) $proposed['attendees'] < 1 || ( ! empty( $info['capacity'] ) && (int) $proposed['attendees'] > $info['capacity'] ) ) return new WP_Error( 'campsite_capacity', 'Enter attendance within the selected area capacity.' );
+        }
         $changed = false;
         foreach ( array( 'space', 'booking_date', 'booking_date_end', 'start_time', 'end_time', 'all_day' ) as $key ) if ( (string) ( $proposed[$key] ?? '' ) !== (string) ( $booking->$key ?? '' ) ) $changed = true;
         if ( ! $changed ) return true;
@@ -136,6 +145,11 @@ class MBS_Campsite_Policy {
 
     /** Atomic future-session amendment; never mutates issued financial records. */
     public static function edit_series( $ref, $fields, $version, $notify = false, $exception = false ) {
+        if ( class_exists( 'MBS_Space_Selection' ) ) return MBS_Space_Selection::locked( static function() use ( $ref, $fields, $version, $notify, $exception ) { return self::edit_series_locked( $ref, $fields, $version, $notify, $exception ); } );
+        return self::edit_series_locked( $ref, $fields, $version, $notify, $exception );
+    }
+
+    private static function edit_series_locked( $ref, $fields, $version, $notify, $exception ) {
         global $wpdb;
         if ( ! self::enabled() || ( ! current_user_can( 'manage_options' ) && ! current_user_can( 'mbs_manage_bookings' ) ) ) return self::access_error();
         $table = $wpdb->prefix . MBS_SERIES_TABLE;
@@ -150,9 +164,13 @@ class MBS_Campsite_Policy {
                 if ( MBS_Bookings::has_financial_history( $booking->ref ) ) throw new RuntimeException( 'A session has financial history and cannot be edited in place.' );
                 $proposed = (array) $booking;
                 foreach ( array( 'space', 'start_time', 'end_time', 'purpose' ) as $field ) if ( isset( $fields[$field] ) && $fields[$field] !== '' ) $proposed[$field] = sanitize_text_field( $fields[$field] );
+                if ( class_exists( 'MBS_Space_Selection' ) && $proposed['space'] !== $booking->space ) {
+                    $selection = MBS_Space_Selection::normalize( $proposed['space'] ); if ( is_wp_error( $selection ) ) throw new RuntimeException( $selection->get_error_message() ); $proposed['space'] = $selection;
+                }
                 // Time inputs display minutes; do not discard legacy endpoint seconds on a text-only edit.
                 foreach ( array( 'start_time', 'end_time' ) as $field ) if ( substr( (string) $proposed[$field], 0, 5 ) === substr( (string) $booking->$field, 0, 5 ) ) $proposed[$field] = $booking->$field;
-                if ( ! isset( MBS_Bookings::get_spaces()[$proposed['space']] ) ) throw new RuntimeException( 'Unknown campsite area.' );
+                if ( class_exists( 'MBS_Space_Selection' ) ? ! MBS_Space_Selection::info( $proposed['space'] ) : ! isset( MBS_Bookings::get_spaces()[$proposed['space']] ) ) throw new RuntimeException( 'Unknown campsite area.' );
+                if ( class_exists( 'MBS_Space_Selection' ) && $proposed['space'] !== $booking->space && (int) $booking->attendees > (int) MBS_Space_Selection::info( $proposed['space'] )['capacity'] ) throw new RuntimeException( 'Existing attendance exceeds the selected area capacity.' );
                 $schedule_changed = $proposed['space'] !== $booking->space || substr( (string) $proposed['start_time'], 0, 5 ) !== substr( (string) $booking->start_time, 0, 5 ) || substr( (string) $proposed['end_time'], 0, 5 ) !== substr( (string) $booking->end_time, 0, 5 );
                 if ( $schedule_changed ) {
                     $proposed['booking_span'] = self::span( $booking ); $proposed['campsite_exception'] = $exception;
@@ -162,7 +180,10 @@ class MBS_Campsite_Policy {
                 }
                 $changes[$booking->ref] = array_intersect_key( $proposed, array_flip( array( 'space', 'start_time', 'end_time', 'purpose' ) ) );
             }
-            foreach ( $changes as $booking_ref => $update ) if ( $wpdb->update( $wpdb->prefix . MBS_TABLE, $update, array( 'ref' => $booking_ref ) ) === false ) throw new RuntimeException( 'Could not save every session.' );
+            foreach ( $changes as $booking_ref => $update ) {
+                if ( class_exists( 'MBS_Space_Selection' ) ) MBS_Space_Selection::record_selection( $update['space'] );
+                if ( $wpdb->update( $wpdb->prefix . MBS_TABLE, $update, array( 'ref' => $booking_ref ) ) === false ) throw new RuntimeException( 'Could not save every session.' );
+            }
             $snapshot = reset( $changes ); $snapshot['version'] = (int) $series->version + 1; $snapshot['updated_at'] = current_time( 'mysql' );
             if ( $wpdb->update( $table, $snapshot, array( 'series_ref' => $ref, 'version' => (int) $version ) ) !== 1 ) throw new RuntimeException( 'The series changed concurrently. Nothing was saved.' );
             if ( $wpdb->query( 'COMMIT' ) === false ) throw new RuntimeException( 'Could not commit the schedule change.' );
@@ -199,6 +220,7 @@ class MBS_Campsite_Policy {
         }
         if ( $enabled && ! empty( $data['kitchen_enabled'] ) ) return new WP_Error( 'campsite_kitchen_enabled', 'Disable the kitchen add-on before enabling free campsite mode.' );
         update_option( 'mbs_campsite_mode', $enabled ? 1 : 0 );
+        if ( array_key_exists( 'multi_space_enabled', $data ) ) update_option( 'mbs_multi_space_enabled', ! empty( $data['multi_space_enabled'] ) ? 1 : 0 );
         update_option( 'mbs_campsite_roles', $roles );
         if ( array_key_exists( 'campsite_slots', $data ) ) update_option( 'mbs_campsite_slots', $slots );
         return true;

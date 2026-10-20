@@ -105,6 +105,11 @@ class MBS_Modification {
     // ── Approve ────────────────────────────────────────────────────────────────
 
     public static function approve( $request_id ) {
+        if ( class_exists( 'MBS_Space_Selection' ) ) return MBS_Space_Selection::locked( static function() use ( $request_id ) { return self::approve_locked( $request_id ); } );
+        return self::approve_locked( $request_id );
+    }
+
+    private static function approve_locked( $request_id ) {
         $request = self::get_request( $request_id );
         if ( ! $request || $request->status !== 'pending' ) return false;
         if ( MBS_Series_Request::is_series_request( $request ) ) {
@@ -147,6 +152,14 @@ class MBS_Modification {
                 }
 
                 if ( ! empty( $update ) ) {
+                    if ( class_exists( 'MBS_Space_Selection' ) && isset( $update['space'] ) && $update['space'] !== $booking->space ) {
+                        $selection = MBS_Space_Selection::normalize( $update['space'] );
+                        if ( is_wp_error( $selection ) ) return $selection; $update['space'] = $selection;
+                    }
+                    if ( class_exists( 'MBS_Campsite_Policy' ) ) {
+                        $valid = MBS_Campsite_Policy::validate_amendment( $booking, $update );
+                        if ( is_wp_error( $valid ) ) return $valid;
+                    }
                     // QA-004: Check for conflicts before applying changes
                     $check_space = $update['space'] ?? $booking->space;
                     $check_date  = $update['booking_date'] ?? $booking->booking_date;
@@ -294,6 +307,7 @@ class MBS_Modification {
 	                        $lk_paid = (float) ( $locked_booking->amount_paid ?? 0 );
 	                        $update['status'] = ( class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ) ? $locked_booking->status : ( ( $lk_paid >= (float) $new_amount ) ? 'paid' : 'confirmed' );
 
+	                        if ( class_exists( 'MBS_Space_Selection' ) && isset( $update['space'] ) ) MBS_Space_Selection::record_selection( $update['space'] );
 	                        $booking_updated = $wpdb->update( $table, $update, array( 'ref' => $request->booking_ref ) );
 	                        if ( $booking_updated === false ) {
 	                            $wpdb->query( 'ROLLBACK' );
@@ -375,6 +389,7 @@ class MBS_Modification {
 
 	                    } else {
 	                        // Non-material or no existing document: simple update (no R2 needed)
+	                        if ( class_exists( 'MBS_Space_Selection' ) && isset( $update['space'] ) ) MBS_Space_Selection::record_selection( $update['space'] );
 	                        $booking_updated = $wpdb->update( $table, $update, array( 'ref' => $request->booking_ref ) );
 	                        if ( $booking_updated === false ) {
 	                            return new WP_Error( 'modification_update_failed', 'The booking change could not be saved.' );

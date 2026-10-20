@@ -501,7 +501,11 @@ class MBS_Rest_API {
         $notify      = rest_sanitize_boolean( $request->get_param( 'notify_hirer' ) );
         $spaces      = MBS_Bookings::get_spaces();
 
-        if ( ! isset( $spaces[ $space ] ) ) {
+        if ( class_exists( 'MBS_Space_Selection' ) ) {
+            $selected = MBS_Space_Selection::normalize( $request->get_param( 'spaces' ) ?? $space );
+            if ( is_wp_error( $selected ) ) return $selected; $space = $selected;
+        }
+        if ( class_exists( 'MBS_Space_Selection' ) ? ! MBS_Space_Selection::info( $space ) : ! isset( $spaces[ $space ] ) ) {
             return new WP_Error( 'invalid_space', 'Unknown venue space.', array( 'status' => 400 ) );
         }
         if ( ! $this->is_valid_date( $date_from ) || ! $this->is_valid_date( $date_to ) ) {
@@ -768,7 +772,11 @@ class MBS_Rest_API {
         $all_day     = rest_sanitize_boolean( $request->get_param( 'all_day' ) );
         $exclude_ref = strtoupper( sanitize_text_field( $request->get_param( 'exclude_ref' ) ?? '' ) );
 
-        if ( ! array_key_exists( $space, MBS_Bookings::get_spaces() ) ) {
+        if ( class_exists( 'MBS_Space_Selection' ) ) {
+            $selected = MBS_Space_Selection::normalize( $request->get_param( 'spaces' ) ?? $space, true );
+            if ( is_wp_error( $selected ) ) return $selected; $space = $selected;
+        }
+        if ( class_exists( 'MBS_Space_Selection' ) ? ! MBS_Space_Selection::info( $space ) : ! array_key_exists( $space, MBS_Bookings::get_spaces() ) ) {
             return new WP_Error( 'invalid_space', 'Unknown venue space.', array( 'status' => 400 ) );
         }
         if ( ! $this->is_valid_date( $date ) ) {
@@ -1051,6 +1059,7 @@ class MBS_Rest_API {
 
         return rest_ensure_response( array(
             'plugin_version' => MBS_VERSION,
+            'space_selection' => class_exists( 'MBS_Space_Selection' ) ? array( 'enabled' => MBS_Space_Selection::enabled(), 'scope' => 'free_campsite_sibling_areas', 'capacity_rule' => 'lowest_selected_capacity', 'parent_resources' => 'exclusive_unchanged', 'api_input' => 'space label or spaces array' ) : array(),
             'payment_features' => class_exists( 'MBS_Payment_Features' ) ? MBS_Payment_Features::state() : array(),
             'role'           => $is_admin ? 'administrator' : 'booking_manager',
             'actions'        => $actions,
@@ -1346,7 +1355,7 @@ class MBS_Rest_API {
 
     public function get_admin_configuration() {
         $keys = array(
-            'mbs_campsite_mode', 'mbs_campsite_roles',
+            'mbs_campsite_mode', 'mbs_campsite_roles', 'mbs_multi_space_enabled',
             'mbs_campsite_booking_open', 'mbs_campsite_slots',
             'mbs_min_notice_days', 'mbs_min_duration_hours', 'mbs_kitchen_price',
             'mbs_kitchen_enabled', 'mbs_reminder_hours', 'mbs_terms_page_id',
@@ -1463,6 +1472,7 @@ class MBS_Rest_API {
         );
 
         $safe = array_intersect_key( $source, array_flip( $fields ) );
+        if ( class_exists( 'MBS_Space_Selection' ) && isset( $safe['space'] ) ) $safe['selected_spaces'] = MBS_Space_Selection::members( $safe['space'] );
         foreach ( array( 'kitchen', 'all_day', 'scout_use', 'is_public', 'ha_notified', 'reminder_sent', 'feedback_sent', 'access_sent' ) as $field ) {
             if ( array_key_exists( $field, $safe ) ) $safe[ $field ] = (bool) $safe[ $field ];
         }
@@ -1499,6 +1509,7 @@ class MBS_Rest_API {
             'created_at', 'updated_at',
         );
         $safe = array_intersect_key( $source, array_flip( $fields ) );
+        if ( class_exists( 'MBS_Space_Selection' ) ) $safe['selected_spaces'] = MBS_Space_Selection::members( $series->space );
         foreach ( array( 'kitchen', 'all_day', 'scout_use', 'automatic_reminders', 'metadata_incomplete' ) as $field ) if ( isset( $safe[ $field ] ) ) $safe[ $field ] = (bool) $safe[ $field ];
         foreach ( array( 'version', 'attendees', 'requested_count', 'accepted_count', 'conflict_count', 'blocked_count', 'error_count', 'invoice_lead_days', 'payment_terms_days' ) as $field ) if ( isset( $safe[ $field ] ) ) $safe[ $field ] = (int) $safe[ $field ];
         $safe['schedule'] = json_decode( (string) ( $series->schedule_json ?? '' ), true ) ?: array();

@@ -58,6 +58,11 @@ class MBS_Campsite_Consolidation {
     }
 
     public function apply( $request ) {
+        if ( class_exists( 'MBS_Space_Selection' ) ) return MBS_Space_Selection::locked( function() use ( $request ) { return $this->apply_locked( $request ); } );
+        return $this->apply_locked( $request );
+    }
+
+    public function apply_locked( $request ) {
         global $wpdb;
         $done = get_option( 'mbs_campsite_whole_park_batch', array() );
         if ( $done ) return rest_ensure_response( array( 'no_op' => true, 'result' => $done['result'] ) );

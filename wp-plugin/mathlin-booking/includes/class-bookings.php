@@ -416,6 +416,17 @@ class MBS_Bookings {
      *                                     set an explicit non-negative amount.
      */
     public static function create( $data, $trusted_admin_context = false, $manage_transaction = true ) {
+        if ( class_exists( 'MBS_Space_Selection' ) ) return MBS_Space_Selection::locked( static function() use ( $data, $trusted_admin_context, $manage_transaction ) { return self::create_selected( $data, $trusted_admin_context, $manage_transaction ); } );
+        return self::create_selected( $data, $trusted_admin_context, $manage_transaction );
+    }
+
+    private static function create_selected( $data, $trusted_admin_context, $manage_transaction ) {
+        if ( class_exists( 'MBS_Space_Selection' ) ) {
+            $space = MBS_Space_Selection::normalize( $data['spaces'] ?? ( $data['space'] ?? '' ) );
+            if ( is_wp_error( $space ) ) return $space;
+            $data['space'] = $space;
+            if ( count( MBS_Space_Selection::members( $space ) ) > 1 ) update_option( 'mbs_multi_space_ever_used', 1, false );
+        }
         if ( class_exists( 'MBS_Campsite_Policy' ) ) {
             $policy = MBS_Campsite_Policy::validate( $data, $trusted_admin_context );
             if ( is_wp_error( $policy ) ) return $policy;
@@ -717,6 +728,14 @@ class MBS_Bookings {
     }
 
     public static function update_status( $ref, $status, $notify_hirer = true ) {
+        if ( class_exists( 'MBS_Space_Selection' ) ) {
+            $result = MBS_Space_Selection::locked( static function() use ( $ref, $status, $notify_hirer ) { return self::update_status_locked( $ref, $status, $notify_hirer ); } );
+            return is_wp_error( $result ) ? false : $result;
+        }
+        return self::update_status_locked( $ref, $status, $notify_hirer );
+    }
+
+    private static function update_status_locked( $ref, $status, $notify_hirer ) {
         global $wpdb;
         $table   = $wpdb->prefix . MBS_TABLE;
         $allowed = array( 'pending', 'confirmed', 'cancelled', 'archived', 'paid', 'deposit_paid' );
@@ -728,6 +747,14 @@ class MBS_Bookings {
 
         // Idempotent: already at the requested status — no-op success.
         if ( $current->status === $status ) return true;
+        if ( class_exists( 'MBS_Space_Selection' ) && MBS_Space_Selection::protect_allocations() && in_array( $current->status, array( 'cancelled', 'archived' ), true ) && ! in_array( $status, array( 'cancelled', 'archived' ), true ) ) {
+            if ( is_wp_error( MBS_Space_Selection::normalize( $current->space, true ) ) ) return false;
+            $last = $current->booking_date_end ?: $current->booking_date;
+            for ( $day = new DateTimeImmutable( $current->booking_date ); $day->format( 'Y-m-d' ) <= $last; $day = $day->modify( '+1 day' ) ) {
+                $ymd = $day->format( 'Y-m-d' ); $interval = MBS_Campsite_Policy::interval( $current, $ymd );
+                if ( MBS_Blocked_Dates::is_blocked( $ymd, $current->space ) || self::check_conflicts( $current->space, $ymd, $interval[0], $interval[1], (bool) $current->all_day, $ref ) ) return false;
+            }
+        }
 
         // Status change with financial history is disallowed (immutable once invoiced)
         if ( self::has_financial_history( $ref ) ) return false;
@@ -910,6 +937,9 @@ class MBS_Bookings {
      * @return array  Array of conflicting booking objects (empty = no conflicts)
      */
     public static function check_conflicts( $space, $date, $start_time = null, $end_time = null, $all_day = false, $exclude_ref = '' ) {
+        if ( class_exists( 'MBS_Space_Selection' ) && MBS_Space_Selection::protect_allocations() ) {
+            return self::check_conflicts_for_space( $space, $date, $start_time, $end_time, $all_day, $exclude_ref, true );
+        }
         // Check the requested space AND any related spaces (parent/child bundling)
         $spaces_to_check = array_merge( array( $space ), self::get_related_spaces( $space ) );
         $all_conflicts = array();
@@ -925,7 +955,7 @@ class MBS_Bookings {
     /**
      * Check conflicts for a single space (internal helper).
      */
-    private static function check_conflicts_for_space( $space, $date, $start_time = null, $end_time = null, $all_day = false, $exclude_ref = '' ) {
+    private static function check_conflicts_for_space( $space, $date, $start_time = null, $end_time = null, $all_day = false, $exclude_ref = '', $area_sets = false ) {
         global $wpdb;
         $table = $wpdb->prefix . MBS_TABLE;
 
@@ -936,6 +966,7 @@ class MBS_Bookings {
                       OR (booking_date_end IS NOT NULL AND booking_date <= %s AND booking_date_end >= %s)
                   )";
         $values = array( $space, $date, $date, $date );
+        if ( $area_sets ) { $where = substr( $where, strlen( 'space = %s AND ' ) ); array_shift( $values ); }
 
         if ( $exclude_ref ) {
             $where .= " AND ref != %s";
@@ -947,6 +978,8 @@ class MBS_Bookings {
             $values
         ) );
 
+        if ( $area_sets && ( ! is_array( $existing ) || ! empty( $wpdb->last_error ) ) ) return array( (object) array( 'space' => $space, 'booking_date' => $date, 'all_day' => 1, 'name' => 'Availability could not be verified', 'ref' => '' ) );
+        if ( $area_sets ) $existing = array_values( array_filter( (array) $existing, static function( $booking ) use ( $space ) { return MBS_Space_Selection::overlaps( $space, $booking->space ); } ) );
         if ( empty( $existing ) ) return array();
 
         // If the new booking is all-day, it conflicts with everything on that date
@@ -1038,6 +1071,15 @@ class MBS_Bookings {
      * @return array  Array of created booking refs, or WP_Error
      */
     public static function create_recurring( $data, $repeat_until, $trusted_admin_context = false ) {
+        if ( class_exists( 'MBS_Space_Selection' ) ) return MBS_Space_Selection::locked( static function() use ( $data, $repeat_until, $trusted_admin_context ) { return self::create_recurring_locked( $data, $repeat_until, $trusted_admin_context ); } );
+        return self::create_recurring_locked( $data, $repeat_until, $trusted_admin_context );
+    }
+
+    private static function create_recurring_locked( $data, $repeat_until, $trusted_admin_context ) {
+        if ( class_exists( 'MBS_Space_Selection' ) ) {
+            $selection = MBS_Space_Selection::normalize( $data['spaces'] ?? ( $data['space'] ?? '' ) );
+            if ( is_wp_error( $selection ) ) return $selection; $data['space'] = $selection;
+        }
         global $wpdb;
         $interval_weeks = absint( $data['recurrence_interval'] ?? 1 );
         $dates = MBS_Recurrence::dates( $data, $repeat_until );
@@ -1434,6 +1476,11 @@ class MBS_Bookings {
      * @return array|WP_Error  ['created' => int, 'skipped' => array of dates]
      */
     public static function extend_series( $series_id, $new_end ) {
+        if ( class_exists( 'MBS_Space_Selection' ) ) return MBS_Space_Selection::locked( static function() use ( $series_id, $new_end ) { return self::extend_series_locked( $series_id, $new_end ); } );
+        return self::extend_series_locked( $series_id, $new_end );
+    }
+
+    private static function extend_series_locked( $series_id, $new_end ) {
         global $wpdb;
         if ( ! self::is_legacy_scout_series( $series_id ) ) return new WP_Error( 'canonical_series_required', 'This action is limited to legacy Scout series; use the versioned series extension service.' );
         $table = $wpdb->prefix . MBS_TABLE;
