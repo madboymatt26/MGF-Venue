@@ -26,12 +26,12 @@ class MBS_Imported_Access_Reset {
     }
 
     /** Pure reviewed selection; genuine prior delivery/queue evidence is protected. */
-    public static function plan( $rows, $protected, $today, $resolver ) {
+    public static function plan( $rows, $protected, $today, $resolver, $clock = '23:59:59' ) {
         $eligible = array(); $skipped = array();
         foreach ( $rows as $booking ) {
             $reason = '';
             $lineage = self::lineage( $booking, $resolver );
-            if ( $booking->booking_date <= $today ) $reason = 'not_future';
+            if ( $booking->booking_date < $today || ( $booking->booking_date === $today && ( ! empty( $booking->all_day ) || ( $booking->start_time ?? '' ) <= $clock ) ) ) $reason = 'not_future';
             elseif ( ! in_array( $booking->status, array( 'confirmed','deposit_paid','paid' ), true ) ) $reason = 'not_approved';
             elseif ( MBS_Access_Details::is_estate_booking( $booking ) ) $reason = 'estate_booking';
             elseif ( ! $lineage ) $reason = 'not_verified_import';
@@ -72,7 +72,7 @@ class MBS_Imported_Access_Reset {
                     $protected[$ref] = (int) $audit > 0 || (int) $queue > 0;
                 }
                 ksort( $protected, SORT_STRING );
-                $plan = self::plan( $rows, $protected, wp_date( 'Y-m-d' ), $resolver );
+                $plan = self::plan( $rows, $protected, wp_date( 'Y-m-d' ), $resolver, wp_date( 'H:i:s' ) );
                 if ( $operation === 'commit' ) {
                     if ( ! hash_equals( $plan['fingerprint'], $input['fingerprint'] ) ) throw new RuntimeException( 'Source or delivery evidence changed; preview again.' );
                     foreach ( $plan['refs'] as $ref ) {
