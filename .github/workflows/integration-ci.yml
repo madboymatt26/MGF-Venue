@@ -138,6 +138,8 @@ jobs:
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/admin-booking-entry.php --allow-root
       - name: Verify reviewed park consolidation and rollback
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/reviewed-park-consolidation.php --allow-root
+        - name: Verify multi-area bookings and unchanged whole-venue dependencies
+          run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/multi-space-bookings.php --allow-root
       - name: Run invoice lifecycle matrix
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/invoice-lifecycle-matrix.php --allow-root
       - name: Collect service diagnostics

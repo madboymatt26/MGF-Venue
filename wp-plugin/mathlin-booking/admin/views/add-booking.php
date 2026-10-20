@@ -33,6 +33,7 @@ $camp = MBS_Campsite_Policy::enabled(); $paid = ! MBS_Payment_Features::free_hir
             </section>
             <section class="nms-card"><h2>Dates and space</h2>
                 <label for="entry-space">Space *</label><select id="entry-space" name="space" required><option value="">Select a space</option><?php foreach ( MBS_Bookings::get_spaces() as $name => $info ) : ?><option value="<?php echo esc_attr( $name ); ?>"><?php echo esc_html( $name ); ?> — up to <?php echo (int) $info['capacity']; ?></option><?php endforeach; ?></select>
+                <?php if ( class_exists( 'MBS_Space_Selection' ) ) MBS_Space_Selection::selector( 'entry-space' ); ?>
                 <label for="entry-attendees">Expected attendance *</label><input id="entry-attendees" name="attendees" type="number" min="1" required>
                 <label for="entry-date">Start / arrival date *</label><input id="entry-date" name="booking_date" type="date" min="<?php echo esc_attr( wp_date( 'Y-m-d' ) ); ?>" required>
                 <label for="entry-end-date">End / departure date</label><input id="entry-end-date" name="booking_date_end" type="date"><p class="mbs-entry-help">Inclusive last occupied date. Leave blank for a single day. Recurring sessions must be single-day bookings.</p>

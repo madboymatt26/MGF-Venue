@@ -27,6 +27,10 @@ class MBS_Admin_Booking_Entry {
         if ( ! in_array( $type, array( 'hire', 'scout', 'estate' ), true ) || ( $type === 'estate' && ! $campsite ) || ( $type === 'scout' && ! get_option( 'mbs_scout_nights_enabled', 1 ) ) ) return self::fail( 'This booking type is not enabled here.' );
         $d = array();
         foreach ( array( 'name', 'organisation', 'phone', 'space', 'booking_date', 'booking_date_end', 'start_time', 'end_time', 'purpose', 'repeat_until', 'pricing_tier', 'booking_span', 'recurrence_pattern' ) as $key ) $d[$key] = sanitize_text_field( $input[$key] ?? '' );
+        if ( class_exists( 'MBS_Space_Selection' ) ) {
+            $selection = MBS_Space_Selection::normalize( $input['spaces'] ?? $d['space'] );
+            if ( is_wp_error( $selection ) ) return $selection; $d['space'] = $selection;
+        }
         foreach ( array( 'all_day', 'kitchen', 'notify_hirer', 'campsite_exception' ) as $key ) $d[$key] = rest_sanitize_boolean( $input[$key] ?? false );
         $d['email'] = sanitize_email( $input['email'] ?? '' );
         $d['address'] = sanitize_textarea_field( $input['address'] ?? '' );
@@ -43,8 +47,9 @@ class MBS_Admin_Booking_Entry {
         $days = ( new DateTimeImmutable( $d['booking_date'] ) )->diff( new DateTimeImmutable( $d['booking_date_end'] ) )->days + 1;
         if ( $days > 367 ) return self::fail( 'A booking may cover no more than one year.' );
         $spaces = MBS_Bookings::get_spaces();
-        if ( ! isset( $spaces[$d['space']] ) ) return self::fail( 'Select a configured space.' );
-        if ( $d['attendees'] < 1 || ( ! empty( $spaces[$d['space']]['capacity'] ) && $d['attendees'] > (int) $spaces[$d['space']]['capacity'] ) ) return self::fail( 'Enter attendance within the space capacity.' );
+        $info = class_exists( 'MBS_Space_Selection' ) ? MBS_Space_Selection::info( $d['space'] ) : ( $spaces[$d['space']] ?? null );
+        if ( ! $info ) return self::fail( 'Select a configured space.' );
+        if ( $d['attendees'] < 1 || ( ! empty( $info['capacity'] ) && $d['attendees'] > (int) $info['capacity'] ) ) return self::fail( 'Enter attendance within the space capacity.' );
         if ( ! isset( MBS_Bookings::get_pricing_tiers()[$d['pricing_tier']] ) ) return self::fail( 'Select a configured pricing tier.' );
         if ( $d['kitchen'] && ! get_option( 'mbs_kitchen_enabled', 1 ) ) return self::fail( 'Kitchen hire is disabled.' );
         if ( ! $d['all_day'] ) {

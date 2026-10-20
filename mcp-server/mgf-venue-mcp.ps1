@@ -244,7 +244,8 @@ $script:Tools = @(
                 email = @{ type = 'string'; description = 'Contact email. Defaults to the current WordPress user/admin email.' }
                 phone = @{ type = 'string' }
                 address = @{ type = 'string' }
-                space = @{ type = 'string' }
+                space = @{ type = 'string'; description = 'Configured space, or a canonical area label joined with " + " when free campsite multi-area booking is enabled. Parent whole-venue resources must be selected alone.' }
+                spaces = @{ type = 'array'; minItems = 1; maxItems = 20; items = @{ type = 'string' }; description = 'Optional explicit sibling-area set; overrides space. Requires the site-local multi-area setting and free campsite mode. Never combine parent and children.' }
                 booking_date = @{ type = 'string'; description = 'Start date in YYYY-MM-DD format.' }
                 booking_date_end = @{ type = 'string'; description = 'Optional inclusive end date in YYYY-MM-DD format.' }
                 repeat_until = @{ type = 'string'; description = 'Optional weekly recurrence end date in YYYY-MM-DD format, up to one calendar year inclusive and 53 dates. Cannot be combined with a multi-day booking_date_end.' }
@@ -283,7 +284,7 @@ $script:Tools = @(
     @{
         name = 'check_availability'
         title = 'Check venue availability'
-        description = 'Check blocked dates and booking conflicts for a proposed venue slot.'
+        description = 'Check blocked dates and booking conflicts for a proposed venue slot. For multiple free campsite areas, space is the canonical label joined with " + "; this checks every selected area and parent dependency.'
         inputSchema = @{
             type = 'object'
             properties = @{

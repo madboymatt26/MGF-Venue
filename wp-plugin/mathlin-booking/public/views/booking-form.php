@@ -105,6 +105,7 @@ $free_campsite = class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::e
                 <div class="nms-form-row">
                     <div class="nms-form-group">
                         <label for="nms-space">Space Required <span class="nms-req">*</span></label>
+                        <?php if ( class_exists( 'MBS_Space_Selection' ) ) MBS_Space_Selection::selector( 'nms-space' ); ?>
                         <select id="nms-space" name="space" required>
                             <option value="">— Select a space —</option>
                             <?php

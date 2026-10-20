@@ -493,6 +493,11 @@ class MBS_Series {
 
     /** Safely extend a first-class weekly or fortnightly series within its original one-year window. */
     public static function extend( $series_ref, $new_repeat_until, $expected_version, $notify_hirer = false ) {
+        if ( class_exists( 'MBS_Space_Selection' ) ) return MBS_Space_Selection::locked( static function() use ( $series_ref, $new_repeat_until, $expected_version, $notify_hirer ) { return self::extend_locked( $series_ref, $new_repeat_until, $expected_version, $notify_hirer ); } );
+        return self::extend_locked( $series_ref, $new_repeat_until, $expected_version, $notify_hirer );
+    }
+
+    private static function extend_locked( $series_ref, $new_repeat_until, $expected_version, $notify_hirer ) {
         global $wpdb;
         $series_table = $wpdb->prefix . MBS_SERIES_TABLE;
         $booking_table = $wpdb->prefix . MBS_TABLE;

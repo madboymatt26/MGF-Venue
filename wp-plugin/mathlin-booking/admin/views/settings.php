@@ -47,6 +47,7 @@
                     </select>
                     <p class="description">No hire charges or invoices for new campsite bookings. Phone is optional; no billing address is collected. Disable the kitchen add-on first. Additional charges require the payment switches above to be enabled explicitly.</p>
                 </td></tr>
+                <tr><th><label for="multi_space_enabled">Multiple area bookings</label></th><td><label><input type="checkbox" id="multi_space_enabled" value="1" <?php checked( get_option( 'mbs_multi_space_enabled', false ) ); ?>> Allow several individual areas in one free campsite booking</label><p class="description">Off by default; available only in free campsite mode. Whole Park / Whole Centre remain separate, exclusive parent choices. Combined attendance uses the lowest selected area capacity, not the sum. Turning this off does not release existing reservations.</p></td></tr>
                 <tr><th><label for="campsite_roles">Allowed booking roles</label></th><td>
                     <select id="campsite_roles" multiple size="6">
                         <?php foreach ( wp_roles()->roles as $role_key => $role_info ) : ?>

@@ -1,0 +1,63 @@
+<?php
+/** Disposable WordPress database only; never a production migration. */
+if (!defined('WP_CLI') || !WP_CLI || !preg_match('/localhost|wordpress|127\.0\.0\.1/', home_url())) throw new RuntimeException('Disposable integration host required.');
+function ms_ok($v,$m){if(!$v)throw new RuntimeException($m);}
+function ms_created($data){$r=MBS_Bookings::create($data,true);ms_ok(!is_wp_error($r),is_wp_error($r)?$r->get_error_message():'create');return MBS_Bookings::get($r['ref']);}
+$original=[];
+foreach(['mbs_spaces','mbs_campsite_mode','mbs_multi_space_enabled','mbs_multi_space_ever_used','mbs_payments_enabled','mbs_kitchen_enabled','mbs_min_duration_hours','mbs_ha_webhook_url','mbs_google_calendar']as$key)$original[$key]=get_option($key,null);
+$admin=get_user_by('login','admin');wp_set_current_user($admin->ID);
+$mail=0;$http=0;$mail_guard=function($pre)use(&$mail){$mail++;return true;};$http_guard=function($pre)use(&$http){$http++;return $pre;};add_filter('pre_wp_mail',$mail_guard);add_filter('pre_http_request',$http_guard);
+try{
+ update_option('mbs_multi_space_ever_used',0);update_option('mbs_multi_space_enabled',0);update_option('mbs_campsite_mode',0);update_option('mbs_payments_enabled',1);update_option('mbs_min_duration_hours',0);update_option('mbs_ha_webhook_url','');update_option('mbs_google_calendar',[]);
+ $paid=['MS Whole Centre'=>['capacity'=>200,'rate_hourly'=>50,'rate_daily'=>300],'MS Hall'=>['parent'=>'MS Whole Centre','capacity'=>100,'rate_hourly'=>25],'MS Meeting'=>['parent'=>'MS Whole Centre','capacity'=>30,'rate_hourly'=>12]];
+ update_option('mbs_spaces',$paid);
+ $date=(new DateTimeImmutable(wp_date('Y-m-d')))->modify('+270 days')->format('Y-m-d');
+ $base=['name'=>'Fictional camp leader','email'=>'multi-area@example.invalid','organisation'=>'Fictional Camp','phone'=>'','space'=>'MS Whole Centre','booking_date'=>$date,'booking_date_end'=>$date,'all_day'=>false,'start_time'=>'18:00','end_time'=>'20:00','attendees'=>10,'purpose'=>'Disposable multi-area test','notes'=>'','campsite_exception'=>true];
+ ms_ok(!MBS_Space_Selection::enabled(),'Paid site defaults off');
+ $whole=ms_created($base);ms_ok((float)$whole->amount===100.0&&$whole->space==='MS Whole Centre','Needham-style whole centre price and identity unchanged');
+ ms_ok(count(MBS_Bookings::check_conflicts('MS Hall',$date,'18:00','20:00'))===1,'Whole Centre blocks child');
+ ms_ok(is_wp_error(MBS_Bookings::create(array_merge($base,['space'=>'MS Hall','spaces'=>['MS Hall','MS Meeting']]),true)),'Paid multi-area rejected');
+ MBS_Bookings::update_status($whole->ref,'archived',false);
+ $hall=ms_created(array_merge($base,['space'=>'MS Hall']));ms_ok((float)$hall->amount===50.0,'Paid room price unchanged');ms_ok(!MBS_Bookings::check_conflicts('MS Meeting',$date,'18:00','20:00'),'Paid siblings remain independent');
+ $spaces=['MS Whole Park'=>['capacity'=>1000,'rate_hourly'=>0]];
+ $areas=['MS Bomb Hole','MS Cabin','MS Paddock','MS Plantation','MS Survival Area','MS Top Campfire Circle'];foreach($areas as$area)$spaces[$area]=['capacity'=>100,'parent'=>'MS Whole Park','rate_hourly'=>0,'rate_daily'=>0];
+ update_option('mbs_spaces',$spaces);update_option('mbs_campsite_mode',1);update_option('mbs_payments_enabled',0);update_option('mbs_kitchen_enabled',0);update_option('mbs_multi_space_enabled',1);
+ $date=(new DateTimeImmutable($date))->modify('+10 days')->format('Y-m-d');$end=(new DateTimeImmutable($date))->modify('+3 days')->format('Y-m-d');
+ $selected=array_values(array_diff($areas,['MS Paddock']));$label=MBS_Space_Selection::normalize($selected);ms_ok(strlen($label)>60,'Exercise wider space columns');
+ $camp=array_merge($base,['space'=>$label,'booking_date'=>$date,'booking_date_end'=>$end,'all_day'=>true,'booking_span'=>'continuous']);
+ $group=ms_created($camp);ms_ok($group->space===$label&&(float)$group->amount===0.0&&$group->booking_date_end===$end,'One free booking retains full allocation and span');
+ $api=new MBS_REST_API();ms_ok($api->format_admin_booking($group)['selected_spaces']===MBS_Space_Selection::members($label),'MCP read exposes explicit areas');
+ foreach($selected as$area)ms_ok(count(MBS_Bookings::check_conflicts($area,$end,null,null,true))===1,'Selected area occupied through last date');
+ ms_ok(!MBS_Bookings::check_conflicts('MS Paddock',$date,null,null,true),'Unselected Paddock remains available');
+ ms_ok(count(MBS_Bookings::check_conflicts('MS Whole Park',$date,null,null,true))===1,'Whole Park sees exactly one reservation');
+ ms_ok(is_wp_error(MBS_Bookings::create(array_merge($camp,['space'=>'MS Whole Park']),true)),'Cannot place whole park over set');
+ ms_ok(is_wp_error(MBS_Bookings::create(array_merge($camp,['space'=>'MS Cabin']),true)),'Cannot place individual member over set');
+ $paddock=ms_created(array_merge($camp,['space'=>'MS Paddock','booking_date'=>(new DateTimeImmutable($date))->modify('-3 days')->format('Y-m-d')]));
+ ms_ok(MBS_Bookings::update_status($group->ref,'cancelled',false),'Cancel combined booking');
+ ms_ok(!MBS_Bookings::check_conflicts('MS Cabin',$date,null,null,true),'Cancellation releases all selected areas');ms_ok(MBS_Bookings::get($paddock->ref)->status==='pending','Cancellation leaves separate paddock booking');
+ $member=ms_created(array_merge($camp,['space'=>'MS Cabin']));ms_ok(MBS_Bookings::update_status($group->ref,'confirmed',false)===false,'Restore cannot double book a member');
+ MBS_Bookings::update_status($member->ref,'archived',false);ms_ok(MBS_Bookings::update_status($group->ref,'confirmed',false),'Safe restore retains full set');
+ $bad=$camp;$bad['space']='MS Whole Park + MS Cabin';ms_ok(is_wp_error(MBS_Bookings::create($bad,true)),'Parent mixed with child rejected');
+ $bad=$camp;$bad['attendees']=101;ms_ok(is_wp_error(MBS_Bookings::create($bad,true)),'No invented aggregate capacity');
+ $new_date=(new DateTimeImmutable($end))->modify('+10 days')->format('Y-m-d');MBS_Blocked_Dates::add($new_date,$new_date,'MS Cabin','Disposable block');$blocked_id=$wpdb->insert_id;
+ ms_ok(is_wp_error(MBS_Bookings::create(array_merge($camp,['booking_date'=>$new_date,'booking_date_end'=>$new_date]),true)),'Member block rejects complete selection');MBS_Blocked_Dates::delete($blocked_id);
+ $amend=MBS_Campsite_Policy::validate_amendment($group,['space'=>'MS Paddock','attendees'=>10],true);ms_ok(is_wp_error($amend),'Amendment checks separate paddock occupancy');
+ $new_date=(new DateTimeImmutable($end))->modify('+30 days')->format('Y-m-d');$stay=ms_created(array_merge($camp,['booking_date'=>$new_date,'booking_date_end'=>(new DateTimeImmutable($new_date))->modify('+2 days')->format('Y-m-d'),'all_day'=>false,'start_time'=>'18:00','end_time'=>'09:00']));
+ ms_ok(!MBS_Bookings::check_conflicts('MS Cabin',$new_date,'17:00','18:00'),'Continuous arrival before 18 remains free');
+ ms_ok((bool)MBS_Bookings::check_conflicts('MS Cabin',(new DateTimeImmutable($new_date))->modify('+1 day')->format('Y-m-d'),'00:00','01:00'),'Continuous interior night occupied');
+ ms_ok(!MBS_Bookings::check_conflicts('MS Cabin',$stay->booking_date_end,'09:00','10:00'),'Exclusive departure boundary preserved');
+ $rec_date=(new DateTimeImmutable($stay->booking_date_end))->modify('+20 days')->format('Y-m-d');$rec=array_merge($camp,['booking_date'=>$rec_date,'booking_date_end'=>$rec_date,'recurrence_pattern'=>'weekly']);
+ $series=MBS_Bookings::create_recurring($rec,(new DateTimeImmutable($rec_date))->modify('+14 days')->format('Y-m-d'),true);ms_ok(!is_wp_error($series),is_wp_error($series)?$series->get_error_message():'series');
+ $rows=MBS_Bookings::get_series($series['series_id']);ms_ok(count($rows)===3,'Three normal recurring occurrences');foreach($rows as$row)ms_ok($row->space===$label,'Occurrence retains every area');
+ $parent=MBS_Series::get($series['series_id']);ms_ok($parent->space===$label,'Series snapshot retains full set');
+ $extension=MBS_Series::extend($parent->series_ref,(new DateTimeImmutable($rec_date))->modify('+21 days')->format('Y-m-d'),$parent->version,false);ms_ok(!is_wp_error($extension),is_wp_error($extension)?$extension->get_error_message():'extension');
+ ms_ok(count(MBS_Bookings::get_series($parent->series_ref))===4,'Extension preserves allocation model');
+ $group=MBS_Bookings::get($group->ref);$projection=MBS_Google_Calendar::project([(array)$group],false,'https://example.invalid','fictional-calendar',new DateTimeZone('Europe/London'),wp_date('Y-m-d'));ms_ok(count($projection['desired'])===1,'One Google event for one combined stay');ms_ok(strpos(reset($projection['desired'])['summary'],$label)!==false,'Calendar names actual selected areas, not Whole Park');
+ $removed=$spaces;unset($removed['MS Cabin']);ms_ok(is_wp_error(MBS_Space_Selection::validate_configuration($removed)),'Active allocation prevents area removal');
+ $lock_key='mbs_spaces_'.substr(hash('sha256',$wpdb->prefix),0,32);
+ MBS_Space_Selection::locked(function()use($wpdb,$lock_key){$other=new wpdb(DB_USER,DB_PASSWORD,DB_NAME,DB_HOST);ms_ok((int)$other->get_var($other->prepare('SELECT GET_LOCK(%s,0)',$lock_key))===0,'Second DB connection cannot enter occupancy critical section');$other->close();});
+ update_option('mbs_multi_space_enabled',0);ms_ok(is_wp_error(MBS_Bookings::create(array_merge($camp,['booking_date'=>(new DateTimeImmutable($end))->modify('+100 days')->format('Y-m-d'),'booking_date_end'=>(new DateTimeImmutable($end))->modify('+100 days')->format('Y-m-d')]),true)),'Disabled rejects new combined bookings');
+ ms_ok((bool)MBS_Bookings::check_conflicts('MS Cabin',$date,null,null,true),'Disabled preserves existing occupancy');update_option('mbs_campsite_mode',0);ms_ok((bool)MBS_Bookings::check_conflicts('MS Whole Park',$date,null,null,true),'Both modes off still protect existing allocations');
+ ms_ok($mail===0&&$http===0,'No notification or Google network activity');
+ echo "MULTI_SPACE_WORDPRESS_OK\n";
+}finally{remove_filter('pre_wp_mail',$mail_guard);remove_filter('pre_http_request',$http_guard);foreach($original as$key=>$value){if($value===null)delete_option($key);else update_option($key,$value);}}

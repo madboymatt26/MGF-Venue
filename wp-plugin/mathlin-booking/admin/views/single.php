@@ -147,7 +147,9 @@ $invoice_pdf_url = $invoice_document_id ? add_query_arg( array(
                     <div><label class="nms-edit-label">Phone</label><input type="text" id="nms-edit-phone" value="<?php echo esc_attr( $booking->phone ); ?>" class="regular-text" style="width:100%;"></div>
                     <div>
                         <label class="nms-edit-label">Space</label>
+                        <?php if ( class_exists( 'MBS_Space_Selection' ) ) MBS_Space_Selection::selector( 'nms-edit-space', $booking->space ); ?>
                         <select id="nms-edit-space" style="width:100%;">
+                            <?php if ( ! isset( $spaces[$booking->space] ) ) : ?><option value="<?php echo esc_attr( $booking->space ); ?>" selected><?php echo esc_html( $booking->space ); ?></option><?php endif; ?>
                             <?php foreach ( $spaces as $name => $info ) : ?>
                             <option value="<?php echo esc_attr( $name ); ?>" <?php selected( $booking->space, $name ); ?>><?php echo esc_html( $name ); ?></option>
                             <?php endforeach; ?>

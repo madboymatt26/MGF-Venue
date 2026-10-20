@@ -79,6 +79,7 @@ $kitchen_price = MBS_Bookings::get_tiered_kitchen_price( $pricing_tier );
                 <div class="nms-form-row">
                     <div class="nms-form-group">
                         <label for="nms-mod-space">Space</label>
+                        <?php if ( class_exists( 'MBS_Space_Selection' ) ) MBS_Space_Selection::selector( 'nms-mod-space', $booking->space ); ?>
                         <select id="nms-mod-space" name="new_space">
                             <?php foreach ( $all_spaces as $sname => $sinfo ) : ?>
                             <option value="<?php echo esc_attr( $sname ); ?>" <?php selected( $booking->space, $sname ); ?>><?php echo esc_html( $sname ); ?></option>

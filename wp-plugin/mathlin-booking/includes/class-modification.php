@@ -105,6 +105,11 @@ class MBS_Modification {
     // ── Approve ────────────────────────────────────────────────────────────────
 
     public static function approve( $request_id ) {
+        if ( class_exists( 'MBS_Space_Selection' ) ) return MBS_Space_Selection::locked( static function() use ( $request_id ) { return self::approve_locked( $request_id ); } );
+        return self::approve_locked( $request_id );
+    }
+
+    private static function approve_locked( $request_id ) {
         $request = self::get_request( $request_id );
         if ( ! $request || $request->status !== 'pending' ) return false;
         if ( MBS_Series_Request::is_series_request( $request ) ) {
@@ -147,6 +152,14 @@ class MBS_Modification {
                 }
 
                 if ( ! empty( $update ) ) {
+                    if ( class_exists( 'MBS_Space_Selection' ) && isset( $update['space'] ) && $update['space'] !== $booking->space ) {
+                        $selection = MBS_Space_Selection::normalize( $update['space'] );
+                        if ( is_wp_error( $selection ) ) return $selection; $update['space'] = $selection;
+                    }
+                    if ( class_exists( 'MBS_Campsite_Policy' ) ) {
+                        $valid = MBS_Campsite_Policy::validate_amendment( $booking, $update );
+                        if ( is_wp_error( $valid ) ) return $valid;
+                    }
                     // QA-004: Check for conflicts before applying changes
                     $check_space = $update['space'] ?? $booking->space;
                     $check_date  = $update['booking_date'] ?? $booking->booking_date;

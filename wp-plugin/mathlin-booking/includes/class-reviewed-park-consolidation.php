@@ -48,6 +48,11 @@ class MBS_Reviewed_Park_Consolidation {
     }
 
     public function handle( $request ) {
+        if ( class_exists( 'MBS_Space_Selection' ) ) return MBS_Space_Selection::locked( function() use ( $request ) { return $this->handle_locked( $request ); } );
+        return $this->handle_locked( $request );
+    }
+
+    public function handle_locked( $request ) {
         if ( ! $this->allowed() ) return self::fail( 'Administrator access to the Stowmarket campsite is required.' );
         global $wpdb;
         $input = $request->get_json_params();

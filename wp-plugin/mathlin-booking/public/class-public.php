@@ -268,7 +268,12 @@ class MBS_Public {
         // Validate space
         $spaces = MBS_Bookings::get_spaces();
         $space  = sanitize_text_field( $_POST['space'] );
-        if ( ! isset( $spaces[ $space ] ) ) {
+        if ( class_exists( 'MBS_Space_Selection' ) ) {
+            $selected = MBS_Space_Selection::normalize( $_POST['spaces'] ?? $space );
+            if ( is_wp_error( $selected ) ) wp_send_json_error( array( 'message' => $selected->get_error_message() ) );
+            $space = $selected; $_POST['space'] = $space;
+        }
+        if ( class_exists( 'MBS_Space_Selection' ) ? ! MBS_Space_Selection::info( $space ) : ! isset( $spaces[ $space ] ) ) {
             wp_send_json_error( array( 'message' => 'Invalid space selected.' ) );
         }
 
