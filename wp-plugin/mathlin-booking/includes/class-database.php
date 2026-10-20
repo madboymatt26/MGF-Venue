@@ -867,6 +867,17 @@ class MBS_Database {
         global $wpdb;
 	        $table = $wpdb->prefix . MBS_TABLE;
 
+            // dbDelta does not reliably alter CREATE TABLE IF NOT EXISTS tables.
+            // Widen existing installations explicitly; never narrow an unexpected column.
+            foreach ( array( $table, $wpdb->prefix . MBS_SERIES_TABLE ) as $space_table ) {
+                $space_column = $wpdb->get_row( "SHOW COLUMNS FROM {$space_table} WHERE Field = 'space'" );
+                $space_type = strtolower( (string) ( $space_column->Type ?? '' ) );
+                if ( $space_type === 'varchar(255)' ) continue;
+                if ( ! preg_match( '/^varchar\((\d+)\)$/D', $space_type, $space_match ) || (int) $space_match[1] > 255 ) return new WP_Error( 'space_column_upgrade_failed', 'Cannot safely widen ' . $space_table . '.space from ' . $space_type . '.' );
+                $space_upgrade = self::migration_query( "ALTER TABLE {$space_table} MODIFY COLUMN space VARCHAR(255) NOT NULL", 'Multi-area space width upgrade' );
+                if ( is_wp_error( $space_upgrade ) ) return $space_upgrade;
+            }
+
 	        // Schema 7 introduced this safety boundary. Add it explicitly because
 	        // dbDelta does not reliably alter CREATE TABLE IF NOT EXISTS shapes.
 	        $legacy_column = $wpdb->get_row( "SHOW COLUMNS FROM {$table} WHERE Field = 'legacy_billing_excluded'" );

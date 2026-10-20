@@ -9,6 +9,18 @@ foreach(['mbs_spaces','mbs_campsite_mode','mbs_multi_space_enabled','mbs_multi_s
 $admin=get_user_by('login','admin');wp_set_current_user($admin->ID);
 $mail=0;$http=0;$mail_guard=function($pre)use(&$mail){$mail++;return true;};$http_guard=function($pre)use(&$http){$http++;return $pre;};add_filter('pre_wp_mail',$mail_guard);add_filter('pre_http_request',$http_guard);
 try{
+ // Exercise an upgrade, not just the clean-install schema used by the harness.
+ $booking_table=$wpdb->prefix.MBS_TABLE;$series_table=$wpdb->prefix.MBS_SERIES_TABLE;
+ ms_ok((int)$wpdb->get_var("SELECT COALESCE(MAX(CHAR_LENGTH(space)),0) FROM {$booking_table}")<=60,'Fixture fits old booking width');
+ ms_ok((int)$wpdb->get_var("SELECT COALESCE(MAX(CHAR_LENGTH(space)),0) FROM {$series_table}")<=60,'Fixture fits old series width');
+ $upgrade_rows=$wpdb->get_results("SELECT * FROM {$booking_table} ORDER BY ref",ARRAY_A);
+ ms_ok($wpdb->query("ALTER TABLE {$booking_table} MODIFY COLUMN space VARCHAR(60) NOT NULL")!==false,'Simulate old booking column');
+ ms_ok($wpdb->query("ALTER TABLE {$series_table} MODIFY COLUMN space VARCHAR(60) NOT NULL")!==false,'Simulate old series column');
+ $upgraded=MBS_Database::create_tables();ms_ok($upgraded===true,is_wp_error($upgraded)?$upgraded->get_error_message():'Upgrade old installation');
+ ms_ok(strtolower($wpdb->get_row("SHOW COLUMNS FROM {$booking_table} WHERE Field='space'")->Type)==='varchar(255)','Existing booking column widened');
+ ms_ok(strtolower($wpdb->get_row("SHOW COLUMNS FROM {$series_table} WHERE Field='space'")->Type)==='varchar(255)','Existing series column widened');
+ ms_ok($upgrade_rows===$wpdb->get_results("SELECT * FROM {$booking_table} ORDER BY ref",ARRAY_A),'Upgrade preserves all booking fields');
+ ms_ok(MBS_Database::create_tables()===true,'Upgrade retry is idempotent');
  update_option('mbs_multi_space_ever_used',0);update_option('mbs_multi_space_enabled',0);update_option('mbs_campsite_mode',0);update_option('mbs_payments_enabled',1);update_option('mbs_min_duration_hours',0);update_option('mbs_ha_webhook_url','');update_option('mbs_google_calendar',[]);
  $paid=['MS Whole Centre'=>['capacity'=>200,'rate_hourly'=>50,'rate_daily'=>300],'MS Hall'=>['parent'=>'MS Whole Centre','capacity'=>100,'rate_hourly'=>25],'MS Meeting'=>['parent'=>'MS Whole Centre','capacity'=>30,'rate_hourly'=>12]];
  update_option('mbs_spaces',$paid);
