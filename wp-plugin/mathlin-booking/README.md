@@ -4,7 +4,14 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.33.0
+**Current Version:** 3.33.1
+
+## 3.33.1 Existing-installation upgrade repair
+
+Explicitly widens booking and series space columns on existing installations,
+where WordPress dbDelta does not reliably alter CREATE TABLE IF NOT EXISTS
+definitions. Refuses unsafe narrowing and verifies the complete schema afterwards.
+Adds a real old-width upgrade/idempotency regression; no booking values change.
 
 ## 3.33.0 Opt-in multi-area campsite bookings
 
