@@ -35,6 +35,25 @@ class MBS_Calendar_Reference_Links {
     public static function records( $link ) {
         return isset( $link['events'] ) && is_array( $link['events'] ) ? $link['events'] : ( ! empty( $link['id'] ) ? array( $link['id'] => $link['google_hash'] ?? '' ) : array() );
     }
+    public static function descriptor( $op ) {
+        $originals = array();
+        foreach ( $op['original_sources'] ?? array() as $source ) {
+            $source = (object) $source; $meta = json_decode( $source->custom_fields, true );
+            $originals[] = (string) ( $meta['_mbs_legacy']['booking_id'] ?? '' );
+        }
+        return array( 'key' => $op['key'], 'want' => $op['want'], 'originals' => array_values( array_unique( $originals ) ) );
+    }
+    /** One historical Google span can represent separate non-overlapping MGF date slices. */
+    public static function can_share( $a, $b, $event ) {
+        if ( ( $a['key'] ?? '' ) === ( $b['key'] ?? '' ) ) return true;
+        $id = self::event_legacy_id( $event );
+        if ( ! $id || ! in_array( $id, $a['originals'] ?? array(), true ) || ! in_array( $id, $b['originals'] ?? array(), true ) ) return false;
+        foreach ( array( $a, $b ) as $slice ) {
+            if ( empty( $slice['want']['start']['date'] ) || empty( $slice['want']['end']['date'] ) || empty( $event['start']['date'] ) || empty( $event['end']['date'] ) ) return false;
+            if ( $event['start']['date'] > $slice['want']['start']['date'] || $event['end']['date'] < $slice['want']['end']['date'] ) return false;
+        }
+        return $a['want']['end']['date'] <= $b['want']['start']['date'] || $b['want']['end']['date'] <= $a['want']['start']['date'];
+    }
     /** Recommendations require unique original IDs AND exact endpoints. Differences remain explicit. */
     public static function recommend( $sources, $events, $want ) {
         if ( ! $sources ) return array( 'ids' => array(), 'reason' => 'No verified original booking lineage.' );

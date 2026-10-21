@@ -299,6 +299,14 @@ class MBS_Google_Calendar {
             if ( ( $link['until'] ?? '' ) < $today || isset( $projection['desired'][$key] ) || isset( $owned[$key] ) ) continue;
             $ops[] = array( 'key' => $key, 'ref' => $link['ref'], 'want' => null, 'action' => 'retained', 'event' => $ids[$link['id']] ?? null, 'linked_events' => array_values( array_intersect_key( $ids, MBS_Calendar_Reference_Links::records( $link ) ) ), 'candidates' => array(), 'reason' => 'No current exported booking. All protected estate entries retained; manual review required.' );
         }
+        $claims = array();
+        foreach ( $ops as $index => $op ) foreach ( $op['recommendation']['ids'] ?? array() as $id ) $claims[$id][] = $index;
+        foreach ( $claims as $id => $indexes ) foreach ( $indexes as $a ) foreach ( $indexes as $b ) {
+            if ( $a === $b ) continue;
+            if ( ! MBS_Calendar_Reference_Links::can_share( MBS_Calendar_Reference_Links::descriptor( $ops[$a] ), MBS_Calendar_Reference_Links::descriptor( $ops[$b] ), $ids[$id] ) ) {
+                $ops[$a]['recommendation'] = array( 'ids' => array(), 'reason' => 'Another MGF reservation claims this original Google reference with incompatible dates. Review both; Google unchanged.' );
+            }
+        }
         foreach ( $ops as &$op ) $op['hash'] = hash( 'sha256', wp_json_encode( $op ) ); unset( $op );
         return $ops;
     }
@@ -338,8 +346,9 @@ class MBS_Google_Calendar {
             $available = array_column( $item['action'] === 'difference' ? ( $item['linked_events'] ?? array_filter( array( $item['event'] ) ) ) : $item['candidates'], null, 'id' );
             foreach ( $values as $choice ) {
                 if ( ! is_string( $choice ) || strpos( $choice, 'protect:' ) !== 0 || ! isset( $available[substr( $choice, 8 )] ) ) self::error( 'Invalid Google reference selection. Refresh comparison.' );
-                if ( isset( $claimed[$choice] ) && $claimed[$choice] !== $item['key'] ) self::error( 'A Google record cannot be assigned to two different booking occurrences.' );
-                $claimed[$choice] = $item['key'];
+                $descriptor = MBS_Calendar_Reference_Links::descriptor( $item );
+                foreach ( $claimed[$choice] ?? array() as $prior ) if ( ! MBS_Calendar_Reference_Links::can_share( $prior, $descriptor, $available[substr( $choice, 8 )] ) ) self::error( 'A Google record can be shared only by verified non-overlapping original date slices.' );
+                $claimed[$choice][] = $descriptor;
             }
             if ( $values && $item['action'] === 'difference' && count( array_unique( $values ) ) !== count( $available ) ) self::error( 'Acknowledge the complete existing linked set; no area links may be silently dropped.' );
             if ( $values ) $choices[$item['hash']] = array_values( array_unique( $values ) );
@@ -375,7 +384,13 @@ class MBS_Google_Calendar {
     }
     private static function execute( $ops, $choices = array(), $allow_create = true ) {
         $done = 0; $blocked = 0; $checked = 0; $used = array();
-        foreach ( (array) ( self::settings()['links'] ?? array() ) as $key => $link ) foreach ( MBS_Calendar_Reference_Links::records( $link ) as $id => $hash ) $used[$id] = $key;
+        $initial_settings = self::settings();
+        $current_projection = self::project( self::bookings(), ! empty( $initial_settings['pending'] ), self::site_key(), $initial_settings['calendar'], wp_timezone(), wp_date( 'Y-m-d' ), $initial_settings, ! empty( get_option( 'mbs_campsite_mode', false ) ) );
+        foreach ( (array) ( $initial_settings['links'] ?? array() ) as $key => $link ) {
+            $descriptor = array( 'key' => $key );
+            if ( isset( $current_projection['desired'][$key] ) && ( $link['source_hash'] ?? '' ) === self::source_hash( $current_projection['desired'][$key] ) && ( $link['source_evidence'] ?? '' ) === hash( 'sha256', wp_json_encode( $current_projection['legacy'][$key] ?? array() ) ) ) $descriptor = MBS_Calendar_Reference_Links::descriptor( array( 'key' => $key, 'want' => $current_projection['desired'][$key], 'original_sources' => $current_projection['legacy'][$key] ?? array() ) );
+            foreach ( MBS_Calendar_Reference_Links::records( $link ) as $id => $hash ) $used[$id][] = $descriptor;
+        }
         foreach ( $ops as $op ) {
             if ( $allow_create && $done >= 20 ) break;
             $checked++;
@@ -388,7 +403,11 @@ class MBS_Google_Calendar {
                 $choices_for_op = (array) ( $choices[$op['hash']] ?? array() );
                 foreach ( $choices_for_op as $choice ) {
                     if ( ! is_string( $choice ) || strpos( $choice, 'protect:' ) !== 0 ) continue;
-                    foreach ( $op['candidates'] as $candidate ) if ( $candidate['id'] === substr( $choice, 8 ) && ( $candidate['status'] ?? '' ) !== 'cancelled' && ( ! isset( $used[$candidate['id']] ) || $used[$candidate['id']] === $op['key'] ) ) $selected[$candidate['id']] = $candidate;
+                    foreach ( $op['candidates'] as $candidate ) if ( $candidate['id'] === substr( $choice, 8 ) && ( $candidate['status'] ?? '' ) !== 'cancelled' ) {
+                        $compatible = true;
+                        foreach ( $used[$candidate['id']] ?? array() as $prior ) if ( ! MBS_Calendar_Reference_Links::can_share( $prior, MBS_Calendar_Reference_Links::descriptor( $op ), $candidate ) ) $compatible = false;
+                        if ( $compatible ) $selected[$candidate['id']] = $candidate;
+                    }
                 }
                 if ( ! $selected || count( $selected ) !== count( array_unique( $choices_for_op ) ) ) { $blocked++; continue; }
                 $action = 'protect'; $event = reset( $selected );
@@ -403,7 +422,7 @@ class MBS_Google_Calendar {
               foreach ( $selected as $event ) {
                 $current = self::api( 'GET', self::events_path() . '/' . rawurlencode( $event['id'] ), null, '', true );
                 if ( ! $current || self::event_hash( $current ) !== self::event_hash( $event ) ) self::error( 'Estate event changed. Refresh the read-only comparison before saving a match.' );
-                $used[$event['id']] = $op['key'];
+                $used[$event['id']][] = MBS_Calendar_Reference_Links::descriptor( $op );
               }
             } else {
                 // Recheck the target interval just before insertion. A newly added estate event blocks it.
@@ -420,6 +439,7 @@ class MBS_Google_Calendar {
             $s['links'][$op['key']] = array( 'id' => $event['id'], 'ref' => $op['ref'], 'origin' => $action === 'protect' ? 'estate' : 'mgf', 'source_hash' => self::source_hash( $op['want'] ), 'google_hash' => self::event_hash( $event ), 'until' => substr( $op['want']['end']['date'] ?? $op['want']['end']['dateTime'], 0, 10 ) );
             if ( $action === 'protect' ) { $s['links'][$op['key']]['events'] = array(); foreach ( $selected as $e ) $s['links'][$op['key']]['events'][$e['id']] = self::event_hash( $e ); }
             if ( $action === 'protect' ) $s['links'][$op['key']]['source_evidence'] = $op['source_evidence'];
+            if ( $action === 'protect' ) $s['links'][$op['key']]['reference_source'] = MBS_Calendar_Reference_Links::descriptor( $op );
             self::save( $s );
             self::record( $action, $op['ref'], $action === 'protect' ? 'Protected reference saved; Google unchanged.' : 'Created one MGF event; existing estate events unchanged.' );
         }
