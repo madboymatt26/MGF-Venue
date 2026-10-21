@@ -669,8 +669,8 @@ class MBS_Bookings {
         }
         if ( $args['search'] ) {
             $like     = '%' . $wpdb->esc_like( $args['search'] ) . '%';
-            $where[]  = '(name LIKE %s OR organisation LIKE %s OR ref LIKE %s OR purpose LIKE %s)';
-            $values[] = $like; $values[] = $like; $values[] = $like; $values[] = $like;
+            $where[]  = '(name LIKE %s OR organisation LIKE %s OR ref LIKE %s OR purpose LIKE %s OR notes LIKE %s)';
+            array_push( $values, $like, $like, $like, $like, $like );
         }
 
         $allowed_order = array( 'booking_date', 'created_at', 'name', 'status', 'amount' );

@@ -92,8 +92,8 @@ class MBS_Series {
         }
         if ( $search ) {
             $like = '%' . $wpdb->esc_like( $search ) . '%';
-            $where[] = '(series_ref LIKE %s OR contact_name LIKE %s OR contact_organisation LIKE %s OR contact_email LIKE %s OR purpose LIKE %s OR space LIKE %s)';
-            array_push( $params, $like, $like, $like, $like, $like, $like );
+            $where[] = '(series_ref LIKE %s OR contact_name LIKE %s OR contact_organisation LIKE %s OR contact_email LIKE %s OR purpose LIKE %s OR space LIKE %s OR notes LIKE %s)';
+            array_push( $params, $like, $like, $like, $like, $like, $like, $like );
         }
         if ( array_key_exists( 'scout_use', $args ) && $args['scout_use'] !== '' && $args['scout_use'] !== null ) {
             $where[] = 'scout_use = %d';
