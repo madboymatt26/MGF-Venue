@@ -70,6 +70,41 @@ try {
     await staff.getByText('Saved. Do not resubmit this reservation.',{exact:true}).waitFor();
     await staff.getByRole('link',{name:'View saved booking',exact:true}).click();
     await staff.getByText('Synthetic browser staff booking',{exact:true}).first().waitFor();
+    // Admin month includes stays starting in the previous month. Each day is
+    // a real keyboard-accessible link, and layout is checked at two widths.
+    await staff.setViewportSize({width:1440,height:1000});
+    await staff.goto(base+'/wp-admin/admin.php?page=mathlin-calendar&cal_year=2030&cal_month=12&cal_date=2030-12-01');
+    await staff.getByText('INT-CAL-SPAN',{exact:false}).first().waitFor();
+    for(const day of ['01','02'])assert.ok(await staff.locator('.nms-cal-day-link[href*="cal_date=2030-12-'+day+'"] .nms-cal-badge').count(),'Stay occupies December '+day);
+    assert.equal(await staff.locator('.nms-cal-day-link[href*="cal_date=2030-12-03"] .nms-cal-badge').count(),0,'No spill beyond end date');
+    const cell=await staff.locator('.nms-cal-day-link').first().boundingBox();
+    assert.ok(cell.height>=110,'Comfortable full-height desktop day target');
+    await staff.screenshot({path:'browser-artifacts/calendar-admin-desktop.png',fullPage:true});
+    await staff.setViewportSize({width:390,height:844});
+    assert.ok(await staff.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),'Admin calendar fits phone width');
+    await staff.screenshot({path:'browser-artifacts/calendar-admin-mobile.png',fullPage:true});
+    // Public views show tomorrow despite the real 14-day booking restriction.
+    // This checks actual WordPress AJAX, not a mocked bookings response.
+    const calendar=await admin.newPage();watch(calendar);
+    async function selectCalendarDate(date,keyboard=false){
+        const expected=new Date(date+'T00:00:00');
+        const shown=await calendar.evaluate(()=>({year:new Date(NMS.today+'T00:00:00').getFullYear(),month:new Date(NMS.today+'T00:00:00').getMonth()}));
+        let months=(expected.getFullYear()-shown.year)*12+expected.getMonth()-shown.month;
+        while(months-->0){await calendar.locator('#nms-cal-next').click();await calendar.waitForFunction(()=>document.querySelector('#nms-cal-days').style.opacity==='1');}
+        const day=calendar.locator('.nms-viewable-date[data-date="'+date+'"]');
+        await day.waitFor();
+        if(keyboard){await day.focus();await day.press('Enter');}else await day.click();
+        await calendar.locator('#nms-cal-sidebar .nms-day-booking').first().waitFor();
+    }
+    await calendar.goto(fixture.calendar_url);
+    await selectCalendarDate(fixture.near_date,true);
+    await calendar.locator('#nms-cal-sidebar').getByText('Synthetic calendar near-date event',{exact:true}).waitFor();
+    assert.equal(await calendar.locator('.nms-prefill-date').count(),0,'Readonly never offers booking');
+    await calendar.screenshot({path:'browser-artifacts/calendar-public-near-date.png',fullPage:true});
+    await calendar.goto(fixture.booking_url);
+    await selectCalendarDate(fixture.near_date);
+    assert.equal(await calendar.locator('.nms-prefill-date').count(),0,'Within notice date is viewable but not bookable');
+    assert.equal(await calendar.locator('#nms-date').getAttribute('min'),await calendar.evaluate(()=>NMS.min_date),'Form notice remains enforced');
     const owner=await browser.newContext(); const portal=await owner.newPage(); watch(portal);
     await login(portal,'extra-browser'); await portal.goto(fixture.portal_url);
     await portal.getByText(fixture.invoice_ref,{exact:true}).waitFor();

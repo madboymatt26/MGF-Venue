@@ -1,4 +1,12 @@
 /* NM Scouts Booking – Public JS */
+// Viewing a date is always allowed; booking eligibility is a separate rule.
+window.NMSCalendarCanBook = function(date, settings) {
+    var now = new Date();
+    var today = settings.today || now.getFullYear() + '-' + ('0' + (now.getMonth() + 1)).slice(-2) + '-' + ('0' + now.getDate()).slice(-2);
+    var blocks = (settings.blocked_dates || {})[date] || [];
+    return settings.calendar_mode !== 'readonly' && date >= today &&
+        date >= (settings.min_date || today) && blocks.indexOf('__all__') === -1;
+};
 window.NMSAdditionalCharges = function(charges) {
     var $ = jQuery, root = $('<div>');
     if (!Array.isArray(charges) || !charges.length) return root;
@@ -20,8 +28,9 @@ window.NMSAdditionalCharges = function(charges) {
 jQuery(function ($) {
 
     // ── Calendar ───────────────────────────────────────────────────────────────
-    var calYear  = new Date().getFullYear();
-    var calMonth = new Date().getMonth() + 1; // 1-based
+    var calendarToday = NMS.today ? new Date(NMS.today + 'T00:00:00') : new Date();
+    var calYear  = calendarToday.getFullYear();
+    var calMonth = calendarToday.getMonth() + 1; // 1-based
     var calData  = {};
 
     var MONTHS = ['January','February','March','April','May','June',
@@ -63,7 +72,7 @@ jQuery(function ($) {
     function renderCalendar(year, month) {
         $('#nms-cal-month-label').text(MONTHS[month - 1] + ' ' + year);
 
-        var today    = new Date();
+        var today    = new Date(calendarToday.getTime());
         today.setHours(0,0,0,0);
         var firstDay = new Date(year, month - 1, 1);
         var lastDay  = new Date(year, month, 0);
@@ -91,7 +100,7 @@ jQuery(function ($) {
             // Grey out dates within the minimum notice period (too soon to book)
             var minDate = NMS.min_date ? new Date(NMS.min_date + 'T00:00:00') : today;
             var tooSoon = thisDate >= today && thisDate < minDate;
-            if (tooSoon) classes.push('nms-beyond-limit');
+            if (tooSoon && NMS.calendar_mode !== 'readonly') classes.push('nms-beyond-limit');
 
             // Check if date is blocked (all spaces or partial)
             var isBlocked = false;
@@ -109,8 +118,11 @@ jQuery(function ($) {
             if (isPartiallyBlocked) classes.push('nms-partially-blocked');
 
             var $cell = $('<div>')
-                .addClass(classes.join(' '))
-                .attr('data-date', dateStr);
+                .addClass(classes.join(' ') + ' nms-viewable-date')
+                .attr('data-date', dateStr)
+                .attr('role', 'button')
+                .attr('tabindex', '0')
+                .attr('aria-label', formatDate(dateStr) + ' — view bookings' + (isBlocked ? ', unavailable for new bookings' : ''));
 
             // Day number
             var $num = $('<span class="nms-cal-day-num">').text(d);
@@ -123,14 +135,17 @@ jQuery(function ($) {
                 $cell.append('<span class="nms-partial-label">Limited</span>');
             }
 
-            if (thisDate >= minDate && !isBlocked) {
-                $cell.on('click', function () {
+            $cell.on('click', function () {
                     var ds = $(this).data('date');
                     $('.nms-cal-day').removeClass('nms-selected');
                     $(this).addClass('nms-selected');
                     showDayInfo(ds);
+                }).on('keydown', function (event) {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        $(this).trigger('click');
+                    }
                 });
-            }
             $grid.append($cell);
         }
     }
@@ -186,8 +201,10 @@ jQuery(function ($) {
             }
 
             // Only show the "Book this date" button in booking mode
-            if (NMS.calendar_mode !== 'readonly') {
+            if (window.NMSCalendarCanBook(dateStr, NMS)) {
                 html += '<button class="nms-btn nms-btn-primary nms-btn-sm nms-prefill-date" data-date="' + dateStr + '">+ Book this date</button>';
+            } else if (NMS.calendar_mode !== 'readonly' && blockedSpaces.indexOf('__all__') === -1) {
+                html += '<p class="nms-muted">Bookings can be viewed for this date, but new requests must meet the minimum booking notice.</p>';
             }
             $sidebar.html(html);
 
@@ -201,6 +218,7 @@ jQuery(function ($) {
     // Prefill date in form when clicking calendar button
     $(document).on('click', '.nms-prefill-date', function () {
         var date = $(this).data('date');
+        if (!window.NMSCalendarCanBook(date, NMS)) return;
         $('#nms-date').val(date);
         var $form = $('#nms-form-section');
         if ($form.length) {

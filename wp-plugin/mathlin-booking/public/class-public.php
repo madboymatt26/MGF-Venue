@@ -54,6 +54,7 @@ class MBS_Public {
                 'min_notice_days' => $notice_days,
                 'min_duration_hours' => (float) get_option( 'mbs_min_duration_hours', 0 ),
                 'min_date'        => wp_date( 'Y-m-d', strtotime( "+{$notice_days} days" ) ),
+                'today'           => wp_date( 'Y-m-d' ),
                 'blocked_dates'   => self::get_blocked_dates_for_frontend(),
                 'is_logged_in'    => is_user_logged_in(),
                 'portal_url'      => $portal_url,

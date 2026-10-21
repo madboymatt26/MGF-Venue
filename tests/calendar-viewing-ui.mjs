@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import vm from 'node:vm';
+const source=readFileSync('wp-plugin/mathlin-booking/public/public.js','utf8');
+const context={window:{},jQuery:()=>{},Date};
+vm.runInNewContext(source,context);
+const canBook=context.window.NMSCalendarCanBook;
+const settings={today:'2026-10-21',min_date:'2026-11-04',calendar_mode:'booking',blocked_dates:{'2026-11-05':['__all__'],'2026-11-06':['Paddock']}};
+assert.equal(canBook('2026-10-22',settings),false,'Tomorrow remains inside notice');
+assert.equal(canBook('2026-10-20',settings),false,'Past dates cannot prefill');
+assert.equal(canBook('2026-11-04',settings),true,'Exact notice boundary can book');
+assert.equal(canBook('2026-11-05',settings),false,'Fully blocked dates cannot prefill');
+assert.equal(canBook('2026-11-06',settings),true,'Partially blocked dates can choose other spaces');
+assert.equal(canBook('2026-11-04',{...settings,calendar_mode:'readonly'}),false,'Readonly never offers booking');
+assert.equal(canBook('2026-10-21',{...settings,min_date:'2026-10-21'}),true,'Same day remains configurable');
+console.log('CALENDAR_VIEWING_POLICY_OK');

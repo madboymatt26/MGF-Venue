@@ -43,6 +43,8 @@ jobs:
         run: php tests/php-invoice-document-unit.php
       - name: Verify multi-area selector state transitions
         run: node tests/space-selection-ui.mjs
+      - name: Verify calendar booking/viewing separation
+        run: node tests/calendar-viewing-ui.mjs
       - name: Run correctness regression tests
         run: php tests/php-correctness-regression.php
       - name: Validate Composer dependencies
