@@ -207,6 +207,31 @@
 }
 
 /* Calendar View */
+.mbs-calendar-page { max-width: 1680px; }
+.mbs-calendar-page .nms-cal-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; color: var(--text-muted); }
+.mbs-calendar-page .nms-calendar-layout { grid-template-columns: minmax(0, 1fr) minmax(280px, 360px); align-items: start; }
+.mbs-calendar-page .nms-calendar-main { min-width: 0; }
+.mbs-calendar-page .nms-cal-grid { table-layout: fixed; }
+.mbs-calendar-page .nms-cal-grid td { height: 112px; }
+.mbs-calendar-page .nms-cal-day-link { box-sizing: border-box; min-height: 112px; height: auto; padding: 10px; overflow: hidden; }
+.mbs-calendar-page .nms-cal-day-link:focus-visible { outline: 3px solid var(--scout-purple); outline-offset: -3px; }
+.mbs-calendar-page .nms-cal-badge { float: right; margin: 0; }
+.mbs-calendar-page .nms-cal-previews { display: grid; gap: 3px; margin-top: 7px; }
+.mbs-calendar-page .nms-cal-preview { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; line-height: 1.5; }
+.mbs-calendar-page .nms-cal-booking-header { flex-wrap: wrap; gap: 8px; }
+.mbs-calendar-page .nms-cal-booking-card { overflow-wrap: anywhere; }
+.mbs-calendar-page .nms-calendar-sidebar { max-height: none; padding: 20px; }
+@media (max-width: 1100px) {
+    .mbs-calendar-page .nms-calendar-layout { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 600px) {
+    .mbs-calendar-page .nms-cal-grid td { height: 58px; }
+    .mbs-calendar-page .nms-cal-day-link { min-height: 58px; padding: 5px; }
+    .mbs-calendar-page .nms-cal-previews, .mbs-calendar-page .nms-cal-blocked-badge { display: none; }
+    .mbs-calendar-page .nms-cal-grid th { padding: 8px 2px; font-size: 11px; }
+    .mbs-calendar-page .nms-cal-title { font-size: 18px; }
+    .mbs-calendar-page .nms-cal-badge { padding: 1px 4px; }
+}
 .nms-calendar-layout {
     display: grid;
     grid-template-columns: 1fr 320px;

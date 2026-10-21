@@ -4,7 +4,14 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.37.1
+**Current Version:** 3.38.0
+
+## 3.38.0 Calendar viewing and staff layout
+
+- View dates inside the booking notice period, including read-only What's On calendars, without permitting early booking requests. Fully blocked dates can also be inspected. Existing access/privacy and server booking checks are unchanged.
+- Keyboard-accessible day selection, clearer focus and legible near-date numbers.
+- Staff calendar: responsive full-height date targets, space previews, Today shortcut and day details; multi-day stays appear on all occupied dates, including stays beginning in the previous month. Counts are unique bookings per month, daily occupancy per cell. Payment amounts follow the site's payment feature switch.
+- Synthetic render, notice-policy and real WordPress browser regressions cover near-date viewing and cross-month stays. No data migration or Google sync setting changes.
 
 ## 3.37.1 Preserve sync when saving links
 

@@ -127,6 +127,10 @@
 .nms-today       { background: #7413DC; color: #fff; font-weight: 700; }
 .nms-today:hover { background: #5c0fb3; }
 .nms-selected    { outline: 2px solid #f5a623; outline-offset: 1px; }
+.nms-cal-day.nms-viewable-date { cursor: pointer; color: #374151; }
+.nms-cal-day.nms-viewable-date:focus-visible { outline: 3px solid #7413DC; outline-offset: 1px; }
+.nms-cal-day.nms-viewable-date.nms-today { color: #fff; }
+.nms-cal-day.nms-viewable-date.nms-blocked { color: #991b1b; }
 
 .nms-has-bookings::after {
     content: '';

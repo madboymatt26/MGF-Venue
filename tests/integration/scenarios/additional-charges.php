@@ -173,4 +173,12 @@ if (!$browser_user) $browser_user=wp_insert_user(array('user_login'=>'extra-brow
 extra_it_assert($browser_user,'Create synthetic browser owner');
 $page_id=wp_insert_post(array('post_title'=>'Additional charge integration portal','post_name'=>'extra-integration-portal','post_content'=>'[mathlin_manage]','post_status'=>'publish','post_type'=>'page'));
 extra_it_assert($page_id,'Create isolated portal page');
-update_option('mbs_extra_browser_fixture',array('booking_ref'=>$booking_ref,'invoice_ref'=>$api_issued['invoice_ref'],'archive_ref'=>$discarded->invoice_ref,'credit_ref'=>$cn,'portal_url'=>get_permalink($page_id)),false);
+$calendar_page=wp_insert_post(array('post_title'=>'Calendar integration','post_content'=>'[mathlin_calendar]','post_status'=>'publish','post_type'=>'page'));
+$booking_page=wp_insert_post(array('post_title'=>'Booking integration','post_content'=>'[mathlin_booking]','post_status'=>'publish','post_type'=>'page'));
+$tomorrow=wp_date('Y-m-d',time()+DAY_IN_SECONDS);
+update_option('mbs_min_notice_days',14);
+foreach (array(array('INT-CAL-NEAR',$tomorrow,$tomorrow),array('INT-CAL-SPAN','2030-11-30','2030-12-02')) as $row) {
+    extra_it_assert($wpdb->insert($wpdb->prefix.MBS_TABLE,array('ref'=>$row[0],'status'=>'confirmed','name'=>'Synthetic calendar contact','email'=>'calendar@example.invalid','space'=>'Main Scout Hall','booking_date'=>$row[1],'booking_date_end'=>$row[2],'start_time'=>'10:00:00','end_time'=>'12:00:00','attendees'=>1,'purpose'=>'Synthetic calendar near-date event','is_public'=>1,'all_day'=>0,'access_sent'=>1,'created_at'=>$now,'updated_at'=>$now))!==false,'Seed calendar browser fixture');
+}
+extra_it_assert($calendar_page && $booking_page,'Create isolated calendar pages');
+update_option('mbs_extra_browser_fixture',array('booking_ref'=>$booking_ref,'invoice_ref'=>$api_issued['invoice_ref'],'archive_ref'=>$discarded->invoice_ref,'credit_ref'=>$cn,'portal_url'=>get_permalink($page_id),'calendar_url'=>get_permalink($calendar_page),'booking_url'=>get_permalink($booking_page),'near_date'=>$tomorrow),false);

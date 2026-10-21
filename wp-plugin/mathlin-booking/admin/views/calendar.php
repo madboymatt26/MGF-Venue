@@ -1,7 +1,8 @@
 <?php if ( ! defined( 'ABSPATH' ) ) exit;
 
-$year  = isset( $_GET['cal_year'] )  ? absint( $_GET['cal_year'] )  : (int) date( 'Y' );
-$month = isset( $_GET['cal_month'] ) ? absint( $_GET['cal_month'] ) : (int) date( 'n' );
+$year  = isset( $_GET['cal_year'] )  ? absint( $_GET['cal_year'] )  : (int) wp_date( 'Y' );
+$month = isset( $_GET['cal_month'] ) ? absint( $_GET['cal_month'] ) : (int) wp_date( 'n' );
+$year = max( 1900, min( 2200, $year ) );
 
 // Clamp
 if ( $month < 1 ) { $month = 12; $year--; }
@@ -24,14 +25,19 @@ $last_day  = date( 'Y-m-t', strtotime( $first_day ) );
 global $wpdb;
 $table    = $wpdb->prefix . MBS_TABLE;
 $bookings = $wpdb->get_results( $wpdb->prepare(
-    "SELECT * FROM {$table} WHERE booking_date BETWEEN %s AND %s AND status NOT IN ('cancelled', 'archived') ORDER BY start_time ASC",
-    $first_day, $last_day
+    "SELECT * FROM {$table} WHERE booking_date <= %s AND COALESCE(NULLIF(booking_date_end, ''), booking_date) >= %s AND status NOT IN ('cancelled', 'archived') ORDER BY start_time ASC, ref ASC",
+    $last_day, $first_day
 ) );
 
 // Group bookings by date
 $by_date = array();
 foreach ( $bookings as $b ) {
-    $by_date[ $b->booking_date ][] = $b;
+    // Inclusive occupied dates, clipped to this month (including stays starting earlier).
+    $start = max( $first_day, $b->booking_date );
+    $end = min( $last_day, ! empty( $b->booking_date_end ) ? $b->booking_date_end : $b->booking_date );
+    for ( $date = $start; $date <= $end; $date = gmdate( 'Y-m-d', strtotime( $date . ' +1 day UTC' ) ) ) {
+        $by_date[ $date ][] = $b;
+    }
 }
 
 // Get blocked dates for this month
@@ -40,16 +46,24 @@ $blocked_dates = MBS_Blocked_Dates::get_for_month( $year, $month );
 // Calendar grid info
 $first_dow = (int) date( 'N', strtotime( $first_day ) ); // 1=Mon, 7=Sun
 $days_in_month = (int) date( 't', strtotime( $first_day ) );
-$today = date( 'Y-m-d' );
+$today = wp_date( 'Y-m-d' );
 
 // Selected day
 $selected_date = isset( $_GET['cal_date'] ) ? sanitize_text_field( $_GET['cal_date'] ) : '';
+if ( ! preg_match( '/^\d{4}-\d{2}-\d{2}$/', $selected_date ) || $selected_date < $first_day || $selected_date > $last_day ) {
+    $selected_date = $today >= $first_day && $today <= $last_day ? $today : $first_day;
+}
 $selected_bookings = $selected_date && isset( $by_date[ $selected_date ] ) ? $by_date[ $selected_date ] : array();
 $selected_blocks   = $selected_date && isset( $blocked_dates[ $selected_date ] ) ? $blocked_dates[ $selected_date ] : array();
 ?>
-<div class="wrap mbs-admin">
+<div class="wrap mbs-admin mbs-calendar-page">
     <h1 class="wp-heading-inline"><?php echo MBS_Admin::brand_mark(); ?>MGF Venue – Calendar</h1>
     <hr class="wp-header-end">
+    <p class="nms-muted">Select any date to view its bookings. Multi-day stays appear on every occupied day.</p>
+    <div class="nms-cal-toolbar"><a class="button" href="<?php echo esc_url( add_query_arg( array( 'page' => 'mathlin-calendar', 'cal_year' => wp_date( 'Y' ), 'cal_month' => wp_date( 'n' ), 'cal_date' => $today ), admin_url( 'admin.php' ) ) ); ?>">Today</a>
+        <span><?php echo count( $bookings ); ?> booking<?php echo count( $bookings ) === 1 ? '' : 's'; ?> overlapping this month</span>
+        <span>Day counts include pending and approved bookings.</span>
+    </div>
 
     <div class="nms-calendar-layout">
         <div class="nms-calendar-main">
@@ -95,13 +109,22 @@ $selected_blocks   = $selected_date && isset( $blocked_dates[ $selected_date ] )
                         $url = add_query_arg( array( 'page' => 'mathlin-calendar', 'cal_year' => $year, 'cal_month' => $month, 'cal_date' => $date_str ) );
 
                         echo '<td class="' . esc_attr( $classes ) . '">';
-                        echo '<a href="' . esc_url( $url ) . '" class="nms-cal-day-link">';
+                        $day_label = $date_str . ': ' . $count . ' booking' . ( $count === 1 ? '' : 's' ) . ( $is_blocked ? ', blocked spaces' : '' );
+                        echo '<a href="' . esc_url( $url ) . '" class="nms-cal-day-link" aria-label="' . esc_attr( $day_label ) . '"' . ( $is_selected ? ' aria-current="date"' : '' ) . '>';
                         echo '<span class="nms-cal-day-num">' . $day . '</span>';
                         if ( $count > 0 ) {
                             echo '<span class="nms-cal-badge">' . $count . '</span>';
                         }
                         if ( $is_blocked ) {
-                            echo '<span class="nms-cal-blocked-badge">🚫</span>';
+                            echo '<span class="nms-cal-blocked-badge">Blocked spaces</span>';
+                        }
+                        if ( $has_bookings ) {
+                            echo '<span class="nms-cal-previews" aria-hidden="true">';
+                            foreach ( array_slice( $by_date[ $date_str ], 0, 2 ) as $preview ) {
+                                echo '<span class="nms-cal-preview">' . esc_html( $preview->space ) . '</span>';
+                            }
+                            if ( $count > 2 ) echo '<span class="nms-cal-preview nms-muted">+' . ( $count - 2 ) . ' more</span>';
+                            echo '</span>';
                         }
                         echo '</a>';
                         echo '</td>';
@@ -137,9 +160,9 @@ $selected_blocks   = $selected_date && isset( $blocked_dates[ $selected_date ] )
                     <p class="nms-muted">No bookings on this day.</p>
                 <?php else : ?>
                     <?php foreach ( $selected_bookings as $b ) :
-                        $spaces   = MBS_Bookings::get_spaces();
-                        $is_daily = isset( $spaces[ $b->space ] ) && $spaces[ $b->space ]['unit'] === 'day';
-                        $time_str = $is_daily ? 'All day' : $b->start_time . ' – ' . $b->end_time;
+                        $is_daily = ! empty( $b->all_day );
+                        $interval = class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ? MBS_Campsite_Policy::interval( $b, $selected_date ) : array( $b->start_time, $b->end_time );
+                        $time_str = $is_daily ? 'All day' : substr( $interval[0], 0, 5 ) . ' – ' . substr( $interval[1], 0, 5 );
                     ?>
                     <div class="nms-cal-booking-card">
                         <div class="nms-cal-booking-header">
@@ -149,11 +172,12 @@ $selected_blocks   = $selected_date && isset( $blocked_dates[ $selected_date ] )
                         <?php if ( $b->organisation ) : ?>
                             <div class="nms-muted"><?php echo esc_html( $b->organisation ); ?></div>
                         <?php endif; ?>
+                        <div class="nms-muted"><?php echo esc_html( $b->ref ); ?><?php if ( ! empty( $b->booking_date_end ) && $b->booking_date_end !== $b->booking_date ) echo ' · ' . esc_html( $b->booking_date . ' – ' . $b->booking_date_end ); ?></div>
                         <div class="nms-cal-booking-details">
                             <span>📍 <?php echo esc_html( $b->space ); ?></span>
                             <span>🕐 <?php echo esc_html( $time_str ); ?></span>
                             <span>👥 <?php echo esc_html( $b->attendees ); ?> people</span>
-                            <span>💷 &pound;<?php echo number_format( $b->amount, 2 ); ?></span>
+                            <?php if ( MBS_Payment_Features::enabled() ) : ?><span>💷 &pound;<?php echo number_format( $b->amount, 2 ); ?></span><?php endif; ?>
                         </div>
                         <div class="nms-cal-booking-purpose"><?php echo esc_html( $b->purpose ); ?></div>
                         <a href="?page=mathlin-booking&action=view&ref=<?php echo esc_attr( $b->ref ); ?>" class="button button-small">View Full Booking</a>
