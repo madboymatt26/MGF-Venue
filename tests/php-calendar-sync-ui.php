@@ -13,8 +13,8 @@ foreach(['review','linked','estate','history','settings'] as $tab){
         verify(strpos($html,'6 Google records with the same visible details')!==false,'Repeated Google records grouped');
         verify(strpos($html,'6 MGF reservations share these candidates')!==false,'Related reservations grouped');
         verify(strpos($html,'29 display groups')!==false,'Group count separate from reservation total');
-        verify(substr_count($html,'name="choice[family')===6,'All six independent reference choices retained');
-        verify(strpos($html,'<optgroup label=')!==false,'Dropdown options organised into labelled groups');
+        verify(substr_count($html,'name="choice[family')===36,'Each reservation exposes all six independently selectable Google area references');
+        verify(strpos($html,'type="checkbox" name="choice[family1][]"')!==false,'Multi-reference checkboxes replace indistinguishable dropdown options');
         verify(strpos($html,'Open in Google')!==false,'Underlying records inspectable');
         verify(strpos($html,'explicitly keep both')===false,'Obsolete duplicate-creation wording removed');
         verify(strpos($html,'24 Oct 2026 – 26 Oct 2026')!==false,'Inclusive all-day date labels');

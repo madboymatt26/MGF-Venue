@@ -1,6 +1,7 @@
 <?php
 /** Protected, add-only Google projection. Existing estate events are never rewritten or deleted. */
 if ( ! defined( 'ABSPATH' ) ) exit;
+require_once __DIR__ . '/class-calendar-reference-links.php';
 
 class MBS_Google_Calendar {
     const OPTION = 'mbs_google_calendar';
@@ -165,7 +166,8 @@ class MBS_Google_Calendar {
 
     /** Minimal public fields only; intentionally never exports contact/name/purpose/notes. */
     public static function project( $rows, $pending, $site, $calendar, $zone, $today, $colour_settings = array(), $campsite = false ) {
-        $desired = array(); $source = array();
+        $desired = array(); $source = array(); $legacy = array(); $imports = array(); $row_map = array();
+        foreach ( $rows as $row ) { $row = (object) $row; $row_map[$row->ref] = $row; }
         $colour_rules = self::colour_settings( $colour_settings );
         foreach ( $rows as $row ) {
             $b = (object) $row; $ref = (string) $b->ref;
@@ -195,11 +197,13 @@ class MBS_Google_Calendar {
                     $desired[$key] = array( 'id' => 'mgf' . hash( 'sha256', $site . '|' . $calendar . '|' . $key ), 'summary' => function_exists( 'mb_substr' ) ? mb_substr( $summary, 0, 250 ) : $summary, 'start' => $start, 'end' => $end, 'status' => $b->status === 'pending' ? 'tentative' : 'confirmed', 'transparency' => 'opaque', 'extendedProperties' => array( 'private' => array( 'mgf_site' => $site, 'mgf_booking' => $key, 'mgf_ref' => $ref ) ) );
                     $colour = self::booking_colour( $b, $colour_rules, $campsite );
                     if ( $colour !== '' ) $desired[$key]['colorId'] = $colour;
+                    $legacy[$key] = MBS_Calendar_Reference_Links::leaves( $b, $row_map );
+                    $imports[$key] = isset( $meta['_mbs_legacy'] ) || isset( $meta['_mbs_whole_park_sources'] ) || isset( $meta['_mbs_multiday_sources'] );
                 }
                 if ( $continuous || ! empty( $b->all_day ) ) break;
             }
         }
-        ksort( $desired ); return array( 'desired' => $desired, 'source' => $source );
+        ksort( $desired ); return array( 'desired' => $desired, 'source' => $source, 'legacy' => $legacy, 'imports' => $imports );
     }
     private static function date( $text, $zone ) {
         $d = DateTimeImmutable::createFromFormat( '!Y-m-d', (string) $text, $zone );
@@ -236,7 +240,10 @@ class MBS_Google_Calendar {
     }
     public static function estate_only( $snapshot ) {
         $linked = array();
-        foreach ( $snapshot['ops'] as $op ) if ( $op['event'] ) $linked[$op['event']['id']] = true;
+        foreach ( $snapshot['ops'] as $op ) {
+            if ( $op['event'] ) $linked[$op['event']['id']] = true;
+            foreach ( $op['linked_events'] ?? array() as $e ) $linked[$e['id']] = true;
+        }
         return array_values( array_filter( $snapshot['events'], static function( $e ) use ( $linked ) { return ! isset( $linked[$e['id']] ) && ( $e['status'] ?? '' ) !== 'cancelled'; } ) );
     }
 
@@ -251,11 +258,20 @@ class MBS_Google_Calendar {
         foreach ( $projection['desired'] as $key => $want ) {
             $matches = $owned[$key] ?? array(); unset( $owned[$key] );
             $op = array( 'key' => $key, 'ref' => $want['extendedProperties']['private']['mgf_ref'], 'want' => $want, 'action' => 'create', 'event' => null, 'candidates' => array(), 'reason' => '' );
+            $op['source_evidence'] = hash( 'sha256', wp_json_encode( $projection['legacy'][$key] ?? array() ) );
+            $op['original_sources'] = array_values( $projection['legacy'][$key] ?? array() );
             if ( isset( $links[$key] ) ) {
-                $link = $links[$key]; $event = $ids[$link['id']] ?? null;
+                $link = $links[$key]; $records = MBS_Calendar_Reference_Links::records( $link ); $event = $ids[$link['id']] ?? null;
+                $op['linked_events'] = array();
                 $op['event'] = $event; $op['action'] = 'matched'; $op['reason'] = 'Protected link; Google entry is retained unchanged.';
-                if ( ! $event || ( $event['status'] ?? '' ) === 'cancelled' ) { $op['action'] = 'blocked'; $op['reason'] = 'Linked Google event missing or deleted. Never recreate automatically.'; }
-                elseif ( empty( $link['source_hash'] ) || $link['source_hash'] !== self::source_hash( $want ) || empty( $link['google_hash'] ) || $link['google_hash'] !== self::event_hash( $event ) ) { $op['action'] = 'difference'; $op['reason'] = 'Booking or estate entry changed. Google wins; review without overwriting it.'; }
+                foreach ( $records as $id => $hash ) {
+                    $e = $ids[$id] ?? null;
+                    if ( ! $e || ( $e['status'] ?? '' ) === 'cancelled' ) { $op['action'] = 'blocked'; $op['reason'] = 'A linked Google area event is missing/deleted. Never recreate automatically.'; break; }
+                    $op['linked_events'][] = $e;
+                    if ( ! $hash || $hash !== self::event_hash( $e ) ) $op['action'] = 'difference';
+                }
+                if ( $op['action'] !== 'blocked' && ( empty( $link['source_hash'] ) || $link['source_hash'] !== self::source_hash( $want ) || $op['action'] === 'difference' ) ) { $op['action'] = 'difference'; $op['reason'] = 'Booking or linked estate entry changed. Google wins; review the complete linked set without overwriting it.'; }
+                if ( $op['action'] === 'matched' && isset( $link['source_evidence'] ) && $link['source_evidence'] !== $op['source_evidence'] ) { $op['action'] = 'difference'; $op['reason'] = 'Original reservation evidence changed. Review every link; Google remains unchanged.'; }
             }
             elseif ( count( $matches ) > 1 ) { $op['action'] = 'blocked'; $op['reason'] = 'Multiple linked events: review in Google Calendar.'; }
             elseif ( count( $matches ) === 1 ) {
@@ -266,8 +282,9 @@ class MBS_Google_Calendar {
             } elseif ( isset( $ids[$want['id']] ) ) { $op['action'] = 'blocked'; $op['reason'] = 'Reserved event ID already exists without the expected link.'; }
             else {
                 foreach ( $manual as $e ) if ( self::overlaps( $want, $e ) ) $op['candidates'][] = $e;
-                if ( $op['candidates'] ) { $op['action'] = 'review'; $op['reason'] = 'Existing calendar event overlaps. Choose a match or explicitly keep both.'; }
+                if ( $op['candidates'] || ! empty( $projection['imports'][$key] ) || ! empty( $projection['legacy'][$key] ) ) { $op['action'] = 'review'; $op['reason'] = 'Review existing Google area events. Imported reservations are never blindly added again.'; }
             }
+            if ( $op['action'] === 'review' ) $op['recommendation'] = MBS_Calendar_Reference_Links::recommend( $projection['legacy'][$key] ?? array(), $op['candidates'], $want );
             $ops[] = $op;
         }
         foreach ( $owned as $key => $events_for_key ) foreach ( $events_for_key as $e ) {
@@ -280,7 +297,7 @@ class MBS_Google_Calendar {
         }
         foreach ( $links as $key => $link ) {
             if ( ( $link['until'] ?? '' ) < $today || isset( $projection['desired'][$key] ) || isset( $owned[$key] ) ) continue;
-            $ops[] = array( 'key' => $key, 'ref' => $link['ref'], 'want' => null, 'action' => 'retained', 'event' => $ids[$link['id']] ?? null, 'candidates' => array(), 'reason' => 'No current exported booking. Protected estate entry retained; manual review required.' );
+            $ops[] = array( 'key' => $key, 'ref' => $link['ref'], 'want' => null, 'action' => 'retained', 'event' => $ids[$link['id']] ?? null, 'linked_events' => array_values( array_intersect_key( $ids, MBS_Calendar_Reference_Links::records( $link ) ) ), 'candidates' => array(), 'reason' => 'No current exported booking. All protected estate entries retained; manual review required.' );
         }
         foreach ( $ops as &$op ) $op['hash'] = hash( 'sha256', wp_json_encode( $op ) ); unset( $op );
         return $ops;
@@ -294,11 +311,14 @@ class MBS_Google_Calendar {
         $present = array_fill_keys( array_column( $events, 'id' ), true );
         // Remember protected references too. A missing estate event never silently creates a duplicate.
         foreach ( (array) ( $s['links'] ?? array() ) as $key => $link ) {
-            if ( isset( $present[$link['id']] ) || ( $link['until'] ?? '' ) < $today ) continue;
-            $event = self::api( 'GET', self::events_path() . '/' . rawurlencode( $link['id'] ), null, '', true );
+          foreach ( MBS_Calendar_Reference_Links::records( $link ) as $id => $hash ) {
+            if ( isset( $present[$id] ) || ( $link['until'] ?? '' ) < $today ) continue;
+            $event = self::api( 'GET', self::events_path() . '/' . rawurlencode( $id ), null, '', true );
             $tags = array( 'mgf_site' => self::site_key(), 'mgf_booking' => $key, 'mgf_ref' => $link['ref'] );
-            if ( ! $event ) $event = array( 'id' => $link['id'], 'status' => 'cancelled', 'extendedProperties' => array( 'private' => $tags ), 'end' => array( 'date' => $link['until'] ) );
+            if ( ! $event ) $event = array( 'id' => $id, 'status' => 'cancelled', 'extendedProperties' => array( 'private' => $tags ), 'end' => array( 'date' => $link['until'] ) );
             $events[] = $event;
+            $present[$id] = true;
+          }
         }
         foreach ( $projection['desired'] as $want ) if ( substr( $want['end']['date'] ?? $want['end']['dateTime'], 0, 10 ) >= $midnight->modify( '+5 years' )->format( 'Y-m-d' ) ) self::error( 'A booking is outside the five-year calendar review window. Review the booking before syncing.' );
         usort( $events, function( $a, $b ) { return strcmp( $a['id'], $b['id'] ); } );
@@ -311,32 +331,80 @@ class MBS_Google_Calendar {
     }
     private static function unlock() { delete_option( 'mbs_gcal_lock' ); }
     private static function fingerprint( $snapshot ) { $s = self::settings(); return hash( 'sha256', wp_json_encode( array( $s['calendar'] ?? '', ! empty( $s['pending'] ), $snapshot ) ) ); }
+    private static function reviewed_choices( $ops, $input ) {
+        $choices = array(); $claimed = array();
+        foreach ( $ops as $item ) {
+            $values = (array) ( $input[$item['hash']] ?? array() );
+            $available = array_column( $item['action'] === 'difference' ? ( $item['linked_events'] ?? array_filter( array( $item['event'] ) ) ) : $item['candidates'], null, 'id' );
+            foreach ( $values as $choice ) {
+                if ( ! is_string( $choice ) || strpos( $choice, 'protect:' ) !== 0 || ! isset( $available[substr( $choice, 8 )] ) ) self::error( 'Invalid Google reference selection. Refresh comparison.' );
+                if ( isset( $claimed[$choice] ) && $claimed[$choice] !== $item['key'] ) self::error( 'A Google record cannot be assigned to two different booking occurrences.' );
+                $claimed[$choice] = $item['key'];
+            }
+            if ( $values && $item['action'] === 'difference' && count( array_unique( $values ) ) !== count( $available ) ) self::error( 'Acknowledge the complete existing linked set; no area links may be silently dropped.' );
+            if ( $values ) $choices[$item['hash']] = array_values( array_unique( $values ) );
+        }
+        if ( array_diff( array_keys( $input ), array_column( $ops, 'hash' ) ) ) self::error( 'Stale booking selection. Refresh comparison.' );
+        return $choices;
+    }
+    /** Narrow administrator MCP parity: explicit preview/commit; never exposes descriptions or tokens. */
+    public static function reviewed_sync( $input ) {
+        if ( ! current_user_can( 'manage_options' ) || ! is_array( $input ) ) return new WP_Error( 'calendar_sync', 'Administrator review required.' );
+        try { self::lock(); } catch ( Throwable $e ) { return new WP_Error( 'calendar_sync', $e->getMessage() ); }
+        try {
+            if ( array_diff( array_keys( $input ), array( 'operation','fingerprint','confirm','choices' ) ) ) self::error( 'Unknown calendar review input.' );
+            $operation = $input['operation'] ?? 'preview';
+            if ( ! in_array( $operation, array( 'preview','reconcile','enable' ), true ) ) self::error( 'Unknown calendar review operation.' );
+            $snapshot = self::snapshot(); $fingerprint = self::fingerprint( $snapshot );
+            if ( $operation !== 'preview' ) {
+                if ( ( $input['confirm'] ?? false ) !== true || ! is_string( $input['fingerprint'] ?? null ) || ! hash_equals( $fingerprint, $input['fingerprint'] ) ) self::error( 'Confirm a fresh unchanged calendar comparison.' );
+                $choices = self::reviewed_choices( $snapshot['ops'], $input['choices'] ?? array() );
+                $s = self::settings(); $s['enabled'] = false; $s['policy'] = 'protected-v1'; $s['choices'] = array(); self::save( $s );
+                $result = self::execute( $snapshot['ops'], $choices, $operation === 'enable' );
+                $s = self::settings(); $s['enabled'] = $operation === 'enable'; $s['last_attempt'] = $s['last_success'] = gmdate( DATE_RFC3339 ); $s['last_result'] = $result['completed'] . ' completed; ' . $result['needs_review'] . ' need review; ' . $result['remaining'] . ' queued. Existing Google entries unchanged.'; self::save( $s );
+                return array( 'status' => self::status(), 'result' => $result );
+            }
+            $inventory = array(); foreach ( $snapshot['events'] as $event ) $inventory[$event['id']] = self::event_hash( $event );
+            return array( 'status' => self::status(), 'fingerprint' => $fingerprint, 'google_inventory' => $inventory, 'items' => array_map( static function( $op ) {
+                return array( 'hash' => $op['hash'], 'ref' => $op['ref'], 'key' => $op['key'], 'action' => $op['action'], 'reason' => $op['reason'], 'booking' => self::display_event( $op['want'] ), 'original_sources' => $op['original_sources'] ?? array(), 'recommendation' => $op['recommendation'] ?? null,
+                    'linked_ids' => array_column( $op['linked_events'] ?? array_filter( array( $op['event'] ) ), 'id' ),
+                    'candidates' => array_map( static function( $e ) { return array_merge( self::display_event( $e ), array( 'id' => $e['id'], 'legacy_id' => MBS_Calendar_Reference_Links::event_legacy_id( $e ) ) ); }, $op['candidates'] ) );
+            }, $snapshot['ops'] ) );
+        } catch ( Throwable $e ) { return new WP_Error( 'calendar_sync', $e->getMessage() ); }
+        finally { self::unlock(); }
+    }
     private static function execute( $ops, $choices = array(), $allow_create = true ) {
         $done = 0; $blocked = 0; $checked = 0; $used = array();
-        foreach ( (array) ( self::settings()['links'] ?? array() ) as $key => $link ) $used[$link['id']] = $key;
+        foreach ( (array) ( self::settings()['links'] ?? array() ) as $key => $link ) foreach ( MBS_Calendar_Reference_Links::records( $link ) as $id => $hash ) $used[$id] = $key;
         foreach ( $ops as $op ) {
             if ( $allow_create && $done >= 20 ) break;
             $checked++;
             $action = $op['action']; $event = $op['event'];
-            if ( $action === 'difference' && $event && isset( $choices[$op['hash']] ) ) { $action = 'review'; $op['candidates'] = array( $event ); }
+            $selected = array();
+            if ( $action === 'difference' && $event && isset( $choices[$op['hash']] ) ) { $action = 'review'; $op['candidates'] = $op['linked_events'] ?? array( $event ); }
             if ( $action === 'matched' ) continue;
             if ( ! in_array( $action, array( 'create', 'review' ), true ) ) { $blocked++; continue; }
             if ( $action === 'review' ) {
-                $choice = $choices[$op['hash']] ?? '';
-                if ( strpos( $choice, 'protect:' ) === 0 ) {
-                    foreach ( $op['candidates'] as $candidate ) if ( $candidate['id'] === substr( $choice, 8 ) && ( $candidate['status'] ?? '' ) !== 'cancelled' && ( ! isset( $used[$candidate['id']] ) || $used[$candidate['id']] === $op['key'] ) ) { $event = $candidate; $action = 'protect'; break; }
-                    if ( $action === 'review' ) { $blocked++; continue; }
-                } else { $blocked++; continue; }
+                $choices_for_op = (array) ( $choices[$op['hash']] ?? array() );
+                foreach ( $choices_for_op as $choice ) {
+                    if ( ! is_string( $choice ) || strpos( $choice, 'protect:' ) !== 0 ) continue;
+                    foreach ( $op['candidates'] as $candidate ) if ( $candidate['id'] === substr( $choice, 8 ) && ( $candidate['status'] ?? '' ) !== 'cancelled' && ( ! isset( $used[$candidate['id']] ) || $used[$candidate['id']] === $op['key'] ) ) $selected[$candidate['id']] = $candidate;
+                }
+                if ( ! $selected || count( $selected ) !== count( array_unique( $choices_for_op ) ) ) { $blocked++; continue; }
+                $action = 'protect'; $event = reset( $selected );
             }
             if ( $action === 'create' && ! $allow_create ) continue;
             // Revalidate changeable booking facts immediately before each write.
             $s = self::settings();
             $fresh = self::project( self::bookings(), ! empty( $s['pending'] ), self::site_key(), $s['calendar'], wp_timezone(), wp_date( 'Y-m-d' ), $s, ! empty( get_option( 'mbs_campsite_mode', false ) ) );
             if ( $op['want'] !== ( $fresh['desired'][$op['key']] ?? null ) ) self::error( 'A booking changed during sync. Preview again; already completed operations are retained.' );
+            if ( isset( $op['source_evidence'] ) && $op['source_evidence'] !== hash( 'sha256', wp_json_encode( $fresh['legacy'][$op['key']] ?? array() ) ) ) self::error( 'Original area provenance changed during review. Refresh comparison.' );
             if ( $action === 'protect' ) {
+              foreach ( $selected as $event ) {
                 $current = self::api( 'GET', self::events_path() . '/' . rawurlencode( $event['id'] ), null, '', true );
                 if ( ! $current || self::event_hash( $current ) !== self::event_hash( $event ) ) self::error( 'Estate event changed. Refresh the read-only comparison before saving a match.' );
                 $used[$event['id']] = $op['key'];
+              }
             } else {
                 // Recheck the target interval just before insertion. A newly added estate event blocks it.
                 list( $start_at, $end_at ) = self::endpoints( $op['want'] );
@@ -350,6 +418,8 @@ class MBS_Google_Calendar {
             $done++;
             $s = self::settings(); $s['has_written'] = ! empty( $s['has_written'] ) || $action === 'create';
             $s['links'][$op['key']] = array( 'id' => $event['id'], 'ref' => $op['ref'], 'origin' => $action === 'protect' ? 'estate' : 'mgf', 'source_hash' => self::source_hash( $op['want'] ), 'google_hash' => self::event_hash( $event ), 'until' => substr( $op['want']['end']['date'] ?? $op['want']['end']['dateTime'], 0, 10 ) );
+            if ( $action === 'protect' ) { $s['links'][$op['key']]['events'] = array(); foreach ( $selected as $e ) $s['links'][$op['key']]['events'][$e['id']] = self::event_hash( $e ); }
+            if ( $action === 'protect' ) $s['links'][$op['key']]['source_evidence'] = $op['source_evidence'];
             self::save( $s );
             self::record( $action, $op['ref'], $action === 'protect' ? 'Protected reference saved; Google unchanged.' : 'Created one MGF event; existing estate events unchanged.' );
         }
@@ -410,13 +480,7 @@ class MBS_Google_Calendar {
                 $preview = get_transient( 'mbs_gcal_preview_' . get_current_user_id() );
                 $snapshot = self::snapshot();
                 if ( ! $preview || ! hash_equals( $preview['fingerprint'], self::fingerprint( $snapshot ) ) ) self::error( 'The preview expired or booking/calendar data changed. Generate a fresh preview.' );
-                $choices = array(); $claimed = array();
-                foreach ( $snapshot['ops'] as $item ) {
-                    $choice = sanitize_text_field( wp_unslash( $_POST['choice'][$item['hash']] ?? '' ) );
-                    if ( $choice && strpos( $choice, 'protect:' ) !== 0 ) self::error( 'Unsupported or old review choice. Generate a fresh protected preview.' );
-                    if ( strpos( $choice, 'protect:' ) === 0 ) { if ( isset( $claimed[$choice] ) ) self::error( 'An existing event cannot be linked to two bookings.' ); $claimed[$choice] = true; }
-                    if ( $choice ) $choices[$item['hash']] = $choice;
-                }
+                $choices = self::reviewed_choices( $snapshot['ops'], wp_unslash( $_POST['choice'] ?? array() ) );
                 $s['choices'] = $choices; $s['policy'] = 'protected-v1'; $s['enabled'] = false; self::save( $s );
                 $result = self::execute( $snapshot['ops'], $choices, $op === 'apply' );
                 $s = self::settings(); $s['enabled'] = $op === 'apply'; $s['last_attempt'] = $s['last_success'] = gmdate( DATE_RFC3339 ); $s['last_result'] = $result['completed'] . ' completed; ' . $result['needs_review'] . ' need review; ' . $result['remaining'] . ' queued. Existing Google entries unchanged.'; self::save( $s );
