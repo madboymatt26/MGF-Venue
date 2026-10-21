@@ -55,6 +55,13 @@ $op = actual_ops( array( $overlap ) )[0]; $one = $overlap; $two = $overlap; $two
 $op['action'] = 'matched'; $op['event'] = $one; $op['linked_events'] = array( $one, $two );
 $view = invoke( 'booking_view', 'MBS-F1', array( 'ops' => array( $op ) ) );
 check( count( $view['events'] ) === 2 && ! $view['can_sync'], 'Multiple protected area events displayed once each, never mutated.' );
+$op['event'] = null; $op['linked_events'][0]['description'] = 'WPBC: 123';
+$op['original_sources'] = array( (object) array( 'space' => 'Cabin', 'custom_fields' => '{"_mbs_legacy":{"booking_id":123}}' ) );
+$view = invoke( 'booking_view', 'MBS-F1', array( 'ops' => array( $op ) ) );
+check( strpos( $view['events'][0]['summary'], 'Cabin — ' ) === 0 && strpos( $view['events'][0]['summary'], '24 Oct 2026' ) !== false, 'Original area and venue-local dates distinguish linked entries without exposing descriptions.' );
+$op['linked_events'] = array( array( 'id' => 'missing-event', 'status' => 'cancelled' ) );
+$view = invoke( 'booking_view', 'MBS-F1', array( 'ops' => array( $op ) ) );
+check( strpos( $view['events'][0]['summary'], 'Dates unavailable' ) !== false, 'Missing Google event never displays an invented current date.' );
 foreach ( array( 'javascript:alert(1)', 'https://evil.test/calendar/event', 'https://www.google.com.evil.test/calendar/event', 'https://www.google.com/url?q=evil', 'https://user@www.google.com/calendar/event' ) as $url ) check( MBS_Google_Calendar::event_url( array( 'htmlLink' => $url ) ) === '', 'Untrusted event URL rejected.' );
 card_ready(); $calendar_admin = false; $requests = array();
 check( MBS_Google_Calendar::booking_sync( 'MBS-F1' ) instanceof WP_Error && ! $requests, 'Nonadministrator denied before any Google access.' );

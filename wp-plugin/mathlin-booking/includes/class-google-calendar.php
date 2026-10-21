@@ -473,6 +473,7 @@ class MBS_Google_Calendar {
                 }
                 $dates = '';
                 try {
+                    if ( empty( $event['start']['date'] ) && empty( $event['start']['dateTime'] ) || empty( $event['end']['date'] ) && empty( $event['end']['dateTime'] ) ) throw new RuntimeException( 'Missing event dates.' );
                     $a = new DateTimeImmutable( $event['start']['date'] ?? $event['start']['dateTime'], wp_timezone() );
                     $z = new DateTimeImmutable( $event['end']['date'] ?? $event['end']['dateTime'], wp_timezone() );
                     if ( isset( $event['start']['date'] ) ) $dates = $a->format( 'j M Y' ) . ' – ' . $z->modify( '-1 day' )->format( 'j M Y' ) . ' · All day';
