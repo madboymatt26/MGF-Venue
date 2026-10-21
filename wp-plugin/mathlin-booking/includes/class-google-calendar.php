@@ -265,14 +265,17 @@ class MBS_Google_Calendar {
             if ( ( $p['mgf_site'] ?? '' ) === $site && ! empty( $p['mgf_booking'] ) ) $owned[$p['mgf_booking']][] = $e;
             elseif ( ( $e['status'] ?? '' ) !== 'cancelled' ) $manual[] = $e;
         }
-        $link_keys = array(); $aliases = array();
+        $link_keys = array(); $aliases = array(); $rekey_reviews = array();
         if ( ! empty( $settings['managed_updates'] ) ) {
             $by_ref = array(); foreach ( $projection['desired'] as $key => $want ) $by_ref[$want['extendedProperties']['private']['mgf_ref']][] = $key;
             $owned_links = array(); foreach ( $links as $key => $link ) if ( ( $link['origin'] ?? '' ) === 'mgf' ) $owned_links[$link['ref']][] = $key;
             foreach ( $by_ref as $ref => $keys ) if ( count( $keys ) === 1 && count( $owned_links[$ref] ?? array() ) === 1 ) {
                 $new_key = $keys[0]; $old_key = $owned_links[$ref][0]; $link = $links[$old_key];
-                if ( $new_key !== $old_key && ! isset( $links[$new_key] ) && ! isset( $projection['desired'][$old_key] ) && self::managed_owner( $ids[$link['id']] ?? null, $link, $old_key, $site, $settings['calendar'] ?? '' ) ) {
-                    $links[$new_key] = $link; $link_keys[$new_key] = $old_key; $aliases[$old_key] = true; unset( $owned[$old_key] );
+                if ( $new_key !== $old_key && ! isset( $links[$new_key] ) && ! isset( $projection['desired'][$old_key] ) ) {
+                    $old_event = $ids[$link['id']] ?? null;
+                    if ( self::managed_owner( $old_event, $link, $old_key, $site, $settings['calendar'] ?? '' ) && ( $link['google_hash'] ?? '' ) === self::event_hash( $old_event ) ) {
+                        $links[$new_key] = $link; $link_keys[$new_key] = $old_key; $aliases[$old_key] = true; unset( $owned[$old_key] );
+                    } else $rekey_reviews[$new_key] = true;
                 }
             }
         }
@@ -313,6 +316,7 @@ class MBS_Google_Calendar {
                 foreach ( $manual as $e ) if ( self::overlaps( $want, $e ) ) $op['candidates'][] = $e;
                 if ( $op['candidates'] || ! empty( $projection['imports'][$key] ) || ! empty( $projection['legacy'][$key] ) ) { $op['action'] = 'review'; $op['reason'] = 'Review existing Google area events. Imported reservations are never blindly added again.'; }
             }
+            if ( isset( $rekey_reviews[$key] ) ) { $op['action'] = 'blocked'; $op['reason'] = 'The prior MGF event is missing, independently edited or no longer safely owned. Review the date move; never create a replacement blindly.'; }
             if ( $op['action'] === 'review' ) $op['recommendation'] = MBS_Calendar_Reference_Links::recommend( $projection['legacy'][$key] ?? array(), $op['candidates'], $want );
             $ops[] = $op;
         }
