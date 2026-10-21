@@ -44,6 +44,7 @@ try {
     $before_repair=[];
     foreach(['SCOUT'=>'Scout Group','ESTATE'=>'Estate','HP'=>'HP Business','SENT'=>'Scout Group']as$tag=>$org){
         $copy=(array)$booking;unset($copy['id']);$copy['ref']='MBS-AR-'.strtoupper(wp_generate_password(8,false,false));$copy['organisation']=$org;$copy['notes']='';$copy['access_sent']=1;$copy['status']='confirmed';$copy['custom_fields']=wp_json_encode(['_mbs_legacy'=>['plugin'=>'wpbc']]);
+        $copy['updated_at']='2020-01-01 00:00:00'; // Make ON UPDATE drift observable even when the test completes within one second.
         access_ok($wpdb->insert($wpdb->prefix.MBS_TABLE,$copy)===1,'Insert isolated repair fixture: '.$wpdb->last_error);$repair_refs[]=$copy['ref'];$before_repair[$tag]=MBS_Bookings::get($copy['ref']);
     }
     MBS_Audit_Log::log($before_repair['SENT']->ref,'access_sent','Synthetic prior acceptance');
