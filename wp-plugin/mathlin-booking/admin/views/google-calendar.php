@@ -1,6 +1,7 @@
 <?php
 if ( ! defined( 'ABSPATH' ) ) exit;
 require_once MBS_PLUGIN_DIR . 'includes/class-calendar-sync-view.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-calendar-reference-links.php';
 $tabs = array( 'review' => 'Needs review', 'linked' => 'Linked entries', 'estate' => 'Estate-only entries', 'history' => 'History', 'settings' => 'Connection settings' );
 $tab = sanitize_key( $_GET['sync_view'] ?? 'review' ); if ( ! isset( $tabs[$tab] ) ) $tab = 'review';
 $snapshot = $preview['snapshot'] ?? array( 'ops' => array(), 'events' => array() );
@@ -35,6 +36,8 @@ $print_groups = static function( $events ) use ( $print_event ) {
         echo '<details><summary>Inspect ' . (int) $count . ' individual Google record' . ( $count === 1 ? '' : 's' ) . '</summary><ul class="sync-records">';
         foreach ( $group['records'] as $i => $record ) {
             echo '<li><strong>Record ' . (int) ( $i + 1 ) . '</strong> · <code>' . esc_html( $record['id'] ?? 'ID unavailable' ) . '</code>';
+            $original = MBS_Calendar_Reference_Links::event_legacy_id( $record );
+            if ( $original ) echo '<br>Original booking: <strong>' . esc_html( $original ) . '</strong>';
             $url = MBS_Calendar_Sync_View::google_url( $record );
             if ( $url ) echo ' · <a target="_blank" rel="noopener noreferrer" href="' . esc_url( $url ) . '">Open in Google</a>';
             echo '</li>';
@@ -88,8 +91,8 @@ $print_groups = static function( $events ) use ( $print_event ) {
 <?php foreach ( $display as $group ) $print_groups( $group['records'] ); ?>
 <?php if ( ! $items ) : ?><p>No unlinked estate entries in this comparison window.</p><?php endif; ?>
 <?php else : ?>
-<p><?php echo $tab === 'linked' ? 'Protected references. Differences appear under Needs review; linked entries are never overwritten.' : 'Bookings sharing the same Google candidate records are shown together. This is a display group, not a confirmed event match. Saving individual references makes no Google edits and leaves sync paused.'; ?></p>
-<?php if ( $tab === 'review' ) : ?><p class="sync-safety">Repeated-looking Google records are not interchangeable. Inspect their IDs and Google details before choosing an individual reference. If identity is uncertain, leave the group unresolved. Group-wide or many-to-many linking is not performed here.</p><?php endif; ?>
+<p><?php echo $tab === 'linked' ? 'Protected references. One MGF reservation may link to several original Google area events. Differences appear under Needs review; all linked events remain unchanged.' : 'Select all Google area records belonging to each MGF reservation. Original booking references distinguish repeated-looking records. Saving references makes no Google edits and leaves sync paused.'; ?></p>
+<?php if ( $tab === 'review' ) : ?><p class="sync-safety">Recommendations require unique original references and matching dates/times for every imported area reservation. Differences and uncertain matches stay unresolved. Imported bookings are not automatically added again.</p><?php endif; ?>
 <?php if ( $tab === 'review' ) self::form_start( 'reconcile' ); ?>
 <div class="sync-table"><table class="widefat striped"><thead><tr><th>MGF reservations</th><th>Google candidate groups</th><th>Review / individual references</th></tr></thead><tbody>
 <?php foreach ( $display as $booking_group ) : $first = $booking_group['items'][0]; $group_count = count( $booking_group['items'] ); ?><tr>
@@ -98,15 +101,19 @@ $print_groups = static function( $events ) use ( $print_event ) {
 <ul class="sync-bookings"><?php foreach ( $booking_group['items'] as $item ) : ?><li><a href="<?php echo esc_url( admin_url( 'admin.php?page=mathlin-booking&s=' . rawurlencode( $item['ref'] ) ) ); ?>"><?php echo esc_html( $item['ref'] ); ?></a><br><?php $print_event( $item['want'] ); ?></li><?php endforeach; ?></ul>
 <?php if ( $group_count > 1 ) : ?></details><?php endif; ?>
 </td>
-<td><?php if ( $booking_group['candidates'] ) { $print_groups( $booking_group['candidates'] ); } else { $print_event( $first['event'] ); } ?></td>
+<td><?php if ( $booking_group['candidates'] ) { $print_groups( $booking_group['candidates'] ); } elseif ( ! empty( $first['linked_events'] ) ) { $print_groups( $first['linked_events'] ); } else { $print_event( $first['event'] ); } ?></td>
 <td><span class="sync-badge"><?php echo $group_count > 1 ? 'Shared candidates — review required' : esc_html( ucfirst( $first['action'] ) ); ?></span>
 <?php if ( $first['action'] === 'review' ) : ?><p>Not linked yet. An overlap is not proof of identity. Compare names, areas and dates; keep any differences visible.</p><?php else : ?><p><?php echo esc_html( $first['reason'] ); ?></p><?php endif; ?>
-<?php if ( $group_count > 1 ) : ?><details><summary>Review individual links (advanced)</summary><p>No group-wide link will be saved. Leave unresolved unless a specific record is justified.</p><?php endif; ?>
+<?php if ( $group_count > 1 ) : ?><details><summary>Review links for each reservation</summary><p>Select each reservation's original area records, not every overlapping event.</p><?php endif; ?>
 <?php foreach ( $booking_group['items'] as $item ) : ?><div class="sync-choice">
-<?php if ( $item['action'] === 'review' ) : ?><label><?php echo esc_html( $item['ref'] ); ?> — individual reference<select aria-label="<?php echo esc_attr( $item['ref'] . ' individual reference' ); ?>" name="choice[<?php echo esc_attr( $item['hash'] ); ?>]"><option value="">Leave unresolved — preserve Google</option>
-<?php foreach ( MBS_Calendar_Sync_View::event_groups( $item['candidates'] ) as $option_group ) : ?><optgroup label="<?php echo esc_attr( ( $option_group['event']['summary'] ?? '(untitled)' ) . ' · ' . $date_label( $option_group['event'] ) . ' · ' . ( $option_group['event']['location'] ?? 'No location' ) . ' · ' . count( $option_group['records'] ) . ' record(s)' ); ?>">
-<?php foreach ( $option_group['records'] as $i => $candidate ) : ?><option value="<?php echo esc_attr( 'protect:' . $candidate['id'] ); ?>"><?php echo esc_html( 'Record ' . ( $i + 1 ) . ' · ' . MBS_Calendar_Sync_View::record_label( $candidate ) . ' · ' . ( $candidate['summary'] ?? '(untitled)' ) ); ?></option><?php endforeach; ?></optgroup><?php endforeach; ?></select></label>
-<?php elseif ( $item['action'] === 'difference' && $item['event'] && $item['want'] ) : ?><label><input type="checkbox" name="choice[<?php echo esc_attr( $item['hash'] ); ?>]" value="<?php echo esc_attr( 'protect:' . $item['event']['id'] ); ?>"> Acknowledge difference; keep Google exactly as it is</label>
+<?php if ( $item['action'] === 'review' || ( $item['action'] === 'difference' && $item['want'] ) ) : ?>
+<strong><?php echo esc_html( $item['ref'] ); ?> — Google area links</strong>
+<p><?php echo esc_html( $item['recommendation']['reason'] ?? 'Review changes to every linked Google record; Google remains unchanged.' ); ?></p>
+<?php $options = $item['action'] === 'difference' ? ( $item['linked_events'] ?? array_filter( array( $item['event'] ) ) ) : $item['candidates']; foreach ( $options as $candidate ) : $original = MBS_Calendar_Reference_Links::event_legacy_id( $candidate ); ?>
+<p><label><input type="checkbox" name="choice[<?php echo esc_attr( $item['hash'] ); ?>][]" value="<?php echo esc_attr( 'protect:' . $candidate['id'] ); ?>">
+<?php echo esc_html( ( $original ? 'Original #' . $original . ' · ' : '' ) . MBS_Calendar_Sync_View::record_label( $candidate ) . ' · ' . ( $candidate['summary'] ?? '(untitled)' ) . ' · ' . $date_label( $candidate ) ); ?>
+<?php if ( in_array( $candidate['id'], $item['recommendation']['ids'] ?? array(), true ) ) : ?><span class="sync-badge">Recommended</span><?php endif; ?></label></p>
+<?php endforeach; ?><p class="description">Nothing selected = leave unresolved. Select all corresponding area records; every Google event is preserved.</p>
 <?php elseif ( $item['action'] === 'create' ) : ?>Missing in Google. A new entry can be added only when sync is separately enabled.<?php else : ?>No Google changes.<?php endif; ?></div><?php endforeach; ?>
 <?php if ( $group_count > 1 ) : ?></details><?php endif; ?></td></tr><?php endforeach; ?>
 <?php if ( ! $items ) : ?><tr><td colspan="3">No items in this view. Estate entries remain protected.</td></tr><?php endif; ?></tbody></table></div>

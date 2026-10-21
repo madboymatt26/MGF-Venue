@@ -4,7 +4,16 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.34.2
+**Current Version:** 3.35.0
+
+## 3.35.0 Multiple protected Google area references
+
+Link one consolidated MGF reservation to several original Google area records.
+Original booking-reference recommendations, explicit multi-selection and complete
+set change detection preserve the master estate calendar. Unmatched imports stay
+blocked rather than duplicated. Narrow fingerprinted MCP review/enable operations
+share the GUI's locks and add-only transport. No automatic setting or link changes
+on upgrade. See `docs/calendar-multiple-references.md`.
 
 ## 3.34.2 Estate access exclusion and reviewed import flag repair
 
