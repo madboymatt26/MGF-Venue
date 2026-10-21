@@ -303,7 +303,7 @@ class MBS_Email_Queue {
             if ( in_array( $email->message_type, array( 'access_details', 'access_manual' ), true ) ) {
                 $message = MBS_Access_Details::queued_message( $email );
                 if ( is_wp_error( $message ) ) {
-                    if ( in_array( $message->get_error_code(), array( 'access_inactive','access_expired','access_stale' ), true ) ) {
+                    if ( in_array( $message->get_error_code(), array( 'access_inactive','access_expired','access_stale','access_estate' ), true ) ) {
                         self::mark_failed( $email->id, $worker_id );
                     } else {
                         // Policy/timing pauses do not exhaust transport retries.

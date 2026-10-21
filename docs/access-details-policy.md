@@ -1,6 +1,6 @@
 # Access details policy
 
-Access delivery uses the installation's effective Payments and billing switch, not the booking amount, campsite hostname or a pricing-tier exemption. With payments off, confirmed/deposit-paid/paid bookings qualify. With payments on, only paid bookings qualify. Pending, cancelled, archived and missing bookings never qualify, including manual sends.
+Access delivery uses the installation's effective Payments and billing switch, not the booking amount, campsite hostname or a pricing-tier exemption. With payments off, confirmed/deposit-paid/paid bookings qualify. With payments on, only paid bookings qualify. Pending, cancelled, archived and missing bookings never qualify, including manual sends. In campsite mode, exact case-insensitive Estate/HP Business organisation labels and generated staff estate entries are always excluded, even if paid; queued retries recheck this exclusion.
 
 The normal 24-hour setting means the previous calendar day from 08:00 in the WordPress timezone. An hourly cron check permits catch-up after late approval/payment, only before the booking starts. Other configured hour values retain an elapsed-hours window. Site traffic is not an exact scheduler: configure server cron for reliable delivery.
 
@@ -8,4 +8,6 @@ Automatic access mail uses the transactional outbox with a stable booking/date/a
 
 The manual send button uses the same approval/payment policy, but intentionally bypasses the automatic time window. Explicit manual resends have distinct queue keys.
 
-Administrator MCP action save_settings accepts a narrow access_settings object with enabled, code, instructions, health_safety, hours_before. Omitted fields and all unrelated settings are preserved. The response returns only a code-configured boolean, never the code. No installation is enabled automatically by this release. Migration-set access_sent flags remain untouched; deciding whether to include future imported bookings is a separate reviewed operation.
+Administrator MCP action save_settings accepts a narrow access_settings object with enabled, code, instructions, health_safety, hours_before. Omitted fields and all unrelated settings are preserved. The response returns only a code-configured boolean, never the code. No installation is enabled automatically by this release.
+
+For an explicitly authorised migration-flag repair, save_settings accepts reviewed_access_reset with operation preview/commit and 1–200 explicit refs. Commit also requires confirm=true and the fresh preview fingerprint. Administrator/campsite guards, source row locks, lineage checks and a single transaction protect the operation. Only future approved imported Scout bookings with access_sent=1 and no access audit/outbox evidence (including original sources) are reset; estate, past, pending/cancelled, native, genuinely sent/queued and already-unsent records are untouched. Commit clears access_sent only and adds repair audit entries; no email is sent by the command and nothing runs automatically on upgrade. The regular day-before worker can subsequently send when due. Changes to source/date/status or delivery evidence invalidate the preview.

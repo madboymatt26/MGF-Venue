@@ -7,6 +7,7 @@ $keys=['mbs_spaces','mbs_campsite_mode','mbs_payments_enabled','mbs_access_enabl
 $original=[];foreach($keys as $key)$original[$key]=get_option($key,null);
 $mail=[];$intercept=static function($result,$args)use(&$mail){$mail[]=$args;return true;};add_filter('pre_wp_mail',$intercept,PHP_INT_MAX,2);
 $ref='';
+$repair_refs=[];$original_user=get_current_user_id();wp_set_current_user(get_user_by('login','admin')->ID);
 try {
     update_option('mbs_spaces',['Access Test Area'=>['rate_hourly'=>0,'rate_daily'=>0,'capacity'=>10,'parent'=>null]]);
     update_option('mbs_campsite_mode',0);update_option('mbs_payments_enabled',0);update_option('mbs_min_notice_days',0);update_option('mbs_min_duration_hours',0);
@@ -29,13 +30,37 @@ try {
     access_ok($result['sent']===1 && count($mail)===1 && strpos($mail[0]['message'],'ROTATED-INTEGRATION-FAKE')!==false,'Actual worker renders current code and submits once');
     access_ok((bool)MBS_Bookings::get($ref)->access_sent,'Sent flag only after acceptance');
     MBS_Email_Queue::dispatch_message($id);access_ok(count($mail)===1,'Accepted message is not resent by another dispatch');
+    MBS_Access_Details::resend($booking);
+    $estate_queue=(int)$wpdb->get_var($wpdb->prepare("SELECT MAX(id) FROM $table WHERE reference_id=%d AND message_type='access_manual'",$booking->id));
+    update_option('mbs_campsite_mode',1);$wpdb->update($wpdb->prefix.MBS_TABLE,['organisation'=>'HP Business'],['ref'=>$ref]);
+    MBS_Email_Queue::dispatch_message($estate_queue);access_ok(count($mail)===1,'Entry becoming estate after enqueue never releases access');
+    access_ok(is_wp_error(MBS_Access_Details::resend(MBS_Bookings::get($ref))),'Manual estate access forbidden');
+    update_option('mbs_campsite_mode',0);
     $wpdb->update($wpdb->prefix.MBS_TABLE,['status'=>'cancelled'],['ref'=>$ref]);
     $automatic_id=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM $table WHERE reference_id=%d AND message_type='access_details'",$booking->id));
     MBS_Email_Queue::dispatch_message($automatic_id);access_ok(count($mail)===1,'Cancelled source blocks queued automatic email');
     access_ok($wpdb->get_var($wpdb->prepare("SELECT status FROM $table WHERE id=%d",$automatic_id))==='failed','Inactive queued message terminally blocked');
+    update_option('mbs_campsite_mode',1);
+    $before_repair=[];
+    foreach(['SCOUT'=>'Scout Group','ESTATE'=>'Estate','HP'=>'HP Business','SENT'=>'Scout Group']as$tag=>$org){
+        $copy=(array)$booking;unset($copy['id']);$copy['ref']='MBS-AR-'.strtoupper(wp_generate_password(8,false,false));$copy['organisation']=$org;$copy['notes']='';$copy['access_sent']=1;$copy['status']='confirmed';$copy['custom_fields']=wp_json_encode(['_mbs_legacy'=>['plugin'=>'wpbc']]);
+        $copy['updated_at']='2020-01-01 00:00:00'; // Make ON UPDATE drift observable even when the test completes within one second.
+        access_ok($wpdb->insert($wpdb->prefix.MBS_TABLE,$copy)===1,'Insert isolated repair fixture: '.$wpdb->last_error);$repair_refs[]=$copy['ref'];$before_repair[$tag]=MBS_Bookings::get($copy['ref']);
+    }
+    MBS_Audit_Log::log($before_repair['SENT']->ref,'access_sent','Synthetic prior acceptance');
+    $preview=MBS_Imported_Access_Reset::handle(['operation'=>'preview','refs'=>$repair_refs]);
+    access_ok(!is_wp_error($preview)&&$preview['refs']===[$before_repair['SCOUT']->ref]&&$preview['changed']===0,'Preview selects imported Scout only, excludes estate and genuine sent');
+    $stale=MBS_Imported_Access_Reset::handle(['operation'=>'commit','refs'=>$repair_refs,'confirm'=>true,'fingerprint'=>str_repeat('0',64)]);
+    access_ok(is_wp_error($stale)&&MBS_Bookings::get($before_repair['SCOUT']->ref)->access_sent,'Stale commit makes no changes');
+    $result=MBS_Imported_Access_Reset::handle(['operation'=>'commit','refs'=>$repair_refs,'confirm'=>true,'fingerprint'=>$preview['fingerprint']]);
+    access_ok(!is_wp_error($result)&&$result['changed']===1,'Reviewed reset commits exactly one flag');
+    foreach($before_repair as$tag=>$before){$after=MBS_Bookings::get($before->ref);$expected=(array)$before;$actual=(array)$after;access_ok((int)$actual['access_sent']===($tag==='SCOUT'?0:(int)$expected['access_sent']),'Only selected flag cleared');unset($actual['access_sent'],$expected['access_sent']);access_ok($actual===$expected,'All other columns untouched');}
+    access_ok(count($mail)===1,'Reset sends no immediate email');
     echo "ACCESS_DETAILS_INTEGRATION_OK\n";
 } finally {
     remove_filter('pre_wp_mail',$intercept,PHP_INT_MAX);
     if($ref)$wpdb->delete($wpdb->prefix.MBS_TABLE,['ref'=>$ref]);
+    foreach($repair_refs as$repair_ref)$wpdb->delete($wpdb->prefix.MBS_TABLE,['ref'=>$repair_ref]);
     foreach($original as $key=>$value){if($value===null)delete_option($key);else update_option($key,$value);}
+    wp_set_current_user($original_user);
 }
