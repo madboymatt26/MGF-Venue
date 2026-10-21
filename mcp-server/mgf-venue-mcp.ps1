@@ -218,7 +218,7 @@ $script:Tools = @(
                 status = @{ type = 'string'; enum = @('pending', 'confirmed', 'deposit_paid', 'paid', 'cancelled', 'archived') }
                 date_from = @{ type = 'string'; description = 'Inclusive start date in YYYY-MM-DD format.' }
                 date_to = @{ type = 'string'; description = 'Inclusive end date in YYYY-MM-DD format.' }
-                search = @{ type = 'string'; description = 'Search name, organisation, reference, or purpose.' }
+                search = @{ type = 'string'; description = 'Search name, organisation, reference, purpose, or description/notes.' }
                 orderby = @{ type = 'string'; enum = @('booking_date', 'created_at', 'name', 'status', 'amount'); default = 'booking_date' }
                 order = @{ type = 'string'; enum = @('ASC', 'DESC'); default = 'ASC' }
                 limit = @{ type = 'integer'; minimum = 1; maximum = 200; default = 50 }

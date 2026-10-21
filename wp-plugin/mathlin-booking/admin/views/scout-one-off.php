@@ -5,7 +5,7 @@
     <input type="hidden" name="page" value="mathlin-scout-nights">
     <input type="hidden" name="tab" value="one-off">
     <label class="screen-reader-text" for="scout-one-off-search">Search one-off Scout bookings</label>
-    <input id="scout-one-off-search" type="search" name="s" value="<?php echo esc_attr( $search ); ?>" placeholder="Name, organisation, reference or purpose">
+    <input id="scout-one-off-search" type="search" name="s" value="<?php echo esc_attr( $search ); ?>" placeholder="Name, organisation, reference, purpose or notes">
     <label class="screen-reader-text" for="scout-one-off-status">Status</label>
     <select id="scout-one-off-status" name="status">
         <option value="">All statuses</option>
