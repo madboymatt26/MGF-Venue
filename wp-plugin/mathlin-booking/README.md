@@ -4,7 +4,12 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.37.0
+**Current Version:** 3.37.1
+
+## 3.37.1 Preserve sync when saving links
+
+- Website and MCP reference-only saves keep automatic sync enabled if already enabled, or paused if already paused. No Google edits occur during the save.
+- Explicit enabling and changes to credentials, target calendar, colours or managed policy retain their separate reviewed safety workflow. History now records reference saves and explicit enabling.
 
 ## 3.37.0 Booking calendar status
 

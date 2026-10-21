@@ -423,9 +423,7 @@ class MBS_Google_Calendar {
                     return array( 'status' => self::status(), 'result' => 'Policy saved; refresh comparison before enabling. No Google event changed.' );
                 }
                 $choices = self::reviewed_choices( $snapshot['ops'], $input['choices'] ?? array() );
-                $s = self::settings(); $s['enabled'] = false; $s['policy'] = 'protected-v1'; $s['choices'] = array(); self::save( $s );
-                $result = self::execute( $snapshot['ops'], $choices, $operation === 'enable' );
-                $s = self::settings(); $s['enabled'] = $operation === 'enable'; $s['last_attempt'] = $s['last_success'] = gmdate( DATE_RFC3339 ); $s['last_result'] = $result['completed'] . ' completed; ' . $result['needs_review'] . ' need review; ' . $result['remaining'] . ' queued. Estate-created Google entries unchanged.'; self::save( $s );
+                $result = self::commit_review( $snapshot, $choices, $operation === 'enable' );
                 return array( 'status' => self::status(), 'result' => $result );
             }
             $inventory = array(); foreach ( $snapshot['events'] as $event ) $inventory[$event['id']] = self::event_hash( $event );
@@ -436,6 +434,21 @@ class MBS_Google_Calendar {
             }, $snapshot['ops'] ) );
         } catch ( Throwable $e ) { return new WP_Error( 'calendar_sync', $e->getMessage() ); }
         finally { self::unlock(); }
+    }
+    /** Caller holds the shared lease and has validated the fresh fingerprint/choices. */
+    private static function commit_review( $snapshot, $choices, $enable ) {
+        // Saving references is not permission to enable a paused/unreviewed connection.
+        $resume = $enable || self::status()['enabled'];
+        $s = self::settings(); $s['enabled'] = $enable ? false : $resume;
+        $s['policy'] = 'protected-v1'; $s['choices'] = array(); self::save( $s );
+        // Reference-only saves cannot insert or apply managed lifecycle changes.
+        $result = self::execute( $snapshot['ops'], $choices, $enable );
+        $s = self::settings(); $s['enabled'] = $resume;
+        $s['last_attempt'] = $s['last_success'] = gmdate( DATE_RFC3339 );
+        $s['last_result'] = $result['completed'] . ' completed; ' . $result['needs_review'] . ' need review; ' . $result['remaining'] . ' queued. Estate-created Google entries unchanged.';
+        self::save( $s );
+        self::record( $enable ? 'sync_enabled' : 'references_saved', '', $enable ? 'Protected sync enabled after review.' : ( $resume ? 'References saved only; automatic sync remains enabled.' : 'References saved only; automatic sync remains paused.' ) );
+        return $result;
     }
     /** Booking-scoped projection, using the full calendar comparison for overlap safety. */
     private static function booking_ops( $snapshot, $ref ) {
@@ -710,10 +723,9 @@ class MBS_Google_Calendar {
                 $snapshot = self::snapshot();
                 if ( ! $preview || ! hash_equals( $preview['fingerprint'], self::fingerprint( $snapshot ) ) ) self::error( 'The preview expired or booking/calendar data changed. Generate a fresh preview.' );
                 $choices = self::reviewed_choices( $snapshot['ops'], wp_unslash( $_POST['choice'] ?? array() ) );
-                $s['choices'] = $choices; $s['policy'] = 'protected-v1'; $s['enabled'] = false; self::save( $s );
-                $result = self::execute( $snapshot['ops'], $choices, $op === 'apply' );
-                $s = self::settings(); $s['enabled'] = $op === 'apply'; $s['last_attempt'] = $s['last_success'] = gmdate( DATE_RFC3339 ); $s['last_result'] = $result['completed'] . ' completed; ' . $result['needs_review'] . ' need review; ' . $result['remaining'] . ' queued. Estate-created Google entries unchanged.'; self::save( $s );
-                delete_transient( 'mbs_gcal_preview_' . get_current_user_id() ); self::notice( $s['last_result'] . ( $op === 'apply' ? ' Protected sync enabled with the selected lifecycle policy.' : ' Matches saved; sync remains paused.' ) );
+                $result = self::commit_review( $snapshot, $choices, $op === 'apply' );
+                $s = self::settings();
+                delete_transient( 'mbs_gcal_preview_' . get_current_user_id() ); self::notice( $s['last_result'] . ( $op === 'apply' ? ' Protected sync enabled with the selected lifecycle policy.' : ( self::status()['enabled'] ? ' Matches saved; automatic sync remains enabled.' : ' Matches saved; automatic sync remains paused.' ) ) );
             } elseif ( $op === 'pause' || $op === 'disconnect' ) {
                 $s['enabled'] = false;
                 if ( $op === 'disconnect' ) { unset( $s['refresh'], $s['access'], $s['expires'], $s['choices'] ); }
