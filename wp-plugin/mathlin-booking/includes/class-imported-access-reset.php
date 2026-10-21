@@ -75,8 +75,10 @@ class MBS_Imported_Access_Reset {
                 $plan = self::plan( $rows, $protected, wp_date( 'Y-m-d' ), $resolver, wp_date( 'H:i:s' ) );
                 if ( $operation === 'commit' ) {
                     if ( ! hash_equals( $plan['fingerprint'], $input['fingerprint'] ) ) throw new RuntimeException( 'Source or delivery evidence changed; preview again.' );
+                    $locked_rows = array(); foreach ( $rows as $row ) $locked_rows[$row->ref] = $row;
                     foreach ( $plan['refs'] as $ref ) {
-                        if ( $wpdb->update( $wpdb->prefix . MBS_TABLE, array( 'access_sent' => 0 ), array( 'ref' => $ref, 'access_sent' => 1 ) ) !== 1 ) throw new RuntimeException( 'A selected flag changed during repair.' );
+                        // Explicitly preserve the ON UPDATE timestamp: this repairs delivery metadata, not the reservation.
+                        if ( $wpdb->update( $wpdb->prefix . MBS_TABLE, array( 'access_sent' => 0, 'updated_at' => $locked_rows[$ref]->updated_at ), array( 'ref' => $ref, 'access_sent' => 1 ) ) !== 1 ) throw new RuntimeException( 'A selected flag changed during repair.' );
                         if ( ! MBS_Audit_Log::log( $ref, 'imported_access_reset', 'Reviewed migration-set access flag cleared for future approved Scout booking. No immediate email; normal day-before eligibility applies.' ) ) throw new RuntimeException( 'Repair audit could not be recorded.' );
                     }
                 }
