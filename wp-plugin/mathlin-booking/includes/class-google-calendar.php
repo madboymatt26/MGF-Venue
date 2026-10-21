@@ -14,6 +14,7 @@ class MBS_Google_Calendar {
         add_action( 'admin_menu', function() { add_submenu_page( 'mathlin-booking', 'Calendar Sync', 'Calendar Sync', 'manage_options', 'mathlin-google-calendar', array( $this, 'render' ) ); } );
         add_action( 'admin_post_mbs_gcal', array( $this, 'handle' ) );
         add_action( 'admin_post_mbs_gcal_oauth_callback', array( $this, 'callback' ) );
+        add_action( 'wp_ajax_mbs_gcal_booking', array( $this, 'booking_ajax' ) );
         add_action( 'rest_api_init', function() {
             register_rest_route( 'mathlin/v1', '/admin/google-calendar', array( 'methods' => 'GET', 'permission_callback' => function() { return current_user_can( 'manage_options' ); }, 'callback' => function( $request ) {
                 if ( ! $request->get_param( 'preview' ) ) return rest_ensure_response( self::status() );
@@ -404,6 +405,10 @@ class MBS_Google_Calendar {
     /** Narrow administrator MCP parity: explicit preview/commit; never exposes descriptions or tokens. */
     public static function reviewed_sync( $input ) {
         if ( ! current_user_can( 'manage_options' ) || ! is_array( $input ) ) return new WP_Error( 'calendar_sync', 'Administrator review required.' );
+        if ( in_array( $input['operation'] ?? '', array( 'booking_preview', 'booking_sync' ), true ) ) {
+            if ( array_diff( array_keys( $input ), array( 'operation', 'ref', 'fingerprint', 'confirm' ) ) ) return new WP_Error( 'calendar_sync', 'Unknown booking calendar input.' );
+            return self::booking_sync( $input['ref'] ?? '', $input['operation'] === 'booking_sync', $input['fingerprint'] ?? '', ( $input['confirm'] ?? false ) === true );
+        }
         try { self::lock(); } catch ( Throwable $e ) { return new WP_Error( 'calendar_sync', $e->getMessage() ); }
         try {
             if ( array_diff( array_keys( $input ), array( 'operation','fingerprint','confirm','choices','managed_updates' ) ) ) self::error( 'Unknown calendar review input.' );
@@ -431,6 +436,87 @@ class MBS_Google_Calendar {
             }, $snapshot['ops'] ) );
         } catch ( Throwable $e ) { return new WP_Error( 'calendar_sync', $e->getMessage() ); }
         finally { self::unlock(); }
+    }
+    /** Booking-scoped projection, using the full calendar comparison for overlap safety. */
+    private static function booking_ops( $snapshot, $ref ) {
+        return array_values( array_filter( $snapshot['ops'], static function( $op ) use ( $ref ) { return $op['ref'] === $ref; } ) );
+    }
+    private static function booking_can_sync( $ops, $enabled ) {
+        if ( ! $enabled || ! $ops || count( $ops ) > 20 ) return false;
+        $pending = false;
+        foreach ( $ops as $op ) {
+            if ( ! in_array( $op['action'], array( 'matched', 'create', 'managed_update', 'managed_cancel' ), true ) ) return false;
+            if ( $op['action'] !== 'matched' ) $pending = true;
+        }
+        return $pending;
+    }
+    /** Accept provider event links only, never arbitrary stored redirects. */
+    public static function event_url( $event ) {
+        $url = $event['htmlLink'] ?? '';
+        $p = is_string( $url ) ? parse_url( $url ) : false;
+        if ( ! $p || ( $p['scheme'] ?? '' ) !== 'https' || ! in_array( $p['host'] ?? '', array( 'www.google.com', 'calendar.google.com' ), true ) || strpos( $p['path'] ?? '', '/calendar/' ) !== 0 || isset( $p['user'] ) || isset( $p['pass'] ) || isset( $p['port'] ) ) return '';
+        return $url;
+    }
+    private static function booking_view( $ref, $snapshot = null ) {
+        $status = self::status(); $ops = $snapshot ? self::booking_ops( $snapshot, $ref ) : array();
+        $labels = array( 'matched' => 'Linked / up to date', 'create' => 'Not yet synced', 'managed_update' => 'Changes waiting to sync', 'managed_cancel' => 'Cancellation/status waiting to sync', 'review' => 'Needs review', 'difference' => 'Needs review', 'blocked' => 'Blocked — needs review', 'retained' => 'Protected history — review required' );
+        $items = array(); $events = array();
+        foreach ( $ops as $op ) {
+            $linked = $op['linked_events'] ?? array();
+            if ( $op['event'] ) $linked[] = $op['event'];
+            foreach ( $linked as $event ) {
+                if ( empty( $event['id'] ) ) continue;
+                $events[$event['id']] = array( 'id' => $event['id'], 'summary' => $event['summary'] ?? 'Google event', 'url' => self::event_url( $event ) );
+            }
+            $items[] = array( 'state' => $op['action'], 'label' => $labels[$op['action']] ?? 'Needs review', 'reason' => $op['reason'] );
+        }
+        $label = 'Not currently exported (past, unapproved, cancelled or archived booking).';
+        if ( ! $status['connected'] ) $label = 'Google Calendar is not connected.';
+        elseif ( ! $status['calendar_id'] ) $label = 'Select a target calendar in Calendar Sync.';
+        elseif ( $items ) $label = count( $items ) === 1 ? $items[0]['label'] : count( $items ) . ' calendar entries — see status below';
+        $last = null; foreach ( self::history() as $entry ) if ( ( $entry['ref'] ?? '' ) === $ref ) $last = array( 'at' => $entry['at'], 'result' => $entry['result'] );
+        return array( 'ref' => $ref, 'label' => $label, 'calendar' => $status['calendar'], 'enabled' => $status['enabled'], 'checked_at' => $snapshot ? gmdate( DATE_RFC3339 ) : '', 'fingerprint' => $snapshot ? self::fingerprint( $snapshot ) : '', 'can_sync' => self::booking_can_sync( $ops, $status['enabled'] ), 'items' => $items, 'events' => array_values( $events ), 'last_action' => $last, 'review_url' => self::page() );
+    }
+    public static function booking_sync( $ref, $write = false, $fingerprint = '', $confirmed = false ) {
+        if ( ! current_user_can( 'manage_options' ) ) return new WP_Error( 'booking_calendar', 'Administrator access required.' );
+        if ( ! is_string( $ref ) || ! preg_match( '/^[A-Z0-9-]{1,100}$/D', $ref ) ) return new WP_Error( 'booking_calendar', 'Invalid booking reference.' );
+        try { self::lock(); } catch ( Throwable $e ) { return new WP_Error( 'booking_calendar', $e->getMessage() ); }
+        try {
+            $exists = false; foreach ( self::bookings() as $booking ) if ( $booking->ref === $ref ) $exists = true;
+            if ( ! $exists ) self::error( 'Booking not found.' );
+            $status = self::status();
+            if ( ! $status['connected'] || ! $status['calendar_id'] ) {
+                if ( $write ) self::error( 'Connect and select a calendar before syncing.' );
+                return self::booking_view( $ref );
+            }
+            $snapshot = self::snapshot();
+            if ( $write ) {
+                if ( ! $confirmed || ! is_string( $fingerprint ) || ! hash_equals( self::fingerprint( $snapshot ), $fingerprint ) ) self::error( 'Booking or calendar changed. Check status again before syncing.' );
+                $ops = self::booking_ops( $snapshot, $ref );
+                if ( ! self::booking_can_sync( $ops, self::status()['enabled'] ) ) self::error( 'This booking cannot sync automatically. Check Calendar Sync review or enable the reviewed connection first.' );
+                // No choices, global enablement or unrelated operations are accepted here.
+                $result = self::execute( $ops, array(), true );
+                self::record( 'booking_sync', $ref, $result['completed'] . ' event changes for this booking only.' );
+                $snapshot = self::snapshot();
+            }
+            return self::booking_view( $ref, $snapshot );
+        } catch ( Throwable $e ) { return new WP_Error( 'booking_calendar', $e->getMessage() ); }
+        finally { self::unlock(); }
+    }
+    public function booking_ajax() {
+        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'Administrator access required.', 403 );
+        check_ajax_referer( 'mbs_gcal_booking', 'nonce' );
+        $operation = $_POST['operation'] ?? 'preview';
+        if ( ! in_array( $operation, array( 'preview', 'sync' ), true ) ) wp_send_json_error( 'Invalid operation.', 400 );
+        $result = self::booking_sync( wp_unslash( $_POST['ref'] ?? '' ), $operation === 'sync', wp_unslash( $_POST['fingerprint'] ?? '' ), ( $_POST['confirm'] ?? '' ) === '1' );
+        if ( is_wp_error( $result ) ) wp_send_json_error( $result->get_error_message(), 409 );
+        wp_send_json_success( $result );
+    }
+    public static function render_booking_card( $booking ) {
+        if ( ! current_user_can( 'manage_options' ) ) return;
+        $s = self::settings();
+        if ( empty( $s['client_id'] ) && empty( $s['refresh'] ) && empty( $s['calendar'] ) ) return;
+        include MBS_PLUGIN_DIR . 'admin/views/booking-calendar.php';
     }
     private static function execute( $ops, $choices = array(), $allow_create = true ) {
         $done = 0; $blocked = 0; $checked = 0; $used = array();

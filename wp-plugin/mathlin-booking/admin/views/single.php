@@ -345,6 +345,8 @@ $invoice_pdf_url = $invoice_document_id ? add_query_arg( array(
         <?php endif; ?>
     </div>
 
+    <?php if ( class_exists( 'MBS_Google_Calendar' ) ) MBS_Google_Calendar::render_booking_card( $booking ); ?>
+
     <!-- Audit Log -->
     <?php $audit_entries = MBS_Audit_Log::get_for_booking( $booking->ref ); ?>
     <?php if ( ! empty( $audit_entries ) ) : ?>
