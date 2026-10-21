@@ -466,7 +466,20 @@ class MBS_Google_Calendar {
             if ( $op['event'] ) $linked[] = $op['event'];
             foreach ( $linked as $event ) {
                 if ( empty( $event['id'] ) ) continue;
-                $events[$event['id']] = array( 'id' => $event['id'], 'summary' => $event['summary'] ?? 'Google event', 'url' => self::event_url( $event ) );
+                $areas = array(); $original_id = MBS_Calendar_Reference_Links::event_legacy_id( $event );
+                foreach ( $op['original_sources'] ?? array() as $source ) {
+                    $source = (object) $source; $meta = json_decode( (string) ( $source->custom_fields ?? '{}' ), true );
+                    if ( $original_id && (string) ( $meta['_mbs_legacy']['booking_id'] ?? '' ) === $original_id ) $areas[] = $source->space;
+                }
+                $dates = '';
+                try {
+                    $a = new DateTimeImmutable( $event['start']['date'] ?? $event['start']['dateTime'], wp_timezone() );
+                    $z = new DateTimeImmutable( $event['end']['date'] ?? $event['end']['dateTime'], wp_timezone() );
+                    if ( isset( $event['start']['date'] ) ) $dates = $a->format( 'j M Y' ) . ' – ' . $z->modify( '-1 day' )->format( 'j M Y' ) . ' · All day';
+                    else $dates = $a->setTimezone( wp_timezone() )->format( 'j M Y H:i' ) . ' – ' . $z->setTimezone( wp_timezone() )->format( 'j M Y H:i' );
+                } catch ( Throwable $e ) { $dates = 'Dates unavailable'; }
+                $title = implode( ', ', array_unique( $areas ) );
+                $events[$event['id']] = array( 'id' => $event['id'], 'summary' => ( $title ? $title . ' — ' : '' ) . ( $event['summary'] ?? 'Google event' ) . ' · ' . $dates, 'url' => self::event_url( $event ) );
             }
             $items[] = array( 'state' => $op['action'], 'label' => $labels[$op['action']] ?? 'Needs review', 'reason' => $op['reason'] );
         }

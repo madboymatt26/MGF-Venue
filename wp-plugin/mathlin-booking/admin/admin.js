@@ -21,9 +21,9 @@ jQuery(function ($) {
                 var $items = $card.find('.nms-gcal-items').empty();
                 data.items.forEach(function (item) { $('<li>').text(item.label + ' — ' + item.reason).appendTo($items); });
                 var $events = $card.find('.nms-gcal-events').empty();
-                data.events.forEach(function (event) {
+                data.events.forEach(function (event, index) {
                     var $li = $('<li>').appendTo($events);
-                    if (event.url) $('<a>', {href: event.url, target: '_blank', rel: 'noopener noreferrer'}).text('Open Google event: ' + event.summary).appendTo($li);
+                    if (event.url) $('<a>', {href: event.url, target: '_blank', rel: 'noopener noreferrer'}).text('Open Google event ' + (index + 1) + ': ' + event.summary).appendTo($li);
                     else $li.text(event.summary + ' — Google event link unavailable');
                 });
                 $card.find('.nms-gcal-checked').text(data.checked_at ? 'Checked: ' + new Date(data.checked_at).toLocaleString() : 'Not live-verified.');
