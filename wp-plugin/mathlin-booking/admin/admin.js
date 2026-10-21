@@ -1,6 +1,49 @@
 /* NM Scouts Booking – Admin JS */
 jQuery(function ($) {
 
+    // Live read-only linkage check; a separate explicit click permits a scoped sync.
+    $('.nms-booking-calendar').each(function () {
+        var $card = $(this), fingerprint = '', canSync = false;
+        var $check = $card.find('.nms-gcal-check'), $sync = $card.find('.nms-gcal-sync');
+        function loadCalendar(write) {
+            if (write && (!canSync || !fingerprint)) return;
+            if (write && !confirm('Sync Google Calendar for booking ' + $card.data('ref') + ' only? Existing estate entries stay protected. No booking email will be sent.')) return;
+            $check.prop('disabled', true); $sync.prop('disabled', true);
+            $card.find('.nms-gcal-label').text(write ? 'Syncing this booking…' : 'Checking calendar linkage…');
+            $.ajax({url: MBS_Admin.ajax_url, type: 'POST', dataType: 'json', timeout: 120000, data: {
+                action: 'mbs_gcal_booking', nonce: $card.data('nonce'), ref: $card.data('ref'),
+                operation: write ? 'sync' : 'preview', fingerprint: fingerprint, confirm: write ? '1' : '0'
+            }}).done(function (res) {
+                if (!res.success) { failed(typeof res.data === 'string' ? res.data : 'Calendar check failed.'); return; }
+                var data = res.data; fingerprint = data.fingerprint; canSync = data.can_sync;
+                $card.find('.nms-gcal-label').text(data.label);
+                $card.find('.nms-gcal-connection').text((data.calendar || 'No calendar selected') + (data.enabled ? ' · Automatic sync enabled' : ' · Automatic sync paused'));
+                var $items = $card.find('.nms-gcal-items').empty();
+                data.items.forEach(function (item) { $('<li>').text(item.label + ' — ' + item.reason).appendTo($items); });
+                var $events = $card.find('.nms-gcal-events').empty();
+                data.events.forEach(function (event, index) {
+                    var $li = $('<li>').appendTo($events);
+                    if (event.url) $('<a>', {href: event.url, target: '_blank', rel: 'noopener noreferrer'}).text('Open Google event ' + (index + 1) + ': ' + event.summary).appendTo($li);
+                    else $li.text(event.summary + ' — Google event link unavailable');
+                });
+                $card.find('.nms-gcal-checked').text(data.checked_at ? 'Checked: ' + new Date(data.checked_at).toLocaleString() : 'Not live-verified.');
+                $card.find('.nms-gcal-last').text(data.last_action ? 'Last recorded action: ' + new Date(data.last_action.at).toLocaleString() + ' — ' + data.last_action.result : '');
+            }).fail(function (xhr) {
+                var res = xhr.responseJSON;
+                failed(res && typeof res.data === 'string' ? res.data : 'Calendar check/sync did not complete. Check status before retrying; a timed-out sync may already have completed.');
+            }).always(function () { $check.prop('disabled', false); $sync.prop('disabled', !canSync); });
+        }
+        function failed(message) {
+            fingerprint = ''; canSync = false;
+            $card.find('.nms-gcal-label').text(message);
+            $card.find('.nms-gcal-checked').text('Status not verified. Check again before syncing.');
+            $card.find('.nms-gcal-items, .nms-gcal-events').empty();
+        }
+        $check.on('click', function () { loadCalendar(false); });
+        $sync.on('click', function () { loadCalendar(true); });
+        loadCalendar(false);
+    });
+
     // ── Confirm booking ────────────────────────────────────────────────────────
     $(document).on('click', '.nms-btn-confirm', function () {
         var $btn     = $(this);
