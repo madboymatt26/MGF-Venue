@@ -166,7 +166,7 @@ class MBS_Google_Calendar {
 
     /** Minimal public fields only; intentionally never exports contact/name/purpose/notes. */
     public static function project( $rows, $pending, $site, $calendar, $zone, $today, $colour_settings = array(), $campsite = false ) {
-        $desired = array(); $source = array(); $legacy = array(); $row_map = array();
+        $desired = array(); $source = array(); $legacy = array(); $imports = array(); $row_map = array();
         foreach ( $rows as $row ) { $row = (object) $row; $row_map[$row->ref] = $row; }
         $colour_rules = self::colour_settings( $colour_settings );
         foreach ( $rows as $row ) {
@@ -198,11 +198,12 @@ class MBS_Google_Calendar {
                     $colour = self::booking_colour( $b, $colour_rules, $campsite );
                     if ( $colour !== '' ) $desired[$key]['colorId'] = $colour;
                     $legacy[$key] = MBS_Calendar_Reference_Links::leaves( $b, $row_map );
+                    $imports[$key] = isset( $meta['_mbs_legacy'] ) || isset( $meta['_mbs_whole_park_sources'] ) || isset( $meta['_mbs_multiday_sources'] );
                 }
                 if ( $continuous || ! empty( $b->all_day ) ) break;
             }
         }
-        ksort( $desired ); return array( 'desired' => $desired, 'source' => $source, 'legacy' => $legacy );
+        ksort( $desired ); return array( 'desired' => $desired, 'source' => $source, 'legacy' => $legacy, 'imports' => $imports );
     }
     private static function date( $text, $zone ) {
         $d = DateTimeImmutable::createFromFormat( '!Y-m-d', (string) $text, $zone );
@@ -280,7 +281,7 @@ class MBS_Google_Calendar {
             } elseif ( isset( $ids[$want['id']] ) ) { $op['action'] = 'blocked'; $op['reason'] = 'Reserved event ID already exists without the expected link.'; }
             else {
                 foreach ( $manual as $e ) if ( self::overlaps( $want, $e ) ) $op['candidates'][] = $e;
-                if ( $op['candidates'] || ! empty( $projection['legacy'][$key] ) ) { $op['action'] = 'review'; $op['reason'] = 'Review existing Google area events. Imported reservations are never blindly added again.'; }
+                if ( $op['candidates'] || ! empty( $projection['imports'][$key] ) || ! empty( $projection['legacy'][$key] ) ) { $op['action'] = 'review'; $op['reason'] = 'Review existing Google area events. Imported reservations are never blindly added again.'; }
             }
             if ( $op['action'] === 'review' ) $op['recommendation'] = MBS_Calendar_Reference_Links::recommend( $projection['legacy'][$key] ?? array(), $op['candidates'], $want );
             $ops[] = $op;

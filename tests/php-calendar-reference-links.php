@@ -34,4 +34,5 @@ $cancelled=MBS_Google_Calendar::project($wpdb->rows,false,$site,'target',wp_time
 $retained=MBS_Google_Calendar::plan($cancelled,[$e1,$e2],$site,'2026-10-18',$saved_links);check(count($retained[0]['linked_events'])===2&&$retained[0]['action']==='retained','cancel retains every Google area reference');
 $native=fixture();$native->ref='MBS-NATIVE';$wpdb->rows=[$native];check(actual_ops()[0]['action']==='create','native new bookings still add');
 $native->custom_fields=json_encode(['_mbs_legacy'=>['plugin'=>'wpbc','booking_id'=>8]]);check(actual_ops()[0]['action']==='review','unmatched import blocked even with no overlap');
+$native->custom_fields=json_encode(['_mbs_whole_park_sources'=>['MBS-MISSING']]);check(actual_ops()[0]['action']==='review','broken import lineage never treated as missing native booking');
 echo "Calendar multiple references: passed ($assertions total checks).\n";
