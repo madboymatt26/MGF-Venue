@@ -118,6 +118,10 @@ class MBS_Campsite_Policy {
 
     /** Revalidate every occupied day of an amendment, including its departure date. */
     public static function validate_amendment( $booking, $update, $exception = false ) {
+        if ( class_exists( 'MBS_Booking_Validation' ) ) {
+            $preserve_unknown = isset( $booking->attendees ) && (int) $booking->attendees === 0 && ( ! array_key_exists( 'attendees', $update ) || (string) $update['attendees'] === (string) $booking->attendees );
+            $common = MBS_Booking_Validation::validate( array_merge( (array) $booking, $update ), $preserve_unknown ); if ( is_wp_error( $common ) ) return $common;
+        }
         if ( ! self::enabled() ) return true;
         $proposed = array_merge( (array) $booking, $update );
         if ( class_exists( 'MBS_Space_Selection' ) && $proposed['space'] !== $booking->space ) {
@@ -181,6 +185,7 @@ class MBS_Campsite_Policy {
                 $changes[$booking->ref] = array_intersect_key( $proposed, array_flip( array( 'space', 'start_time', 'end_time', 'purpose' ) ) );
             }
             foreach ( $changes as $booking_ref => $update ) {
+                $update = MBS_Booking_Validation::delivery_update( MBS_Bookings::get($booking_ref), $update );
                 if ( class_exists( 'MBS_Space_Selection' ) ) MBS_Space_Selection::record_selection( $update['space'] );
                 if ( $wpdb->update( $wpdb->prefix . MBS_TABLE, $update, array( 'ref' => $booking_ref ) ) === false ) throw new RuntimeException( 'Could not save every session.' );
             }

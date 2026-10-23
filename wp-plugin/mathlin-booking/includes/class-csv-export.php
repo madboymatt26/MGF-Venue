@@ -8,12 +8,19 @@ if ( ! defined( 'ABSPATH' ) ) exit;
  * Triggered via admin AJAX action.
  */
 class MBS_CSV_Export {
+    public static function safe_fields( $fields ) {
+        return array_map( static function( $value ) {
+            // Only text is neutralised: legitimate numeric amount columns stay numeric.
+            if ( is_string( $value ) && preg_match( '/^[\x00-\x20]*[=+@-]/u', $value ) && ! preg_match( '/^-?\d+(?:\.\d+)?$/D', $value ) ) return "'" . $value;
+            return $value;
+        }, $fields );
+    }
     private static function write_row( $output, $fields ) {
         if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'reports' ) ) {
             foreach ( array( 6, 18, 19 ) as $index ) unset( $fields[$index] );
             $fields = array_values( $fields );
         }
-        fputcsv( $output, $fields, ',', '"', '\\' );
+        fputcsv( $output, self::safe_fields( $fields ), ',', '"', '\\' );
     }
 
     /**

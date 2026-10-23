@@ -10,7 +10,7 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 class MBS_Accounting_Export {
 
     private static function write_csv( $output, $fields ) {
-        fputcsv( $output, $fields, ',', '"', '\\' );
+        fputcsv( $output, MBS_CSV_Export::safe_fields( $fields ), ',', '"', '\\' );
     }
 
     public function init() {

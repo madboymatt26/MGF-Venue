@@ -209,6 +209,7 @@ class MBS_Public {
     // ── AJAX: submit booking ───────────────────────────────────────────────────
     public function ajax_submit() {
         check_ajax_referer( 'mbs_public_nonce', 'nonce' );
+        if ( ! MBS_Hirer_Identity::throttle( 'submit', $_SERVER['REMOTE_ADDR'] ?? '', 20, 3600 ) ) wp_send_json_error( array( 'message' => 'Too many booking submissions. Please try again later.' ), 429 );
         if ( class_exists( 'MBS_Campsite_Policy' ) && ! MBS_Campsite_Policy::can_book() ) {
             wp_send_json_error( array( 'message' => MBS_Campsite_Policy::access_error()->get_error_message() ), 403 );
         }
@@ -217,6 +218,9 @@ class MBS_Public {
         if ( ! empty( $_POST['mbs_hp_field'] ) ) {
             wp_send_json_success( array( 'ref' => 'MBS-000000', 'message' => 'Booking submitted.' ) ); // Fake success to not alert the bot
         }
+        $submission = MBS_Submission_Guard::begin( $_POST );
+        if ( is_wp_error($submission) ) wp_send_json_error(array('message'=>$submission->get_error_message()),409);
+        if ( is_array($submission) ) wp_send_json_success($submission);
 
         $required = array( 'name', 'email', 'phone', 'address', 'space', 'booking_date', 'attendees', 'purpose' );
         if ( class_exists( 'MBS_Payment_Features' ) && MBS_Payment_Features::free_hire() ) $required = array_diff( $required, array( 'address' ) );
@@ -313,6 +317,8 @@ class MBS_Public {
             wp_send_json_error( array( 'message' => 'End date must be on or after start date.' ) );
         }
 
+        $input_check = MBS_Booking_Validation::validate( $_POST );
+        if ( is_wp_error( $input_check ) ) wp_send_json_error( array( 'message' => $input_check->get_error_message() ), 400 );
         // Check blocked dates for entire range
         if ( class_exists( 'MBS_Campsite_Policy' ) ) {
             $schedule = MBS_Campsite_Policy::validate_schedule( $_POST );
@@ -372,15 +378,13 @@ class MBS_Public {
 
             // One request-level notification to each audience. Occurrence
             // emails, invoices and payment links are deliberately suppressed.
-            MBS_Email::notify_admin_series( $result['series'], $result['occurrences'] );
-            MBS_Email::notify_recurring_summary( $result['series'], $result['occurrences'] );
 
             $msg = 'Recurring booking submitted! ' . $result['created'] . ' booking(s) created (reference series: ' . $result['series_id'] . ').';
             if ( ! empty( $result['skipped'] ) ) {
                 $msg .= ' ' . count( $result['skipped'] ) . ' date(s) were skipped due to conflicts or blocked dates.';
             }
 
-            wp_send_json_success( array(
+            $response = array(
                 'ref'       => $result['series_id'],
                 'message'   => $msg,
                 'recurring' => true,
@@ -390,7 +394,11 @@ class MBS_Public {
                 'price_per_booking' => (float) $result['series']->price_per_booking,
                 'estimated_full_value' => (float) $result['series']->estimated_total,
                 'amount_due' => 0,
-            ) );
+            );
+            MBS_Submission_Guard::remember($response);
+            MBS_Email::notify_admin_series( $result['series'], $result['occurrences'] );
+            MBS_Email::notify_recurring_summary( $result['series'], $result['occurrences'] );
+            wp_send_json_success($response);
         }
 
         $result = MBS_Bookings::create( $_POST );
@@ -399,15 +407,13 @@ class MBS_Public {
             wp_send_json_error( array( 'message' => $result->get_error_message() ) );
         }
 
+        $response = array( 'ref'=>$result['ref'], 'message'=>'Your booking request has been submitted! Reference: ' . $result['ref'], 'account_exists'=>(bool)email_exists(sanitize_email($_POST['email'])) );
+        MBS_Submission_Guard::remember($response);
         // Send emails
         MBS_Email::notify_admin( $result );
         MBS_Email::notify_booker( $result );
 
-        wp_send_json_success( array(
-            'ref'     => $result['ref'],
-            'message' => 'Your booking request has been submitted! Reference: ' . $result['ref'],
-            'account_exists' => email_exists( sanitize_email( $_POST['email'] ) ) ? true : false,
-        ) );
+        wp_send_json_success( $response );
     }
 
     // ── AJAX: get calendar data for a month ────────────────────────────────────
@@ -502,8 +508,12 @@ class MBS_Public {
         }
 
         $booking = MBS_Bookings::get( $ref );
+        if ( ! MBS_Hirer_Identity::booking_access( $booking ) ) {
+            if ( $booking && strcasecmp( $booking->email, $email ) === 0 && ( ! MBS_Campsite_Policy::enabled() || MBS_Campsite_Policy::can_book() ) ) MBS_Hirer_Identity::send_link( $email, 0, $booking );
+            wp_send_json_success( array( 'verification_required' => true, 'message' => 'If the details match, we will email a secure access link. Check your inbox and junk folder, then open Manage Bookings and look up the booking again.' ) );
+        }
 
-        // SEC-002: Verify email matches to prevent reference enumeration
+        // Mailbox/session proof AND matching contact are both required.
         if ( ! $booking || strtolower( $booking->email ) !== strtolower( $email ) ) {
             wp_send_json_error( array( 'message' => 'No booking found with that reference and email combination. Please check and try again.' ) );
         }
@@ -523,7 +533,7 @@ class MBS_Public {
             'amount'          => number_format( $booking->amount, 2 ),
             'invoice_number'  => $booking->invoice_number,
             'invoice_pdf_url' => '',
-            'ical_url'        => rest_url( 'mathlin/v1/bookings/' . $booking->ref . '/ical' ),
+            'ical_url'        => MBS_Hirer_Identity::calendar_url( $booking ),
             'payment_url'     => '',
         );
 

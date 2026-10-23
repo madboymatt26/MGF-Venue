@@ -14,11 +14,7 @@ class MBS_Reminders {
     public function init() {
         add_action( 'mbs_daily_reminders', array( $this, 'send_reminders' ) );
 
-        if ( ! wp_next_scheduled( 'mbs_daily_reminders' ) ) {
-            // Schedule to run daily at 7am local time
-            $timestamp = strtotime( 'tomorrow 07:00:00' );
-            wp_schedule_event( $timestamp, 'daily', 'mbs_daily_reminders' );
-        }
+        MBS_Local_Schedule::register( 'mbs_daily_reminders', 'mbs_cron_time_reminders', '07:00' );
     }
 
     /**
@@ -46,7 +42,7 @@ class MBS_Reminders {
         $bookings = $wpdb->get_results( $wpdb->prepare(
             "SELECT * FROM {$table}
              WHERE booking_date BETWEEN %s AND %s
-             AND status IN ('confirmed', 'paid')
+             AND status IN ('confirmed', 'deposit_paid', 'paid')
              AND reminder_sent = 0
              ORDER BY booking_date ASC, start_time ASC",
             $today, $reminder_date
@@ -57,13 +53,7 @@ class MBS_Reminders {
         foreach ( $bookings as $booking ) {
             MBS_Email::notify_reminder( $booking );
 
-            // Mark as sent
-            $wpdb->update(
-                $table,
-                array( 'reminder_sent' => 1 ),
-                array( 'id' => $booking->id ),
-                array( '%d' ), array( '%d' )
-            );
+            // Durable queue acceptance, not scheduling, updates the sent flag.
         }
 
         error_log( '[MGF Venue] Sent ' . count( $bookings ) . ' reminder email(s).' );

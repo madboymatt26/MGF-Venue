@@ -35,19 +35,8 @@ if ( isset( $_GET['mbs_modify'] ) && $_GET['mbs_modify'] === '1' ) {
             <div class="nms-manage-card">
                 <h3>Sign In</h3>
                 <p class="nms-muted">Access your full booking history, invoices, and make changes.</p>
-                <form id="nms-manage-login" class="nms-form" novalidate>
-                    <?php wp_nonce_field( 'mbs_public_nonce', 'nonce' ); ?>
-                    <div class="nms-form-group">
-                        <label for="nms-login-identity">Email Address or Username</label>
-                        <input type="text" id="nms-login-identity" name="login" autocomplete="username" placeholder="your@email.com" required>
-                    </div>
-                    <div class="nms-form-group">
-                        <label for="nms-login-pass">Password</label>
-                        <input type="password" id="nms-login-pass" name="password" autocomplete="current-password" placeholder="••••••••" required>
-                    </div>
-                    <div id="nms-login-msg" class="nms-manage-msg"></div>
-                    <button type="submit" class="nms-btn nms-btn-primary" style="width:100%;">Sign In</button>
-                </form>
+                <p><a class="nms-btn nms-btn-primary" href="<?php echo esc_url( wp_login_url( get_permalink() ) ); ?>">Continue to secure sign-in</a></p>
+                <p class="nms-muted">Use the normal website sign-in, including any two-factor checks. No need to enter your password twice.</p>
             </div>
 
             <!-- Register Card -->
@@ -72,10 +61,7 @@ if ( isset( $_GET['mbs_modify'] ) && $_GET['mbs_modify'] === '1' ) {
                         <label for="nms-reg-org">Organisation (optional)</label>
                         <input type="text" id="nms-reg-org" name="organisation" placeholder="e.g. Acme Ltd">
                     </div>
-                    <div class="nms-form-group">
-                        <label for="nms-reg-pass">Password (min 8 characters)</label>
-                        <input type="password" id="nms-reg-pass" name="password" placeholder="••••••••" required minlength="8">
-                    </div>
+                    <p class="nms-muted">We will email a verification link. Set your password securely after confirming your email.</p>
                     <div id="nms-register-msg" class="nms-manage-msg"></div>
                     <button type="submit" class="nms-btn nms-btn-primary" style="width:100%;">Create Account</button>
                 </form>
@@ -132,6 +118,7 @@ jQuery(function($) {
             password: $('#nms-login-pass').val()
         }, function(res) {
             if (res.success) {
+                if (res.data.login_url) { window.location.assign(res.data.login_url); return; }
                 $msg.html('<span class="nms-msg-success">✓ ' + res.data.message + '</span>');
                 setTimeout(function() { window.location.reload(); }, 800);
             } else {
@@ -158,10 +145,10 @@ jQuery(function($) {
             name:         $('#nms-reg-name').val(),
             email:        $('#nms-reg-email').val(),
             phone:        $('#nms-reg-phone').val(),
-            organisation: $('#nms-reg-org').val(),
-            password:     $('#nms-reg-pass').val()
+            organisation: $('#nms-reg-org').val()
         }, function(res) {
             if (res.success) {
+                if (res.data.verification_required) { $msg.text(res.data.message); $btn.prop('disabled', false).text('Create Account'); return; }
                 $msg.html('<span class="nms-msg-success">✓ ' + res.data.message + '</span>');
                 setTimeout(function() { window.location.reload(); }, 800);
             } else {
@@ -192,6 +179,7 @@ jQuery(function($) {
         }, function(res) {
             $btn.prop('disabled', false).text('Look Up Booking');
             if (res.success) {
+                if (res.data.verification_required) { $msg.text(res.data.message); $res.hide(); return; }
                 var b = res.data;
                 var statusColors = {
                     pending:   'background:#fff3cd;color:#856404',

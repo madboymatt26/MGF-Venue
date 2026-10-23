@@ -14,7 +14,7 @@ class MBS_Series_Request {
     }
 
     public static function owned_series( $ref ) {
-        if ( ! is_user_logged_in() ) return false;
+        if ( ! is_user_logged_in() || ! MBS_Hirer_Identity::verified() || ! MBS_Campsite_Policy::can_book() ) return false;
         $user = wp_get_current_user();
         $series = MBS_Series::get( $ref );
         return $series && empty( $series->scout_use ) && $user->user_email !== '' &&

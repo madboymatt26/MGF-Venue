@@ -152,6 +152,7 @@ class MBS_Modification {
                 }
 
                 if ( ! empty( $update ) ) {
+                    $update = MBS_Booking_Validation::delivery_update( $booking, $update );
                     if ( class_exists( 'MBS_Space_Selection' ) && isset( $update['space'] ) && $update['space'] !== $booking->space ) {
                         $selection = MBS_Space_Selection::normalize( $update['space'] );
                         if ( is_wp_error( $selection ) ) return $selection; $update['space'] = $selection;
@@ -269,6 +270,7 @@ class MBS_Modification {
 	                        if ( isset( $lk_changes['kitchen'] ) )      $update['kitchen']          = (int) $lk_changes['kitchen'];
 	                        if ( isset( $lk_changes['attendees'] ) )    $update['attendees']        = absint( $lk_changes['attendees'] );
 	                        if ( isset( $lk_changes['booking_type'] ) ) $update['all_day']          = $lk_changes['booking_type'] === 'fullday' ? 1 : 0;
+                            $update = MBS_Booking_Validation::delivery_update( $locked_booking, $update );
 
 	                        if ( MBS_Bookings::has_financial_history( $locked_booking->ref ) ) {
 	                            $wpdb->query( 'ROLLBACK' );
@@ -307,6 +309,7 @@ class MBS_Modification {
 	                        $lk_paid = (float) ( $locked_booking->amount_paid ?? 0 );
 	                        $update['status'] = ( class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ) ? $locked_booking->status : ( ( $lk_paid >= (float) $new_amount ) ? 'paid' : 'confirmed' );
 
+	                        $update = MBS_Booking_Validation::delivery_update( $locked_booking, $update );
 	                        if ( class_exists( 'MBS_Space_Selection' ) && isset( $update['space'] ) ) MBS_Space_Selection::record_selection( $update['space'] );
 	                        $booking_updated = $wpdb->update( $table, $update, array( 'ref' => $request->booking_ref ) );
 	                        if ( $booking_updated === false ) {

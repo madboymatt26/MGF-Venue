@@ -65,7 +65,7 @@ class MBS_Space_Selection {
 
     /** Serialize ALL campsite occupancy writers, including empty dates and parent selections. */
     public static function locked( $callback ) {
-        if ( ! self::protect_allocations() ) return call_user_func( $callback );
+        // Paid single-space and whole-centre writers need the same empty-date lock.
         global $wpdb;
         $key = 'mbs_spaces_' . substr( hash( 'sha256', ( defined( 'DB_NAME' ) ? DB_NAME : '' ) . '|' . $wpdb->prefix ), 0, 32 );
         if ( self::$lock_depth === 0 && (int) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, 10)', $key ) ) !== 1 ) return new WP_Error( 'occupancy_busy', 'Another booking is being saved. Refresh availability and retry.' );

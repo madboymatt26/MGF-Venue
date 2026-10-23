@@ -23,13 +23,13 @@ require_once __DIR__ . '/audit-assertions.php';
 global $wpdb;
 $a = MBS_Audit_Assertions::current();
 
-$matrix_offset = 500;
+$GLOBALS['matrix_offset'] = wp_rand( 1000, 100000 ); // WP-CLI eval scope is not the function's global scope.
 
 function matrix_booking( $overrides = array() ) {
     global $matrix_offset;
-    $matrix_offset++;
+    $matrix_offset += 3; // Leave room for the rescheduling scenario.
     return MBS_Bookings::create( array_merge( array(
-        'space' => 'Main Hall',
+        'space' => array_key_first( MBS_Bookings::get_spaces() ),
         'booking_date' => wp_date( 'Y-m-d', strtotime( '+' . ( 50 + $matrix_offset ) . ' days' ) ),
         'name' => 'Matrix Test', 'email' => 'matrix@example.com',
         'phone' => '07700900050', 'address' => '50 Test Lane',
@@ -86,7 +86,7 @@ $a->run( 'Matrix: monthly series invoice issued', function() use ( $wpdb ) {
     $wpdb->insert( $booking_table, array(
         'ref' => $ref, 'series_id' => $series_ref, 'status' => 'confirmed',
         'name' => 'Matrix', 'email' => 'matrix-s@example.com', 'phone' => '07700',
-        'address' => 'Test', 'space' => 'Main Hall', 'booking_date' => $month . '-05',
+        'address' => 'Test', 'space' => array_key_first( MBS_Bookings::get_spaces() ), 'booking_date' => $month . '-05',
         'start_time' => '18:00', 'end_time' => '20:00', 'attendees' => 10,
         'purpose' => 'Weekly', 'amount' => '50.00', 'pricing_tier' => 'standard',
         'legacy_billing_excluded' => 0, 'created_at' => current_time( 'mysql' ),
@@ -148,7 +148,7 @@ $a->run( 'Matrix: supplement after base', function() use ( $wpdb ) {
     $wpdb->insert( $booking_table, array(
         'ref' => $ref2, 'series_id' => $series_ref, 'status' => 'confirmed',
         'name' => 'Matrix', 'email' => 'mxs@example.com', 'phone' => '07700',
-        'address' => 'Test', 'space' => 'Main Hall', 'booking_date' => $month . '-15',
+        'address' => 'Test', 'space' => array_key_first( MBS_Bookings::get_spaces() ), 'booking_date' => $month . '-15',
         'start_time' => '18:00', 'end_time' => '20:00', 'attendees' => 10,
         'purpose' => 'Extra', 'amount' => '50.00', 'pricing_tier' => 'standard',
         'legacy_billing_excluded' => 0, 'created_at' => current_time( 'mysql' ),
@@ -170,10 +170,11 @@ $a->run( 'Matrix: material modification creates R2', function() use ( $wpdb ) {
 
     MBS_Modification::create_request( array(
         'ref' => $b['ref'], 'type' => 'modify', 'notes' => 'Move',
-        'changes' => array( 'date' => wp_date( 'Y-m-d', strtotime( '+250 days' ) ) ),
+        'changes' => array( 'date' => wp_date( 'Y-m-d', strtotime( MBS_Bookings::get( $b['ref'] )->booking_date . ' +1 day' ) ) ),
     ) );
     $req_id = $wpdb->insert_id;
-    MBS_Modification::approve( $req_id );
+    $approval = MBS_Modification::approve( $req_id );
+    MBS_Audit_Assertions::assert_that( ! is_wp_error( $approval ), 'Approve: ' . ( is_wp_error( $approval ) ? $approval->get_error_message() : '' ) );
 
     $r2 = (int) MBS_Bookings::get( $b['ref'] )->current_invoice_document_id;
     MBS_Audit_Assertions::assert_that( $r2 > $r1, 'R2 > R1' );

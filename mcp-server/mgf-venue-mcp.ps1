@@ -504,7 +504,7 @@ $script:Tools = @(
         inputSchema = @{
             type = 'object'
             properties = @{
-                resource = @{ type = 'string'; enum = @('capabilities', 'dashboard', 'blocked_dates', 'series', 'requests', 'global_audit', 'configuration', 'email_configuration', 'custom_fields', 'osm_configuration', 'analytics', 'invoice', 'payment_url') }
+                resource = @{ type = 'string'; enum = @('capabilities', 'dashboard', 'health', 'blocked_dates', 'series', 'requests', 'global_audit', 'configuration', 'email_configuration', 'custom_fields', 'osm_configuration', 'analytics', 'invoice', 'payment_url') }
                 ref = @{ type = 'string'; description = 'Booking reference, required for invoice and payment_url.' }
                 series_id = @{ type = 'string'; description = 'Series identifier, required for series.' }
                 status = @{ type = 'string'; enum = @('pending', 'all'); default = 'pending' }
@@ -727,6 +727,7 @@ function Invoke-MgfVenueTool {
                 }
                 'configuration' { return Invoke-VenueApi -Method GET -Path '/admin/configuration' }
                 'email_configuration' { return Invoke-VenueApi -Method GET -Path '/admin/email-configuration' }
+                'health' { return Invoke-VenueApi -Method GET -Path '/admin/health' }
                 'custom_fields' { return Invoke-VenueApi -Method GET -Path '/admin/custom-fields' }
                 'osm_configuration' { return Invoke-VenueApi -Method GET -Path '/admin/osm-configuration' }
                 'analytics' {

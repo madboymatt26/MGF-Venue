@@ -11,21 +11,8 @@
         <!-- Login -->
         <div class="nms-form-section">
             <h3>Log In</h3>
-            <form id="nms-hirer-login">
-                <?php wp_nonce_field( 'mbs_public_nonce', 'nonce' ); ?>
-                <div class="nms-form-group">
-                    <label for="nms-login-identity">Email Address or Username</label>
-                    <input type="text" id="nms-login-identity" name="login" autocomplete="username" required>
-                </div>
-                <div class="nms-form-group">
-                    <label for="nms-login-pass">Password</label>
-                    <input type="password" id="nms-login-pass" name="password" autocomplete="current-password" required>
-                </div>
-                <div class="nms-form-group" style="margin-top:0.5rem;">
-                    <button type="submit" class="nms-btn nms-btn-primary" style="width:100%;">Log In</button>
-                </div>
-                <p style="text-align:center;margin-top:0.5rem;"><a href="<?php echo esc_url( wp_lostpassword_url() ); ?>" style="color:#7413DC;font-size:0.85rem;">Forgot your password?</a></p>
-            </form>
+            <p><a class="nms-btn nms-btn-primary" href="<?php echo esc_url( wp_login_url( get_permalink() ) ); ?>">Continue to secure sign-in</a></p>
+            <p><a href="<?php echo esc_url( wp_lostpassword_url() ); ?>">Forgot your password?</a></p>
         </div>
 
         <!-- Register -->
@@ -50,11 +37,7 @@
                     <label for="nms-reg-phone">Phone Number</label>
                     <input type="tel" id="nms-reg-phone" name="phone">
                 </div>
-                <div class="nms-form-group">
-                    <label for="nms-reg-pass">Password <span class="nms-req">*</span></label>
-                    <input type="password" id="nms-reg-pass" name="password" required minlength="8">
-                    <p class="nms-field-hint">At least 8 characters</p>
-                </div>
+                <p class="nms-field-hint">Verify your email first, then set your password securely.</p>
                 <div class="nms-form-group" style="margin-top:0.5rem;">
                     <button type="submit" class="nms-btn nms-btn-primary" style="width:100%;">Create Account</button>
                 </div>
@@ -77,6 +60,7 @@ jQuery(function($) {
         data.push({ name: 'action', value: 'mbs_hirer_login' });
         $.post(NMS.ajax_url, data, function(res) {
             if (res.success) {
+                if (res.data.login_url) { window.location.assign(res.data.login_url); return; }
                 showMsg(res.data.message, 'success');
                 setTimeout(function() { location.reload(); }, 800);
             } else {
@@ -92,6 +76,7 @@ jQuery(function($) {
         $.post(NMS.ajax_url, data, function(res) {
             if (res.success) {
                 showMsg(res.data.message, 'success');
+                if (res.data.verification_required) return;
                 setTimeout(function() { location.reload(); }, 800);
             } else {
                 showMsg(res.data.message, 'error');

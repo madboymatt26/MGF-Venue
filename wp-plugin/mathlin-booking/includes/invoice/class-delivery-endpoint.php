@@ -158,6 +158,7 @@ class MBS_Invoice_Delivery_Endpoint {
         if ( current_user_can( 'mbs_manage_bookings' ) ) {
             return true;
         }
+        if ( ! MBS_Hirer_Identity::verified() || ! MBS_Campsite_Policy::can_book() ) return new WP_Error( 'email_unverified', 'Verify your account email before accessing private documents.' );
 
         // Hirer: must own the document
         if ( ! $user_id ) {
@@ -176,6 +177,9 @@ class MBS_Invoice_Delivery_Endpoint {
             $booking_table = $wpdb->prefix . MBS_TABLE;
             $booking = $wpdb->get_row( $wpdb->prepare( "SELECT user_id, email FROM {$booking_table} WHERE id = %d", (int) $document->booking_id ) );
             if ( $booking ) {
+                // Legacy user_id links may predate mailbox proof. They are not
+                // sufficient after an account changes to another email address.
+                if ( ! MBS_Hirer_Identity::owns_email( $booking->email ) ) return new WP_Error( 'not_authorised', 'The verified account email must match the booking contact.' );
                 // Primary: user_id match
                 if ( (int) $booking->user_id === $user_id ) return true;
                 // If user_id exists but doesn't match, deny (no email fallback)
@@ -198,6 +202,7 @@ class MBS_Invoice_Delivery_Endpoint {
         if ( $document->invoice_id ) {
             $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
             $invoice = $wpdb->get_row( $wpdb->prepare( "SELECT series_ref, contact_email, billing_mode FROM {$invoice_table} WHERE id = %d", (int) $document->invoice_id ) );
+            if ( $invoice && ! MBS_Hirer_Identity::owns_email( $invoice->contact_email ) ) return new WP_Error( 'not_authorised', 'The verified account email must match the invoice contact.' );
             if ( $invoice && $invoice->billing_mode === 'additional_charge' ) {
                 $user = get_userdata( $user_id );
                 if ( $user && strcasecmp( $user->user_email, $invoice->contact_email ) === 0 ) return true;

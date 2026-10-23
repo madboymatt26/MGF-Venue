@@ -20,7 +20,9 @@ function is_wp_error($r){return false;}
 // Minimal PHP distribution has no crypto extension. Mock decryption only for transport tests.
 if(!function_exists('openssl_decrypt')){function openssl_decrypt(...$args){return 'fake-fixture-token';}if(!defined('OPENSSL_RAW_DATA'))define('OPENSSL_RAW_DATA',1);}
 require __DIR__.'/../wp-plugin/mathlin-booking/includes/class-google-calendar.php';
-class FixtureDB{public $prefix='wp_';public $last_error='';public $rows=[];public function get_results($sql){return $this->rows;}}
+function maybe_serialize($v){return serialize($v);}
+function wp_cache_delete($key,$group){return true;}
+class FixtureDB{public $prefix='wp_';public $options='wp_options';public $last_error='';public $rows=[];public function get_results($sql){return $this->rows;}public function prepare($sql,...$args){foreach($args as$a)$sql=preg_replace('/%s/',"'".str_replace("'","''",(string)$a)."'",$sql,1);return $sql;}public function get_var($sql){return 1;}public function query($sql){if(strpos($sql,'DELETE FROM wp_options')!==false)delete_option('mbs_gcal_lock');return 1;}}
 $wpdb=new FixtureDB();
 function invoke($name,...$args){$r=new ReflectionMethod(MBS_Google_Calendar::class,$name);if(PHP_VERSION_ID<80100)$r->setAccessible(true);return $r->invokeArgs(null,$args);}
 function check($v,$msg){global $assertions;$assertions++;if(!$v)throw new RuntimeException($msg);}

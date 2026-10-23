@@ -12,9 +12,7 @@ class MBS_Auto_Archive {
     public function init() {
         add_action( 'mbs_daily_auto_archive', array( $this, 'run_archive' ) );
 
-        if ( ! wp_next_scheduled( 'mbs_daily_auto_archive' ) ) {
-            wp_schedule_event( strtotime( 'tomorrow 02:00:00' ), 'daily', 'mbs_daily_auto_archive' );
-        }
+        MBS_Local_Schedule::register( 'mbs_daily_auto_archive', 'mbs_cron_time_archive', '02:00' );
     }
 
     public static function deactivate() {
@@ -42,7 +40,8 @@ class MBS_Auto_Archive {
              SET status = 'archived'
              WHERE COALESCE(NULLIF(booking_date_end, ''), booking_date) < %s
              AND COALESCE(NULLIF(booking_date_end, ''), booking_date) < %s
-             AND status IN ('confirmed', 'deposit_paid', 'cancelled', 'paid')",
+             AND status IN ('confirmed', 'deposit_paid', 'cancelled', 'paid')
+             AND (status IN ('cancelled','paid') OR amount <= COALESCE(amount_paid,0))",
             $today,
             $threshold
         ) );

@@ -425,6 +425,8 @@ class MBS_Bookings {
             $space = MBS_Space_Selection::normalize( $data['spaces'] ?? ( $data['space'] ?? '' ) );
             if ( is_wp_error( $space ) ) return $space;
             $data['space'] = $space;
+            $valid = MBS_Booking_Validation::validate( $data, $trusted_admin_context );
+            if ( is_wp_error( $valid ) ) return $valid;
             if ( count( MBS_Space_Selection::members( $space ) ) > 1 ) update_option( 'mbs_multi_space_ever_used', 1, false );
         }
         if ( class_exists( 'MBS_Campsite_Policy' ) ) {
@@ -446,8 +448,8 @@ class MBS_Bookings {
         $scout_use = false;
         if ( ! empty( $data['scout_use'] ) ) {
             $vol_emails = array_filter( array_map( 'trim', explode( "\n", get_option( 'mbs_scout_volunteer_emails', '' ) ) ) );
-            $submitter_email = sanitize_email( $data['email'] ?? '' );
-            $scout_use = $trusted_admin_context || in_array( strtolower( $submitter_email ), array_map( 'strtolower', $vol_emails ), true );
+            $user = wp_get_current_user();
+            $scout_use = $trusted_admin_context || ( MBS_Hirer_Identity::verified( $user ) && ( get_user_meta( $user->ID, 'mbs_scout_volunteer', true ) || in_array( strtolower( $user->user_email ), array_map( 'strtolower', $vol_emails ), true ) ) );
         }
 
         // Enforce the minimum booking duration before doing any expensive work
@@ -540,7 +542,7 @@ class MBS_Bookings {
             // reservations in the operator's customer portal by attaching their ID.
             $contact_user = get_user_by( 'email', $insert['email'] );
             $insert['user_id'] = $contact_user ? (int) $contact_user->ID : 0;
-        } elseif ( is_user_logged_in() ) {
+        } elseif ( is_user_logged_in() && MBS_Hirer_Identity::owns_email( $insert['email'] ) ) {
             $insert['user_id'] = get_current_user_id();
         }
 
@@ -556,7 +558,7 @@ class MBS_Bookings {
         for ( $check_ts = strtotime( $date_from ), $end_ts = strtotime( $date_to ); $check_ts <= $end_ts; $check_ts += DAY_IN_SECONDS ) {
             $check_date = wp_date( 'Y-m-d', $check_ts );
             foreach ( $spaces_to_lock as $lock_space ) {
-                $wpdb->query( $wpdb->prepare(
+                $locked = $wpdb->query( $wpdb->prepare(
                     "SELECT id FROM {$table}
                      WHERE space = %s AND status NOT IN ('cancelled','archived')
                      AND (booking_date = %s OR (booking_date_end IS NOT NULL AND booking_date <= %s AND booking_date_end >= %s))
@@ -564,9 +566,9 @@ class MBS_Bookings {
                     $lock_space,
                     $check_date,
                     $check_date,
-                    $check_date,
                     $check_date
                 ) );
+                if ( $locked === false ) { if ( $manage_transaction ) $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'occupancy_lock_failed', 'Availability could not be locked. Please retry.' ); }
             }
 
             $blocked = MBS_Blocked_Dates::is_blocked( $check_date, $space_val );
@@ -747,7 +749,8 @@ class MBS_Bookings {
 
         // Idempotent: already at the requested status — no-op success.
         if ( $current->status === $status ) return true;
-        if ( class_exists( 'MBS_Space_Selection' ) && MBS_Space_Selection::protect_allocations() && in_array( $current->status, array( 'cancelled', 'archived' ), true ) && ! in_array( $status, array( 'cancelled', 'archived' ), true ) ) {
+        if ( class_exists( 'MBS_Space_Selection' ) && in_array( $current->status, array( 'cancelled', 'archived' ), true ) && ! in_array( $status, array( 'cancelled', 'archived' ), true ) ) {
+            if ( is_wp_error( MBS_Booking_Validation::validate( (array) $current, true ) ) ) return false;
             if ( is_wp_error( MBS_Space_Selection::normalize( $current->space, true ) ) ) return false;
             $last = $current->booking_date_end ?: $current->booking_date;
             for ( $day = new DateTimeImmutable( $current->booking_date ); $day->format( 'Y-m-d' ) <= $last; $day = $day->modify( '+1 day' ) ) {
@@ -978,7 +981,7 @@ class MBS_Bookings {
             $values
         ) );
 
-        if ( $area_sets && ( ! is_array( $existing ) || ! empty( $wpdb->last_error ) ) ) return array( (object) array( 'space' => $space, 'booking_date' => $date, 'all_day' => 1, 'name' => 'Availability could not be verified', 'ref' => '' ) );
+        if ( ! is_array( $existing ) || ! empty( $wpdb->last_error ) ) return array( (object) array( 'space' => $space, 'booking_date' => $date, 'all_day' => 1, 'name' => 'Availability could not be verified', 'ref' => '' ) );
         if ( $area_sets ) $existing = array_values( array_filter( (array) $existing, static function( $booking ) use ( $space ) { return MBS_Space_Selection::overlaps( $space, $booking->space ); } ) );
         if ( empty( $existing ) ) return array();
 
@@ -1019,11 +1022,12 @@ class MBS_Bookings {
      */
     public static function format_conflict_message( $conflicts ) {
         if ( empty( $conflicts ) ) return '';
+        foreach ( $conflicts as $conflict ) if ( empty( $conflict->ref ) && ( $conflict->name ?? '' ) === 'Availability could not be verified' ) return 'Availability could not be verified. No booking was saved; please retry.';
 
         $msgs = array();
         foreach ( $conflicts as $b ) {
             $time = $b->all_day ? 'all day' : ( $b->start_time . '–' . $b->end_time );
-            $msgs[] = $b->space . ' on ' . wp_date( 'j M', strtotime( $b->booking_date ) ) . ' (' . $time . ') – ' . $b->name;
+            $msgs[] = $b->space . ' on ' . wp_date( 'j M', strtotime( $b->booking_date ) ) . ' (' . $time . ')' . ( current_user_can( 'mbs_manage_bookings' ) ? ' – ' . $b->name : '' );
         }
 
         return 'This booking conflicts with: ' . implode( '; ', $msgs ) . '. Please choose a different time or space.';
@@ -1939,7 +1943,10 @@ f) On detection of a fire, the Hirer must break a glass and assist evacuation of
                 address = '',
                 organisation = '',
                 notes = '',
-                admin_notes = CONCAT('[GDPR erasure ', NOW(), '] ', COALESCE(admin_notes, '')),
+                admin_notes = '[Personal data erased; restricted financial documents may be retained]',
+                purpose = 'Anonymised booking',
+                modification_token = '',
+                user_id = 0,
                 custom_fields = ''
             WHERE email = %s",
             $email
@@ -1961,7 +1968,7 @@ f) On detection of a fire, the Hirer must break a glass and assist evacuation of
 
         // Anonymise IP addresses in audit log for this person's bookings
         foreach ( array_merge( $booking_refs, $series_refs, wp_list_pluck( $invoice_rows, 'invoice_ref' ) ) as $audit_ref ) {
-            $wpdb->query( $wpdb->prepare( "UPDATE {$audit_table} SET ip_address = '0.0.0.0', user_name = 'Anonymised' WHERE ref = %s AND user_name != 'System'", $audit_ref ) );
+            $wpdb->query( $wpdb->prepare( "UPDATE {$audit_table} SET ip_address = '0.0.0.0', user_name = 'Anonymised', details = '[Personal details redacted]' WHERE ref = %s", $audit_ref ) );
         }
 
         // Delete any queued emails containing this person's data
@@ -1986,7 +1993,7 @@ f) On detection of a fire, the Hirer must break a glass and assist evacuation of
             'items_removed'  => $items_removed,
             'items_retained' => $items_removed, // Financial records retained but anonymised
             'messages'       => $items_removed
-                ? array( sprintf( '%d booking, series or invoice record(s) anonymised. Financial totals preserved for audit.', $total_affected ) )
+                ? array( sprintf( '%d booking, series or invoice record(s) anonymised. Financial totals preserved. Issued invoice snapshots, WooCommerce records, administrator-copy emails and protected external calendar records may retain personal information under the applicable retention policy and require separate review. This operation does not erase those external/immutable records.', $total_affected ) )
                 : array(),
             'done'           => true,
         );

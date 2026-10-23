@@ -393,6 +393,7 @@ jQuery(function ($) {
 
         $.post(MBS_Admin.ajax_url, {
             action:          'mbs_save_settings',
+            expected_settings_hash: MBS_Admin.settings_hash,
             nonce:           MBS_Admin.nonce,
             ha_webhook_url:  $('#ha_webhook_url').val(),
             min_notice_days: $('#min_notice_days').val(),
@@ -442,14 +443,15 @@ jQuery(function ($) {
         }, function (res) {
             $btn.prop('disabled', false).text('💾 Save All Settings');
             if (res.success) {
+                if (res.data.settings_hash) MBS_Admin.settings_hash = res.data.settings_hash;
                 $msg.text('✓ All settings saved successfully').css('color', '#46b450').show();
             } else {
-                $msg.text('✗ Error saving settings').css('color', '#dc3232').show();
+                $msg.text('✗ ' + (res.data || 'Error saving settings')).css('color', '#dc3232').show();
             }
             setTimeout(function () { $msg.text('').hide(); }, 4000);
-        }).fail(function () {
+        }).fail(function (xhr) {
             $btn.prop('disabled', false).text('💾 Save All Settings');
-            $msg.text('✗ Network error – please try again').css('color', '#dc3232').show();
+            $msg.text('✗ ' + (xhr.responseJSON && typeof xhr.responseJSON.data === 'string' ? xhr.responseJSON.data : 'Network error – please try again')).css('color', '#dc3232').show();
         });
     });
 
@@ -1027,6 +1029,7 @@ jQuery(function ($) {
 
         $.post(MBS_Admin.ajax_url, {
             action:              'mbs_save_email_settings',
+            expected_settings_hash: MBS_Admin.email_settings_hash,
             nonce:               MBS_Admin.nonce,
             org_name:            $('#org_name').val(),
             org_address:         $('#org_address').val(),
@@ -1042,11 +1045,15 @@ jQuery(function ($) {
         }, function (res) {
             $btn.prop('disabled', false).text('💾 Save Email Settings');
             if (res.success) {
+                if (res.data.settings_hash) MBS_Admin.email_settings_hash = res.data.settings_hash;
                 $msg.text('✓ Email settings saved').css('color', '#46b450').show();
             } else {
-                $msg.text('✗ Error saving').css('color', '#dc3232').show();
+                $msg.text('✗ ' + (res.data || 'Error saving')).css('color', '#dc3232').show();
             }
             setTimeout(function () { $msg.text('').hide(); }, 4000);
+        }).fail(function(xhr) {
+            $btn.prop('disabled', false).text('💾 Save Email Settings');
+            $msg.text('✗ ' + (xhr.responseJSON && typeof xhr.responseJSON.data === 'string' ? xhr.responseJSON.data : 'Network error – please retry')).css('color', '#dc3232').show();
         });
     });
 
