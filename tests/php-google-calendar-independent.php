@@ -29,8 +29,9 @@ $event = lifecycle_ready(); $event['etag'] = 'decorated'; $event['location'] = '
 $ops = lifecycle_plan([$event]);
 check($ops[0]['action'] === 'refresh_link', 'Google-only decoration queues local comparison refresh, not relinking');
 $queue = [['code'=>200,'body'=>json_encode($event)]];
-invoke('execute', $ops);
+$result = invoke('execute', $ops);
 check(count($requests) === 1 && $requests[0][1]['method'] === 'GET', 'decoration repair makes no Google write');
+check($result['completed'] === 0 && $result['refreshed'] === 1, 'local refresh is not reported as a Google event change');
 $link = reset($options['mbs_google_calendar']['links']);
 check($link['origin'] === 'mgf' && $link['id'] === $event['id'], 'repair preserves managed origin and event ID');
 check(lifecycle_plan([$event])[0]['action'] === 'matched', 'decoration refresh removes false review');
