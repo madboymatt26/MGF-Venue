@@ -138,14 +138,15 @@ $a->run( 'TxFail: non-material attendees change does not create R2', function() 
 
     MBS_Modification::create_request( array(
         'ref' => $ref, 'type' => 'modify', 'notes' => 'More people',
-        'changes' => array( 'attendees' => '99' ),
+        'changes' => array( 'attendees' => '19' ),
     ) );
     $req_id = $wpdb->insert_id;
-    MBS_Modification::approve( $req_id );
+    $approval = MBS_Modification::approve( $req_id );
+    MBS_Audit_Assertions::assert_that( ! is_wp_error( $approval ), 'Approve valid attendee update: ' . ( is_wp_error( $approval ) ? $approval->get_error_message() : '' ) );
 
     $after = MBS_Bookings::get( $ref );
     MBS_Audit_Assertions::assert_that( (int) $after->current_invoice_document_id === $r1, 'Non-material: pointer unchanged' );
-    MBS_Audit_Assertions::assert_that( (int) $after->attendees === 99, 'Attendees updated' );
+    MBS_Audit_Assertions::assert_that( (int) $after->attendees === 19, 'Attendees updated within configured capacity' );
 });
 
 // ── Confirmation invariant: no confirmed chargeable booking without document ────

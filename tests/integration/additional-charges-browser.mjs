@@ -9,7 +9,7 @@ const {chromium}=await import(pathToFileURL(process.env.MGF_BROWSER_MODULE).href
 const browser=await chromium.launch({headless:true});
 await mkdir('browser-artifacts',{recursive:true});
 const errors=[];
-const watch=page=>page.on('pageerror',error=>errors.push(error.message));
+const watch=page=>{page.setDefaultTimeout(30000);page.setDefaultNavigationTimeout(45000);page.on('pageerror',error=>errors.push(error.message));};
 async function login(page,user){
     await page.goto(base+'/wp-login.php');
     await page.locator('#user_login').fill(user);
@@ -20,6 +20,7 @@ try {
     const admin=await browser.newContext(); const staff=await admin.newPage(); watch(staff);
     await login(staff,'admin');
     await staff.goto(base+'/wp-admin/admin.php?page=mathlin-additional-charges');
+    console.log('BROWSER_STAGE: staff charges');
     await staff.locator('h1').filter({hasText:'Additional charges'}).waitFor();
     assert.equal(await staff.locator('input[name="amount"]').count(),0,'List has no create form');
     await staff.getByRole('columnheader',{name:'Original booking',exact:true}).waitFor();
@@ -51,6 +52,7 @@ try {
     // The new staff entry screen uses the same signed-in operator, real REST nonce
     // and disposable WordPress database. No customer notification is selected.
     await staff.goto(base+'/wp-admin/admin.php?page=mathlin-add-booking');
+    console.log('BROWSER_STAGE: staff creation');
     await staff.locator('h1').filter({hasText:'Add booking'}).waitFor();
     await staff.locator('#entry-purpose').fill('Synthetic browser staff booking');
     await staff.locator('#entry-name').fill('Synthetic staff contact');
@@ -97,6 +99,7 @@ try {
         await calendar.locator('#nms-cal-sidebar .nms-day-booking').first().waitFor();
     }
     await calendar.goto(fixture.calendar_url);
+    console.log('BROWSER_STAGE: public calendar');
     await selectCalendarDate(fixture.near_date,true);
     await calendar.locator('#nms-cal-sidebar').getByText('Synthetic calendar near-date event',{exact:true}).waitFor();
     assert.equal(await calendar.locator('.nms-prefill-date').count(),0,'Readonly never offers booking');
@@ -107,6 +110,7 @@ try {
     assert.equal(await calendar.locator('#nms-date').getAttribute('min'),await calendar.evaluate(()=>NMS.min_date),'Form notice remains enforced');
     const owner=await browser.newContext(); const portal=await owner.newPage(); watch(portal);
     await login(portal,'extra-browser'); await portal.goto(fixture.portal_url);
+    console.log('BROWSER_STAGE: unverified owner');
     await portal.getByRole('heading',{name:'Verify your booking email',exact:true}).waitFor();
     assert.equal(await portal.getByText(fixture.invoice_ref,{exact:true}).count(),0,'Unverified account sees no private invoice');
     assert.ok(fixture.owner_proof.startsWith(base+'/'),'Local-only mailbox proof');
@@ -122,6 +126,7 @@ try {
     await portal.screenshot({path:'browser-artifacts/hirer-charges.png',fullPage:true});
     const guest=await browser.newContext(); const lookup=await guest.newPage(); watch(lookup);
     await lookup.goto(fixture.portal_url);
+    console.log('BROWSER_STAGE: guest proof');
     await lookup.getByRole('button',{name:/Quick Lookup/}).click();
     await lookup.locator('#nms-lookup-ref').fill(fixture.booking_ref);
     await lookup.locator('#nms-lookup-email').fill('extra-charge@example.invalid');
