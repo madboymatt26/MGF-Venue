@@ -4,7 +4,17 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.38.1
+**Current Version:** 3.39.0
+
+## 3.39.0 Cross-site safeguards and integration health
+
+- Verify mailbox ownership before revealing private hirer records; use normal WordPress login/password security. Existing venue-hirer accounts complete a one-time verification and secure password setup.
+- Strengthen date, attendance, occupancy, restoration and retry handling while preserving paid venues, free campsites, multiple areas and whole-venue dependencies. Staff can retain explicitly unknown legacy headcounts.
+- Revalidate queued notifications, access/payment eligibility and current booking state; keep unpaid balances visible and schedule daily tasks in the site's local timezone.
+- Preserve omitted settings, detect stale edits, protect active resource allocations, retain data on uninstall by default and verify named release ZIP integrity.
+- Add private Integration health diagnostics and a dedicated read-only integration role; improve sync recovery and distinguish review decisions from queued work without altering estate-owned events.
+
+Rollout: detailed Home Assistant feeds now need authentication; public availability remains available. Needham's access details require full payment when payments are enabled. Mail transport acceptance is not proof of inbox delivery. Back up each site and purge stale page/asset caches after updating; no automatic template repair, access reset, calendar-link decision or historical invoice rewrite is performed.
 
 ## 3.38.1 Legacy read-only admin recovery
 
