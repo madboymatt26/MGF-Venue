@@ -4,6 +4,8 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 require_once __DIR__ . '/class-calendar-reference-links.php';
 
 class MBS_Google_Calendar {
+    private static $lease = null;
+    private static function lock_key() { global $wpdb; return 'mbs_gcal_' . substr( hash( 'sha256', ( defined( 'DB_NAME' ) ? DB_NAME : '' ) . '|' . $wpdb->prefix ), 0, 32 ); }
     const OPTION = 'mbs_google_calendar';
     const HOOK = 'mbs_google_calendar_tick';
     const SCOPES = 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly';
@@ -167,7 +169,7 @@ class MBS_Google_Calendar {
 
     /** Minimal public fields only; intentionally never exports contact/name/purpose/notes. */
     public static function project( $rows, $pending, $site, $calendar, $zone, $today, $colour_settings = array(), $campsite = false ) {
-        $desired = array(); $source = array(); $legacy = array(); $imports = array(); $row_map = array();
+        $desired = array(); $source = array(); $legacy = array(); $imports = array(); $row_map = array(); $errors = array();
         foreach ( $rows as $row ) { $row = (object) $row; $row_map[$row->ref] = $row; }
         $colour_rules = self::colour_settings( $colour_settings );
         foreach ( $rows as $row ) {
@@ -175,6 +177,7 @@ class MBS_Google_Calendar {
             if ( isset( $source[$ref] ) ) self::error( 'Duplicate booking references. Resolve before syncing.' );
             $source[$ref] = (string) $b->status;
             if ( ! in_array( $b->status, $pending ? array( 'confirmed', 'paid', 'deposit_paid', 'pending' ) : array( 'confirmed', 'paid', 'deposit_paid' ), true ) ) continue;
+            try {
             $first = self::date( $b->booking_date, $zone ); $last = self::date( $b->booking_date_end ?: $b->booking_date, $zone );
             if ( $last < $first || $first->diff( $last )->days > 730 ) self::error( 'Invalid booking date range: ' . $ref );
             $meta = is_string( $b->custom_fields ?? null ) ? json_decode( $b->custom_fields, true ) : (array) ( $b->custom_fields ?? array() );
@@ -203,8 +206,13 @@ class MBS_Google_Calendar {
                 }
                 if ( $continuous || ! empty( $b->all_day ) ) break;
             }
+            } catch ( Throwable $e ) {
+                $source[$ref] = 'exception';
+                $errors[$ref] = 'Invalid source dates/times. This booking needs review; unrelated bookings can sync.';
+                foreach ( array_keys( $desired ) as $key ) if ( strpos( $key, $ref . '|' ) === 0 ) unset( $desired[$key] );
+            }
         }
-        ksort( $desired ); return array( 'desired' => $desired, 'source' => $source, 'legacy' => $legacy, 'imports' => $imports );
+        ksort( $desired ); return array( 'desired' => $desired, 'source' => $source, 'legacy' => $legacy, 'imports' => $imports, 'errors'=>$errors );
     }
     private static function date( $text, $zone ) {
         $d = DateTimeImmutable::createFromFormat( '!Y-m-d', (string) $text, $zone );
@@ -374,16 +382,58 @@ class MBS_Google_Calendar {
             $present[$id] = true;
           }
         }
-        foreach ( $projection['desired'] as $want ) if ( substr( $want['end']['date'] ?? $want['end']['dateTime'], 0, 10 ) >= $midnight->modify( '+5 years' )->format( 'Y-m-d' ) ) self::error( 'A booking is outside the five-year calendar review window. Review the booking before syncing.' );
+        $outside = array();
+        foreach ( $projection['desired'] as $key => $want ) if ( substr( $want['end']['date'] ?? $want['end']['dateTime'], 0, 10 ) >= $midnight->modify( '+5 years' )->format( 'Y-m-d' ) ) { $outside[$key] = $want; unset( $projection['desired'][$key] ); }
         usort( $events, function( $a, $b ) { return strcmp( $a['id'], $b['id'] ); } );
-        return array( 'projection' => $projection, 'events' => $events, 'ops' => self::plan( $projection, $events, self::site_key(), $today, (array) ( $s['links'] ?? array() ), $s ) );
+        $ops = self::plan( $projection, $events, self::site_key(), $today, (array) ( $s['links'] ?? array() ), $s );
+        foreach ( $projection['errors'] ?? array() as $ref => $reason ) {
+            $ops = array_values( array_filter( $ops, static function( $op ) use ( $ref ) { return $op['ref'] !== $ref; } ) );
+            $ops[] = array( 'key'=>$ref.'|invalid', 'ref'=>$ref, 'want'=>null, 'event'=>null, 'candidates'=>array(), 'action'=>'blocked', 'reason'=>$reason );
+        }
+        $outside_refs = array();
+        foreach ( $outside as $key => $want ) {
+            $ref = $want['extendedProperties']['private']['mgf_ref'];
+            if ( isset( $outside_refs[$ref] ) ) continue;
+            $outside_refs[$ref] = true;
+            // Suppress lifecycle retirement for this excluded key; it is an exception, not a cancellation.
+            $ops = array_values( array_filter( $ops, static function( $op ) use ( $ref ) { return $op['ref'] !== $ref; } ) );
+            $ops[] = array( 'key'=>$key, 'ref'=>$want['extendedProperties']['private']['mgf_ref'], 'want'=>$want, 'event'=>null, 'candidates'=>array(), 'action'=>'blocked', 'reason'=>'Outside the five-year comparison window. This booking is not changed; other bookings can sync.' );
+        }
+        return array( 'projection' => $projection, 'events' => $events, 'ops' => $ops );
     }
 
     /** Atomic database lease. Never steals a possibly in-flight request. */
     private static function lock() {
-        if ( ! add_option( 'mbs_gcal_lock', array( 'at' => time(), 'token' => wp_generate_password( 32, false ) ), '', false ) ) self::error( 'A calendar operation is already running. If this persists, an administrator must check the sync lock.' );
+        global $wpdb;
+        if ( self::$lease !== null || (int) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s,0)', self::lock_key() ) ) !== 1 ) self::error( 'Another calendar operation is running.' );
+        $old = get_option( 'mbs_gcal_lock' );
+        if ( $old && ( $old['engine'] ?? '' ) !== 'connection-v1' ) { $wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', self::lock_key() ) ); self::error( 'A legacy sync lock needs administrator review before recovery. No events changed.' ); }
+        // Owning the connection lock proves a previous connection-based worker ended.
+        if ( $old ) delete_option( 'mbs_gcal_lock' );
+        $lease = array( 'at'=>time(), 'token'=>wp_generate_password( 32, false ), 'engine'=>'connection-v1' );
+        if ( ! add_option( 'mbs_gcal_lock', $lease, '', false ) ) { $wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', self::lock_key() ) ); self::error( 'Calendar lease could not be recorded.' ); }
+        self::$lease = $lease;
     }
-    private static function unlock() { delete_option( 'mbs_gcal_lock' ); }
+    private static function unlock() {
+        global $wpdb;
+        if ( self::$lease === null ) return;
+        $wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->options} WHERE option_name='mbs_gcal_lock' AND option_value=%s", maybe_serialize( self::$lease ) ) );
+        wp_cache_delete( 'mbs_gcal_lock', 'options' );
+        self::$lease = null;
+        $wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', self::lock_key() ) );
+    }
+    public static function recover_legacy_lock( $expected ) {
+        if(!current_user_can('manage_options')) return new WP_Error('forbidden','Administrator required.');
+        global $wpdb;
+        if((int)$wpdb->get_var($wpdb->prepare('SELECT GET_LOCK(%s,0)',self::lock_key()))!==1) return new WP_Error('busy','A calendar worker is active.');
+        try {
+            $old=get_option('mbs_gcal_lock',array());
+            if(!$old||($old['engine']??'')==='connection-v1'||empty($old['at'])||time()-(int)$old['at']<3600||!hash_equals(hash('sha256',wp_json_encode($old)),$expected)) return new WP_Error('changed_lock','Lock changed, is not legacy, or is not yet one hour old. Refresh health and review.');
+            $ok=$wpdb->query($wpdb->prepare("DELETE FROM {$wpdb->options} WHERE option_name='mbs_gcal_lock' AND option_value=%s",maybe_serialize($old)));
+            wp_cache_delete('mbs_gcal_lock','options');
+            return $ok===1?true:new WP_Error('changed_lock','The lock changed; nothing was recovered.');
+        } finally { $wpdb->get_var($wpdb->prepare('SELECT RELEASE_LOCK(%s)',self::lock_key())); }
+    }
     private static function fingerprint( $snapshot ) { $s = self::settings(); return hash( 'sha256', wp_json_encode( array( $s['calendar'] ?? '', ! empty( $s['pending'] ), ! empty( $s['managed_updates'] ), $snapshot ) ) ); }
     private static function reviewed_choices( $ops, $input ) {
         $choices = array(); $claimed = array();
@@ -707,9 +757,9 @@ class MBS_Google_Calendar {
                 self::notice( 'Target saved. Preview and review before enabling sync.' );
             } elseif ( $op === 'colours' ) {
                 $s['colours'] = self::colour_settings( array( 'colours' => wp_unslash( $_POST['colours'] ?? array() ) ), true );
-                $s['enabled'] = false; $s['choices'] = array(); self::save( $s );
+                self::save( $s );
                 delete_transient( 'mbs_gcal_preview_' . get_current_user_id() );
-                self::notice( 'New-event colours saved. Sync paused for a fresh comparison; existing Google events and colours unchanged.' );
+                self::notice( 'New-event colours saved. Existing Google colours and sync enabled/paused state are unchanged.' );
             } elseif ( $op === 'preview' ) {
                 $snapshot = self::snapshot();
                 set_transient( 'mbs_gcal_preview_' . get_current_user_id(), array( 'fingerprint' => self::fingerprint( $snapshot ), 'snapshot' => $snapshot ), 900 );

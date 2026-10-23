@@ -8,10 +8,11 @@ function mbs_scout_assert( $condition, $message ) {
 $start = ( new DateTimeImmutable( '+90 days', wp_timezone() ) )->modify( 'next monday' );
 $start_date = $start->format( 'Y-m-d' );
 $repeat_until = $start->modify( '+14 days' )->format( 'Y-m-d' );
+$fixture_space = array_key_first( MBS_Bookings::get_spaces() );
 $data = array(
     'name' => 'Integration Test Scouts', 'organisation' => 'MGF Venue Test',
     'email' => get_option( 'admin_email' ), 'phone' => '', 'address' => '',
-    'space' => 'Main Hall', 'kitchen' => false,
+    'space' => $fixture_space, 'kitchen' => false,
     'booking_date' => $start_date, 'booking_date_end' => $start_date,
     'all_day' => false, 'scout_use' => true, 'pricing_tier' => 'standard',
     'start_time' => '06:00', 'end_time' => '07:00', 'attendees' => 0,

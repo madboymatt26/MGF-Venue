@@ -27,6 +27,7 @@ class MBS_Rest_API {
     }
 
     public function campsite_public_permission( $result, $server, $request ) {
+        if ( $request->get_method() === 'GET' && current_user_can('mbs_read_bookings') && preg_match('#^/mathlin/v1/bookings/(today|upcoming)$#D',$request->get_route()) ) return $result;
         if ( class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() && preg_match( '#^/mathlin/v1/bookings/(upcoming|today|calendar|date/|ical|[A-Z0-9-]+/ical)#', $request->get_route() ) && ! MBS_Campsite_Policy::can_book() ) return new WP_Error( 'campsite_access_denied', 'Sign in with an approved campsite account.', array( 'status' => 403 ) );
         return $result;
     }
@@ -36,7 +37,7 @@ class MBS_Rest_API {
         register_rest_route( self::API_NAMESPACE, '/bookings/upcoming', array(
             'methods'             => 'GET',
             'callback'            => array( $this, 'get_upcoming' ),
-            'permission_callback' => '__return_true',
+            'permission_callback' => array( $this, 'booking_manager_permission' ),
             'args'                => array(
                 'days' => array( 'default' => 30, 'sanitize_callback' => 'absint' ),
             ),
@@ -45,7 +46,7 @@ class MBS_Rest_API {
         register_rest_route( self::API_NAMESPACE, '/bookings/today', array(
             'methods'             => 'GET',
             'callback'            => array( $this, 'get_today' ),
-            'permission_callback' => '__return_true',
+            'permission_callback' => array( $this, 'booking_manager_permission' ),
         ) );
 
         register_rest_route( self::API_NAMESPACE, '/bookings/calendar', array(
@@ -419,8 +420,9 @@ class MBS_Rest_API {
         return current_user_can( 'manage_options' );
     }
 
-    public function booking_manager_permission() {
-        return current_user_can( 'manage_options' ) || current_user_can( 'mbs_manage_bookings' );
+    public function booking_manager_permission( $request = null ) {
+        if ( current_user_can( 'manage_options' ) || current_user_can( 'mbs_manage_bookings' ) ) return true;
+        return $request instanceof WP_REST_Request && $request->get_method() === 'GET' && current_user_can( 'mbs_read_bookings' ) && (bool) preg_match( '#^/mathlin/v1/(?:bookings/(?:today|upcoming)|admin/(?:capabilities|bookings(?:/[A-Z0-9-]+(?:/audit)?)?|availability|dashboard|blocked-dates|requests|audit))$#D', $request->get_route() );
     }
 
     private function integration_idempotency_transient( $scope, $key, $payload = array() ) {
@@ -1057,11 +1059,12 @@ class MBS_Rest_API {
             $actions = array_values( array_diff( $actions, $admin_only_actions ) );
         }
 
+        if ( ! $is_admin && ! current_user_can( 'mbs_manage_bookings' ) ) { $actions = array(); $reads = array( 'bookings','booking','availability','audit','dashboard','blocked_dates','requests' ); }
         return rest_ensure_response( array(
             'plugin_version' => MBS_VERSION,
             'space_selection' => class_exists( 'MBS_Space_Selection' ) ? array( 'enabled' => MBS_Space_Selection::enabled(), 'scope' => 'free_campsite_sibling_areas', 'capacity_rule' => 'lowest_selected_capacity', 'parent_resources' => 'exclusive_unchanged', 'api_input' => 'space label or spaces array' ) : array(),
             'payment_features' => class_exists( 'MBS_Payment_Features' ) ? MBS_Payment_Features::state() : array(),
-            'role'           => $is_admin ? 'administrator' : 'booking_manager',
+            'role'           => $is_admin ? 'administrator' : ( current_user_can( 'mbs_manage_bookings' ) ? 'booking_manager' : 'booking_reader' ),
             'actions'        => $actions,
             'reads'          => $reads,
         ) );
@@ -1579,6 +1582,7 @@ class MBS_Rest_API {
         if ( ! $booking ) {
             return new WP_Error( 'not_found', 'Booking not found', array( 'status' => 404 ) );
         }
+        if ( ! MBS_Hirer_Identity::calendar_access( $booking, $request->get_param( 'calendar_token' ) ) ) return new WP_Error( 'calendar_forbidden', 'Sign in as the verified hirer or request a secure booking link.', array( 'status' => 403 ) );
 
         $ics = MBS_ICal::generate( $booking );
 

@@ -1,5 +1,8 @@
 <?php if ( ! defined( 'ABSPATH' ) ) exit;
 
+if ( ! MBS_Campsite_Policy::can_book() ) { echo '<p>' . esc_html( MBS_Campsite_Policy::access_error()->get_error_message() ) . '</p>'; return; }
+if ( ! MBS_Hirer_Identity::verified() ) { echo MBS_Hirer_Identity::verification_notice(); return; }
+
 $user    = wp_get_current_user();
 $email   = $user->user_email;
 $name    = get_user_meta( $user->ID, 'first_name', true ) ?: $user->display_name;
@@ -221,7 +224,7 @@ foreach ( $invoices as $invoice ) $invoices_by_series[ $invoice->series_ref ][] 
                                     ?>
                                         <a href="<?php echo esc_url( $booking_pdf_url ); ?>" class="nms-btn nms-btn-sm" style="background:#f5f0ff;color:#7413DC;border-color:#e0d0f0;font-size:0.7rem;">Invoice PDF</a>
                                     <?php endif; ?>
-                                    <a href="<?php $ical_url = rest_url( 'mathlin/v1/bookings/' . $b->ref . '/ical' ); echo esc_url( $free_campsite ? add_query_arg( '_wpnonce', wp_create_nonce( 'wp_rest' ), $ical_url ) : $ical_url ); ?>" class="nms-btn nms-btn-sm" style="background:#f5f0ff;color:#7413DC;border-color:#e0d0f0;font-size:0.7rem;">📅</a>
+                                    <a href="<?php echo esc_url( MBS_Hirer_Identity::calendar_url( $b ) ); ?>" class="nms-btn nms-btn-sm" style="background:#f5f0ff;color:#7413DC;border-color:#e0d0f0;font-size:0.7rem;" aria-label="Download booking calendar entry">📅</a>
                                     <?php
                                     $mod_url = MBS_Modification::get_modification_url( $b );
                                     if ( $mod_url && ! in_array( $b->status, array( 'cancelled' ) ) && ! $is_past ) :

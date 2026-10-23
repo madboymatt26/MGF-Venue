@@ -3,7 +3,7 @@
  * Plugin Name: MGF Venue
  * Plugin URI:  https://github.com/madboymatt26/MGF-Venue
  * Description: Venue booking and management system with Home Assistant integration.
- * Version:     3.38.1
+ * Version:     3.39.0
  * Author:      MGF Venue
  * License:     GPL-2.0+
  * Text Domain: mathlin-booking
@@ -11,7 +11,7 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'MBS_VERSION',    '3.38.1' );
+define( 'MBS_VERSION',    '3.39.0' );
 define( 'MBS_DB_VERSION', '3.33.0-schema-12' );
 define( 'MBS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MBS_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -41,6 +41,9 @@ require_once MBS_PLUGIN_DIR . 'includes/class-invoice-reservation.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-bookings.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-campsite-policy.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-space-selection.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-booking-validation.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-settings-guard.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-submission-guard.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-payment-features.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-campsite-migration.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-campsite-consolidation.php';
@@ -56,6 +59,7 @@ require_once MBS_PLUGIN_DIR . 'includes/class-homeassistant.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-blocked-dates.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-updater.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-reminders.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-local-schedule.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-access-details.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-imported-access-reset.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-feedback.php';
@@ -72,6 +76,8 @@ require_once MBS_PLUGIN_DIR . 'includes/class-email-queue.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-custom-fields.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-modification.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-hirer-portal.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-hirer-identity.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-integration-health.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-series-request.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-accounting-export.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-osm-accounting-v2.php';
@@ -197,6 +203,8 @@ function mbs_init() {
     $email_queue->init();
     $modification->init();
     $hirer_portal->init();
+    ( new MBS_Hirer_Identity() )->init();
+    ( new MBS_Integration_Health() )->init();
     ( new MBS_Series_Request() )->init();
     $accounting->init();
     $osm_integration->init();

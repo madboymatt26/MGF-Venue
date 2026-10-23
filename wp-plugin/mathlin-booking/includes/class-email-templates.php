@@ -177,6 +177,26 @@ class MBS_Email_Templates {
         ) );
     }
 
+    public static function quote_repair_preview() {
+        $before=array();$after=array();
+        foreach(array_keys(self::get_template_types())as$type){
+            $saved=get_option('mbs_email_template_'.$type,array());$clean=$saved;
+            foreach(array('subject','body')as$field)if(isset($clean[$field]))$clean[$field]=str_replace("\\'","'",$clean[$field]);
+            if($clean!==$saved){$before[$type]=$saved;$after[$type]=$clean;}
+        }
+        return array('before'=>$before,'after'=>$after,'fingerprint'=>hash('sha256',wp_json_encode($before)));
+    }
+
+    /** Explicit staff-reviewed repair only; never touches issued documents. */
+    public static function repair_template_quotes( $expected ) {
+        if(!current_user_can('manage_options'))return new WP_Error('forbidden','Administrator required.');
+        $preview=self::quote_repair_preview();
+        if(!$preview['before']||!hash_equals($preview['fingerprint'],(string)$expected))return new WP_Error('changed_templates','Templates changed or no repair is required. Refresh the preview.');
+        if(!add_option('mbs_template_quote_backup_'.substr($expected,0,32),$preview['before'],'',false))return new WP_Error('backup_exists','A backup already exists for this repair. Review it before retrying.');
+        foreach($preview['after']as$type=>$template)update_option('mbs_email_template_'.$type,$template,false);
+        return true;
+    }
+
     /**
      * Reset a template to its default.
      */

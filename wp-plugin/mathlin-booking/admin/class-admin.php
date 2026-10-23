@@ -172,6 +172,8 @@ class MBS_Admin {
             'ajax_url' => admin_url( 'admin-ajax.php' ),
             'nonce'    => wp_create_nonce( 'mbs_admin_nonce' ),
             'doc_nonce' => wp_create_nonce( 'mbs_invoice_document_nonce' ),
+            'settings_hash' => MBS_Settings_Guard::fingerprint(),
+            'email_settings_hash' => MBS_Settings_Guard::fingerprint( true ),
             'free_campsite' => class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled(),
         ) );
         // Enqueue media library for logo upload
@@ -525,7 +527,9 @@ class MBS_Admin {
         // Only allow restoring to safe statuses
         $allowed = array( 'confirmed', 'deposit_paid', 'paid' );
         if ( ! in_array( $status, $allowed ) ) $status = 'confirmed';
-        if ( class_exists( 'MBS_Space_Selection' ) && MBS_Space_Selection::protect_allocations() ) {
+        if ( class_exists( 'MBS_Space_Selection' ) ) {
+            $invariants = MBS_Booking_Validation::validate( (array) $booking, true );
+            if ( is_wp_error( $invariants ) ) wp_send_json_error( $invariants->get_error_message(), 400 );
             $valid_selection = MBS_Space_Selection::normalize( $booking->space, true );
             if ( is_wp_error( $valid_selection ) ) wp_send_json_error( 'Restore cannot use removed or reconfigured areas. Review the current resources first.', 409 );
             $last = $booking->booking_date_end ?: $booking->booking_date;
@@ -723,7 +727,18 @@ class MBS_Admin {
 
     public function ajax_save_settings() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'Administrator required.', 403 );
+        if ( array_intersect( array( 'calendar_sync','reviewed_access_reset','access_settings','space_selection','payment_features' ), array_keys( $_POST ) ) ) return $this->save_settings_locked();
+        $result = MBS_Space_Selection::locked( array( $this, 'save_settings_locked' ) );
+        if ( is_wp_error( $result ) ) wp_send_json_error( $result->get_error_message(), 409 );
+    }
+
+    public function save_settings_locked() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
         if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
+        // PATCH semantics: omitted values are not instructions to reset options.
+        $preserve = array( 'ha_webhook_url','min_notice_days','min_duration_hours','kitchen_price','kitchen_enabled','reminder_hours','terms_page_id','auto_archive_days','additional_emails','auto_chase_enabled','scout_volunteer_emails','scout_nights_enabled','payment_terms_days','deposit_enabled','deposit_percentage','deposit_balance_days','access_enabled','access_hours_before','venue_capacity','curfew_saturday','curfew_sunday','payment_days_required','feedback_enabled','feedback_review_url','feedback_distribution_email','feedback_subject','feedback_body','booking_notice','facilities_text','offline_payment_instructions' );
+        foreach ( $preserve as $field ) if ( ! array_key_exists( $field, $_POST ) ) { $existing = get_option( 'mbs_' . $field, null ); if ( $existing !== null ) $_POST[$field] = $existing; }
         // Safe partial update for MCP clients; do not reset unrelated settings.
         if ( isset( $_POST['calendar_sync'] ) ) {
             $result = MBS_Google_Calendar::reviewed_sync( wp_unslash( $_POST['calendar_sync'] ) );
@@ -756,6 +771,8 @@ class MBS_Admin {
             wp_send_json_success( array( 'payment_features' => $feature_result ) );
             return;
         }
+        $preflight = MBS_Settings_Guard::preflight( $_POST );
+        if ( is_wp_error( $preflight ) ) wp_send_json_error( $preflight->get_error_message(), 409 );
         if ( class_exists( 'MBS_Campsite_Policy' ) ) {
             $policy_save = MBS_Campsite_Policy::save_settings( $_POST );
             if ( is_wp_error( $policy_save ) ) wp_send_json_error( $policy_save->get_error_message(), 400 );
@@ -951,7 +968,7 @@ class MBS_Admin {
             update_option( 'mbs_feedback_body', wp_kses_post( $_POST['feedback_body'] ) );
         }
 
-        wp_send_json_success( array( 'saved' => true, 'min_notice_days' => $notice_days, 'min_duration_hours' => $min_duration ) );
+        wp_send_json_success( array( 'saved' => true, 'min_notice_days' => $notice_days, 'min_duration_hours' => $min_duration, 'settings_hash'=>MBS_Settings_Guard::fingerprint() ) );
     }
 
     public function ajax_test_ha() {
@@ -1653,6 +1670,10 @@ class MBS_Admin {
     public function ajax_save_email_settings() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
         if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
+        $preflight = MBS_Settings_Guard::preflight( $_POST, true );
+        if ( is_wp_error( $preflight ) ) wp_send_json_error( $preflight->get_error_message(), 409 );
+        $_POST = wp_unslash( $_POST );
+        foreach ( array( 'org_name','org_address','org_phone','org_charity_number','org_logo_url','max_chase_emails','chase_interval_days','cron_time_reminders','cron_time_chase','cron_time_archive' ) as $field ) if ( ! array_key_exists( $field, $_POST ) ) { $existing = get_option( 'mbs_' . $field, null ); if ( $existing !== null ) $_POST[$field] = $existing; }
 
         // Save organisation details
         MBS_Email_Templates::save_org_settings( array(
@@ -1683,7 +1704,7 @@ class MBS_Admin {
             }
         }
 
-        wp_send_json_success( array( 'saved' => true ) );
+        wp_send_json_success( array( 'saved' => true, 'settings_hash'=>MBS_Settings_Guard::fingerprint( true ) ) );
     }
 
     public function ajax_save_custom_fields() {
@@ -1817,6 +1838,9 @@ class MBS_Admin {
             $valid = MBS_Campsite_Policy::validate_amendment( $booking, $update, ! empty( $_POST['campsite_exception'] ) );
             if ( is_wp_error( $valid ) ) wp_send_json_error( $valid->get_error_message() );
         }
+        $invariants = MBS_Booking_Validation::validate( array_merge( (array) $booking, $update ), true );
+        if ( is_wp_error( $invariants ) ) wp_send_json_error( $invariants->get_error_message(), 400 );
+        $update = MBS_Booking_Validation::delivery_update( $booking, $update );
         if ( class_exists( 'MBS_Space_Selection' ) && isset( $update['space'] ) ) MBS_Space_Selection::record_selection( $update['space'] );
         $wpdb->update( $table, $update, array( 'ref' => $ref ) );
 

@@ -15,6 +15,7 @@
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 class MBS_Updater {
+    private $following_download = false;
 
     /** GitHub owner/repo */
     private $repo = 'madboymatt26/MGF-Venue';
@@ -47,6 +48,8 @@ class MBS_Updater {
         add_filter( 'plugins_api',                           array( $this, 'plugin_info' ), 20, 3 );
         add_filter( 'upgrader_source_selection',             array( $this, 'fix_source_dir' ), 10, 4 );
         add_filter( 'http_request_args',                     array( $this, 'add_auth_header' ), 10, 2 );
+        add_filter( 'pre_http_request', array( $this, 'follow_authenticated_download' ), 10, 3 );
+        add_filter( 'upgrader_pre_download', array( $this, 'verify_release_download' ), 10, 4 );
     }
 
     /**
@@ -115,10 +118,11 @@ class MBS_Updater {
      * Auth is handled via the http_request_args filter (add_auth_header).
      */
     private function get_download_url( $release ) {
+        $expected = 'MGF-Venue-' . $this->parse_version( $release['tag_name'] ) . '.zip';
         // Check for an attached .zip asset first
         if ( ! empty( $release['assets'] ) ) {
             foreach ( $release['assets'] as $asset ) {
-                if ( substr( $asset['name'], -4 ) === '.zip' ) {
+                if ( $asset['name'] === $expected ) {
                     return $asset['browser_download_url'];
                 }
             }
@@ -213,6 +217,13 @@ class MBS_Updater {
      * Add Authorization header to download requests for private repos.
      */
     public function add_auth_header( $args, $url ) {
+        $parts = wp_parse_url( $url );
+        $host = strtolower( $parts['host'] ?? '' );
+        $path = $parts['path'] ?? '';
+        $prefix = $host === 'api.github.com' ? '/repos/' . $this->repo : '/' . $this->repo;
+        if ( ! is_array( $parts ) || ( $parts['scheme'] ?? '' ) !== 'https' || ! in_array( $host, array( 'github.com','api.github.com','codeload.github.com' ), true ) || isset( $parts['user'] ) || isset( $parts['pass'] ) || ( isset( $parts['port'] ) && $parts['port'] !== 443 ) || !( $path === $prefix || strpos( $path, $prefix . '/' ) === 0 ) ) return $args;
+        // Never forward a credential on an HTTP redirect to an unchecked origin.
+        $args['redirection'] = 0;
         // Only add auth for GitHub API/download URLs
         if ( strpos( $url, 'github.com/' . $this->repo ) === false &&
              strpos( $url, 'api.github.com/repos/' . $this->repo ) === false &&
@@ -226,6 +237,44 @@ class MBS_Updater {
         }
 
         return $args;
+    }
+
+    /** Follow release redirects explicitly, dropping credentials before changing origin. */
+    public function follow_authenticated_download( $pre, $args, $url ) {
+        if ( $pre !== false || $this->following_download || strtoupper( $args['method'] ?? 'GET' ) !== 'GET' ) return $pre;
+        $checked = $this->add_auth_header( array( 'headers'=>array() ), $url );
+        if ( ( $checked['redirection'] ?? null ) !== 0 ) return $pre;
+        $this->following_download = true;
+        try {
+            for ( $hop = 0; $hop < 6; $hop++ ) {
+                $args['redirection'] = 0;
+                foreach ( array_keys( $args['headers'] ) as $header ) if ( strcasecmp( $header, 'Authorization' ) === 0 ) unset( $args['headers'][$header] );
+                $args = $this->add_auth_header( $args, $url );
+                $response = wp_remote_request( $url, $args );
+                if ( is_wp_error( $response ) ) return $response;
+                if ( ! in_array( wp_remote_retrieve_response_code( $response ), array( 301,302,303,307,308 ), true ) ) return $response;
+                $next = WP_Http::make_absolute_url( wp_remote_retrieve_header( $response, 'location' ), $url );
+                $parts = wp_parse_url( $next );
+                if ( ! is_array( $parts ) || ( $parts['scheme'] ?? '' ) !== 'https' || isset( $parts['user'] ) || isset( $parts['pass'] ) || ( isset( $parts['port'] ) && $parts['port'] !== 443 ) || ! in_array( strtolower( $parts['host'] ?? '' ), array( 'github.com','api.github.com','codeload.github.com','release-assets.githubusercontent.com','objects.githubusercontent.com' ), true ) ) return new WP_Error( 'update_redirect_rejected', 'The release download redirected outside approved HTTPS download hosts.' );
+                $url = $next;
+            }
+            return new WP_Error( 'update_redirect_limit', 'The release download exceeded its redirect limit.' );
+        } finally { $this->following_download = false; }
+    }
+
+    /** Verify the exact named release asset before WordPress extracts/installs it. */
+    public function verify_release_download( $reply, $package, $upgrader, $hook_extra ) {
+        if ( $reply !== false || ( $hook_extra['plugin'] ?? '' ) !== $this->plugin_basename || strpos( $package, 'https://github.com/' . $this->repo . '/releases/download/' ) !== 0 ) return $reply;
+        $release = $this->fetch_latest_release();
+        if ( ! $release || $this->get_download_url( $release ) !== $package ) return new WP_Error( 'mgf_release_changed', 'The release changed or cannot be verified. Refresh Updates before retrying.' );
+        $digest = '';
+        foreach ( $release['assets'] ?? array() as $asset ) if ( ( $asset['browser_download_url'] ?? '' ) === $package ) $digest = $asset['digest'] ?? '';
+        if ( ! preg_match( '/^sha256:([a-f0-9]{64})$/iD', $digest, $matches ) ) return new WP_Error( 'mgf_release_digest_missing', 'The published release has no SHA-256 integrity metadata. Installation stopped safely.' );
+        $file = download_url( $package );
+        if ( is_wp_error( $file ) ) return $file;
+        $actual = hash_file( 'sha256', $file );
+        if ( ! is_string( $actual ) || ! hash_equals( strtolower( $matches[1] ), $actual ) ) { wp_delete_file( $file ); return new WP_Error( 'mgf_release_digest_mismatch', 'The release ZIP failed its SHA-256 integrity check. No plugin files were installed.' ); }
+        return $file;
     }
 
     /**

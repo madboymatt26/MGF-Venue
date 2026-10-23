@@ -17,7 +17,11 @@ function wp_date( $format ) { return '2026-10-12'; }
 function current_time( $format ) { return '2026-10-12 12:00:00'; }
 function get_current_user_id() { return 5; }
 function is_user_logged_in() { return $GLOBALS['signed_in']; }
-function wp_get_current_user() { return (object) array( 'user_email' => $GLOBALS['email'] ); }
+function wp_get_current_user() { return (object) array( 'ID'=>5, 'user_email' => $GLOBALS['email'] ); }
+function get_user_meta($id,$key,$single=true){return ($GLOBALS['verified']??true)?hash('sha256',strtolower($GLOBALS['email'])):'';}
+function get_option($key,$default=false){return $default;}
+require __DIR__ . '/../wp-plugin/mathlin-booking/includes/class-hirer-identity.php';
+require __DIR__ . '/../wp-plugin/mathlin-booking/includes/class-campsite-policy.php';
 function admin_url( $path ) { return 'https://example.invalid/' . $path; }
 class MBS_Series {
     static $series;
@@ -94,6 +98,7 @@ foreach ( array( array( 'one', array( 'A','B' ), '' ), array( 'one', array( 'OTH
     check( is_wp_error( $select( ...$args ) ), 'invalid scope/date/ref rejected' );
 }
 check( MBS_Series_Request::owned_series( 'SER-TEST' ) !== false, 'case-insensitive owner email' );
+$GLOBALS['verified']=false;check(!MBS_Series_Request::owned_series('SER-TEST'),'unverified matching email denied');$GLOBALS['verified']=true;
 $GLOBALS['email'] = 'other@example.invalid';
 check( ! MBS_Series_Request::owned_series( 'SER-TEST' ), 'other account blocked' );
 $GLOBALS['signed_in'] = false;

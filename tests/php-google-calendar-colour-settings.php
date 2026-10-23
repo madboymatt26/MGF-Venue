@@ -22,7 +22,7 @@ $colour_transients['mbs_gcal_preview_7'] = array( 'old snapshot' );
 colour_save( array( 'enabled' => '1', 'estate' => '10', 'scout' => '9', 'estate_groups' => "HP Business\nEstate" ) );
 $saved = $options['mbs_google_calendar'];
 check( $saved['colours']['enabled'] && $saved['colours']['estate'] === '10' && $saved['colours']['scout'] === '9', 'real settings handler saves palette IDs' );
-check( ! $saved['enabled'] && $saved['choices'] === array(), 'saving pauses sync and clears choices' );
+check( $saved['enabled'], 'cosmetic preferences preserve enabled sync' );
 check( ! isset( $colour_transients['mbs_gcal_preview_7'] ), 'operator preview invalidated' );
 check( $saved['links'] === array( 'keep' => array( 'id' => 'existing' ) ), 'existing protected links preserved' );
 check( $saved['refresh'] === 'fixture' && $saved['calendar'] === 'target', 'connection and target preserved' );

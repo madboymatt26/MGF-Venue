@@ -16,9 +16,7 @@ class MBS_Payment_Chaser {
     public function init() {
         add_action( 'mbs_daily_payment_chase', array( $this, 'auto_chase' ) );
 
-        if ( ! wp_next_scheduled( 'mbs_daily_payment_chase' ) ) {
-            wp_schedule_event( strtotime( 'tomorrow 09:00:00' ), 'daily', 'mbs_daily_payment_chase' );
-        }
+        MBS_Local_Schedule::register( 'mbs_daily_payment_chase', 'mbs_cron_time_chase', '09:00' );
     }
 
     public static function deactivate() {

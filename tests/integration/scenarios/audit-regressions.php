@@ -15,7 +15,7 @@ function mbs_audit_booking( $ref, $amount = '10.00', $offset = 70 ) {
     $date = wp_date( 'Y-m-d', strtotime( '+' . (int) $offset . ' days' ) );
     $inserted = $wpdb->insert( $wpdb->prefix . MBS_TABLE, array(
         'ref'=>$ref, 'status'=>'confirmed', 'name'=>'Adversarial Integration', 'organisation'=>'Integration',
-        'email'=>'audit@example.invalid', 'phone'=>'000', 'address'=>'Disposable test', 'space'=>'Hall',
+        'email'=>'audit@example.invalid', 'phone'=>'000', 'address'=>'Disposable test', 'space'=>array_key_first(MBS_Bookings::get_spaces()),
         'booking_date'=>$date, 'booking_date_end'=>$date, 'start_time'=>'19:00:00', 'end_time'=>'21:00:00',
         'attendees'=>10, 'purpose'=>'Audit regression', 'amount'=>$amount, 'deposit_paid'=>'0.00',
         'amount_paid'=>'0.00', 'created_at'=>current_time('mysql'), 'updated_at'=>current_time('mysql'),

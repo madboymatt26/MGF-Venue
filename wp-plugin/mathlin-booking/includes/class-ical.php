@@ -88,7 +88,7 @@ class MBS_ICal {
                     if ( count( $page ) < 200 ) break;
                 }
             }
-            return self::campsite_calendar( $all );
+            return self::campsite_calendar( self::public_rows( $all ) );
         }
         $bookings = MBS_Bookings::get_all( array(
             'status'    => 'confirmed',
@@ -106,7 +106,7 @@ class MBS_ICal {
             'order'     => 'ASC',
             'limit'     => 200,
         ) );
-        $bookings = array_merge( $bookings, $paid );
+        $bookings = self::public_rows( array_merge( $bookings, $paid ) );
 
         $ics  = "BEGIN:VCALENDAR\r\n";
         $ics .= "VERSION:2.0\r\n";
@@ -175,6 +175,17 @@ class MBS_ICal {
             }
         }
         return $ics . "END:VCALENDAR\r\n";
+    }
+
+    private static function public_rows( $rows ) {
+        return array_map( static function( $row ) {
+            $copy = clone $row;
+            if ( empty( $copy->is_public ) ) $copy->purpose = 'Reserved';
+            $copy->notes = '';
+            // Public feed identifiers cannot be reused as booking credentials.
+            $copy->ref = hash_hmac( 'sha256', $row->ref, wp_salt( 'auth' ) );
+            return $copy;
+        }, $rows );
     }
 
     private static function escape( $text ) {

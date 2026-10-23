@@ -13,6 +13,7 @@ function wp_roles(){return (object)array('roles'=>array('approved_scout'=>array(
 function sanitize_key($v){return preg_replace('/[^a-z0-9_\-]/','',strtolower($v));}
 function wp_json_encode($v){return json_encode($v);}
 require dirname(__DIR__).'/wp-plugin/mathlin-booking/includes/class-campsite-policy.php';
+require dirname(__DIR__).'/wp-plugin/mathlin-booking/includes/class-hirer-identity.php';
 $checks=0;
 function expect($condition,$message){global $checks;$checks++;if(!$condition){fwrite(STDERR,"FAIL: $message\n");exit(1);}}
 expect(MBS_Campsite_Policy::can_book(),'Disabled policy preserves public venue flow');

@@ -14,6 +14,8 @@ $list = $responses | Where-Object { $_.id -eq 2 }
 if ( $null -eq $list -or $null -eq $list.result.tools ) { throw 'tools/list did not return tools.' }
 
 $tools = @($list.result.tools)
+$healthResource = $tools | Where-Object { $_.name -eq 'get_admin_resource' }
+if ($healthResource.inputSchema.properties.resource.enum -notcontains 'health') { throw 'Read-only integration health is not exposed through MCP.' }
 if ( $tools.Count -ne 23 ) { throw "Expected 23 MCP tools; found $($tools.Count)." }
 
 $create = $tools | Where-Object { $_.name -eq 'create_booking' }

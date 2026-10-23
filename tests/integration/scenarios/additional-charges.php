@@ -181,4 +181,14 @@ foreach (array(array('INT-CAL-NEAR',$tomorrow,$tomorrow),array('INT-CAL-SPAN','2
     extra_it_assert($wpdb->insert($wpdb->prefix.MBS_TABLE,array('ref'=>$row[0],'status'=>'confirmed','name'=>'Synthetic calendar contact','email'=>'calendar@example.invalid','space'=>'Main Scout Hall','booking_date'=>$row[1],'booking_date_end'=>$row[2],'start_time'=>'10:00:00','end_time'=>'12:00:00','attendees'=>1,'purpose'=>'Synthetic calendar near-date event','is_public'=>1,'all_day'=>0,'access_sent'=>1,'created_at'=>$now,'updated_at'=>$now))!==false,'Seed calendar browser fixture');
 }
 extra_it_assert($calendar_page && $booking_page,'Create isolated calendar pages');
-update_option('mbs_extra_browser_fixture',array('booking_ref'=>$booking_ref,'invoice_ref'=>$api_issued['invoice_ref'],'archive_ref'=>$discarded->invoice_ref,'credit_ref'=>$cn,'portal_url'=>get_permalink($page_id),'calendar_url'=>get_permalink($calendar_page),'booking_url'=>get_permalink($booking_page),'near_date'=>$tomorrow),false);
+// Synthetic mailbox links are handed only to the disposable browser test, never sent.
+function extra_browser_proof($email,$user_id,$booking=null){
+    global $wpdb;
+    extra_it_assert(MBS_Hirer_Identity::send_link($email,$user_id,$booking),'Queue synthetic mailbox proof');
+    $body=$wpdb->get_var($wpdb->prepare('SELECT body FROM '.$wpdb->prefix.'mathlin_email_queue WHERE to_email=%s AND message_type=%s ORDER BY id DESC LIMIT 1',$email,'mailbox_verification'));
+    extra_it_assert(preg_match('~https?://[^\s]+[?&]mbs_mailproof=[a-f0-9]{64}~',$body,$match),'Find synthetic mailbox proof');
+    return $match[0];
+}
+$owner_proof=extra_browser_proof($data['contact_email'],$browser_user);
+$guest_proof=extra_browser_proof($data['contact_email'],0,MBS_Bookings::get($booking_ref));
+update_option('mbs_extra_browser_fixture',array('booking_ref'=>$booking_ref,'invoice_ref'=>$api_issued['invoice_ref'],'archive_ref'=>$discarded->invoice_ref,'credit_ref'=>$cn,'portal_url'=>get_permalink($page_id),'calendar_url'=>get_permalink($calendar_page),'booking_url'=>get_permalink($booking_page),'near_date'=>$tomorrow,'owner_proof'=>$owner_proof,'guest_proof'=>$guest_proof),false);

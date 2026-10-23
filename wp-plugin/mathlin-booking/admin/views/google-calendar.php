@@ -7,6 +7,7 @@ $tab = sanitize_key( $_GET['sync_view'] ?? 'review' ); if ( ! isset( $tabs[$tab]
 $snapshot = $preview['snapshot'] ?? array( 'ops' => array(), 'events' => array() );
 $linked = array_values( array_filter( $snapshot['ops'], static function( $r ) { return $r['action'] === 'matched'; } ) );
 $review = array_values( array_filter( $snapshot['ops'], static function( $r ) { return $r['action'] !== 'matched'; } ) );
+$waiting_count = count( array_filter( $review, static function( $r ) { return in_array( $r['action'], array( 'create','managed_update','managed_cancel' ), true ); } ) );
 $estate = self::estate_only( $snapshot );
 $items = $tab === 'linked' ? MBS_Calendar_Sync_View::booking_groups( $linked ) : ( $tab === 'estate' ? MBS_Calendar_Sync_View::event_groups( $estate ) : ( $tab === 'history' ? array_reverse( self::history() ) : MBS_Calendar_Sync_View::booking_groups( $review ) ) );
 $pages = max( 1, (int) ceil( count( $items ) / 25 ) ); $page_number = min( max( 1, absint( $_GET['sync_paged'] ?? 1 ) ), $pages );
@@ -55,7 +56,7 @@ $print_groups = static function( $events ) use ( $print_event ) {
 <?php foreach ( array( array( $notice, 'info' ), array( $problem, 'error' ) ) as $n ) if ( $n[0] ) : ?><div class="notice notice-<?php echo esc_attr( $n[1] ); ?>"><p><?php echo esc_html( $n[0] ); ?></p></div><?php endif; ?>
 <div class="sync-safety"><strong>Protected estate calendar — estate-created Google entries are never edited or deleted.</strong><br>Estate matches are references only. <?php echo ! empty( $status['managed_updates'] ) ? 'MGF-created events follow booking changes; cancellations remain labelled and non-blocking. Independent Google edits stop automatic updates for review.' : 'MGF adds missing bookings only. Enable MGF-created lifecycle updates in Connection settings to sync later changes and cancellations.'; ?> Google edits never change MGF bookings.</div>
 <div class="sync-stats">
-<?php foreach ( array( array( $status['enabled'] ? 'On' : 'Paused', ! empty( $status['managed_updates'] ) ? 'Managed MGF sync' : 'Add-only sync' ), array( count( $review ), 'Need review / adding' ), array( count( $linked ), 'Linked entries' ), array( count( $estate ), 'Estate-only / not linked' ) ) as $stat ) : ?><div class="sync-stat"><b><?php echo esc_html( $stat[0] ); ?></b><?php echo esc_html( $stat[1] ); ?></div><?php endforeach; ?>
+<?php foreach ( array( array( $status['enabled'] ? 'On' : 'Paused', ! empty( $status['managed_updates'] ) ? 'Managed MGF sync' : 'Add-only sync' ), array( count( $review ) - $waiting_count, 'Staff decisions / exceptions' ), array( $waiting_count, 'Safe changes awaiting worker' ), array( count( $linked ), 'Linked entries' ), array( count( $estate ), 'Estate-only / not linked' ) ) as $stat ) : ?><div class="sync-stat"><b><?php echo esc_html( $stat[0] ); ?></b><?php echo esc_html( $stat[1] ); ?></div><?php endforeach; ?>
 </div>
 <p><strong>Calendar:</strong> <?php echo esc_html( $status['calendar'] ?: 'Not selected' ); ?> · <strong>Connection:</strong> <?php echo $status['connected'] ? 'Connected' : 'Not connected'; ?><br><strong>Last result:</strong> <?php echo esc_html( $status['last_result'] ); ?><br><strong>Last successful run:</strong> <?php echo esc_html( $status['last_success'] ?: 'Not yet run' ); ?></p>
 <div class="sync-toolbar">

@@ -57,6 +57,7 @@ jQuery(function($) {
         }, function(res) {
             $btn.prop('disabled', false).text('Look Up');
             if (res.success) {
+                if (res.data.verification_required) { $res.text(res.data.message).show(); return; }
                 var b = res.data;
                 var statusColors = {
                     pending:   'background:#fff3cd;color:#856404',

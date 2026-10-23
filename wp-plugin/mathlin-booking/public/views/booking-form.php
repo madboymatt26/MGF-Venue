@@ -151,7 +151,7 @@ $free_campsite = class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::e
                 <div class="nms-form-row">
                     <div class="nms-form-group">
                         <label for="nms-attendees">Expected Attendees <span class="nms-req">*</span></label>
-                        <input type="number" id="nms-attendees" name="attendees" min="1" max="100" placeholder="e.g. 30" required>
+                        <input type="number" id="nms-attendees" name="attendees" min="1" placeholder="e.g. 30" required>
                     </div>
                     <div class="nms-form-group">
                         <label for="nms-allday">Booking Type</label>

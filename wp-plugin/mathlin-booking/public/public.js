@@ -387,6 +387,15 @@ jQuery(function ($) {
     }
 
     $('#nms-space, #nms-start, #nms-end, #nms-kitchen, #nms-allday, #nms-date, #nms-date-end, #nms-recurring, #nms-repeat-until, #nms-scout-use').on('change', updateCost);
+    function updateAttendanceCapacity() {
+        var value = $('#nms-space').val() || '', capacities = [];
+        var names = NMS.spaces[value] ? [value] : value.split(' + ');
+        names.forEach(function(name) { if (NMS.spaces[name] && Number(NMS.spaces[name].capacity) > 0) capacities.push(Number(NMS.spaces[name].capacity)); });
+        var input = document.getElementById('nms-attendees');
+        if (input) { if (capacities.length) input.max = Math.min.apply(null, capacities); else input.removeAttribute('max'); }
+    }
+    $('#nms-space').on('change', updateAttendanceCapacity);
+    updateAttendanceCapacity();
 
     // ── Minimum booking duration (frontend UX) ──────────────────────────────────
     // Mirrors MBS_Bookings::calculate_duration_hours()/validate_min_duration().
@@ -664,6 +673,12 @@ jQuery(function ($) {
 
         var data = $form.serializeArray();
         data.push({ name: 'action', value: 'mbs_submit_booking' });
+        var fingerprint = JSON.stringify(data);
+        if (NMS._submissionFingerprint !== fingerprint) {
+            NMS._submissionFingerprint = fingerprint;
+            NMS._submissionKey = window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) + '-' + Math.random().toString(36).slice(2);
+        }
+        data.push({name:'submission_key',value:NMS._submissionKey});
 
         // Store form data for quick account creation
         NMS._lastBookingData = {};
@@ -689,9 +704,8 @@ jQuery(function ($) {
                     } else {
                         // No account — show create prompt
                         msg += '<p style="margin:0 0 8px;font-weight:700;color:#7413DC;">📋 Want to track your bookings?</p>' +
-                            '<p style="margin:0 0 12px;font-size:0.85rem;color:#6b7280;">Create an account to view all your bookings, invoices, and make future bookings faster. Your details are already saved — just set a password.</p>' +
+                            '<p style="margin:0 0 12px;font-size:0.85rem;color:#6b7280;">Create an account to manage your bookings. We will email a verification link; set your password securely afterwards.</p>' +
                             '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">' +
-                            '<input type="password" id="nms-quick-password" placeholder="Choose a password (min 8 chars)" style="flex:1 1 200px;min-width:0;width:100%;padding:8px 12px;border:1.5px solid #e5e7eb;border-radius:6px;font-size:16px;box-sizing:border-box;-webkit-appearance:none;appearance:none;">' +
                             '<button type="button" id="nms-quick-register" class="nms-btn nms-btn-primary nms-btn-sm" style="white-space:nowrap;">Create Account</button>' +
                             '</div>' +
                             '<p id="nms-quick-reg-msg" style="margin:8px 0 0;font-size:0.8rem;"></p>';
@@ -721,16 +735,20 @@ jQuery(function ($) {
         $(this).removeClass('nms-field-error');
     });
 
+    $(document).on('submit', '#mbs-verify-email-form', function(e) {
+        e.preventDefault();
+        var form = $(this), button = form.find('button'), status = form.find('.mbs-verification-status');
+        button.prop('disabled', true); status.text('Requesting verification email…');
+        $.post(form.attr('action'), form.serialize()).done(function(res) {
+            status.text(res.data && res.data.message ? res.data.message : 'Please try again.');
+        }).fail(function() { status.text('Unable to request verification right now. Please retry shortly.'); })
+          .always(function() { button.prop('disabled', false); });
+    });
+
     // ── Quick account creation after booking ───────────────────────────────────
     $(document).on('click', '#nms-quick-register', function() {
         var $btn  = $(this);
-        var pass  = $('#nms-quick-password').val();
         var $msg  = $('#nms-quick-reg-msg');
-
-        if (!pass || pass.length < 8) {
-            $msg.text('Password must be at least 8 characters.').css('color', '#e74c3c');
-            return;
-        }
 
         // Get the details from the last submitted booking (stored in NMS)
         var lastBooking = NMS._lastBookingData || {};
@@ -743,14 +761,11 @@ jQuery(function ($) {
             name:         lastBooking.name || '',
             email:        lastBooking.email || '',
             phone:        lastBooking.phone || '',
-            organisation: lastBooking.organisation || '',
-            password:     pass
+            organisation: lastBooking.organisation || ''
         }, function(res) {
             $btn.prop('disabled', false).text('Create Account');
             if (res.success) {
-                $('#nms-create-account-prompt').html(
-                    '<p style="margin:0;color:#065f46;font-weight:600;">✅ Account created! You can now <a href="' + (NMS.portal_url || '#') + '" style="color:#7413DC;">view your bookings</a>.</p>'
-                );
+                $('#nms-create-account-prompt').text(res.data.message);
             } else {
                 $msg.text(res.data.message || 'Error creating account.').css('color', '#e74c3c');
             }

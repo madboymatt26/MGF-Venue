@@ -1,5 +1,6 @@
 <?php
 define( 'ABSPATH', __DIR__ );
+require_once dirname( __DIR__ ) . '/wp-plugin/mathlin-booking/includes/class-csv-export.php';
 require_once dirname( __DIR__ ) . '/wp-plugin/mathlin-booking/includes/class-accounting-export.php';
 
 $records = array(

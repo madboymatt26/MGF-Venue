@@ -577,6 +577,11 @@ class MBS_Email {
      * Send a reminder email before a booking.
      */
     public static function notify_reminder( $booking ) {
+        $message = self::build_reminder_message( $booking );
+        return MBS_Email_Queue::enqueue( $booking->email, $message['subject'], $message['body'], $message['headers'], 'reminder:' . MBS_Access_Details::source_hash( $booking ), MBS_Email_Queue::compute_payload_hash( $booking->email, $message['subject'], $message['body'], $message['headers'], null ), null, array( 'message_type'=>'booking_reminder', 'reference_type'=>'booking', 'reference_id'=>(int) $booking->id ) );
+    }
+
+    public static function build_reminder_message( $booking ) {
         $tpl       = MBS_Email_Templates::get_template( 'booking_reminder' );
         $subject   = MBS_Email_Templates::replace_placeholders( $tpl['subject'], $booking );
         $body_text = MBS_Email_Templates::replace_placeholders( $tpl['body'], $booking );
@@ -587,7 +592,8 @@ class MBS_Email {
         $body .= self::booking_table_obj( $booking );
         $body .= self::ical_button( $booking );
         $body .= self::footer();
-        self::send( $booking->email, $subject, $body );
+        $org = MBS_Email_Templates::get_org_settings();
+        return array( 'subject'=>$subject, 'body'=>$body, 'headers'=>array( 'Content-Type: text/html; charset=UTF-8', 'From: ' . $org['name'] . ' <' . get_option( 'admin_email' ) . '>', 'Reply-To: ' . MBS_Bookings::get_admin_email() ) );
     }
 
     /**
@@ -663,10 +669,9 @@ class MBS_Email {
      * Generate an "Add to Calendar" button for emails.
      */
     private static function ical_button( $booking ) {
-        if ( class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ) return '<p><a href="' . esc_url( get_permalink(1396) ) . '">Sign in to manage your booking or download its calendar entry</a></p>';
-        $ical_url = rest_url( 'mathlin/v1/bookings/' . $booking->ref . '/ical' );
+        $ical_url = MBS_Hirer_Identity::manage_url();
         $html = '<p style="margin-top:16px;">' .
-            '<a href="' . esc_url( $ical_url ) . '" style="background:#7413DC;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold;font-size:14px;">📅 Add to Calendar</a>' .
+            '<a href="' . esc_url( $ical_url ) . '" style="background:#7413DC;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold;font-size:14px;">📅 Manage booking / download calendar entry securely</a>' .
             '</p>';
 
         // Add modification link if token exists

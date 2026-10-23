@@ -300,6 +300,20 @@ class MBS_Email_Queue {
         $failed = 0;
 
         foreach ( $claimed as $email ) {
+            if ( $email->message_type === 'booking_reminder' ) {
+                $booking = MBS_Bookings::get_by_id( (int) $email->reference_id );
+                $now = new DateTimeImmutable( 'now', wp_timezone() );
+                $start = $booking ? new DateTimeImmutable( $booking->booking_date . ' ' . ( $booking->all_day ? '00:00' : $booking->start_time ), wp_timezone() ) : null;
+                if ( ! $booking || ! in_array( $booking->status, array( 'confirmed','deposit_paid','paid' ), true ) || $now >= $start || $email->message_key !== 'reminder:' . MBS_Access_Details::source_hash( $booking ) ) { self::mark_failed( $email->id, $worker_id ); continue; }
+                $hours = (int) get_option( 'mbs_reminder_hours', 24 );
+                if ( $hours <= 0 || $now < $start->modify( '-' . $hours . ' hours' ) ) {
+                    $retry = $hours > 0 ? $start->modify( '-' . $hours . ' hours' )->getTimestamp() : time() + HOUR_IN_SECONDS;
+                    $wpdb->query( $wpdb->prepare( "UPDATE " . self::table() . " SET status='pending',next_retry=%s,last_error='Reminder paused or not yet due',claimed_at=NULL,lease_expires_at=NULL,worker_id=NULL WHERE id=%d AND worker_id=%s AND status='processing'", wp_date( 'Y-m-d H:i:s', max( time()+60, $retry ) ), $email->id, $worker_id ) );
+                    continue;
+                }
+                $message = MBS_Email::build_reminder_message( $booking );
+                $email->subject=$message['subject']; $email->body=$message['body']; $email->headers=wp_json_encode( $message['headers'] );
+            }
             if ( in_array( $email->message_type, array( 'access_details', 'access_manual' ), true ) ) {
                 $message = MBS_Access_Details::queued_message( $email );
                 if ( is_wp_error( $message ) ) {
@@ -349,12 +363,13 @@ class MBS_Email_Queue {
             // only after the confirmation transaction has committed.
             if ( $email->message_type === 'booking_confirmation' && $email->reference_type === 'booking' && ! empty( $email->reference_id ) ) {
                 $booking = MBS_Bookings::get_by_id( (int) $email->reference_id );
-                if ( ! $booking ) {
-                    self::release_for_retry( $email->id, $worker_id, 'Booking confirmation source record is unavailable.' );
-                    $failed++;
+                if ( ! $booking || ! in_array( $booking->status, array( 'confirmed','deposit_paid','paid' ), true ) || strcasecmp( $email->to_email, $booking->email ) !== 0 ) {
+                    self::mark_failed( $email->id, $worker_id );
                     continue;
                 }
                 $message = MBS_Email::build_confirmation_message( $booking );
+                $attachment = json_decode( (string) ( $email->attachment_meta ?? '' ), true );
+                if ( ! empty( $attachment['document_id'] ) && ! empty( $booking->current_invoice_document_id ) && (int) $attachment['document_id'] !== (int) $booking->current_invoice_document_id ) { self::mark_failed( $email->id, $worker_id ); continue; }
                 $email->subject = $message['subject'];
                 $email->body = $message['body'];
             }
@@ -490,6 +505,9 @@ class MBS_Email_Queue {
         $now = current_time( 'mysql' );
 
         switch ( $email->message_type ) {
+            case 'booking_reminder':
+                $wpdb->update( $wpdb->prefix . MBS_TABLE, array( 'reminder_sent'=>1 ), array( 'id'=>(int) $email->reference_id ) );
+                break;
             case 'access_details':
             case 'access_manual':
                 $booking = MBS_Bookings::get_by_id( (int) $email->reference_id );
@@ -579,6 +597,7 @@ class MBS_Email_Queue {
      * Clean up old entries and recover stale processing leases.
      */
     public static function cleanup() {
+        if ( class_exists( 'MBS_Hirer_Identity' ) ) MBS_Hirer_Identity::cleanup();
         global $wpdb;
         $table = self::table();
 

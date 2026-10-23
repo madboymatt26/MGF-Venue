@@ -148,7 +148,9 @@ jobs:
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/multi-space-bookings.php --allow-root
       - name: Verify legacy read-only guard cannot terminate WordPress recovery
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/legacy-read-only-recovery.php --allow-root
-      - name: Run invoice lifecycle matrix
+      - name: Verify cross-site identity, occupancy and feature-policy hardening
+        run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/cross-site-hardening.php --allow-root
+      - name: Run invoice lifecycle matrix after hardening acceptance
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/invoice-lifecycle-matrix.php --allow-root
       - name: Collect service diagnostics
         if: always()

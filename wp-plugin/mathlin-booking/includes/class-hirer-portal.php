@@ -18,9 +18,6 @@ class MBS_Hirer_Portal {
     const ROLE = 'mbs_hirer';
     const MANAGER_ROLE = 'mbs_booking_manager';
 
-    /** True only around this plugin's nonce-protected wp_signon() call. */
-    private $portal_login_in_progress = false;
-
     public function init() {
         add_action( 'init', array( $this, 'register_roles' ) );
         add_shortcode( 'mathlin_portal', array( $this, 'shortcode_portal' ) );
@@ -28,27 +25,17 @@ class MBS_Hirer_Portal {
         add_action( 'wp_ajax_nopriv_mbs_hirer_register', array( $this, 'ajax_register' ) );
         add_action( 'wp_ajax_mbs_hirer_login',       array( $this, 'ajax_login' ) );
         add_action( 'wp_ajax_nopriv_mbs_hirer_login', array( $this, 'ajax_login' ) );
-        // Wordfence documents this filter for custom authentication endpoints.
-        // The callback opts out of CAPTCHA only during our guarded wp_signon().
-        add_filter( 'wordfence_ls_require_captcha', array( $this, 'wordfence_captcha_required' ) );
+        // Authentication is delegated to wp-login.php, including CAPTCHA/2FA.
 
         // Link bookings to user accounts by email
         add_action( 'user_register', array( $this, 'link_existing_bookings' ) );
     }
 
     /**
-     * Keep Wordfence reCAPTCHA on every request except the exact authentication
-     * call made by this portal after its nonce and rate limit have passed.
-     * Wordfence's remaining authentication and brute-force checks still run.
-     */
-    public function wordfence_captcha_required( $required ) {
-        return $this->portal_login_in_progress ? false : $required;
-    }
-
-    /**
      * Register roles on plugin init.
      */
     public function register_roles() {
+        if ( ! get_role( 'mbs_booking_reader' ) ) add_role( 'mbs_booking_reader', 'Booking integration reader', array( 'read'=>true, 'mbs_read_bookings'=>true ) );
         // Hirer role — public users who book the hall
         if ( ! get_role( self::ROLE ) ) {
             add_role( self::ROLE, 'Venue Hirer', array(
@@ -75,6 +62,7 @@ class MBS_Hirer_Portal {
      * Remove the role on plugin deactivation.
      */
     public static function deactivate() {
+        remove_role( 'mbs_booking_reader' );
         remove_role( self::ROLE );
         remove_role( self::MANAGER_ROLE );
         $admin_role = get_role( 'administrator' );
@@ -196,16 +184,14 @@ class MBS_Hirer_Portal {
         $name  = sanitize_text_field( $_POST['name'] ?? '' );
         $email = sanitize_email( $_POST['email'] ?? '' );
         $phone = sanitize_text_field( $_POST['phone'] ?? '' );
-        $pass  = $_POST['password'] ?? '';
+        // The real password is chosen through WordPress AFTER mailbox proof.
+        $pass  = wp_generate_password( 40, true, true );
 
         if ( ! $name || ! $email || ! $pass ) {
             wp_send_json_error( array( 'message' => 'Please fill in all required fields.' ) );
         }
         if ( ! is_email( $email ) ) {
             wp_send_json_error( array( 'message' => 'Please enter a valid email address.' ) );
-        }
-        if ( strlen( $pass ) < 8 ) {
-            wp_send_json_error( array( 'message' => 'Password must be at least 8 characters.' ) );
         }
         if ( email_exists( $email ) ) {
             wp_send_json_error( array( 'message' => 'Unable to create account. If you already have an account, please log in instead.' ) );
@@ -223,14 +209,9 @@ class MBS_Hirer_Portal {
         update_user_meta( $user_id, 'mbs_phone', $phone );
         update_user_meta( $user_id, 'mbs_organisation', sanitize_text_field( $_POST['organisation'] ?? '' ) );
 
-        // Auto-login
-        wp_set_current_user( $user_id );
-        wp_set_auth_cookie( $user_id );
-
-        // Link any existing bookings
-        $this->link_existing_bookings( $user_id );
-
-        wp_send_json_success( array( 'message' => 'Account created! Redirecting…' ) );
+        // No cookie or ownership claim until the mailbox has been proved.
+        MBS_Hirer_Identity::send_link( $email, $user_id );
+        wp_send_json_success( array( 'verification_required'=>true, 'message' => 'Account created. Check your email for the verification link, then set your password securely. If it does not arrive, use Forgot Password to recover your account and request another verification link.' ) );
     }
 
     /**
@@ -238,49 +219,8 @@ class MBS_Hirer_Portal {
      */
     public function ajax_login() {
         check_ajax_referer( 'mbs_public_nonce', 'nonce' );
-        if ( class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ) wp_send_json_error( array( 'message' => 'Please use the website sign-in page so all account security checks can run.', 'login_url' => wp_login_url() ), 400 );
-
-        // Follow the same authentication path as wp-login.php.  Keep accepting
-        // the legacy `email` field so cached/older portal markup still works.
-        $login = sanitize_text_field( wp_unslash( $_POST['login'] ?? $_POST['email'] ?? '' ) );
-        $pass  = isset( $_POST['password'] ) ? (string) wp_unslash( $_POST['password'] ) : '';
-
-        if ( ! $login || ! $pass ) {
-            wp_send_json_error( array( 'message' => 'Please enter your email address or username and password.' ) );
-        }
-
-        // Compensating control for custom/AJAX authentication.  Scope the
-        // counter to both network address and identity so one hirer's typo does
-        // not lock every customer behind the same proxy.
-        $remote_address = sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ?? 'unknown' ) );
-        $rate_key = 'mbs_login_' . md5( strtolower( $login ) . '|' . $remote_address );
-        $attempts = (int) get_transient( $rate_key );
-        if ( $attempts >= 10 ) {
-            wp_send_json_error( array( 'message' => 'Too many login attempts. Please wait 15 minutes and try again.' ), 429 );
-        }
-        set_transient( $rate_key, $attempts + 1, 15 * MINUTE_IN_SECONDS );
-
-        $this->portal_login_in_progress = true;
-        try {
-            $user = wp_signon( array(
-                'user_login'    => $login,
-                'user_password' => $pass,
-                'remember'      => false,
-            ), is_ssl() );
-        } finally {
-            $this->portal_login_in_progress = false;
-        }
-        if ( is_wp_error( $user ) ) {
-            wp_send_json_error( array( 'message' => 'Invalid email address, username or password.' ) );
-        }
-
-        delete_transient( $rate_key );
-
-        // wp_signon() sets the authentication cookie; setting the current user
-        // makes the successful AJAX request consistent for login hooks too.
-        wp_set_current_user( $user->ID );
-
-        wp_send_json_success( array( 'message' => 'Logged in! Redirecting…' ) );
+        // Old/cached forms receive a safe redirect; never bypass security plugins.
+        wp_send_json_success( array( 'message' => 'Continue to secure sign-in.', 'login_url' => wp_login_url( MBS_Hirer_Identity::manage_url() ) ) );
     }
 
     /**
@@ -291,6 +231,7 @@ class MBS_Hirer_Portal {
     public function link_existing_bookings( $user_id ) {
         $user = get_userdata( $user_id );
         if ( ! $user ) return;
+        if ( ! MBS_Hirer_Identity::verified( $user ) ) return;
 
         // Only link bookings for hirer role users
         if ( ! in_array( self::ROLE, (array) $user->roles, true ) ) return;
