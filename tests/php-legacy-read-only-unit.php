@@ -13,7 +13,11 @@ foreach(array('SELECT * FROM wp_booking','SHOW COLUMNS FROM wp_bookingdates','DE
 expect(MBS_Legacy_Read_Only::legacy_stack(array(array('file'=>'C:\\site\\wp-content\\plugins\\booking.personal.10.8\\core.php'))),'Original Personal plugin mail identified');
 expect(MBS_Legacy_Read_Only::legacy_stack(array(array('file'=>'/site/wp-content/plugins/booking/core.php'))),'Original free plugin mail identified');
 expect(!MBS_Legacy_Read_Only::legacy_stack(array(array('file'=>'/site/wp-content/plugins/mathlin-booking/includes/class-email.php'))),'MGF mail unaffected');
-try{MBS_Legacy_Read_Only::guard_query('UPDATE wp_booking SET form=1');expect(false,'Write should abort');}catch(RuntimeException$e){expect($e->getCode()===409,'Write aborts before database');}
+expect(MBS_Legacy_Read_Only::guard_query('UPDATE wp_booking SET form=1')==='', 'Legacy write is suppressed without killing the admin request');
+expect(MBS_Legacy_Read_Only::guard_query('ALTER TABLE wp_bookingdates ADD x INT')==='', 'Background legacy schema write is suppressed without killing WordPress');
+expect(MBS_Legacy_Read_Only::guard_query('DROP TABLE wp_booking')==='', 'Legacy deactivation cannot destroy reference data');
+expect(MBS_Legacy_Read_Only::guard_query("UPDATE wp_options SET option_value='serialized plugins' WHERE option_name='active_plugins'")!== '', 'WordPress activation/deactivation option write stays available');
+expect(MBS_Legacy_Read_Only::guard_query('UPDATE wp_mathlin_bookings SET status=1')!== '', 'MGF operation unaffected');
 expect(MBS_Legacy_Read_Only::guard_query('SELECT * FROM wp_booking')==='SELECT * FROM wp_booking','Original listing can read');
 $main=file_get_contents(dirname(__DIR__).'/wp-plugin/mathlin-booking/mathlin-booking.php');expect(strpos($main,'MBS_Legacy_Comparison')===false,'Replacement interface not loaded');
 echo "PASS $checks original-plugin read-only checks\n";

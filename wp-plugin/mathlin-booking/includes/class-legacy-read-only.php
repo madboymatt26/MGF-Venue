@@ -26,7 +26,11 @@ class MBS_Legacy_Read_Only {
         return (bool) preg_match( '/(?<![a-z0-9_])' . preg_quote( $prefix, '/' ) . 'booking[a-z0-9_]*(?![a-z0-9_])/i', $sql );
     }
     public static function guard_query( $sql ) {
-        if ( self::$enabled && self::is_legacy_write( $sql, self::$prefix ) ) self::deny();
+        // wpdb::query() returns false for an empty filtered query. Fail closed
+        // for the legacy mutation without terminating the surrounding WordPress
+        // request: activation/deactivation and background schema checks may run
+        // on unrelated admin pages, not just inside the legacy booking screen.
+        if ( self::$enabled && self::is_legacy_write( $sql, self::$prefix ) ) return '';
         return $sql;
     }
     public static function deny() {
