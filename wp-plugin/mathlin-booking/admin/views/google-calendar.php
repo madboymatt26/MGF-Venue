@@ -7,7 +7,7 @@ $tab = sanitize_key( $_GET['sync_view'] ?? 'review' ); if ( ! isset( $tabs[$tab]
 $snapshot = $preview['snapshot'] ?? array( 'ops' => array(), 'events' => array() );
 $linked = array_values( array_filter( $snapshot['ops'], static function( $r ) { return $r['action'] === 'matched'; } ) );
 $review = array_values( array_filter( $snapshot['ops'], static function( $r ) { return $r['action'] !== 'matched'; } ) );
-$waiting_count = count( array_filter( $review, static function( $r ) { return in_array( $r['action'], array( 'create','managed_update','managed_cancel' ), true ); } ) );
+$waiting_count = count( array_filter( $review, static function( $r ) { return in_array( $r['action'], array( 'create','managed_update','managed_cancel','refresh_link' ), true ); } ) );
 $estate = self::estate_only( $snapshot );
 $items = $tab === 'linked' ? MBS_Calendar_Sync_View::booking_groups( $linked ) : ( $tab === 'estate' ? MBS_Calendar_Sync_View::event_groups( $estate ) : ( $tab === 'history' ? array_reverse( self::history() ) : MBS_Calendar_Sync_View::booking_groups( $review ) ) );
 $pages = max( 1, (int) ceil( count( $items ) / 25 ) ); $page_number = min( max( 1, absint( $_GET['sync_paged'] ?? 1 ) ), $pages );
@@ -106,7 +106,7 @@ $print_groups = static function( $events ) use ( $print_event ) {
 <?php if ( $group_count > 1 ) : ?></details><?php endif; ?>
 </td>
 <td><?php if ( $booking_group['candidates'] ) { $print_groups( $booking_group['candidates'] ); } elseif ( ! empty( $first['linked_events'] ) ) { $print_groups( $first['linked_events'] ); } else { $print_event( $first['event'] ); } ?></td>
-<td><span class="sync-badge"><?php echo $group_count > 1 ? 'Shared candidates — review required' : esc_html( ucfirst( $first['action'] ) ); ?></span>
+<td><span class="sync-badge"><?php $action_labels = array( 'refresh_link' => 'Already linked — comparison refresh queued', 'difference' => 'Already linked — changes need review', 'create' => 'Separate event awaiting sync' ); echo $group_count > 1 ? 'Shared candidates — review required' : esc_html( $action_labels[$first['action']] ?? ucfirst( $first['action'] ) ); ?></span>
 <?php if ( $first['action'] === 'review' ) : ?><p>Not linked yet. An overlap is not proof of identity. Compare names, areas and dates; keep any differences visible.</p><?php else : ?><p><?php echo esc_html( $first['reason'] ); ?></p><?php endif; ?>
 <?php if ( $group_count > 1 ) : ?><details><summary>Review links for each reservation</summary><p>Select each reservation's original area records, not every overlapping event.</p><?php endif; ?>
 <?php foreach ( $booking_group['items'] as $item ) : ?><div class="sync-choice">

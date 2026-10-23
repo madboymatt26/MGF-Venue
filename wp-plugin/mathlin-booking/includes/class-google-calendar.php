@@ -212,7 +212,7 @@ class MBS_Google_Calendar {
                 foreach ( array_keys( $desired ) as $key ) if ( strpos( $key, $ref . '|' ) === 0 ) unset( $desired[$key] );
             }
         }
-        ksort( $desired ); return array( 'desired' => $desired, 'source' => $source, 'legacy' => $legacy, 'imports' => $imports, 'errors'=>$errors );
+        ksort( $desired ); return array( 'desired' => $desired, 'source' => $source, 'legacy' => $legacy, 'imports' => $imports, 'errors'=>$errors, 'independent_campsite_events' => (bool) $campsite );
     }
     private static function date( $text, $zone ) {
         $d = DateTimeImmutable::createFromFormat( '!Y-m-d', (string) $text, $zone );
@@ -241,6 +241,16 @@ class MBS_Google_Calendar {
         return array( 'summary' => $e['summary'] ?? '(untitled)', 'start' => $e['start'] ?? null, 'end' => $e['end'] ?? null, 'location' => $e['location'] ?? '' );
     }
     private static function event_hash( $e ) { return hash( 'sha256', wp_json_encode( array( self::fields( $e ), $e['etag'] ?? '', $e['location'] ?? '', $e['description'] ?? '' ) ) ); }
+    /** Separate native campsite reservations have separate event identities, not time-slot identities.
+     * Imported records still need provenance review; this never changes booking availability rules.
+     */
+    private static function independent_event( $projection, $key ) {
+        return ! empty( $projection['independent_campsite_events'] ) && isset( $projection['desired'][$key] ) && empty( $projection['imports'][$key] ) && empty( $projection['legacy'][$key] );
+    }
+    /** Google-only decoration is not a scheduling edit. Never accept changed title/time/status/tags. */
+    private static function decoration_only( $event, $link, $key, $site, $calendar ) {
+        return ! empty( $link['projection'] ) && self::managed_owner( $event, $link, $key, $site, $calendar ) && self::fields( $event ) === self::fields( $link['projection'] );
+    }
     private static function history() { return array_slice( (array) get_option( 'mbs_gcal_history', array() ), -100 ); }
     private static function record( $action, $ref, $result ) {
         $history = self::history();
@@ -312,6 +322,10 @@ class MBS_Google_Calendar {
                         $op['action'] = 'managed_update'; $op['reason'] = 'Update MGF-created event only; preserve estate events, colour and unrelated Google fields.';
                         $op['managed_link_key'] = $old_key; $op['managed_source_hash'] = self::managed_source_hash( $projection, $op['ref'] );
                     }
+                    elseif ( $old_key === $key && self::decoration_only( $event, $link, $old_key, $site, $settings['calendar'] ?? '' ) && ( ( $link['google_hash'] ?? '' ) !== self::event_hash( $event ) || ( self::fields( $want ) === self::fields( $event ) && ( $link['source_hash'] ?? '' ) !== self::source_hash( $want ) ) ) ) {
+                        $op['action'] = 'refresh_link'; $op['reason'] = 'Already linked. Preserve Google-only location, notes and colour; refresh the verified local comparison without editing Google.';
+                        $op['managed_link_key'] = $old_key; $op['managed_source_hash'] = self::managed_source_hash( $projection, $op['ref'] );
+                    }
                 }
             }
             elseif ( count( $matches ) > 1 ) { $op['action'] = 'blocked'; $op['reason'] = 'Multiple linked events: review in Google Calendar.'; }
@@ -323,7 +337,8 @@ class MBS_Google_Calendar {
             } elseif ( isset( $ids[$want['id']] ) ) { $op['action'] = 'blocked'; $op['reason'] = 'Reserved event ID already exists without the expected link.'; }
             else {
                 foreach ( $manual as $e ) if ( self::overlaps( $want, $e ) ) $op['candidates'][] = $e;
-                if ( $op['candidates'] || ! empty( $projection['imports'][$key] ) || ! empty( $projection['legacy'][$key] ) ) { $op['action'] = 'review'; $op['reason'] = 'Review existing Google area events. Imported reservations are never blindly added again.'; }
+                if ( ! empty( $projection['imports'][$key] ) || ! empty( $projection['legacy'][$key] ) || ( $op['candidates'] && ! self::independent_event( $projection, $key ) ) ) { $op['action'] = 'review'; $op['reason'] = 'Review existing Google area events. Imported reservations are never blindly added again.'; }
+                elseif ( $op['candidates'] ) { $op['reason'] = 'Separate native campsite reservation: create its own Google event. Concurrent calendar entries are not duplicate identities; existing events stay unchanged.'; }
             }
             if ( isset( $rekey_reviews[$key] ) ) { $op['action'] = 'blocked'; $op['reason'] = 'The prior MGF event is missing, independently edited or no longer safely owned. Review the date move; never create a replacement blindly.'; }
             if ( $op['action'] === 'review' ) $op['recommendation'] = MBS_Calendar_Reference_Links::recommend( $projection['legacy'][$key] ?? array(), $op['candidates'], $want );
@@ -508,7 +523,7 @@ class MBS_Google_Calendar {
         if ( ! $enabled || ! $ops || count( $ops ) > 20 ) return false;
         $pending = false;
         foreach ( $ops as $op ) {
-            if ( ! in_array( $op['action'], array( 'matched', 'create', 'managed_update', 'managed_cancel' ), true ) ) return false;
+            if ( ! in_array( $op['action'], array( 'matched', 'create', 'managed_update', 'managed_cancel', 'refresh_link' ), true ) ) return false;
             if ( $op['action'] !== 'matched' ) $pending = true;
         }
         return $pending;
@@ -522,7 +537,7 @@ class MBS_Google_Calendar {
     }
     private static function booking_view( $ref, $snapshot = null ) {
         $status = self::status(); $ops = $snapshot ? self::booking_ops( $snapshot, $ref ) : array();
-        $labels = array( 'matched' => 'Linked / up to date', 'create' => 'Not yet synced', 'managed_update' => 'Changes waiting to sync', 'managed_cancel' => 'Cancellation/status waiting to sync', 'review' => 'Needs review', 'difference' => 'Needs review', 'blocked' => 'Blocked — needs review', 'retained' => 'Protected history — review required' );
+        $labels = array( 'matched' => 'Linked / up to date', 'create' => 'Not yet synced', 'managed_update' => 'Changes waiting to sync', 'managed_cancel' => 'Cancellation/status waiting to sync', 'refresh_link' => 'Linked — comparison refresh queued (no Google edits)', 'review' => 'Needs review', 'difference' => 'Linked — changed scheduling details need review', 'blocked' => 'Blocked — needs review', 'retained' => 'Protected history — review required' );
         $items = array(); $events = array();
         foreach ( $ops as $op ) {
             $linked = $op['linked_events'] ?? array();
@@ -573,7 +588,7 @@ class MBS_Google_Calendar {
                 if ( ! self::booking_can_sync( $ops, self::status()['enabled'] ) ) self::error( 'This booking cannot sync automatically. Check Calendar Sync review or enable the reviewed connection first.' );
                 // No choices, global enablement or unrelated operations are accepted here.
                 $result = self::execute( $ops, array(), true );
-                self::record( 'booking_sync', $ref, $result['completed'] . ' event changes for this booking only.' );
+                self::record( 'booking_sync', $ref, $result['completed'] . ' event changes for this booking only.' . ( empty( $result['refreshed'] ) ? '' : ' ' . $result['refreshed'] . ' local link refresh; no Google edit.' ) );
                 $snapshot = self::snapshot();
             }
             return self::booking_view( $ref, $snapshot );
@@ -596,7 +611,7 @@ class MBS_Google_Calendar {
         include MBS_PLUGIN_DIR . 'admin/views/booking-calendar.php';
     }
     private static function execute( $ops, $choices = array(), $allow_create = true ) {
-        $done = 0; $blocked = 0; $checked = 0; $used = array();
+        $done = 0; $refreshed = 0; $blocked = 0; $checked = 0; $used = array();
         $initial_settings = self::settings();
         $current_projection = self::project( self::bookings(), ! empty( $initial_settings['pending'] ), self::site_key(), $initial_settings['calendar'], wp_timezone(), wp_date( 'Y-m-d' ), $initial_settings, ! empty( get_option( 'mbs_campsite_mode', false ) ) );
         foreach ( (array) ( $initial_settings['links'] ?? array() ) as $key => $link ) {
@@ -605,9 +620,13 @@ class MBS_Google_Calendar {
             foreach ( MBS_Calendar_Reference_Links::records( $link ) as $id => $hash ) $used[$id][] = $descriptor;
         }
         foreach ( $ops as $op ) {
-            if ( $allow_create && $done >= 20 ) break;
+            if ( $allow_create && $done + $refreshed >= 20 ) break;
             $checked++;
             $action = $op['action']; $event = $op['event'];
+            if ( $action === 'refresh_link' ) {
+                if ( ! $allow_create ) continue;
+                self::refresh_link( $op ); $refreshed++; continue;
+            }
             if ( in_array( $action, array( 'managed_update','managed_cancel' ), true ) ) {
                 if ( ! $allow_create ) continue; // Saving references never changes Google.
                 self::execute_managed( $op ); $done++; continue;
@@ -642,10 +661,10 @@ class MBS_Google_Calendar {
                 $used[$event['id']][] = MBS_Calendar_Reference_Links::descriptor( $op );
               }
             } else {
-                // Recheck the target interval just before insertion. A newly added estate event blocks it.
+                // Recheck immediately before insertion; independent native campsite events may coexist.
                 list( $start_at, $end_at ) = self::endpoints( $op['want'] );
                 $nearby = self::listing( self::events_path() . '?singleEvents=true&showDeleted=false&timeMin=' . rawurlencode( gmdate( DATE_RFC3339, $start_at ) ) . '&timeMax=' . rawurlencode( gmdate( DATE_RFC3339, $end_at ) ) );
-                foreach ( $nearby as $existing ) if ( self::overlaps( $op['want'], $existing ) && ! self::inactive_owned( $existing, $s ) ) self::error( 'An estate event now overlaps this booking. Refresh comparison; no duplicate was created.' );
+                foreach ( $nearby as $existing ) if ( self::overlaps( $op['want'], $existing ) && ! self::inactive_owned( $existing, $s ) && ( ! self::independent_event( $fresh, $op['key'] ) || ( $existing['id'] ?? '' ) === $op['want']['id'] || ( $existing['extendedProperties']['private']['mgf_ref'] ?? '' ) === $op['ref'] ) ) self::error( 'An overlapping event may be the same booking. Refresh comparison; no duplicate was created.' );
                 // Stable IDs make a timed-out insert safe: a new preview finds the tagged event.
                 $body = $op['want']; $body['reminders'] = array( 'useDefault' => false );
                 $event = self::api( 'POST', self::events_path() . '?sendUpdates=none', $body );
@@ -661,11 +680,30 @@ class MBS_Google_Calendar {
             self::save( $s );
             self::record( $action, $op['ref'], $action === 'protect' ? 'Protected reference saved; Google unchanged.' : 'Created one MGF event; existing estate events unchanged.' );
         }
-        return array( 'completed' => $done, 'needs_review' => $blocked, 'remaining' => max( 0, count( $ops ) - $checked ) );
+        return array( 'completed' => $done, 'refreshed' => $refreshed, 'needs_review' => $blocked, 'remaining' => max( 0, count( $ops ) - $checked ) );
     }
     private static function inactive_owned( $event, $settings ) {
         $key = $event['extendedProperties']['private']['mgf_booking'] ?? ''; $link = $settings['links'][$key] ?? array();
         return in_array( $link['lifecycle'] ?? '', array( 'cancelled','pending','retired' ), true ) && ( $event['transparency'] ?? '' ) === 'transparent' && self::managed_owner( $event, $link, $key, self::site_key(), $settings['calendar'] ?? '' ) && ( $link['google_hash'] ?? '' ) === self::event_hash( $event );
+    }
+    /** Rebaseline only a provably MGF-owned event whose scheduling fields have not changed.
+     * There is deliberately no provider write here, and origin remains mgf (not estate).
+     */
+    private static function refresh_link( $op ) {
+        $s = self::settings(); $key = $op['managed_link_key'] ?? ''; $link = $s['links'][$key] ?? array();
+        if ( empty( $s['managed_updates'] ) || ( $s['policy'] ?? '' ) !== 'protected-v1' || $key !== $op['key'] ) self::error( 'Managed comparison refresh is not authorised.' );
+        $fresh = self::project( self::bookings(), ! empty( $s['pending'] ), self::site_key(), $s['calendar'], wp_timezone(), wp_date( 'Y-m-d' ), $s, ! empty( get_option( 'mbs_campsite_mode', false ) ) );
+        if ( ( $op['managed_source_hash'] ?? '' ) !== self::managed_source_hash( $fresh, $op['ref'] ) ) self::error( 'Booking changed before comparison refresh.' );
+        $event = self::api( 'GET', self::events_path() . '/' . rawurlencode( $link['id'] ?? '' ), null, '', true );
+        if ( ! self::decoration_only( $event, $link, $key, self::site_key(), $s['calendar'] ) || empty( $event['etag'] ) || self::event_hash( $event ) !== self::event_hash( $op['event'] ) ) self::error( 'Google scheduling details or ownership changed. Review again; no event was modified.' );
+        $latest = self::project( self::bookings(), ! empty( $s['pending'] ), self::site_key(), $s['calendar'], wp_timezone(), wp_date( 'Y-m-d' ), $s, ! empty( get_option( 'mbs_campsite_mode', false ) ) );
+        if ( $op['managed_source_hash'] !== self::managed_source_hash( $latest, $op['ref'] ) ) self::error( 'Booking changed during comparison refresh.' );
+        $link['google_hash'] = self::event_hash( $event );
+        // If MGF also changed, retain its old projection so the next pass performs a guarded PATCH.
+        $want = $latest['desired'][$key];
+        if ( self::fields( $want ) === self::fields( $event ) ) { $link['source_hash'] = self::source_hash( $want ); $link['projection'] = $want; }
+        $s['links'][$key] = $link; self::save( $s );
+        self::record( 'refresh_link', $op['ref'], 'Verified existing MGF link refreshed locally; Google location, notes, colour and event identity preserved. No Google edit.' );
     }
     /** The only PATCH path. Requires local create receipt, exact tags/ID, unchanged baseline and source. Never DELETE. */
     private static function execute_managed( $op ) {
@@ -681,7 +719,7 @@ class MBS_Google_Calendar {
             if ( ! $want || $want !== $op['want'] ) self::error( 'Managed booking projection changed.' );
             list( $a, $z ) = self::endpoints( $want );
             $nearby = self::listing( self::events_path() . '?singleEvents=true&showDeleted=false&timeMin=' . rawurlencode( gmdate( DATE_RFC3339, $a ) ) . '&timeMax=' . rawurlencode( gmdate( DATE_RFC3339, $z ) ) );
-            foreach ( $nearby as $other ) if ( ( $other['id'] ?? '' ) !== $event['id'] && self::overlaps( $want, $other ) && ! self::inactive_owned( $other, $s ) ) self::error( 'Changed booking overlaps another Google entry. Review before updating.' );
+            foreach ( $nearby as $other ) if ( ( $other['id'] ?? '' ) !== $event['id'] && self::overlaps( $want, $other ) && ! self::inactive_owned( $other, $s ) && ( ! self::independent_event( $fresh, $op['key'] ) || ( $other['extendedProperties']['private']['mgf_ref'] ?? '' ) === $op['ref'] ) ) self::error( 'Changed booking overlaps another Google entry. Review before updating.' );
             foreach ( array( 'summary','start','end','status','transparency' ) as $field ) $body[$field] = $want[$field];
             // Clear the opposite endpoint type when changing between all-day and timed.
             foreach ( array( 'start','end' ) as $field ) { if ( isset( $body[$field]['date'] ) ) { $body[$field]['dateTime'] = null; $body[$field]['timeZone'] = null; } else $body[$field]['date'] = null; }
@@ -721,7 +759,7 @@ class MBS_Google_Calendar {
             $s = self::settings(); $s['last_attempt'] = gmdate( DATE_RFC3339 ); self::save( $s );
             $snapshot = self::snapshot();
             $result = self::execute( $snapshot['ops'], (array) ( $s['choices'] ?? array() ) );
-            $s = self::settings(); $s['last_success'] = gmdate( DATE_RFC3339 ); $s['last_result'] = $result['completed'] . ' event changes; ' . $result['needs_review'] . ' need review; ' . $result['remaining'] . ' queued. Past history and unrelated events retained.'; self::save( $s );
+            $s = self::settings(); $s['last_success'] = gmdate( DATE_RFC3339 ); $s['last_result'] = $result['completed'] . ' event changes; ' . $result['needs_review'] . ' need review; ' . $result['remaining'] . ' queued. Past history and unrelated events retained.' . ( empty( $result['refreshed'] ) ? '' : ' ' . $result['refreshed'] . ' local link refresh; no Google edit.' ); self::save( $s );
         } catch ( Throwable $e ) { $s = self::settings(); $s['last_result'] = $e->getMessage(); self::save( $s ); self::record( 'stopped', '', 'Sync stopped safely. See connection status; no estate entries changed.' ); }
         finally { self::unlock(); }
     }
