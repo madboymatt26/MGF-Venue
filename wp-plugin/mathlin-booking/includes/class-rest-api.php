@@ -350,11 +350,13 @@ class MBS_Rest_API {
     }
 
     public function get_upcoming( WP_REST_Request $request ) {
-        return rest_ensure_response( MBS_HomeAssistant::get_upcoming_for_ha( $request->get_param('days') ) );
+        try { return rest_ensure_response( MBS_HomeAssistant::get_upcoming_for_ha( $request->get_param('days') ?? 30 ) ); }
+        catch ( Throwable $e ) { return new WP_Error( 'occupancy_unavailable', 'Approved booking occupancy could not be read completely.', array( 'status' => 503 ) ); }
     }
 
     public function get_today( WP_REST_Request $request ) {
-        return rest_ensure_response( MBS_HomeAssistant::get_todays_bookings() );
+        try { return rest_ensure_response( MBS_HomeAssistant::get_todays_bookings() ); }
+        catch ( Throwable $e ) { return new WP_Error( 'occupancy_unavailable', 'Today booking occupancy could not be read completely.', array( 'status' => 503 ) ); }
     }
 
     public function get_calendar( WP_REST_Request $request ) {
@@ -1059,7 +1061,8 @@ class MBS_Rest_API {
             $actions = array_values( array_diff( $actions, $admin_only_actions ) );
         }
 
-        if ( ! $is_admin && ! current_user_can( 'mbs_manage_bookings' ) ) { $actions = array(); $reads = array( 'bookings','booking','availability','audit','dashboard','blocked_dates','requests' ); }
+        if ( $is_admin ) $reads = array_merge( $reads, array( 'health','attention','calendar_status','calendar_review' ) );
+        if ( ! $is_admin && ! current_user_can( 'mbs_manage_bookings' ) ) { $actions = array(); $reads = array( 'bookings','booking','availability','audit','dashboard','blocked_dates','requests','health' ); }
         return rest_ensure_response( array(
             'plugin_version' => MBS_VERSION,
             'space_selection' => class_exists( 'MBS_Space_Selection' ) ? array( 'enabled' => MBS_Space_Selection::enabled(), 'scope' => 'free_campsite_sibling_areas', 'capacity_rule' => 'lowest_selected_capacity', 'parent_resources' => 'exclusive_unchanged', 'api_input' => 'space label or spaces array' ) : array(),
@@ -1584,7 +1587,8 @@ class MBS_Rest_API {
         }
         if ( ! MBS_Hirer_Identity::calendar_access( $booking, $request->get_param( 'calendar_token' ) ) ) return new WP_Error( 'calendar_forbidden', 'Sign in as the verified hirer or request a secure booking link.', array( 'status' => 403 ) );
 
-        $ics = MBS_ICal::generate( $booking );
+        try { $ics = MBS_ICal::generate( $booking ); }
+        catch ( Throwable $e ) { return new WP_Error( 'calendar_unavailable', 'Booking calendar dates require administrator review.', array( 'status' => 503 ) ); }
 
         $response = new WP_REST_Response( $ics );
         $response->header( 'Content-Type', 'text/calendar; charset=utf-8' );
@@ -1593,7 +1597,8 @@ class MBS_Rest_API {
     }
 
     public function get_ical_feed( WP_REST_Request $request ) {
-        $ics = MBS_ICal::generate_feed();
+        try { $ics = MBS_ICal::generate_feed(); }
+        catch ( Throwable $e ) { return new WP_Error( 'calendar_unavailable', 'Calendar could not be generated completely.', array( 'status' => 503 ) ); }
 
         $response = new WP_REST_Response( $ics );
         $response->header( 'Content-Type', 'text/calendar; charset=utf-8' );

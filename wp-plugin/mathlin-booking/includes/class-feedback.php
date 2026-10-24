@@ -24,10 +24,7 @@ class MBS_Feedback {
     public function init() {
         // WP-Cron: custom daily hook fired by WordPress once a day.
         add_action( 'mbs_daily_feedback', array( $this, 'send_feedback_requests' ) );
-        if ( ! wp_next_scheduled( 'mbs_daily_feedback' ) ) {
-            // Schedule for 10:00 local time tomorrow, then daily thereafter.
-            wp_schedule_event( strtotime( 'tomorrow 10:00:00' ), 'daily', 'mbs_daily_feedback' );
-        }
+        MBS_Local_Schedule::register( 'mbs_daily_feedback', 'mbs_cron_time_feedback', '10:00' );
 
         // Frontend feedback form (rendered via [mathlin_feedback] shortcode).
         add_shortcode( 'mathlin_feedback', array( $this, 'shortcode_feedback' ) );
@@ -95,7 +92,12 @@ class MBS_Feedback {
         $table = $wpdb->prefix . MBS_TABLE;
 
         // "Exactly 1 day ago" = yesterday's date in site timezone.
-        $yesterday = wp_date( 'Y-m-d', strtotime( '-1 day' ) );
+        $now = new DateTimeImmutable( 'now', wp_timezone() );
+        $yesterday = $now->modify( '-1 day' )->format( 'Y-m-d' );
+        // Do not backfill historical hires on first upgrade. Recover only work
+        // becoming due after this module was enabled on this installation.
+        add_option( 'mbs_feedback_queue_start', $yesterday, '', false );
+        $oldest = max( (string) get_option( 'mbs_feedback_queue_start', $yesterday ), $now->modify( '-7 days' )->format( 'Y-m-d' ) );
 
         // Effective end date = booking_date_end when it's a real date, else booking_date.
         // Exclusion rule: scout_use = 0 (skip Scout / internal bookings).
@@ -108,39 +110,25 @@ class MBS_Feedback {
                      THEN booking_date
                      ELSE booking_date_end
                  END
-             ) = %s
+             ) BETWEEN %s AND %s
              AND scout_use = 0
              AND status IN ('paid', 'confirmed', 'deposit_paid')
              AND feedback_sent = 0
+             AND NOT EXISTS (SELECT 1 FROM {$wpdb->prefix}mathlin_email_queue q WHERE q.message_type = 'feedback_request' AND q.reference_id = {$table}.id)
              ORDER BY id ASC
              LIMIT 50",
-            $yesterday
+            $oldest, $yesterday
         ) );
 
         if ( empty( $bookings ) ) return;
 
         $sent = 0;
         foreach ( $bookings as $booking ) {
-            // Mark as sent FIRST to guarantee idempotency even if the mailer is slow
-            // or the cron overlaps — we never want to email a hirer twice.
-            $updated = $wpdb->update(
-                $table,
-                array( 'feedback_sent' => 1 ),
-                array( 'id' => $booking->id, 'feedback_sent' => 0 ),
-                array( '%d' ),
-                array( '%d', '%d' )
-            );
-
-            // If another run already claimed this row, $updated is 0 — skip.
-            if ( ! $updated ) continue;
-
-            self::send_request_email( $booking );
-            MBS_Audit_Log::log( $booking->ref, 'feedback_sent', 'Post-booking feedback request emailed to hirer.' );
-            $sent++;
+            if ( ! is_wp_error( self::send_request_email( $booking ) ) ) $sent++;
         }
 
         if ( $sent > 0 ) {
-            error_log( '[MGF Venue] Sent ' . $sent . ' post-booking feedback request(s).' );
+            error_log( '[MGF Venue] Queued ' . $sent . ' post-booking feedback request(s).' );
         }
     }
 
@@ -195,7 +183,16 @@ class MBS_Feedback {
     /**
      * Compose and send the feedback-request email to the hirer.
      */
-    public static function send_request_email( $booking ) {
+    public static function send_request_email( $booking, $manual = false ) {
+        $key = 'feedback:' . MBS_Access_Details::source_hash( $booking ) . ( $manual ? ':' . substr( hash( 'sha256', wp_generate_uuid4() ), 0, 12 ) : '' );
+        $subject = 'Feedback request ' . $booking->ref;
+        $body = 'Prepared from current booking at dispatch.';
+        return MBS_Email_Queue::enqueue( $booking->email, $subject, $body, array(), $key,
+            MBS_Email_Queue::compute_payload_hash( $booking->email, $subject, $body, array() ), null,
+            array( 'message_type' => $manual ? 'feedback_manual' : 'feedback_request', 'reference_type' => 'booking', 'reference_id' => (int) $booking->id ) );
+    }
+
+    public static function build_request_message( $booking ) {
         $settings    = self::get_settings();
         $org         = MBS_Email_Templates::get_org_settings();
         $admin_email = MBS_Bookings::get_admin_email();
@@ -224,7 +221,7 @@ class MBS_Feedback {
             'Reply-To: ' . $admin_email,
         );
 
-        MBS_Email_Queue::send( $booking->email, $subject, $body, $headers );
+        return array( 'subject' => $subject, 'body' => $body, 'headers' => $headers );
     }
 
     /**
@@ -369,16 +366,7 @@ class MBS_Feedback {
      * manual button. Still marks feedback_sent = 1 and audit-logs the action.
      */
     public static function resend( $booking ) {
-        self::send_request_email( $booking );
-
-        global $wpdb;
-        $wpdb->update(
-            $wpdb->prefix . MBS_TABLE,
-            array( 'feedback_sent' => 1 ),
-            array( 'ref' => $booking->ref )
-        );
-
-        MBS_Audit_Log::log( $booking->ref, 'feedback_sent', 'Feedback request manually sent to hirer by admin.' );
+        return self::send_request_email( $booking, true );
     }
 
     // ── AJAX: receive feedback submission ─────────────────────────────────────────

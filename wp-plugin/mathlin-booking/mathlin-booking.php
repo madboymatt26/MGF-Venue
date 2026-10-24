@@ -3,7 +3,7 @@
  * Plugin Name: MGF Venue
  * Plugin URI:  https://github.com/madboymatt26/MGF-Venue
  * Description: Venue booking and management system with Home Assistant integration.
- * Version:     3.39.1
+ * Version:     3.40.0
  * Author:      MGF Venue
  * License:     GPL-2.0+
  * Text Domain: mathlin-booking
@@ -11,7 +11,7 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'MBS_VERSION',    '3.39.1' );
+define( 'MBS_VERSION',    '3.40.0' );
 define( 'MBS_DB_VERSION', '3.33.0-schema-12' );
 define( 'MBS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MBS_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -56,6 +56,9 @@ require_once MBS_PLUGIN_DIR . 'includes/class-invoice.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-rest-api.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-admin-booking-entry.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-homeassistant.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-terms-acceptance.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-booking-buffers.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-attention.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-blocked-dates.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-updater.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-reminders.php';
@@ -107,6 +110,7 @@ register_deactivation_hook( __FILE__, array( 'MBS_Auto_Archive', 'deactivate' ) 
 register_deactivation_hook( __FILE__, array( 'MBS_Payment_Chaser', 'deactivate' ) );
 register_deactivation_hook( __FILE__, array( 'MBS_Billing_Engine', 'deactivate' ) );
 register_deactivation_hook( __FILE__, array( 'MBS_Email_Queue', 'deactivate' ) );
+register_deactivation_hook( __FILE__, array( 'MBS_HomeAssistant', 'deactivate' ) );
 register_deactivation_hook( __FILE__, array( 'MBS_Hirer_Portal', 'deactivate' ) );
 register_deactivation_hook( __FILE__, array( 'MBS_Google_Calendar', 'deactivate' ) );
 
@@ -145,14 +149,14 @@ function mbs_init() {
         $legacy_registration = MBS_Series::register_legacy_groups();
         if ( ! is_wp_error( $legacy_registration ) ) update_option( 'mbs_legacy_series_registered', MBS_DB_VERSION, false );
     }
-    if ( MBS_Database::migration_is_current() && get_option( 'mbs_scout_series_reconciled' ) !== MBS_VERSION ) {
+    if ( MBS_Database::migration_is_current() && ! in_array( get_option( 'mbs_scout_series_reconciled' ), array( '3.39.0', '3.39.1', 'scout-parent-v1' ), true ) ) {
         // The legacy Scout screen created occurrence groups independently of
         // first-class parent snapshots. Register any late groups and repair
         // existing parent dates/counts/status once for this feature release.
         $scout_registration = MBS_Series::register_legacy_groups();
         $scout_reconciliation = is_wp_error( $scout_registration ) ? $scout_registration : MBS_Series::synchronize_all_scout_series();
         if ( ! is_wp_error( $scout_reconciliation ) ) {
-            update_option( 'mbs_scout_series_reconciled', MBS_VERSION, false );
+            update_option( 'mbs_scout_series_reconciled', 'scout-parent-v1', false );
         } else {
             error_log( '[MGF Venue] Scout series reconciliation failed: ' . $scout_reconciliation->get_error_message() );
         }
@@ -180,6 +184,7 @@ function mbs_init() {
     $woo_ux = new MBS_Woo_UX();
 
     $admin->init();
+    ( new MBS_HomeAssistant() )->init();
     ( new MBS_Admin_Booking_Entry() )->init();
     ( new MBS_Google_Calendar() )->init();
     ( new MBS_Additional_Charges() )->init();

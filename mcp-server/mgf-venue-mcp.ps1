@@ -11,7 +11,7 @@ $InformationPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 
 $script:ServerName = 'mgf-venue'
-$script:ServerVersion = '0.4.1'
+$script:ServerVersion = '0.5.0'
 $script:DefaultProtocolVersion = '2025-06-18'
 
 function Get-PropertyValue {
@@ -100,6 +100,12 @@ function Assert-VenueConfiguration {
     if ($missing.Count -gt 0) {
         throw "Missing required environment variable(s): $($missing -join ', ')."
     }
+    $venueUri = $null
+    if (-not [Uri]::TryCreate($env:MGF_VENUE_BASE_URL, [UriKind]::Absolute, [ref]$venueUri) -or
+        $venueUri.Scheme -ne 'https' -or $venueUri.UserInfo -or $venueUri.Query -or $venueUri.Fragment -or
+        -not $venueUri.IsDefaultPort) {
+        throw 'MGF Venue requires an absolute HTTPS site URL without credentials, query, fragment or a nonstandard port.'
+    }
 }
 
 function Get-WebErrorMessage {
@@ -155,9 +161,9 @@ function Invoke-VenueApi {
     try {
         if ($Method -eq 'POST') {
             $jsonBody = $Body | ConvertTo-Json -Depth 20 -Compress
-            $response = Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -ContentType 'application/json; charset=utf-8' -Body $jsonBody
+            $response = Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -MaximumRedirection 0 -ContentType 'application/json; charset=utf-8' -Body $jsonBody
         } else {
-            $response = Invoke-RestMethod -Method Get -Uri $uri -Headers $headers
+            $response = Invoke-RestMethod -Method Get -Uri $uri -Headers $headers -MaximumRedirection 0
         }
         if ($response -is [string] -and $response.TrimStart().StartsWith('<')) {
             throw 'Venue API returned HTML instead of JSON; check the WordPress REST URL and permalink configuration.'
@@ -198,7 +204,7 @@ function Invoke-VenueDownload {
     $jsonBody = $Arguments | ConvertTo-Json -Depth 30 -Compress
 
     try {
-        Invoke-WebRequest -Method Post -Uri $uri -Headers $headers -ContentType 'application/json; charset=utf-8' -Body $jsonBody -OutFile $fullPath
+        Invoke-WebRequest -Method Post -Uri $uri -Headers $headers -MaximumRedirection 0 -ContentType 'application/json; charset=utf-8' -Body $jsonBody -OutFile $fullPath
     } catch {
         throw (Get-WebErrorMessage $_)
     }
@@ -504,7 +510,7 @@ $script:Tools = @(
         inputSchema = @{
             type = 'object'
             properties = @{
-                resource = @{ type = 'string'; enum = @('capabilities', 'dashboard', 'health', 'blocked_dates', 'series', 'requests', 'global_audit', 'configuration', 'email_configuration', 'custom_fields', 'osm_configuration', 'analytics', 'invoice', 'payment_url') }
+                resource = @{ type = 'string'; enum = @('capabilities', 'dashboard', 'health', 'attention', 'calendar_status', 'calendar_review', 'blocked_dates', 'series', 'requests', 'global_audit', 'configuration', 'email_configuration', 'custom_fields', 'osm_configuration', 'analytics', 'invoice', 'payment_url') }
                 ref = @{ type = 'string'; description = 'Booking reference, required for invoice and payment_url.' }
                 series_id = @{ type = 'string'; description = 'Series identifier, required for series.' }
                 status = @{ type = 'string'; enum = @('pending', 'all'); default = 'pending' }
@@ -728,6 +734,9 @@ function Invoke-MgfVenueTool {
                 'configuration' { return Invoke-VenueApi -Method GET -Path '/admin/configuration' }
                 'email_configuration' { return Invoke-VenueApi -Method GET -Path '/admin/email-configuration' }
                 'health' { return Invoke-VenueApi -Method GET -Path '/admin/health' }
+                'attention' { return Invoke-VenueApi -Method GET -Path '/admin/attention' }
+                'calendar_status' { return Invoke-VenueApi -Method GET -Path '/admin/google-calendar' }
+                'calendar_review' { return Invoke-VenueApi -Method GET -Path '/admin/google-calendar?preview=1' }
                 'custom_fields' { return Invoke-VenueApi -Method GET -Path '/admin/custom-fields' }
                 'osm_configuration' { return Invoke-VenueApi -Method GET -Path '/admin/osm-configuration' }
                 'analytics' {

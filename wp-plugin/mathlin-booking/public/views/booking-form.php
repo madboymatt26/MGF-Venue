@@ -242,6 +242,7 @@ $free_campsite = class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::e
 
             <!-- Cost preview -->
             <?php MBS_Custom_Fields::render_form_fields(); ?>
+            <input type="hidden" name="terms_hash" value="<?php echo esc_attr( MBS_Terms_Acceptance::current()['hash'] ); ?>">
 
             <?php if ( $free_campsite ) : ?><p class="nms-venue-notice">No hire charge or payment is required. All requested dates remain subject to approval.</p><?php endif; ?>
             <div class="nms-form-section" id="nms-cost-section" <?php if ( MBS_Payment_Features::free_hire() ) echo 'hidden'; ?>>

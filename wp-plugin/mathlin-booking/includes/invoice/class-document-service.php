@@ -187,7 +187,6 @@ class MBS_Invoice_Document_Service {
         // Post-commit: HA notification
         $booking->status = 'confirmed';
         MBS_HomeAssistant::notify( $booking );
-        $wpdb->update( $booking_table, array( 'ha_notified' => 1 ), array( 'id' => (int) $booking->id ) );
 
         // Auto-promote £0 bookings to paid
         $amount_minor = MBS_Money::from_decimal_string( (string) $booking->amount );

@@ -183,7 +183,7 @@ class MBS_Email_Queue {
              SET status = 'processing', claimed_at = %s, lease_expires_at = %s, worker_id = %s
              WHERE status = 'pending' AND (next_retry IS NULL OR next_retry <= %s)
              {$target}
-             ORDER BY created_at ASC LIMIT %d",
+             ORDER BY CASE WHEN message_type='mailbox_verification' THEN 0 WHEN message_type IN ('access_details','access_manual') THEN 1 ELSE 2 END, created_at ASC, id ASC LIMIT %d",
             $now, $lease_expires, sanitize_text_field( $worker_id ), $now, (int) $limit
         ) );
 
@@ -255,6 +255,15 @@ class MBS_Email_Queue {
         ) ) === 1;
     }
 
+    /** A disabled policy is not a failed delivery attempt. Keep its intent. */
+    public static function pause_for_policy( $id, $worker_id, $reason ) {
+        global $wpdb;
+        return $wpdb->query( $wpdb->prepare(
+            "UPDATE " . self::table() . " SET status='pending',next_retry=%s,last_error=%s,claimed_at=NULL,lease_expires_at=NULL,worker_id=NULL WHERE id=%d AND worker_id=%s AND status='processing'",
+            wp_date( 'Y-m-d H:i:s', time() + HOUR_IN_SECONDS ), sanitize_text_field( $reason ), (int) $id, sanitize_text_field( $worker_id )
+        ) ) === 1;
+    }
+
     /**
      * Recover stale processing leases (worker crashed/timed out).
      */
@@ -300,6 +309,17 @@ class MBS_Email_Queue {
         $failed = 0;
 
         foreach ( $claimed as $email ) {
+            if ( $email->message_type === 'mailbox_verification' ) {
+                $created = new DateTimeImmutable( $email->created_at, wp_timezone() );
+                if ( $created->getTimestamp() + 900 <= time() ) { self::mark_failed( $email->id, $worker_id ); continue; }
+            }
+            if ( in_array( $email->message_type, array( 'feedback_request', 'feedback_manual' ), true ) ) {
+                $booking = MBS_Bookings::get_by_id( (int) $email->reference_id );
+                if ( ! $booking || strcasecmp( $booking->email, $email->to_email ) !== 0 || strpos( $email->message_key, 'feedback:' . MBS_Access_Details::source_hash( $booking ) ) !== 0 || ! in_array( $booking->status, array( 'confirmed','deposit_paid','paid' ), true ) || ! empty( $booking->scout_use ) ) { self::mark_failed( $email->id, $worker_id ); continue; }
+                if ( $email->message_type === 'feedback_request' && ! get_option( 'mbs_feedback_enabled', 0 ) ) { self::pause_for_policy( $email->id, $worker_id, 'Feedback is disabled; delivery paused.' ); continue; }
+                $message = MBS_Feedback::build_request_message( $booking );
+                $email->subject = $message['subject']; $email->body = $message['body']; $email->headers = wp_json_encode( $message['headers'] );
+            }
             if ( $email->message_type === 'booking_reminder' ) {
                 $booking = MBS_Bookings::get_by_id( (int) $email->reference_id );
                 $now = new DateTimeImmutable( 'now', wp_timezone() );
@@ -340,6 +360,10 @@ class MBS_Email_Queue {
             if ( class_exists( 'MBS_Additional_Charges' ) && $email->reference_type === 'invoice'
                 && in_array( $email->message_type, array( 'invoice_issued','invoice_reminder' ), true ) ) {
                 $source_invoice = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . $wpdb->prefix . MBS_INVOICE_TABLE . ' WHERE id=%d', $email->reference_id ) );
+                if ( ! $source_invoice || in_array( $source_invoice->status, array( 'draft','void' ), true ) || ( $email->message_type === 'invoice_reminder' && (int) $source_invoice->total_minor <= (int) $source_invoice->paid_minor + (int) $source_invoice->credited_minor ) ) {
+                    self::mark_failed( $email->id, $worker_id );
+                    continue;
+                }
                 if ( MBS_Additional_Charges::is_charge( $source_invoice ) ) {
                     if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'additional_charges' ) ) {
                         $wpdb->query( $wpdb->prepare( "UPDATE " . self::table() . " SET status='pending',next_retry=%s,last_error=%s,claimed_at=NULL,lease_expires_at=NULL,worker_id=NULL WHERE id=%d AND worker_id=%s AND status='processing'", wp_date( 'Y-m-d H:i:s', time() + HOUR_IN_SECONDS ), 'Additional charges disabled; delivery paused.', $email->id, $worker_id ) );
@@ -505,6 +529,14 @@ class MBS_Email_Queue {
         $now = current_time( 'mysql' );
 
         switch ( $email->message_type ) {
+            case 'feedback_request':
+            case 'feedback_manual':
+                $booking = MBS_Bookings::get_by_id( (int) $email->reference_id );
+                if ( $booking ) {
+                    $wpdb->update( $wpdb->prefix . MBS_TABLE, array( 'feedback_sent' => 1 ), array( 'id' => (int) $booking->id ) );
+                    MBS_Audit_Log::log( $booking->ref, 'feedback_sent', 'Feedback email accepted by transport; inbox delivery not independently confirmed.' );
+                }
+                break;
             case 'booking_reminder':
                 $wpdb->update( $wpdb->prefix . MBS_TABLE, array( 'reminder_sent'=>1 ), array( 'id'=>(int) $email->reference_id ) );
                 break;
@@ -614,10 +646,12 @@ class MBS_Email_Queue {
             $cutoff_30
         ) );
 
-        // Force-fail stalled pending entries older than 7 days
+        // Legacy untyped rows cannot be revalidated. Typed policy-sensitive
+        // intents are revalidated by the worker and must survive feature pauses;
+        // actual transport failures still exhaust MAX_ATTEMPTS normally.
         $cutoff_7 = wp_date( 'Y-m-d H:i:s', strtotime( '-7 days' ) );
         $stalled = $wpdb->query( $wpdb->prepare(
-            "UPDATE {$table} SET status = 'failed' WHERE status = 'pending' AND created_at < %s",
+            "UPDATE {$table} SET status = 'failed' WHERE status = 'pending' AND created_at < %s AND COALESCE(message_type,'') NOT IN ('access_details','access_manual','booking_reminder','feedback_request','feedback_manual','invoice_issued','invoice_reminder')",
             $cutoff_7
         ) );
         if ( $stalled > 0 ) {

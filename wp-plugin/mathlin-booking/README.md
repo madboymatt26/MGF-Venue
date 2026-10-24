@@ -4,7 +4,17 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.39.0
+**Current Version:** 3.40.0
+
+## 3.40.0 Reliability and operations
+
+- Complete paged privacy/approved calendar feeds; local-time, daily-session and multi-day export correctness.
+- Durable feedback and Home Assistant retry delivery, transport-success bookkeeping, verification expiry and atomic mailbox throttling.
+- Shared occupancy reporting with parent/child resources and reporting-hour settings; optional setup/clear-down buffers default off.
+- Versioned evidence of new one-off terms acceptance without retrospective acceptance on imported bookings.
+- Read-only staff attention/API view, job diagnostics and reviewed Home Assistant retry controls.
+- Preserve OSM reconciliation; distinguish optional accounting CSV layouts from direct integrations and refuse partial oversized exports.
+- Preserve existing payment rules, issued documents and protected estate calendar entries. This is the reliability milestone, not completion of all optional roadmap features; see `docs/implementation-register-2026-10.md` in the repository.
 
 ## 3.39.0 Cross-site safeguards and integration health
 

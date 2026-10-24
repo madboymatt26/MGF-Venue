@@ -563,7 +563,6 @@ class MBS_Admin {
             $fresh = MBS_Bookings::get( $ref );
             if ( $fresh && $status === 'confirmed' ) {
                 MBS_HomeAssistant::notify( $fresh );
-                $wpdb->update( $table, array( 'ha_notified' => 1 ), array( 'ref' => $ref ) );
             }
         }
 
@@ -607,9 +606,11 @@ class MBS_Admin {
             wp_send_json_error( 'Feedback emails are disabled. Enable them in Settings → Post-Booking Feedback & Reviews.' );
         }
 
-        MBS_Feedback::resend( $booking );
+        $result = MBS_Feedback::resend( $booking );
+        if ( is_wp_error( $result ) ) wp_send_json_error( $result->get_error_message() );
+        if ( ! $result ) wp_send_json_error( 'The feedback request could not be queued.' );
 
-        wp_send_json_success( array( 'ref' => $ref ) );
+        wp_send_json_success( array( 'ref' => $ref, 'queued' => true ) );
     }
 
     /**
@@ -998,6 +999,7 @@ class MBS_Admin {
         }
 
         $code = wp_remote_retrieve_response_code( $response );
+        if ( $code < 200 || $code >= 300 ) wp_send_json_error( 'Home Assistant rejected the test with HTTP ' . (int) $code . '. No successful delivery has been recorded.' );
         wp_send_json_success( array( 'http_code' => $code ) );
     }
 

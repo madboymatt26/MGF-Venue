@@ -166,6 +166,18 @@ class MBS_Google_Calendar {
         if ( $wpdb->last_error || ! is_array( $rows ) || count( $rows ) > 20000 ) self::error( 'Booking data could not be read completely. No calendar changes made.' );
         return $rows;
     }
+    /** Managed native writes revalidate only their indexed source row. Imported
+     * provenance still requires the complete graph; never cache write authority. */
+    private static function booking_projection( $ref, $settings ) {
+        global $wpdb;
+        $rows = $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM ' . $wpdb->prefix . MBS_TABLE . ' WHERE ref=%s LIMIT 2', $ref ) );
+        if ( $wpdb->last_error || ! is_array( $rows ) || count( $rows ) > 1 ) self::error( 'Booking source could not be verified uniquely. No Google changes made.' );
+        if ( $rows ) {
+            $meta = json_decode( (string) ( $rows[0]->custom_fields ?? '{}' ), true ) ?: array();
+            if ( isset( $meta['_mbs_legacy'] ) || isset( $meta['_mbs_whole_park_sources'] ) || isset( $meta['_mbs_multiday_sources'] ) ) $rows = self::bookings();
+        }
+        return self::project( $rows, ! empty( $settings['pending'] ), self::site_key(), $settings['calendar'], wp_timezone(), wp_date( 'Y-m-d' ), $settings, ! empty( get_option( 'mbs_campsite_mode', false ) ) );
+    }
 
     /** Minimal public fields only; intentionally never exports contact/name/purpose/notes. */
     public static function project( $rows, $pending, $site, $calendar, $zone, $today, $colour_settings = array(), $campsite = false ) {
@@ -692,11 +704,11 @@ class MBS_Google_Calendar {
     private static function refresh_link( $op ) {
         $s = self::settings(); $key = $op['managed_link_key'] ?? ''; $link = $s['links'][$key] ?? array();
         if ( empty( $s['managed_updates'] ) || ( $s['policy'] ?? '' ) !== 'protected-v1' || $key !== $op['key'] ) self::error( 'Managed comparison refresh is not authorised.' );
-        $fresh = self::project( self::bookings(), ! empty( $s['pending'] ), self::site_key(), $s['calendar'], wp_timezone(), wp_date( 'Y-m-d' ), $s, ! empty( get_option( 'mbs_campsite_mode', false ) ) );
+        $fresh = self::booking_projection( $op['ref'], $s );
         if ( ( $op['managed_source_hash'] ?? '' ) !== self::managed_source_hash( $fresh, $op['ref'] ) ) self::error( 'Booking changed before comparison refresh.' );
         $event = self::api( 'GET', self::events_path() . '/' . rawurlencode( $link['id'] ?? '' ), null, '', true );
         if ( ! self::decoration_only( $event, $link, $key, self::site_key(), $s['calendar'] ) || empty( $event['etag'] ) || self::event_hash( $event ) !== self::event_hash( $op['event'] ) ) self::error( 'Google scheduling details or ownership changed. Review again; no event was modified.' );
-        $latest = self::project( self::bookings(), ! empty( $s['pending'] ), self::site_key(), $s['calendar'], wp_timezone(), wp_date( 'Y-m-d' ), $s, ! empty( get_option( 'mbs_campsite_mode', false ) ) );
+        $latest = self::booking_projection( $op['ref'], $s );
         if ( $op['managed_source_hash'] !== self::managed_source_hash( $latest, $op['ref'] ) ) self::error( 'Booking changed during comparison refresh.' );
         $link['google_hash'] = self::event_hash( $event );
         // If MGF also changed, retain its old projection so the next pass performs a guarded PATCH.
@@ -709,7 +721,7 @@ class MBS_Google_Calendar {
     private static function execute_managed( $op ) {
         $s = self::settings(); $old_key = $op['managed_link_key'] ?? ''; $link = $s['links'][$old_key] ?? array();
         if ( empty( $s['managed_updates'] ) || ( $s['policy'] ?? '' ) !== 'protected-v1' || ( $link['origin'] ?? '' ) !== 'mgf' ) self::error( 'Managed updates are disabled or ownership receipt is missing.' );
-        $fresh = self::project( self::bookings(), ! empty( $s['pending'] ), self::site_key(), $s['calendar'], wp_timezone(), wp_date( 'Y-m-d' ), $s, ! empty( get_option( 'mbs_campsite_mode', false ) ) );
+        $fresh = self::booking_projection( $op['ref'], $s );
         if ( ( $op['managed_source_hash'] ?? '' ) !== self::managed_source_hash( $fresh, $op['ref'] ) ) self::error( 'Booking changed before managed update. Review again.' );
         $event = self::api( 'GET', self::events_path() . '/' . rawurlencode( $link['id'] ?? '' ), null, '', true );
         if ( ! self::managed_owner( $event, $link, $old_key, self::site_key(), $s['calendar'] ) || empty( $event['etag'] ) || ( $link['google_hash'] ?? '' ) !== self::event_hash( $event ) || self::event_hash( $event ) !== self::event_hash( $op['event'] ) ) self::error( 'Google event changed or ownership is unverified. No event was overwritten.' );
@@ -733,7 +745,7 @@ class MBS_Google_Calendar {
             $title = $link['projection']['summary'] ?? preg_replace( '/^(Cancelled|Not confirmed|Superseded) — /u', '', $event['summary'] ?? '' );
             $body = array( 'summary' => $prefix . $title, 'transparency' => 'transparent', 'status' => 'confirmed' );
         } else self::error( 'Unsupported managed operation.' );
-        $latest = self::project( self::bookings(), ! empty( $s['pending'] ), self::site_key(), $s['calendar'], wp_timezone(), wp_date( 'Y-m-d' ), $s, ! empty( get_option( 'mbs_campsite_mode', false ) ) );
+        $latest = self::booking_projection( $op['ref'], $s );
         if ( $op['managed_source_hash'] !== self::managed_source_hash( $latest, $op['ref'] ) ) self::error( 'Booking changed during managed update. Nothing sent.' );
         $response = wp_remote_request( 'https://www.googleapis.com/calendar/v3/' . self::events_path() . '/' . rawurlencode( $event['id'] ) . '?sendUpdates=none', array( 'method' => 'PATCH', 'timeout' => 20, 'redirection' => 0, 'headers' => array( 'Authorization' => 'Bearer ' . self::access_token(), 'Accept' => 'application/json', 'Content-Type' => 'application/json', 'If-Match' => $event['etag'] ), 'body' => wp_json_encode( $body ) ) );
         if ( is_wp_error( $response ) ) self::error( 'Managed update outcome uncertain. Refresh comparison before retrying.' );

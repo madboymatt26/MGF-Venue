@@ -627,10 +627,10 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
                     <tbody>
                         <tr><td>Pending (queued for retry)</td><td><strong><?php echo $email_stats['pending']; ?></strong></td></tr>
                         <tr><td>Sent (retried successfully)</td><td><strong><?php echo $email_stats['sent']; ?></strong></td></tr>
-                        <tr><td>Failed (gave up after 3 attempts)</td><td><strong style="color:#e74c3c;"><?php echo $email_stats['failed']; ?></strong></td></tr>
+                        <tr><td>Failed or no longer eligible</td><td><strong style="color:#e74c3c;"><?php echo $email_stats['failed']; ?></strong></td></tr>
                     </tbody>
                 </table>
-                <p class="nms-muted" style="margin-top:8px;font-size:0.8rem;">Queue processes hourly. Failed emails are cleaned up after 30 days.</p>
+                <p class="nms-muted" style="margin-top:8px;font-size:0.8rem;">The queue is scheduled every five minutes, subject to host cron execution. Transport failures stop after five attempts; policy pauses do not consume attempts. Sent means the mail transport accepted the message, not confirmed inbox delivery. Old sent/failed rows are removed after 30 days.</p>
             </div>
         </div>
     </div>
@@ -680,41 +680,17 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
 
     <!-- Occupancy Report -->
     <?php
-    // Calculate occupancy per space for this FY
-    // Assume 12 hours available per day (8am-8pm), 7 days a week
-    $hours_per_day = 12;
-    $fy_days = max( 1, (int) round( ( strtotime( min( date('Y-m-d'), $fy_end ) ) - strtotime( $fy_start ) ) / 86400 ) );
-    $total_available_hours = $fy_days * $hours_per_day;
-
-    $occupancy_data = array();
-    foreach ( MBS_Bookings::get_spaces() as $space_name => $space_info ) {
-        // NOTE: occupancy/utilisation intentionally INCLUDES Scout bookings —
-        // they physically occupy the hall even though they're £0 and excluded
-        // from the commercial revenue/count metrics above. Do not add scout_use = 0 here.
-        $booked_hours = (float) $wpdb->get_var( $wpdb->prepare(
-            "SELECT COALESCE(SUM(
-                CASE
-                    WHEN all_day = 1 THEN {$hours_per_day}
-                    WHEN start_time IS NOT NULL AND end_time IS NOT NULL THEN TIMESTAMPDIFF(MINUTE, start_time, end_time) / 60
-                    ELSE 0
-                END
-            ), 0) FROM {$table}
-            WHERE space = %s AND status IN ('confirmed', 'deposit_paid', 'paid') AND booking_date BETWEEN %s AND %s",
-            $space_name, $fy_start, $fy_end
-        ) );
-        $pct = $total_available_hours > 0 ? round( ( $booked_hours / $total_available_hours ) * 100, 1 ) : 0;
-        $occupancy_data[] = array(
-            'space'   => $space_name,
-            'hours'   => round( $booked_hours, 1 ),
-            'total'   => $total_available_hours,
-            'percent' => $pct,
-        );
-    }
+    require_once MBS_PLUGIN_DIR . 'includes/class-usage-report.php';
+    $occupancy_error = '';
+    try { $occupancy = MBS_Usage_Report::report( $fy_start, $fy_end ); $occupancy_data = $occupancy['rows']; }
+    catch ( Throwable $e ) { $occupancy_error = $e->getMessage(); $occupancy_data = array(); }
     ?>
     <div class="nms-card" style="margin-top:1.5rem;">
         <div class="nms-card-header"><h2>📈 Occupancy / Utilisation (<?php echo esc_html( $fy_label ); ?>)</h2></div>
         <div style="padding:1rem 1.5rem;">
-            <p class="nms-muted" style="margin-bottom:1rem;">Based on <?php echo $hours_per_day; ?> available hours per day (8am–8pm), <?php echo $fy_days; ?> days in the period.</p>
+            <?php if ( $occupancy_error ) : ?><p role="alert"><?php echo esc_html( $occupancy_error ); ?></p><?php else : ?>
+            <p class="nms-muted">Approved physical occupancy for the complete selected period, including internal Scout use. Opening hours: <?php echo (int) $occupancy['opening_hour']; ?>:00–<?php echo (int) $occupancy['closing_hour']; ?>:00. Parent and selected areas are expanded; overlapping hours are counted once. Scheduled utilisation, not measured attendance.</p>
+            <?php if ( $occupancy['invalid_refs'] ) : ?><p role="alert">Excluded invalid bookings: <?php echo esc_html( implode( ', ', $occupancy['invalid_refs'] ) ); ?></p><?php endif; endif; ?>
             <table class="wp-list-table widefat fixed striped" style="font-size:0.85rem;">
                 <thead><tr><th>Space</th><th>Hours Booked</th><th>Hours Available</th><th>Utilisation</th></tr></thead>
                 <tbody>
@@ -740,9 +716,13 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
 
     <!-- Accounting Export -->
     <div class="nms-card" style="margin-top:1.5rem;">
-        <div class="nms-card-header"><h2>💼 Accounting Export</h2></div>
+        <div class="nms-card-header"><h2>💼 Accounting and CSV exports</h2></div>
         <div style="padding:1.5rem;">
-            <p>Export invoices in a format compatible with your accounting software.</p>
+            <h3>OSM reconciliation</h3>
+            <p>OSM uses the existing payout-to-bank reconciliation workflow. CSV exports below are separate, optional downloads; they do not post to OSM or connect another accounting account.</p>
+            <?php if ( current_user_can( 'manage_options' ) ) : ?><p><a class="button button-primary" href="<?php echo esc_url( admin_url( 'admin.php?page=mathlin-osm' ) ); ?>">Open OSM integration</a></p><?php endif; ?>
+            <h3>Optional accounting CSV downloads</h3>
+            <p>Choose a supported CSV layout for review before importing it into another accounting package.</p>
             <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-top:1rem;">
                 <div style="display:flex;gap:0.5rem;align-items:center;">
                     <label style="font-size:0.85rem;font-weight:600;">From:</label>
@@ -752,11 +732,11 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
                 </div>
             </div>
             <div style="display:flex;gap:0.5rem;margin-top:1rem;">
-                <a id="mbs-export-xero" href="#" class="button button-primary">📊 Export for Xero</a>
-                <a id="mbs-export-sage" href="#" class="button">📊 Export for Sage</a>
-                <a id="mbs-export-qb" href="#" class="button">📊 Export for QuickBooks</a>
+                <a id="mbs-export-xero" href="#" class="button">📊 Xero CSV</a>
+                <a id="mbs-export-sage" href="#" class="button">📊 Sage CSV</a>
+                <a id="mbs-export-qb" href="#" class="button">📊 QuickBooks CSV</a>
             </div>
-            <p class="nms-muted" style="margin-top:0.75rem;font-size:0.8rem;">Exports confirmed, paid, and archived bookings as CSV. Import directly into your accounting software.</p>
+            <p class="nms-muted" style="margin-top:0.75rem;font-size:0.8rem;">Includes issued ledger documents and eligible legacy bookings without duplicating allocated hire lines. These are CSV layouts, not direct integrations. Check account codes, tax mappings, credit-note handling and your package's import requirements before importing; do not import the same income into two systems.</p>
         </div>
     </div>
 </div>

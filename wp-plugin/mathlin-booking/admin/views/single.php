@@ -36,6 +36,7 @@ $invoice_pdf_url = $invoice_document_id ? add_query_arg( array(
     </h1>
 
     <?php MBS_Additional_Charges::render_related($booking->ref); ?>
+    <?php MBS_Terms_Acceptance::render($booking); ?>
     <div class="nms-single-layout">
         <!-- Details card -->
         <div class="nms-card">
