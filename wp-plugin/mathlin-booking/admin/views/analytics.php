@@ -689,7 +689,7 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
         <div class="nms-card-header"><h2>📈 Occupancy / Utilisation (<?php echo esc_html( $fy_label ); ?>)</h2></div>
         <div style="padding:1rem 1.5rem;">
             <?php if ( $occupancy_error ) : ?><p role="alert"><?php echo esc_html( $occupancy_error ); ?></p><?php else : ?>
-            <p class="nms-muted">Approved physical occupancy for the complete selected period, including internal Scout use. Opening hours: <?php echo (int) $occupancy['opening_hour']; ?>:00–<?php echo (int) $occupancy['closing_hour']; ?>:00. Parent and selected areas are expanded; overlapping hours are counted once. Scheduled utilisation, not measured attendance.</p>
+            <p class="nms-muted">Approved booking-session occupancy for the complete selected period, including internal Scout use. Reporting hours: <?php echo (int) $occupancy['opening_hour']; ?>:00–<?php echo (int) $occupancy['closing_hour']; ?>:00. Parent and selected areas are expanded; overlapping hours are counted once. Setup/clear-down buffers and blocked-date closures are not included in these metrics. Scheduled utilisation, not measured attendance.</p>
             <?php if ( $occupancy['invalid_refs'] ) : ?><p role="alert">Excluded invalid bookings: <?php echo esc_html( implode( ', ', $occupancy['invalid_refs'] ) ); ?></p><?php endif; endif; ?>
             <table class="wp-list-table widefat fixed striped" style="font-size:0.85rem;">
                 <thead><tr><th>Space</th><th>Hours Booked</th><th>Hours Available</th><th>Utilisation</th></tr></thead>
