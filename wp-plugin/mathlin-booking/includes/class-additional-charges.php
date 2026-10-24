@@ -179,6 +179,13 @@ class MBS_Additional_Charges {
         global $wpdb;
         if ( ! current_user_can( 'mbs_manage_bookings' ) ) return new WP_Error( 'forbidden', 'Booking-manager access required.' );
         if ( ! is_string( $key ) || strlen( $key ) < 8 || strlen( $key ) > 128 ) return new WP_Error( 'invalid_charge_key', 'A stable 8-128 character request key is required.' );
+        $catalogue = null;
+        if ( is_array( $data ) && ! empty( $data['catalogue_id'] ) ) {
+            if ( ! class_exists( 'MBS_Extras_Catalogue' ) ) return new WP_Error( 'extra_unavailable', 'Extras catalogue unavailable.' );
+            $catalogue = MBS_Extras_Catalogue::quote( $data['catalogue_id'], $data['catalogue_version'] ?? null, $data['catalogue_quantity'] ?? null );
+            if ( is_wp_error( $catalogue ) ) return $catalogue;
+            foreach ( array( 'amount', 'description', 'category' ) as $field ) $data[$field] = $catalogue[$field];
+        }
         $clean = self::validate( $data );
         if ( is_wp_error( $clean ) ) return $clean;
         $ref = sanitize_text_field( $data['related_ref'] ?? '' );
@@ -187,6 +194,7 @@ class MBS_Additional_Charges {
         if ( ! $booking && ! $series ) return new WP_Error( 'charge_link_not_found', 'Choose an existing booking or series.' );
         $meta = array( 'related_ref' => $ref, 'related_kind' => $booking ? 'booking' : 'series',
             'category' => $clean['category'], 'notes' => $clean['notes'], 'automatic_reminders' => $clean['automatic_reminders'] );
+        if ( $catalogue ) $meta['catalogue'] = $catalogue['snapshot'];
         $invoice_data = array_merge( $clean, array( 'billing_mode' => self::MODE, 'currency' => 'GBP',
             'period_start' => $clean['service_date'], 'period_end' => $clean['service_date'],
             'due_at' => $clean['due_date'] . ' 23:59:59', 'charge_metadata' => $meta ) );
@@ -202,7 +210,8 @@ class MBS_Additional_Charges {
             'item_type' => 'additional_charge', 'booking_ref' => null,
             'service_date' => $clean['service_date'],
             'description' => $clean['description'],
-            'unit_amount_minor' => $clean['amount_minor'], 'quantity_milli' => 1000, 'pricing_snapshot' => $meta,
+            'unit_amount_minor' => $catalogue ? $catalogue['snapshot']['unit_amount_minor'] : $clean['amount_minor'],
+            'quantity_milli' => $catalogue ? $catalogue['snapshot']['quantity'] * 1000 : 1000, 'pricing_snapshot' => $meta,
         ), $invoice->version, false );
         if ( is_wp_error( $item ) ) return self::rollback( $item );
         if ( ! MBS_Audit_Log::log( $invoice->invoice_ref, 'additional_charge_created', 'Additional charge draft linked to ' . $ref . '.' ) ) return self::rollback( new WP_Error( 'audit_failed', 'Could not audit charge creation.' ) );
@@ -225,11 +234,17 @@ class MBS_Additional_Charges {
         $meta = self::metadata( $invoice );
         if ( empty( $meta['related_ref'] ) ) return self::rollback( new WP_Error( 'charge_metadata_missing', 'Charge association is missing.' ) );
         $meta['category'] = $clean['category']; $meta['notes'] = $clean['notes']; $meta['automatic_reminders'] = $clean['automatic_reminders'];
+        // A deliberate draft edit becomes a custom agreed total. Retain its catalogue origin,
+        // but never misrepresent the old catalogue quantity/price as the current calculation.
+        if ( isset( $meta['catalogue'] ) ) {
+            $meta['catalogue_origin'] = $meta['catalogue'];
+            unset( $meta['catalogue'] );
+        }
         $items = MBS_Billing_Ledger::get_items( $invoice->id );
         $updated = $wpdb->update( $wpdb->prefix . MBS_INVOICE_ITEM_TABLE, array(
             'description' => $clean['description'],
             'service_date' => $clean['service_date'], 'unit_amount_minor' => $clean['amount_minor'],
-            'line_total_minor' => $clean['amount_minor'], 'pricing_snapshot_json' => wp_json_encode( $meta ),
+            'quantity_milli' => 1000, 'line_total_minor' => $clean['amount_minor'], 'pricing_snapshot_json' => wp_json_encode( $meta ),
         ), array( 'id' => $items[0]->id, 'invoice_id' => $invoice->id ) );
         if ( $updated === false ) return self::rollback( new WP_Error( 'charge_edit_failed', 'Could not update draft item.' ) );
         $fields = array_intersect_key( $clean, array_flip( array( 'contact_name', 'contact_email', 'contact_address', 'contact_organisation' ) ) );
@@ -474,6 +489,7 @@ class MBS_Additional_Charges {
         echo '<div class="wrap mbs-admin mbs-charges-admin"><h1 class="wp-heading-inline">'.MBS_Admin::brand_mark().'Additional charges</h1> <a class="page-title-action" href="'.esc_url(self::admin_url(array('view'=>'create','related_ref'=>$related))).'">Add charge</a><hr class="wp-header-end"><p class="nms-muted">Separate invoices for agreed extras, linked to the original booking. Hire payments and access remain unchanged.</p><nav class="mbs-charge-breadcrumbs"><a href="'.esc_url(admin_url('admin.php?page=mathlin-booking')).'">All bookings</a> <span> / </span> <a href="'.esc_url(self::admin_url()).'">Additional charges</a></nav>';
         if($related){$context=self::related_context($related);echo '<p class="mbs-charge-context">For '.($context['url']?'<a href="'.esc_url($context['url']).'">'.esc_html($context['label']).'</a>':esc_html($context['label'])).' — '.esc_html($context['summary']).'</p>';}
         if($view!=='create'&&!$selected_ref){
+            do_action( 'mbs_additional_charge_catalogue' );
             $search=sanitize_text_field(wp_unslash($_GET['charge_search']??''));$filter_status=sanitize_key($_GET['charge_status']??'');$page=max(1,absint($_GET['charge_page']??1));
             $archive_view=sanitize_key($_GET['archive_view']??'active');if(!in_array($archive_view,array('active','archived','all'),true))$archive_view='active';
             $rows=self::list_rows($related,$search,$filter_status,$page,50,$archive_view);$has_next=count($rows)>50;$rows=array_slice($rows,0,50);
@@ -482,6 +498,7 @@ class MBS_Additional_Charges {
         if($view==='create'){
         echo '<section class="nms-card"><div class="nms-card-header"><h2>New additional charge</h2></div><div class="mbs-charge-card-body mbs-charge-editor">';
         self::form_start();
+        do_action( 'mbs_additional_charge_picker' );
         self::field( 'related_ref', 'Booking or series reference', $related );
         self::field( 'contact_name', 'Recipient name (confirm before issue)', $booking ? $booking->name : ( $series ? $series->contact_name : '' ) );
         self::field( 'contact_email', 'Recipient email', $booking ? $booking->email : ( $series ? $series->contact_email : '' ), 'email' );

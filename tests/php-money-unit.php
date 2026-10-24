@@ -29,5 +29,14 @@ same_money( -1851, MBS_Money::line_total( -1234, 1500 ), 'Negative adjustment ro
 same_money( '£12.34', MBS_Money::format( 1234 ), 'GBP minor units format correctly.' );
 same_money( '-£0.05', MBS_Money::format( -5 ), 'Negative GBP minor units format correctly.' );
 same_money( '12.34', MBS_Money::decimal( 1234 ), 'Gateway decimal remains an exact string.' );
+same_money( PHP_INT_MAX, MBS_Money::minor( (string) PHP_INT_MAX ), 'Largest exact integer accepted.' );
+same_money( PHP_INT_MIN, MBS_Money::minor( (string) PHP_INT_MIN ), 'Smallest exact integer accepted.' );
+same_money( 'money_overflow', MBS_Money::minor( (string) PHP_INT_MAX . '0' )->get_error_code(), 'Oversized minor amount does not clamp.' );
+same_money( 'money_overflow', MBS_Money::from_decimal_string( str_repeat( '9', 200 ) )->get_error_code(), 'Oversized decimal never becomes a float.' );
+same_money( 'money_overflow', MBS_Money::line_total( PHP_INT_MAX, 1000 )->get_error_code(), 'Overflowing quantity multiplication fails before float conversion.' );
+same_money( 'money_overflow', MBS_Money::line_total( PHP_INT_MIN, 1000 )->get_error_code(), 'Smallest integer cannot cause abs()/rounding overflow.' );
+same_money( PHP_INT_MIN, MBS_Money::from_decimal_string( MBS_Money::decimal( PHP_INT_MIN ) ), 'Minimum integer formats and parses exactly without abs overflow.' );
+same_money( 'invalid_decimal_money', MBS_Money::from_decimal_string( "1.00\n" )->get_error_code(), 'Trailing newline is not part of a money field.' );
+same_money( 1234, MBS_Money::from_decimal_string( '00012.34' ), 'Leading zeros preserve exact value.' );
 
 echo "OK: {$checks} exact-money assertions passed.\n";

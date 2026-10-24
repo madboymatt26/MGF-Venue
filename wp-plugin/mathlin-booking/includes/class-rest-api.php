@@ -1043,10 +1043,11 @@ class MBS_Rest_API {
         $reads    = array(
             'bookings', 'booking', 'availability', 'audit', 'global_audit',
             'dashboard', 'blocked_dates', 'series', 'series_list', 'invoices', 'invoice', 'requests', 'analytics',
-            'additional_charges', 'additional_charge', 'additional_charge_document',
+            'additional_charges', 'additional_charge', 'additional_charge_document', 'extras_catalogue',
         );
 
         if ( $is_admin ) {
+            if ( MBS_Payment_Features::enabled( 'additional_charges' ) ) $actions[] = 'manage_extras_catalogue';
             $reads = array_merge( $reads, array(
                 'configuration', 'email_configuration', 'custom_fields', 'osm_configuration',
             ) );
@@ -1285,7 +1286,8 @@ class MBS_Rest_API {
         if ( in_array( $operation, array( 'create','edit' ), true ) ) {
             $fields = $data['fields'] ?? array();
             if ( ! is_array( $fields ) ) return new WP_Error( 'invalid_charge_fields', 'fields must be an object.', array( 'status' => 400 ) );
-            if ( array_diff( array_keys( $fields ), array( 'related_ref','category','description','amount','service_date','due_date','contact_name','contact_email','contact_organisation','contact_address','notes','automatic_reminders' ) ) ) return new WP_Error( 'unknown_charge_fields', 'Unknown draft charge field.', array( 'status' => 400 ) );
+            if ( array_diff( array_keys( $fields ), array( 'related_ref','category','description','amount','service_date','due_date','contact_name','contact_email','contact_organisation','contact_address','notes','automatic_reminders','catalogue_id','catalogue_version','catalogue_quantity' ) ) ) return new WP_Error( 'unknown_charge_fields', 'Unknown draft charge field.', array( 'status' => 400 ) );
+            if ( $operation === 'edit' && array_intersect( array_keys( $fields ), array( 'catalogue_id','catalogue_version','catalogue_quantity' ) ) ) return new WP_Error( 'charge_catalogue_create_only', 'Catalogue selection is available when creating a new draft. Existing drafts use explicit custom-total edits.', array( 'status' => 400 ) );
             if ( $operation === 'edit' && array_key_exists( 'related_ref', $fields ) ) return new WP_Error( 'immutable_charge_association', 'An existing charge cannot be relinked; omit related_ref when editing.', array( 'status' => 400 ) );
             if ( isset( $fields['automatic_reminders'] ) && ! is_bool( $fields['automatic_reminders'] ) ) return new WP_Error( 'invalid_reminder_flag', 'automatic_reminders must be a JSON boolean.', array( 'status' => 400 ) );
             $result = $operation === 'create' ? MBS_Additional_Charges::create( $fields, $data['idempotency_key'] ) : MBS_Additional_Charges::update_draft( $ref, $fields, $version );

@@ -13,6 +13,11 @@ function Invoke-VenueApi {
     return @{ok=$true}
 }
 Invoke-MgfVenueTool -Name list_additional_charges -Arguments ([pscustomobject]@{related_ref='MBS-SYNTHETIC';limit=1;offset=2}) | Out-Null
+Invoke-MgfVenueTool -Name get_admin_resource -Arguments ([pscustomobject]@{resource='extras_catalogue'}) | Out-Null
+if ($script:calls[-1].method -ne 'GET' -or $script:calls[-1].path -ne '/admin/extras-catalogue') { throw 'Catalogue read routing failed.' }
+Invoke-MgfVenueTool -Name manage_extras_catalogue -Arguments ([pscustomobject]@{operation='enable';revision=1;enabled=$false}) | Out-Null
+if ($script:calls[-1].method -ne 'POST' -or $script:calls[-1].path -ne '/admin/extras-catalogue' -or $script:calls[-1].body.enabled -ne $false) { throw 'Catalogue write routing failed.' }
+Invoke-MgfVenueTool -Name list_additional_charges -Arguments ([pscustomobject]@{related_ref='MBS-SYNTHETIC';limit=1;offset=2}) | Out-Null
 if ($script:calls[-1].method -ne 'GET' -or $script:calls[-1].path -notmatch 'related_ref=MBS-SYNTHETIC') { throw 'List routing failed.' }
 Invoke-MgfVenueTool -Name list_additional_charges -Arguments ([pscustomobject]@{archive_view='archived'}) | Out-Null
 if ($script:calls[-1].path -notmatch 'archive_view=archived') { throw 'Archive filter routing failed.' }

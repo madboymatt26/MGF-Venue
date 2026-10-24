@@ -11,7 +11,7 @@ $InformationPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 
 $script:ServerName = 'mgf-venue'
-$script:ServerVersion = '0.5.0'
+$script:ServerVersion = '0.6.0'
 $script:DefaultProtocolVersion = '2025-06-18'
 
 function Get-PropertyValue {
@@ -454,6 +454,9 @@ $script:Tools = @(
             reason = @{ type = 'string'; description = 'Required for credit or cancel. Cancel credits the full uncredited amount, never refunds cash or emails automatically. Archive only hides settled/discarded charges from staff lists; restore reverses that.' }
             fields = @{ type = 'object'; properties = @{
                 related_ref = @{ type = 'string'; description = 'Required for create; booking or series reference.' }
+                catalogue_id = @{ type = 'string'; description = 'Optional reusable-extra ID for create only; requires current version and quantity. Server derives description, category and amount.' }
+                catalogue_version = @{ type = 'integer'; minimum = 1 }
+                catalogue_quantity = @{ type = 'integer'; minimum = 1; maximum = 9999 }
                 category = @{ type = 'string'; enum = @('cleaning','damage','other') }
                 description = @{ type = 'string'; maxLength = 500 }; amount = @{ type = 'string'; pattern = '^[0-9]+(\.[0-9]{1,2})?$'; description = 'Exact GBP decimal string, e.g. 25.00.' }
                 service_date = @{ type = 'string'; pattern = '^\d{4}-\d{2}-\d{2}$' }; due_date = @{ type = 'string'; pattern = '^\d{4}-\d{2}-\d{2}$' }
@@ -510,7 +513,7 @@ $script:Tools = @(
         inputSchema = @{
             type = 'object'
             properties = @{
-                resource = @{ type = 'string'; enum = @('capabilities', 'dashboard', 'health', 'attention', 'calendar_status', 'calendar_review', 'blocked_dates', 'series', 'requests', 'global_audit', 'configuration', 'email_configuration', 'custom_fields', 'osm_configuration', 'analytics', 'invoice', 'payment_url') }
+                resource = @{ type = 'string'; enum = @('capabilities', 'dashboard', 'health', 'attention', 'calendar_status', 'calendar_review', 'extras_catalogue', 'blocked_dates', 'series', 'requests', 'global_audit', 'configuration', 'email_configuration', 'custom_fields', 'osm_configuration', 'analytics', 'invoice', 'payment_url') }
                 ref = @{ type = 'string'; description = 'Booking reference, required for invoice and payment_url.' }
                 series_id = @{ type = 'string'; description = 'Series identifier, required for series.' }
                 status = @{ type = 'string'; enum = @('pending', 'all'); default = 'pending' }
@@ -523,6 +526,24 @@ $script:Tools = @(
             additionalProperties = $false
         }
         annotations = @{ readOnlyHint = $true; destructiveHint = $false; idempotentHint = $true; openWorldHint = $true }
+    },
+    @{
+        name = 'manage_extras_catalogue'
+        title = 'Configure the optional reusable extras catalogue'
+        description = 'Administrator-only, version-checked catalogue configuration. Read extras_catalogue first. Saving, archiving or disabling never changes issued invoices, creates a charge or sends email. Requires additional charges enabled; does not enable payments.'
+        inputSchema = @{ type = 'object'; properties = @{
+            operation = @{ type = 'string'; enum = @('enable','save','archive','restore') }
+            revision = @{ type = 'integer'; minimum = 0 }
+            enabled = @{ type = 'boolean' }
+            id = @{ type = 'string'; description = 'Existing item UUID for edits, archive or restore; omit to add.' }
+            description = @{ type = 'string'; maxLength = 300 }
+            unit = @{ type = 'string'; maxLength = 40 }
+            price = @{ type = 'string'; pattern = '^[0-9]{1,7}(\.[0-9]{1,2})?$'; description = 'Exact GBP unit price, maximum 1000000.00.' }
+            category = @{ type = 'string'; enum = @('cleaning','damage','other') }
+            account_code = @{ type = 'string'; maxLength = 40; description = 'Required for save, may be empty. Reference mapping only; no posting.' }
+            tax_code = @{ type = 'string'; maxLength = 40; description = 'Required for save, may be empty. Does not calculate tax.' }
+        }; required = @('operation','revision'); additionalProperties = $false }
+        annotations = @{ readOnlyHint = $false; destructiveHint = $false; idempotentHint = $false; openWorldHint = $true }
     },
     @{
         name = 'run_admin_action'
@@ -707,10 +728,14 @@ function Invoke-MgfVenueTool {
             $invoiceRef = [Uri]::EscapeDataString(([string](Get-PropertyValue $Arguments 'invoice_ref' '')).ToUpperInvariant())
             return Invoke-VenueApi -Method POST -Path "/admin/invoices/${invoiceRef}/payments" -Body $Arguments
         }
+        'manage_extras_catalogue' {
+            return Invoke-VenueApi -Method POST -Path '/admin/extras-catalogue' -Body $Arguments
+        }
         'get_admin_resource' {
             $resource = [string](Get-PropertyValue $Arguments 'resource' '')
             switch ($resource) {
                 'capabilities' { return Invoke-VenueApi -Method GET -Path '/admin/capabilities' }
+                'extras_catalogue' { return Invoke-VenueApi -Method GET -Path '/admin/extras-catalogue' }
                 'dashboard' { return Invoke-VenueApi -Method GET -Path '/admin/dashboard' }
                 'blocked_dates' { return Invoke-VenueApi -Method GET -Path '/admin/blocked-dates' }
                 'series' {
