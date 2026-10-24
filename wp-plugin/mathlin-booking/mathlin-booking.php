@@ -3,7 +3,7 @@
  * Plugin Name: MGF Venue
  * Plugin URI:  https://github.com/madboymatt26/MGF-Venue
  * Description: Venue booking and management system with Home Assistant integration.
- * Version:     3.40.0
+ * Version:     3.41.0
  * Author:      MGF Venue
  * License:     GPL-2.0+
  * Text Domain: mathlin-booking
@@ -11,7 +11,7 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'MBS_VERSION',    '3.40.0' );
+define( 'MBS_VERSION',    '3.41.0' );
 define( 'MBS_DB_VERSION', '3.33.0-schema-12' );
 define( 'MBS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MBS_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -35,6 +35,7 @@ require_once MBS_PLUGIN_DIR . 'includes/class-series.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-money.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-billing-ledger.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-additional-charges.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-extras-catalogue.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-billing-engine.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-invoice-payment.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-invoice-reservation.php';
@@ -188,6 +189,7 @@ function mbs_init() {
     ( new MBS_Admin_Booking_Entry() )->init();
     ( new MBS_Google_Calendar() )->init();
     ( new MBS_Additional_Charges() )->init();
+    ( new MBS_Extras_Catalogue() )->init();
     $public->init();
     ( new MBS_Campsite_Migration() )->init();
     ( new MBS_Payment_Features() )->init();

@@ -1,6 +1,6 @@
 # Review implementation register
 
-Status: development work, not a release or production deployment.
+Status: the reliability baseline was published and deployed to both sites as 3.40.0 on 24 October 2026. The remaining programme is under development on `feature/operations-roadmap`; this is not evidence that the whole roadmap is complete.
 
 ## Confirmed decisions
 
@@ -11,7 +11,7 @@ Status: development work, not a release or production deployment.
 - Keep optional physical setup/clear-down buffers disabled by default. They reserve time, never change billed hire times.
 - No live site, booking, Google event, accounting entry or customer email is changed by this development batch.
 
-## Implemented locally; release acceptance still required
+## Released reliability baseline (3.40.0)
 
 - Shared London-time interval service, DST-aware exports and inclusive stay dates with exclusive calendar endpoints.
 - Complete paged approved-booking feeds and privacy exports; no 100-row privacy truncation.
@@ -26,14 +26,15 @@ Status: development work, not a release or production deployment.
 - Staff attention summary, job observations and integration health. Attention is read-only; it does not approve, send or chase.
 - HTTPS-only credentialed bridge access without redirects, additional calendar read resources and expanded CI runtime coverage.
 
-## Evidence so far
+## Verified release evidence
 
 - 72 isolated root PHP test programs passed.
 - Plugin PHP syntax checks passed.
-- Real disposable WordPress 6.6.2 / MariaDB / PHP 8.3 acceptance: 275 assertions passed, domain changes rolled back. Includes buffer-off parity, child/sibling/whole-park conflicts and real attention queries.
+- Real disposable WordPress 6.6.2 / MariaDB / PHP 8.3 acceptance: 278 assertions passed, domain changes rolled back. Includes buffer-off parity, child/sibling/whole-park conflicts and real attention queries.
 - MCP schema smoke: 23 tools passed. Admin parity: 52 handlers and 52 privileged hooks. Additional-charge mocked dispatch passed.
-- These are local results, not hosted CI or live-site acceptance. WordPress.org update checks in the portable local runtime had a certificate/trust warning; this is not production delivery evidence.
-- The new loopback HTTPS CI proxy and full expanded hosted matrix have not yet run on GitHub.
+- GitHub integration run 40090946693 passed all ten jobs, including the PHP/WordPress/WooCommerce matrix and financial/concurrency suite. Release run 40091175662 succeeded.
+- PR #40 merged as f96e37223e5ed43afcaa674394fa0657a05ee3b5; tag v3.40.0. Both sites updated through WordPress. Needham retained 338 booking rows and Stowmarket 303; site-specific payment, campsite and Google settings retained. Live checks made no booking, customer-message or Google-event changes.
+- Local portable-runtime WordPress.org certificate warnings were not production delivery failures. See `docs/remaining-roadmap.md` for the next delivery gates.
 
 ## Still outstanding — do not describe the whole proposal as finished
 
@@ -48,4 +49,4 @@ Status: development work, not a release or production deployment.
 - Direct accounting connectors require provider-specific OAuth, mappings, import/post semantics, idempotency, credit/refund handling, sandbox tests and recovery. Existing CSV layouts are not a substitute for those controls. OSM remains the priority.
 - Smart-lock hardware/provider decision and end-to-end revocation tests.
 - Full volunteer handover/setup guides, browser/mobile/accessibility verification, performance measurements and query-plan evidence.
-- Run the complete hosted integration/concurrency matrix, review the final diff, choose a release version and obtain publish/deploy authority. No production release has been created by this batch.
+- For every subsequent release, rerun the hosted integration/concurrency matrix, review the final diff and verify each site's configuration after deployment. The user has authorised the entire remaining software roadmap and deployment; external-provider access and unresolved business policies remain separate dependencies.

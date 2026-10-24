@@ -1,6 +1,7 @@
 <?php
 define('ABSPATH',__DIR__);define('MBS_PLUGIN_DIR',__DIR__.'/../wp-plugin/mathlin-booking/');define('MBS_INVOICE_TABLE','invoices');define('MBS_INVOICE_ITEM_TABLE','items');define('MBS_PAYMENT_RESERVATION_TABLE','reservations');define('ARRAY_A','ARRAY_A');
 function current_user_can($cap){return $GLOBALS['manager'];}
+function do_action($hook,...$args){}
 class WP_Error {}
 function is_wp_error($v){return $v instanceof WP_Error;}
 function wp_unslash($s){return $s;}

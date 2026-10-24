@@ -17,7 +17,10 @@ $tools = @($list.result.tools)
 $healthResource = $tools | Where-Object { $_.name -eq 'get_admin_resource' }
 if ($healthResource.inputSchema.properties.resource.enum -notcontains 'health') { throw 'Read-only integration health is not exposed through MCP.' }
 foreach ($resource in @('calendar_status','calendar_review')) { if ($healthResource.inputSchema.properties.resource.enum -notcontains $resource) { throw "Missing calendar read $resource." } }
-if ( $tools.Count -ne 23 ) { throw "Expected 23 MCP tools; found $($tools.Count)." }
+if ( $tools.Count -ne 24 ) { throw "Expected 24 MCP tools; found $($tools.Count)." }
+if ($healthResource.inputSchema.properties.resource.enum -notcontains 'extras_catalogue') { throw 'Extras catalogue read missing.' }
+$extras = $tools | Where-Object { $_.name -eq 'manage_extras_catalogue' }
+if ($extras.inputSchema.required -notcontains 'revision' -or $extras.annotations.readOnlyHint -ne $false) { throw 'Extras write preconditions/annotations missing.' }
 
 $create = $tools | Where-Object { $_.name -eq 'create_booking' }
 if ( $null -eq $create ) { throw 'create_booking tool is missing.' }
@@ -70,4 +73,4 @@ foreach ($toolName in @('list_additional_charges','get_additional_charge','get_a
 }
 $pdfExport = $tools | Where-Object { $_.name -eq 'export_additional_charge_pdf' }
 if ($null -eq $pdfExport -or $pdfExport.inputSchema.required -notcontains 'output_path') { throw 'Charge PDF export must require an explicit path.' }
-Write-Output 'MCP_TOOL_SCHEMA_SMOKE_OK: 23 tools'
+Write-Output 'MCP_TOOL_SCHEMA_SMOKE_OK: 24 tools'
