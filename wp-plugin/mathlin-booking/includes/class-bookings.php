@@ -517,6 +517,10 @@ class MBS_Bookings {
         );
 
         // Store custom field responses
+        if ( ! $trusted_admin_context && ! empty( $data['accept_terms'] ) && class_exists( 'MBS_Terms_Acceptance' ) ) {
+            $accepted_terms = MBS_Terms_Acceptance::capture( $data['terms_hash'] ?? '' );
+            if ( is_wp_error( $accepted_terms ) ) return $accepted_terms;
+        }
         if ( ! empty( $data['custom_fields'] ) && is_array( $data['custom_fields'] ) ) {
             $custom = MBS_Custom_Fields::validate_submission( $data );
             if ( ! is_wp_error( $custom ) && ! empty( $custom ) ) {
@@ -532,6 +536,11 @@ class MBS_Bookings {
         }
 
         $insert['modification_token'] = wp_generate_password( 32, false );
+        if ( isset( $accepted_terms ) ) {
+            $stored_fields = json_decode( (string) ( $insert['custom_fields'] ?? '{}' ), true ) ?: array();
+            $stored_fields['_mbs_terms_acceptance'] = $accepted_terms;
+            $insert['custom_fields'] = wp_json_encode( $stored_fields );
+        }
 
         // Public/private visibility
         $insert['is_public'] = ! empty( $data['is_public'] ) ? 1 : 0;
@@ -675,11 +684,11 @@ class MBS_Bookings {
             array_push( $values, $like, $like, $like, $like, $like );
         }
 
-        $allowed_order = array( 'booking_date', 'created_at', 'name', 'status', 'amount' );
+        $allowed_order = array( 'id', 'booking_date', 'created_at', 'name', 'status', 'amount' );
         $orderby = in_array( $args['orderby'], $allowed_order ) ? $args['orderby'] : 'booking_date';
         $order   = strtoupper( $args['order'] ) === 'DESC' ? 'DESC' : 'ASC';
 
-        $tie_breaker = $args['one_off_only'] ? ", start_time {$order}, id {$order}" : '';
+        $tie_breaker = $args['one_off_only'] ? ", start_time {$order}, id {$order}" : ( $orderby === 'id' ? '' : ", id {$order}" );
         $sql      = "SELECT * FROM {$table} WHERE " . implode( ' AND ', $where ) .
                     " ORDER BY {$orderby} {$order}{$tie_breaker} LIMIT %d OFFSET %d";
         $values[] = $args['limit'];
@@ -718,11 +727,10 @@ class MBS_Bookings {
         $map = array();
         foreach ( $results as $row ) {
             // Expand multi-day bookings into individual dates
-            $start = max( strtotime( $from ), strtotime( $row->booking_date ) );
-            $end   = $row->booking_date_end ? min( strtotime( $to ), strtotime( $row->booking_date_end ) ) : $start;
-
-            for ( $d = $start; $d <= $end; $d += 86400 ) {
-                $date_str = wp_date( 'Y-m-d', $d );
+            $start = max( $from, $row->booking_date );
+            $end = $row->booking_date_end ? min( $to, $row->booking_date_end ) : $start;
+            for ( $d = new DateTimeImmutable( $start, wp_timezone() ); $d->format( 'Y-m-d' ) <= $end; $d = $d->modify( '+1 day' ) ) {
+                $date_str = $d->format( 'Y-m-d' );
                 $map[ $date_str ] = ( $map[ $date_str ] ?? 0 ) + (int) $row->count;
             }
         }
@@ -822,7 +830,6 @@ class MBS_Bookings {
             $booking = self::get( $ref );
             if ( $booking ) {
                 MBS_HomeAssistant::notify( $booking );
-                $wpdb->update( $table, array( 'ha_notified' => 1 ), array( 'ref' => $ref ) );
 
                 // Auto-promote £0 bookings (scout use / free) straight to paid
                 $total_minor = MBS_Money::from_decimal_string( (string) $booking->amount );
@@ -940,6 +947,7 @@ class MBS_Bookings {
      * @return array  Array of conflicting booking objects (empty = no conflicts)
      */
     public static function check_conflicts( $space, $date, $start_time = null, $end_time = null, $all_day = false, $exclude_ref = '' ) {
+        if ( class_exists( 'MBS_Booking_Buffers' ) && MBS_Booking_Buffers::enabled() ) return MBS_Booking_Buffers::conflicts( $space, $date, $start_time, $end_time, $all_day, $exclude_ref );
         if ( class_exists( 'MBS_Space_Selection' ) && MBS_Space_Selection::protect_allocations() ) {
             return self::check_conflicts_for_space( $space, $date, $start_time, $end_time, $all_day, $exclude_ref, true );
         }
@@ -1292,7 +1300,6 @@ class MBS_Bookings {
             foreach ( $bookings as $booking ) {
                 if ( $status === 'confirmed' ) {
                     MBS_HomeAssistant::notify( $booking );
-                    $wpdb->update( $table, array( 'ha_notified' => 1 ), array( 'ref' => $booking->ref ) );
                 } elseif ( $status === 'cancelled' ) {
                     MBS_HomeAssistant::notify_cancelled( $booking );
                 }
@@ -1596,7 +1603,6 @@ class MBS_Bookings {
                 $fresh = self::get( $ref );
                 if ( $fresh ) {
                     MBS_HomeAssistant::notify( $fresh );
-                    $wpdb->update( $table, array( 'ha_notified' => 1 ), array( 'ref' => $ref ) );
                 }
             }
 
@@ -1675,7 +1681,6 @@ class MBS_Bookings {
         foreach ( $affected as $booking ) {
             $booking->status = 'confirmed';
             MBS_HomeAssistant::notify( $booking );
-            $wpdb->update( $table, array( 'ha_notified' => 1 ), array( 'ref' => $booking->ref ) );
         }
 
         return (int) $result;
@@ -2006,10 +2011,11 @@ f) On detection of a fire, the Hirer must break a glass and assist evacuation of
     public static function gdpr_export_personal_data( $email, $page = 1 ) {
         global $wpdb;
         $table = $wpdb->prefix . MBS_TABLE;
+        $offset = ( max( 1, (int) $page ) - 1 ) * 100;
 
         $bookings = $wpdb->get_results( $wpdb->prepare(
-            "SELECT * FROM {$table} WHERE email = %s LIMIT 100",
-            $email
+            "SELECT * FROM {$table} WHERE email = %s ORDER BY id ASC LIMIT 100 OFFSET %d",
+            $email, $offset
         ) );
 
         $export_items = array();
@@ -2035,7 +2041,7 @@ f) On detection of a fire, the Hirer must break a glass and assist evacuation of
         }
 
         $series_table = $wpdb->prefix . MBS_SERIES_TABLE;
-        $series_rows = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$series_table} WHERE contact_email = %s LIMIT 100", $email ) );
+        $series_rows = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$series_table} WHERE contact_email = %s ORDER BY id ASC LIMIT 100 OFFSET %d", $email, $offset ) );
         foreach ( $series_rows as $series ) {
             $export_items[] = array(
                 'group_id' => 'mathlin-booking-series', 'group_label' => 'Recurring Venue Booking Series', 'item_id' => 'series-' . $series->id,
@@ -2050,7 +2056,7 @@ f) On detection of a fire, the Hirer must break a glass and assist evacuation of
         }
         $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
         $transaction_table = $wpdb->prefix . MBS_PAYMENT_TRANSACTION_TABLE;
-        $invoice_rows = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$invoice_table} WHERE contact_email = %s LIMIT 100", $email ) );
+        $invoice_rows = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$invoice_table} WHERE contact_email = %s ORDER BY id ASC LIMIT 100 OFFSET %d", $email, $offset ) );
         foreach ( $invoice_rows as $invoice ) {
             $data = array(
                 array( 'name' => 'Invoice reference', 'value' => $invoice->invoice_ref ), array( 'name' => 'Series reference', 'value' => $invoice->series_ref ),
@@ -2065,7 +2071,7 @@ f) On detection of a fire, the Hirer must break a glass and assist evacuation of
 
         return array(
             'data' => $export_items,
-            'done' => true,
+            'done' => count( $bookings ) < 100 && count( $series_rows ) < 100 && count( $invoice_rows ) < 100,
         );
     }
 }

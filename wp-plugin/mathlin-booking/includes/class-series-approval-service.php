@@ -202,7 +202,6 @@ class MBS_Series_Approval_Service {
         foreach ( $affected as $booking ) {
             $booking->status = 'confirmed';
             MBS_HomeAssistant::notify( $booking );
-            $wpdb->update( $booking_table, array( 'ha_notified' => 1 ), array( 'ref' => $booking->ref ) );
         }
 
         // Optionally trigger cron for immediate email processing

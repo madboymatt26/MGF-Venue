@@ -70,6 +70,7 @@ class MBS_PDF_Renderer {
 
             // Temp/cache paths
             $temp_dir = self::get_render_temp_dir();
+            if ( ! $temp_dir ) return new WP_Error( 'pdf_private_temp_unavailable', 'A private writable PDF render directory is required.' );
             if ( $temp_dir ) {
                 $options->setTempDir( $temp_dir );
                 $options->setFontCache( $temp_dir );
@@ -202,25 +203,13 @@ class MBS_PDF_Renderer {
         $os_temp = get_temp_dir();
         $render_dir = rtrim( $os_temp, '/' ) . '/mbs-invoice-render';
 
-        if ( wp_mkdir_p( $render_dir ) && is_writable( $render_dir ) ) {
+        $real_root = realpath( ABSPATH );
+        $real_temp = realpath( $os_temp );
+        // A denial file is not portable across Apache, Nginx and IIS. Refuse a
+        // web-root fallback rather than assuming that .htaccess is enforced.
+        if ( $real_temp && $real_root && strpos( strtolower( str_replace( '\\', '/', $real_temp ) ) . '/', strtolower( str_replace( '\\', '/', $real_root ) ) . '/' ) !== 0 && wp_mkdir_p( $render_dir ) && is_writable( $render_dir ) ) {
             return $render_dir;
         }
-
-        // Fallback: protected dir under WP_CONTENT
-        $fallback = WP_CONTENT_DIR . '/mbs-private/render';
-        if ( wp_mkdir_p( $fallback ) ) {
-            // Write protection files
-            $htaccess = $fallback . '/.htaccess';
-            if ( ! file_exists( $htaccess ) ) {
-                file_put_contents( $htaccess, "Order deny,allow\nDeny from all\n" );
-            }
-            $index = $fallback . '/index.php';
-            if ( ! file_exists( $index ) ) {
-                file_put_contents( $index, '<?php // Silence is golden.' );
-            }
-            if ( is_writable( $fallback ) ) return $fallback;
-        }
-
         return null;
     }
 

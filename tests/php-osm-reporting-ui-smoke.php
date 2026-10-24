@@ -24,5 +24,7 @@ osm_reporting_assert( strpos( $reports, 'DATE(t.occurred_at) BETWEEN %s AND %s' 
 osm_reporting_assert( strpos( $reports, "t.status='completed'" ) !== false, 'Customer cash report includes non-completed ledger transactions.' );
 osm_reporting_assert( strpos( $rest, "'customers' => \$customers, 'payment_routes' => \$routes, 'osm' => \$osm_summary" ) !== false, 'Structured REST/MCP reporting parity is missing.' );
 osm_reporting_assert( strpos( $mcp, '"/admin/analytics?${query}"' ) !== false && strpos( $mcp, 'date_from' ) !== false, 'MCP cannot request date-filtered reports.' );
+osm_reporting_assert( strpos( $reports, 'Open OSM integration' ) !== false && strpos( $reports, 'page=mathlin-osm' ) !== false, 'Primary OSM workflow link is missing.' );
+osm_reporting_assert( strpos( $reports, 'These are CSV layouts, not direct integrations.' ) !== false, 'CSV exports must not be presented as direct accounting connectors.' );
 
 echo "OSM_REPORTING_UI_SMOKE_OK\n";

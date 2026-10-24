@@ -385,7 +385,6 @@ class MBS_Modification {
 	                        $updated_booking = MBS_Bookings::get( $request->booking_ref );
 	                        if ( $updated_booking ) {
 	                            MBS_HomeAssistant::notify( $updated_booking );
-	                            $wpdb->update( $table, array( 'ha_notified' => 1 ), array( 'ref' => $request->booking_ref ) );
 	                        }
 	                        if ( function_exists( 'spawn_cron' ) ) spawn_cron();
 	                        return true;

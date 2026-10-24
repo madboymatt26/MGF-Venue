@@ -98,6 +98,13 @@ jobs:
             woocommerce: '9.3.3'
             wordpress_image: 'wordpress:6.6.2-php8.3-apache'
             wpcli_image: 'wordpress:cli-2.11.0-php8.3'
+          # Pin these repository variables to the actual deployed versions.
+          # The latest fallback also catches forward-compatibility regressions.
+          - php: '8.3'
+            wordpress: ${{ vars.MGF_PRODUCTION_WP_VERSION || 'latest' }}
+            woocommerce: ${{ vars.MGF_PRODUCTION_WOO_VERSION || 'latest' }}
+            wordpress_image: 'wordpress:php8.3-apache'
+            wpcli_image: 'wordpress:cli-2.11.0-php8.3'
     env:
       WORDPRESS_IMAGE: ${{ matrix.wordpress_image }}
       WPCLI_IMAGE: ${{ matrix.wpcli_image }}
@@ -150,6 +157,8 @@ jobs:
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/legacy-read-only-recovery.php --allow-root
       - name: Verify cross-site identity, occupancy and feature-policy hardening
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/cross-site-hardening.php --allow-root
+      - name: Verify complete exports, privacy pagination and durable delivery
+        run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/review-reliability.php --allow-root
       - name: Run invoice lifecycle matrix after hardening acceptance
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/invoice-lifecycle-matrix.php --allow-root
       - name: Collect service diagnostics
@@ -159,7 +168,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: runtime-${{ matrix.php }}-diagnostics
+          name: runtime-${{ matrix.wordpress }}-${{ matrix.woocommerce }}-${{ matrix.php }}-diagnostics
           path: integration-services.log
           if-no-files-found: error
       - name: Stop disposable services
@@ -188,12 +197,25 @@ jobs:
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli sh /workspace/tests/integration/setup.sh
       - name: Run separate-process integration scenarios
         run: sh tests/integration/run-concurrency.sh
+      - name: Prepare trusted loopback HTTPS for authenticated MCP
+        shell: bash
+        run: |
+          set -euo pipefail
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -keyout /tmp/mgf-ci.key -out /tmp/mgf-ci.crt -subj '/CN=localhost' -addext 'subjectAltName=DNS:localhost'
+          sudo cp /tmp/mgf-ci.crt /usr/local/share/ca-certificates/mgf-ci.crt
+          sudo update-ca-certificates
+          sudo python3 tests/integration/tls-proxy.py --cert /tmp/mgf-ci.crt --key /tmp/mgf-ci.key > /tmp/mgf-tls-proxy.log 2>&1 &
+          for attempt in {1..30}; do
+            if curl --silent --fail https://localhost/wp-json/ > /dev/null; then exit 0; fi
+            sleep 1
+          done
+          exit 1
       - name: Run authenticated MCP mutation protection against WordPress
         shell: bash
         run: |
           set -euo pipefail
           app_password="$(docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp user application-password create admin 'MGF integration CI' --porcelain --allow-root)"
-          MGF_VENUE_BASE_URL='http://localhost:8088' MGF_VENUE_USERNAME='admin' MGF_VENUE_APP_PASSWORD="$app_password" pwsh -NoLogo -NoProfile -File mcp-server/tests/mcp-live-mutation.ps1
+          MGF_VENUE_BASE_URL='https://localhost' MGF_VENUE_USERNAME='admin' MGF_VENUE_APP_PASSWORD="$app_password" pwsh -NoLogo -NoProfile -File mcp-server/tests/mcp-live-mutation.ps1
       - name: Collect service and worker diagnostics
         if: always()
         shell: bash

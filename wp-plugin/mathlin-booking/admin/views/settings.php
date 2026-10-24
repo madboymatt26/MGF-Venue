@@ -1,10 +1,31 @@
 <?php if ( ! defined( 'ABSPATH' ) ) exit; ?>
 <div class="wrap mbs-admin">
     <h1><?php echo MBS_Admin::brand_mark(); ?>MGF Venue – Settings</h1>
+    <?php foreach ( MBS_Integration_Health::payment_policy_warnings() as $warning ) : ?><div class="notice notice-warning inline"><p><?php echo esc_html( $warning ); ?></p></div><?php endforeach; ?>
 
     <div id="nms-settings-global-msg" class="nms-settings-msg" style="margin-bottom:16px;font-size:14px;"></div>
 
     <div class="nms-settings-layout">
+        <?php $operations = MBS_Integration_Health::operational_settings(); ?>
+        <div class="nms-card">
+            <div class="nms-card-header"><h2>Operational reporting and compatibility</h2></div>
+            <p>Reporting hours affect utilisation estimates only, not booking availability or charges. The legacy option protects the original booking system for comparison; it does not activate or synchronise that plugin.</p>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                <?php wp_nonce_field('mbs_operational_settings'); ?>
+                <input type="hidden" name="action" value="mbs_operational_settings"><input type="hidden" name="expected" value="<?php echo esc_attr(hash('sha256',wp_json_encode($operations))); ?>">
+                <p><label>Reporting opens at <input type="number" name="report_open_hour" min="0" max="23" value="<?php echo (int)$operations['report_open_hour']; ?>" required> hour</label></p>
+                <p><label>Reporting closes at <input type="number" name="report_close_hour" min="1" max="24" value="<?php echo (int)$operations['report_close_hour']; ?>" required> hour</label></p>
+                <?php if(MBS_Campsite_Policy::enabled()): ?><p><label>Original booking system read-only protection <select name="legacy_read_only"><option value="1" <?php selected($operations['legacy_read_only'],1); ?>>Enabled</option><option value="0" <?php selected($operations['legacy_read_only'],0); ?>>Disabled</option></select></label></p><p class="description">Keep protection enabled while comparing legacy data. Disabling it allows the old plugin to write if separately activated.</p><?php else: ?><input type="hidden" name="legacy_read_only" value="0"><?php endif; ?>
+                <h3>Optional setup and clear-down buffers</h3>
+                <p>Default off. Buffers reserve physical occupancy only; invoice and booking times stay unchanged. Review existing adjacent bookings before enabling. For a whole-venue booking, set the whole-venue resource rule explicitly.</p>
+                <p><label>Buffers <select name="buffers_enabled"><option value="0" <?php selected($operations['buffers_enabled'],0); ?>>Disabled</option><option value="1" <?php selected($operations['buffers_enabled'],1); ?>>Enabled</option></select></label></p>
+                <table class="widefat"><thead><tr><th>Space</th><th>Setup minutes</th><th>Clear-down minutes</th></tr></thead><tbody>
+                <?php foreach(MBS_Bookings::get_spaces()as$name=>$space): ?><tr><th><?php echo esc_html($name); ?></th><?php foreach(array('before','after')as$field): ?><td><input aria-label="<?php echo esc_attr($name.' '.$field.' buffer minutes'); ?>" type="number" name="resource_buffers[<?php echo esc_attr($name); ?>][<?php echo esc_attr($field); ?>]" min="0" max="240" value="<?php echo (int)($operations['resource_buffers'][$name][$field]??0); ?>"></td><?php endforeach; ?></tr><?php endforeach; ?>
+                </tbody></table>
+                <p><label><input type="checkbox" name="ack_buffers" value="1"> I have reviewed the impact of buffers on existing adjacent bookings.</label></p>
+                <button class="button">Save operational settings</button> <a class="button" href="<?php echo esc_url(admin_url('admin.php?page=mathlin-health')); ?>">Integration health</a>
+            </form>
+        </div>
         <div class="nms-card">
             <div class="nms-card-header"><h2>Google Calendar</h2></div>
             <p>Synchronise bookings one-way to an existing shared calendar. Preview manual events first to prevent duplicates; private booking/contact details are not exported.</p>

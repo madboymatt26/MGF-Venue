@@ -243,6 +243,10 @@ class MBS_Public {
         if ( $terms_page_id && get_post( $terms_page_id ) && empty( $_POST['accept_terms'] ) ) {
             wp_send_json_error( array( 'message' => 'You must agree to the Terms & Conditions to make a booking.' ) );
         }
+        if ( ! empty( $_POST['accept_terms'] ) && class_exists( 'MBS_Terms_Acceptance' ) ) {
+            $accepted_terms = MBS_Terms_Acceptance::capture( wp_unslash( $_POST['terms_hash'] ?? '' ) );
+            if ( is_wp_error( $accepted_terms ) ) wp_send_json_error( array( 'message' => $accepted_terms->get_error_message() ) );
+        }
 
         // Validate date — must be at least min_notice_days from today
         $date         = sanitize_text_field( $_POST['booking_date'] );

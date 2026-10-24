@@ -7,7 +7,14 @@ class MBS_Legacy_Read_Only {
     private static $prefix = '';
     public static function init() {
         global $wpdb;
-        self::$enabled = MBS_Campsite_Policy::enabled() && wp_parse_url( home_url(), PHP_URL_HOST ) === 'stowmarketscouts.org.uk';
+        $configured = get_option( 'mbs_legacy_read_only', null );
+        if ( $configured === null ) {
+            // One-time compatibility default preserves the existing deployment.
+            // Staging and future sites use the explicit setting thereafter.
+            $configured = MBS_Campsite_Policy::enabled() && wp_parse_url( home_url(), PHP_URL_HOST ) === 'stowmarketscouts.org.uk';
+            add_option( 'mbs_legacy_read_only', (int) $configured, '', false );
+        }
+        self::$enabled = MBS_Campsite_Policy::enabled() && (bool) $configured;
         self::$prefix = $wpdb->prefix;
         if ( ! self::$enabled ) return;
         add_filter( 'query', array( __CLASS__, 'guard_query' ), 999 );

@@ -568,7 +568,7 @@ class MBS_Series {
         if ( $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'transaction_commit_failed', 'Could not commit the series extension.' ); }
         foreach ( $created as $ref ) {
             $booking = MBS_Bookings::get( $ref );
-            if ( $booking && $status === 'confirmed' ) { MBS_HomeAssistant::notify( $booking ); $wpdb->update( $booking_table, array( 'ha_notified' => 1 ), array( 'ref' => $ref ) ); }
+            if ( $booking && $status === 'confirmed' ) { MBS_HomeAssistant::notify( $booking ); }
         }
         $fresh = self::get( $series_ref );
         MBS_Audit_Log::log( $series_ref, 'series_extended', 'Extended request to ' . $new_repeat_until . '; created ' . count( $created ) . ' occurrence(s), skipped ' . ( count( $new_dates ) - count( $created ) ) . '.' );
@@ -708,7 +708,6 @@ class MBS_Series {
         foreach ( $affected as $booking ) {
             $booking->status = 'confirmed';
             MBS_HomeAssistant::notify( $booking );
-            $wpdb->update( $booking_table, array( 'ha_notified' => 1 ), array( 'ref' => $booking->ref ) );
         }
         MBS_Audit_Log::log(
             $series_ref,

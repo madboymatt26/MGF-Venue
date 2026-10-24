@@ -5,6 +5,8 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 class MBS_Hirer_Identity {
     public static function cleanup() {
         global $wpdb;
+        $counters = $wpdb->get_col( $wpdb->prepare( "SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s LIMIT 500", $wpdb->esc_like( 'mbs_security_counter_' ) . '%' ) );
+        foreach ( (array) $counters as $key ) if ( preg_match( '/^mbs_security_counter_(\d+)_/', $key, $match ) && (int) $match[1] < time() ) delete_option( $key );
         $rows = $wpdb->get_results( $wpdb->prepare( "SELECT option_name,option_value FROM {$wpdb->options} WHERE option_name LIKE %s LIMIT 500", $wpdb->esc_like( 'mbs_mailproof_' ) . '%' ) );
         foreach ( (array) $rows as $row ) { $value = maybe_unserialize( $row->option_value ); if ( ! is_array( $value ) || (int) ( $value['expires'] ?? 0 ) < time() ) delete_option( $row->option_name ); }
     }
@@ -25,11 +27,14 @@ class MBS_Hirer_Identity {
     }
 
     public static function throttle( $scope, $identity, $limit = 5, $seconds = 900 ) {
-        $key = 'mbs_security_' . hash( 'sha256', $scope . '|' . $identity );
-        $count = (int) get_transient( $key );
-        if ( $count >= $limit ) return false;
-        set_transient( $key, $count + 1, $seconds );
-        return true;
+        global $wpdb;
+        $seconds = max( 1, (int) $seconds ); $limit = max( 1, (int) $limit );
+        $expiry = ( (int) floor( time() / $seconds ) + 1 ) * $seconds;
+        $key = 'mbs_security_counter_' . $expiry . '_' . hash( 'sha256', $scope . '|' . $identity );
+        add_option( $key, '0', '', false );
+        // The conditional increment is one database operation, independent of
+        // object-cache consistency and safe under simultaneous PHP workers.
+        return $wpdb->query( $wpdb->prepare( "UPDATE {$wpdb->options} SET option_value=CAST(option_value AS UNSIGNED)+1 WHERE option_name=%s AND CAST(option_value AS UNSIGNED)<%d", $key, $limit ) ) === 1;
     }
 
     public static function send_link( $email, $user_id = 0, $booking = null ) {

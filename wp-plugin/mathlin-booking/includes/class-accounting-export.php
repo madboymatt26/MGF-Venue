@@ -27,6 +27,13 @@ class MBS_Accounting_Export {
         $format    = sanitize_text_field( $_GET['format'] ?? 'xero' );
         $date_from = sanitize_text_field( $_GET['date_from'] ?? '' );
         $date_to   = sanitize_text_field( $_GET['date_to'] ?? '' );
+        if ( ! in_array( $format, array( 'xero','sage','quickbooks' ), true ) ) wp_die( 'Unknown CSV layout.', '', array( 'response' => 400 ) );
+        foreach ( array( $date_from, $date_to ) as $date ) {
+            if ( $date === '' ) continue;
+            $parsed = DateTimeImmutable::createFromFormat( '!Y-m-d', $date );
+            if ( ! $parsed || $parsed->format( 'Y-m-d' ) !== $date ) wp_die( 'Choose valid export dates.', '', array( 'response' => 400 ) );
+        }
+        if ( $date_from && $date_to && $date_from > $date_to ) wp_die( 'Export end must not precede its start.', '', array( 'response' => 400 ) );
 
         $bookings = MBS_Bookings::get_all( array(
             'status'           => '',
@@ -38,7 +45,11 @@ class MBS_Accounting_Export {
             'exclude_archived' => false,
         ) );
 
-        $records = self::normalise_records( $bookings, $date_from, $date_to );
+        global $wpdb;
+        if ( ! is_array( $bookings ) || $wpdb->last_error ) wp_die( 'Export could not read all bookings. No CSV was generated.', '', array( 'response' => 503 ) );
+        if ( count( $bookings ) >= 10000 ) wp_die( 'This export reaches the 10,000-booking safety boundary. Choose a smaller date range; no partial CSV was generated.', '', array( 'response' => 413 ) );
+        try { $records = self::normalise_records( $bookings, $date_from, $date_to ); }
+        catch ( RuntimeException $e ) { wp_die( 'Export could not read the complete ledger. No CSV was generated.', '', array( 'response' => 503 ) ); }
 
         $filename = 'invoices-' . $format . '-' . date( 'Y-m-d' ) . '.csv';
 
@@ -69,7 +80,9 @@ class MBS_Accounting_Export {
     private static function normalise_records( $bookings, $date_from, $date_to ) {
         global $wpdb;
         $allocation_table = $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE;
-        $allocated = array_fill_keys( $wpdb->get_col( "SELECT DISTINCT booking_ref FROM {$allocation_table}" ), true );
+        $allocation_refs = $wpdb->get_col( "SELECT DISTINCT booking_ref FROM {$allocation_table}" );
+        if ( ! is_array( $allocation_refs ) || ! empty( $wpdb->last_error ) ) throw new RuntimeException( 'Allocation read failed.' );
+        $allocated = array_fill_keys( $allocation_refs, true );
         $records = array();
         $bank = MBS_Bookings::get_bank_details();
         foreach ( $bookings as $booking ) {
@@ -95,6 +108,7 @@ class MBS_Accounting_Export {
 	                FROM {$invoice_table} i INNER JOIN {$item_table} it ON it.invoice_id = i.id
 	                WHERE " . implode( ' AND ', $where ) . ' ORDER BY accounting_date ASC, i.id ASC, it.id ASC';
         $rows = $params ? $wpdb->get_results( $wpdb->prepare( $sql, $params ) ) : $wpdb->get_results( $sql );
+        if ( ! is_array( $rows ) || ! empty( $wpdb->last_error ) ) throw new RuntimeException( 'Ledger read failed.' );
         foreach ( $rows as $row ) {
             $records[] = (object) array(
                 'contact_name' => $row->contact_organisation ?: $row->contact_name, 'email' => $row->contact_email,
