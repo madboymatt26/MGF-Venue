@@ -1411,7 +1411,50 @@ class MBS_Bookings {
      * @param string $series_id The SER-XXXXXX series reference.
      * @return int|false Number of rows cancelled, or false on failure.
      */
+    private static function legacy_slot_unavailable( $space, $date, $start, $end, $all_day, $ref = '' ) {
+        global $wpdb;
+        $conflicts = self::check_conflicts( $space, $date, $all_day ? null : $start, $all_day ? null : $end, $all_day, $ref );
+        if ( $wpdb->last_error ) throw new RuntimeException( 'Availability could not be verified. Nothing changed.' );
+        foreach ( $conflicts as $conflict ) if ( empty( $conflict->ref ) ) throw new RuntimeException( 'Availability could not be verified. Nothing changed.' );
+        $blocked = MBS_Blocked_Dates::is_blocked( $date, $space );
+        if ( $wpdb->last_error || ( $blocked && ! isset( $blocked->id ) ) ) throw new RuntimeException( 'Closures could not be verified. Nothing changed.' );
+        return ! empty( $conflicts ) || (bool) $blocked;
+    }
+
+    private static function legacy_series_change( $series_id, $callback ) {
+        return MBS_Space_Selection::locked( static function() use ( $series_id, $callback ) {
+            global $wpdb;
+            // Legacy registration has its own transaction; complete it before
+            // opening the mutation transaction (never nest START/COMMIT).
+            if ( ! self::is_legacy_scout_series( $series_id ) ) return new WP_Error( 'canonical_series_required', 'Choose an internal Scout series.' );
+            if ( $wpdb->query( 'START TRANSACTION' ) === false ) return new WP_Error( 'legacy_start_failed', 'Could not start the series change.' );
+            try {
+                $rows = $wpdb->get_results( $wpdb->prepare( 'SELECT ref,scout_use FROM ' . $wpdb->prefix . MBS_TABLE . ' WHERE series_id=%s ORDER BY id LIMIT 1001 FOR UPDATE', $series_id ) );
+                if ( ! is_array( $rows ) || $wpdb->last_error || ! $rows || count( $rows ) > 1000 ) throw new RuntimeException( 'Cannot verify the complete Scout series (maximum 1,000 occurrences). Nothing changed.' );
+                foreach ( $rows as $row ) {
+                    if ( empty( $row->scout_use ) ) throw new RuntimeException( 'This action is limited to internal Scout occurrences.' );
+                }
+                $bookings = $wpdb->prefix . MBS_TABLE;
+                $allocation = $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE;
+                $items = $wpdb->prefix . MBS_INVOICE_ITEM_TABLE;
+                $financial = $wpdb->get_var( $wpdb->prepare( "SELECT 1 FROM {$allocation} a INNER JOIN {$bookings} b ON b.ref=a.booking_ref WHERE b.series_id=%s UNION SELECT 1 FROM {$items} i INNER JOIN {$bookings} b ON b.ref=i.booking_ref WHERE b.series_id=%s LIMIT 1", $series_id, $series_id ) );
+                if ( $financial || $wpdb->last_error ) throw new RuntimeException( 'Financial history exists or could not be verified. Use credit/replacement instead; nothing changed.' );
+                $result = call_user_func( $callback );
+                if ( is_wp_error( $result ) || $result === false ) throw new RuntimeException( is_wp_error( $result ) ? $result->get_error_message() : 'The series change failed; nothing was committed.' );
+                if ( $wpdb->query( 'COMMIT' ) === false ) throw new RuntimeException( 'Could not commit the complete series change.' );
+                return $result;
+            } catch ( Throwable $e ) {
+                $wpdb->query( 'ROLLBACK' );
+                return new WP_Error( 'legacy_series_change_failed', $e->getMessage() );
+            }
+        } );
+    }
+
     public static function cancel_series_future( $series_id ) {
+        return self::legacy_series_change( $series_id, static function() use ( $series_id ) { return self::cancel_series_future_locked( $series_id ); } );
+    }
+
+    private static function cancel_series_future_locked( $series_id ) {
         global $wpdb;
         if ( ! self::is_legacy_scout_series( $series_id ) ) return new WP_Error( 'canonical_series_required', 'This action is limited to legacy Scout series; use the versioned series cancellation service.' );
         $table = $wpdb->prefix . MBS_TABLE;
@@ -1420,14 +1463,15 @@ class MBS_Bookings {
         // Grab the affected bookings first so we can notify HA after the update.
         $affected = $wpdb->get_results( $wpdb->prepare(
             "SELECT * FROM {$table}
-             WHERE series_id = %s AND booking_date >= %s AND status != 'cancelled'",
+             WHERE series_id = %s AND booking_date >= %s AND status NOT IN ('cancelled','archived')",
             $series_id,
             $today
         ) );
 
+        if ( ! is_array( $affected ) || $wpdb->last_error ) return false;
         $result = $wpdb->query( $wpdb->prepare(
             "UPDATE {$table} SET status = 'cancelled'
-             WHERE series_id = %s AND booking_date >= %s AND status != 'cancelled'",
+             WHERE series_id = %s AND booking_date >= %s AND status NOT IN ('cancelled','archived')",
             $series_id,
             $today
         ) );
@@ -1438,11 +1482,11 @@ class MBS_Bookings {
         if ( is_wp_error( $synced ) ) return $synced;
 
         // Audit log + HA cancellation notices.
-        MBS_Audit_Log::log(
+        if ( ! MBS_Audit_Log::log(
             $series_id,
             'series_bulk_cancel',
             'Bulk-cancelled ' . (int) $result . ' future booking(s) in series (from ' . $today . ')'
-        );
+        ) ) return false;
 
         foreach ( $affected as $booking ) {
             MBS_HomeAssistant::notify_cancelled( $booking );
@@ -1466,6 +1510,10 @@ class MBS_Bookings {
      * @return array|WP_Error  ['updated' => int, 'skipped' => array of dates]
      */
     public static function update_series_future( $series_id, $fields ) {
+        return self::legacy_series_change( $series_id, static function() use ( $series_id, $fields ) { return self::update_series_future_locked( $series_id, $fields ); } );
+    }
+
+    private static function update_series_future_locked( $series_id, $fields ) {
         global $wpdb;
         if ( ! self::is_legacy_scout_series( $series_id ) ) return new WP_Error( 'canonical_series_required', 'This action is limited to legacy Scout series; use the versioned series service.' );
         $table = $wpdb->prefix . MBS_TABLE;
@@ -1473,12 +1521,13 @@ class MBS_Bookings {
 
         $bookings = $wpdb->get_results( $wpdb->prepare(
             "SELECT * FROM {$table}
-             WHERE series_id = %s AND booking_date >= %s AND status != 'cancelled'
+             WHERE series_id = %s AND booking_date >= %s AND status NOT IN ('cancelled','archived')
              ORDER BY booking_date ASC",
             $series_id,
             $today
         ) );
 
+        if ( ! is_array( $bookings ) || $wpdb->last_error ) return false;
         if ( empty( $bookings ) ) {
             return new WP_Error( 'no_bookings', 'No future bookings found in this series.' );
         }
@@ -1497,26 +1546,18 @@ class MBS_Bookings {
         $skipped = array();
 
         foreach ( $bookings as $b ) {
-            if ( self::has_financial_history( $b->ref ) ) {
-                return new WP_Error( 'billed_occurrence_immutable', 'A billed occurrence cannot be edited. Credit and replace it instead.' );
-            }
             $space   = $new_space !== null ? $new_space : $b->space;
             $start   = $new_start !== null ? $new_start : $b->start_time;
             $end     = $new_end   !== null ? $new_end   : $b->end_time;
             $all_day = (bool) $b->all_day;
 
+            if ( ! isset( self::get_spaces()[$space] ) ) return new WP_Error( 'invalid_space', 'Choose a configured space.' );
+            if ( ! $all_day && ( ! preg_match( '/^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/D', $start ) || ! preg_match( '/^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/D', $end ) || strcmp( substr( $end, 0, 5 ), substr( $start, 0, 5 ) ) <= 0 ) ) return new WP_Error( 'invalid_time', 'Use valid times with the end after the start.' );
+
             // If the space or time is changing, make sure the new slot is free
             // (excluding this booking's own row so it doesn't clash with itself).
             if ( $new_space !== null || $new_start !== null || $new_end !== null ) {
-                $conflicts = self::check_conflicts(
-                    $space,
-                    $b->booking_date,
-                    $all_day ? null : $start,
-                    $all_day ? null : $end,
-                    $all_day,
-                    $b->ref
-                );
-                if ( ! empty( $conflicts ) ) {
+                if ( self::legacy_slot_unavailable( $space, $b->booking_date, $start, $end, $all_day, $b->ref ) ) {
                     $skipped[] = $b->booking_date;
                     continue;
                 }
@@ -1535,7 +1576,7 @@ class MBS_Bookings {
             );
             $update = self::with_pricing_evidence( $b, $update );
 
-            $wpdb->update( $table, $update, array( 'ref' => $b->ref ) );
+            if ( $wpdb->update( $table, $update, array( 'ref' => $b->ref ) ) === false ) return false;
             $updated++;
 
             // Keep Home Assistant in step for confirmed bookings whose slot moved.
@@ -1554,12 +1595,12 @@ class MBS_Bookings {
         if ( $new_start !== null )   $changed[] = 'start → ' . $new_start;
         if ( $new_end !== null )     $changed[] = 'end → ' . $new_end;
         if ( $new_purpose !== null ) $changed[] = 'section → ' . $new_purpose;
-        MBS_Audit_Log::log(
+        if ( ! MBS_Audit_Log::log(
             $series_id,
             'series_bulk_edit',
             'Bulk-edited ' . $updated . ' future booking(s) (' . implode( ', ', $changed ) . ')'
             . ( ! empty( $skipped ) ? '; skipped ' . count( $skipped ) . ' conflicting date(s)' : '' )
-        );
+        ) ) return false;
 
         return array( 'updated' => $updated, 'skipped' => $skipped );
     }
@@ -1580,8 +1621,7 @@ class MBS_Bookings {
      * @return array|WP_Error  ['created' => int, 'skipped' => array of dates]
      */
     public static function extend_series( $series_id, $new_end ) {
-        if ( class_exists( 'MBS_Space_Selection' ) ) return MBS_Space_Selection::locked( static function() use ( $series_id, $new_end ) { return self::extend_series_locked( $series_id, $new_end ); } );
-        return self::extend_series_locked( $series_id, $new_end );
+        return self::legacy_series_change( $series_id, static function() use ( $series_id, $new_end ) { return self::extend_series_locked( $series_id, $new_end ); } );
     }
 
     private static function extend_series_locked( $series_id, $new_end ) {
@@ -1599,7 +1639,7 @@ class MBS_Bookings {
         $last_ts  = strtotime( $template->booking_date );
         $end_ts   = strtotime( sanitize_text_field( $new_end ) );
 
-        if ( ! $end_ts ) {
+        if ( ! $end_ts || wp_date( 'Y-m-d', $end_ts ) !== $new_end ) {
             return new WP_Error( 'invalid_date', 'Invalid end date.' );
         }
 
@@ -1615,31 +1655,22 @@ class MBS_Bookings {
         $all_day = (bool) $template->all_day;
         $created = 0;
         $skipped = array();
-        $max_occurrences = 52;
+        $max_occurrences = min( 52, 1000 - count( $bookings ) );
+        if ( $max_occurrences < 1 ) return new WP_Error( 'series_limit', 'This legacy series has reached 1,000 occurrences. Use a new series for further dates.' );
         $count = 0;
 
         for ( $d = $current; $d <= $end_ts && $count < $max_occurrences; $d = strtotime( '+1 week', $d ) ) {
             $count++;
             $date_str = wp_date( 'Y-m-d', $d );
 
-            // Transaction + row lock: prevent a TOCTOU race with a public booking.
-            if ( $wpdb->query( 'START TRANSACTION' ) === false ) {
-                return new WP_Error( 'transaction_start_failed', 'Could not start the series-extension transaction.' );
-            }
-            $wpdb->query( $wpdb->prepare(
+            // The outer occupancy lock and transaction cover the complete batch.
+            $locked = $wpdb->query( $wpdb->prepare(
                 "SELECT id FROM {$table} WHERE space = %s AND booking_date = %s AND status NOT IN ('cancelled','archived') FOR UPDATE",
                 $template->space, $date_str
             ) );
+            if ( $locked === false ) return new WP_Error( 'series_lock_failed', 'Could not verify the extended date.' );
 
-            $conflicts = self::check_conflicts(
-                $template->space,
-                $date_str,
-                $all_day ? null : $template->start_time,
-                $all_day ? null : $template->end_time,
-                $all_day
-            );
-            if ( ! empty( $conflicts ) || MBS_Blocked_Dates::is_blocked( $date_str, $template->space ) ) {
-                $wpdb->query( 'ROLLBACK' );
+            if ( self::legacy_slot_unavailable( $template->space, $date_str, $template->start_time, $template->end_time, $all_day ) ) {
                 $skipped[] = $date_str;
                 continue;
             }
@@ -1678,17 +1709,11 @@ class MBS_Bookings {
                 'modification_token' => wp_generate_password( 32, false ),
             ) );
             if ( $inserted === false ) {
-                $wpdb->query( 'ROLLBACK' );
                 return new WP_Error( 'series_extension_failed', 'Could not create an extended occurrence; no further occurrences were saved.' );
             }
             $linked = $wpdb->get_var( $wpdb->prepare( "SELECT series_id FROM {$table} WHERE ref = %s", $ref ) );
             if ( $linked !== $series_id ) {
-                $wpdb->query( 'ROLLBACK' );
                 return new WP_Error( 'series_extension_link_failed', 'Could not verify the extended occurrence belongs to this series.' );
-            }
-            if ( $wpdb->query( 'COMMIT' ) === false ) {
-                $wpdb->query( 'ROLLBACK' );
-                return new WP_Error( 'transaction_commit_failed', 'Could not commit the series extension.' );
             }
 
             // Keep Home Assistant in step for confirmed occurrences.
@@ -1712,13 +1737,13 @@ class MBS_Bookings {
         $synced = MBS_Series::synchronize_scout_series( $series_id, $new_exceptions );
         if ( is_wp_error( $synced ) ) return $synced;
 
-        MBS_Audit_Log::log(
+        if ( ! MBS_Audit_Log::log(
             $series_id,
             'series_extended',
             'Extended series by ' . $created . ' booking(s) up to ' . wp_date( 'Y-m-d', min( $end_ts, $d ) )
             . ( ! empty( $skipped ) ? '; skipped ' . count( $skipped ) . ' conflicting date(s)' : '' )
             . ( $count >= $max_occurrences ? ' (52-week cap reached — run again to extend further)' : '' )
-        );
+        ) ) return new WP_Error( 'series_extension_audit_failed', 'Could not audit the complete extension.' );
 
         return array(
             'created'     => $created,
@@ -1737,6 +1762,10 @@ class MBS_Bookings {
      * @return int|false Number of rows reopened, or false on failure.
      */
     public static function reopen_series_future( $series_id ) {
+        return self::legacy_series_change( $series_id, static function() use ( $series_id ) { return self::reopen_series_future_locked( $series_id ); } );
+    }
+
+    private static function reopen_series_future_locked( $series_id ) {
         global $wpdb;
         if ( ! self::is_legacy_scout_series( $series_id ) ) return new WP_Error( 'canonical_series_required', 'This action is limited to legacy Scout series.' );
         $table = $wpdb->prefix . MBS_TABLE;
@@ -1748,8 +1777,9 @@ class MBS_Bookings {
             $series_id,
             $today
         ) );
+        if ( ! is_array( $affected ) || $wpdb->last_error ) return false;
         foreach ( $affected as $booking ) {
-            if ( self::has_financial_history( $booking->ref ) ) return new WP_Error( 'financial_replacement_required', 'A credited or refunded occurrence cannot be reopened through the legacy action; create an explicit replacement occurrence.' );
+            if ( self::legacy_slot_unavailable( $booking->space, $booking->booking_date, $booking->start_time, $booking->end_time, (bool) $booking->all_day, $booking->ref ) ) return new WP_Error( 'reopen_conflict', 'A cancelled occurrence now overlaps another booking or closure. Nothing reopened; review the affected dates.' );
         }
 
         $result = $wpdb->query( $wpdb->prepare(
@@ -1764,11 +1794,11 @@ class MBS_Bookings {
         $synced = MBS_Series::synchronize_scout_series( $series_id );
         if ( is_wp_error( $synced ) ) return $synced;
 
-        MBS_Audit_Log::log(
+        if ( ! MBS_Audit_Log::log(
             $series_id,
             'series_reopen',
             'Reopened ' . (int) $result . ' future booking(s) in series (from ' . $today . ')'
-        );
+        ) ) return false;
 
         // Re-notify Home Assistant so the calendar/automations pick them back up.
         foreach ( $affected as $booking ) {
@@ -1794,6 +1824,11 @@ class MBS_Bookings {
      * @return int|false Number of rows deleted, or false on failure.
      */
     public static function delete_series( $series_id, $scope = 'all' ) {
+        if ( ! in_array( $scope, array( 'all', 'future' ), true ) ) return new WP_Error( 'invalid_scope', 'Choose all or future explicitly.' );
+        return self::legacy_series_change( $series_id, static function() use ( $series_id, $scope ) { return self::delete_series_locked( $series_id, $scope ); } );
+    }
+
+    private static function delete_series_locked( $series_id, $scope ) {
         global $wpdb;
         if ( ! self::is_legacy_scout_series( $series_id ) ) return new WP_Error( 'canonical_series_required', 'This action is limited to legacy Scout series.' );
         $table = $wpdb->prefix . MBS_TABLE;
@@ -1804,7 +1839,7 @@ class MBS_Bookings {
              WHERE b.series_id = %s" . ( $future_only ? " AND b.booking_date >= %s" : '' ) . " LIMIT 1",
             $future_only ? array( $series_id, $today ) : array( $series_id )
         ) );
-        if ( $history_ref ) return false;
+        if ( $history_ref || $wpdb->last_error ) return false;
 
         // Capture active bookings before deletion so Home Assistant can be
         // cleared only after the database change has succeeded.
@@ -1814,6 +1849,7 @@ class MBS_Bookings {
             $series_id,
             $today
         ) );
+        if ( ! is_array( $active ) || $wpdb->last_error ) return false;
         if ( $future_only ) {
             $result = $wpdb->query( $wpdb->prepare(
                 "DELETE FROM {$table} WHERE series_id = %s AND booking_date >= %s",
@@ -1829,23 +1865,26 @@ class MBS_Bookings {
 
         if ( $result === false ) return false;
 
-        if ( self::get_series( $series_id ) ) {
+        $remaining = self::get_series( $series_id );
+        if ( ! is_array( $remaining ) || $wpdb->last_error ) return false;
+        if ( $remaining ) {
             $synced = MBS_Series::synchronize_scout_series( $series_id );
             if ( is_wp_error( $synced ) ) return $synced;
         } else {
-            MBS_Series::delete_empty_scout_series( $series_id );
+            $deleted = MBS_Series::delete_empty_scout_series( $series_id );
+            if ( is_wp_error( $deleted ) || $deleted === false ) return false;
         }
 
         foreach ( $active as $booking ) {
             MBS_HomeAssistant::notify_cancelled( $booking );
         }
 
-        MBS_Audit_Log::log(
+        if ( ! MBS_Audit_Log::log(
             $series_id,
             'series_deleted',
             'Permanently deleted ' . (int) $result . ' booking(s) from series'
             . ( $future_only ? ' (future only, from ' . $today . ')' : ' (entire series, past and future)' )
-        );
+        ) ) return false;
 
         return (int) $result;
     }

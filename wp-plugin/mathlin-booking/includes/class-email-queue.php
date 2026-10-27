@@ -319,6 +319,13 @@ class MBS_Email_Queue {
         $failed = 0;
 
         foreach ( $claimed as $email ) {
+            if ( $email->message_type === 'request_rejected' ) {
+                $request = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . $wpdb->prefix . 'mathlin_mod_requests WHERE id=%d', (int) $email->reference_id ) );
+                if ( $wpdb->last_error ) { self::release_for_retry( $email->id, $worker_id, 'Request source temporarily unavailable.' ); continue; }
+                $booking = $request ? MBS_Bookings::get( $request->booking_ref ) : null;
+                if ( $wpdb->last_error ) { self::release_for_retry( $email->id, $worker_id, 'Booking source temporarily unavailable.' ); continue; }
+                if ( ! $request || $request->status !== 'rejected' || ! $booking || strcasecmp( $booking->email, $email->to_email ) !== 0 ) { self::mark_failed( $email->id, $worker_id ); continue; }
+            }
             if($email->message_type==='series_confirmation'){
                 $source=$wpdb->get_row($wpdb->prepare('SELECT * FROM '.$wpdb->prefix.MBS_SERIES_TABLE.' WHERE id=%d',(int)$email->reference_id));
                 if(!empty($wpdb->last_error)){self::release_for_retry($email->id,$worker_id,'Series source temporarily unavailable.');continue;}

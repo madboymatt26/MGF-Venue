@@ -3,6 +3,34 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 
 /** Local provenance only. Never exports legacy metadata or writes Google events. */
 class MBS_Calendar_Reference_Links {
+    /** Presentation evidence only. Never grants write ownership or selects a link. */
+    public static function explain( $op ) {
+        $sources = $op['original_sources'] ?? array();
+        $events = $op['candidates'] ?? array();
+        if ( ! $events ) $events = $op['linked_events'] ?? array();
+        $reference_counts = array();
+        foreach ( $events as $event ) { $original = self::event_legacy_id( $event ); if ( $original ) $reference_counts[$original] = ( $reference_counts[$original] ?? 0 ) + 1; }
+        $rows = array();
+        foreach ( $events as $event ) {
+            $original = self::event_legacy_id( $event );
+            $related = array();
+            foreach ( $sources as $source ) {
+                $source = (object) $source;
+                $meta = json_decode( (string) ( $source->custom_fields ?? '' ), true );
+                if ( $original !== '' && (string) ( $meta['_mbs_legacy']['booking_id'] ?? '' ) === $original ) $related[] = $source;
+            }
+            $recommended = in_array( $event['id'] ?? '', $op['recommendation']['ids'] ?? array(), true );
+            $findings = array();
+            $findings[] = ! $original ? 'No original booking reference was found in this Google record.' : ( $related ? 'Original reference #' . $original . ' matches the saved MGF import lineage.' : 'Original reference #' . $original . ' does not match this booking\'s saved import lineage.' );
+            if ( ( $reference_counts[$original] ?? 0 ) > 1 ) $findings[] = 'Multiple Google records contain this original reference. Do not choose by title alone.';
+            foreach ( $related as $source ) $findings[] = 'Source ' . $source->ref . ': ' . $source->space . ', ' . $source->booking_date . ' to ' . ( $source->booking_date_end ?: $source->booking_date ) . ( $source->all_day ? ', all day.' : ', ' . substr( (string) $source->start_time, 0, 5 ) . ' to ' . substr( (string) $source->end_time, 0, 5 ) . '.' );
+            $findings[] = $recommended ? 'This record is in the complete, unique reference/date/time recommendation. Review before saving.' : 'Not in a complete verified recommendation: dates, times, source coverage or competing claims may differ. Compare this record with every source above.';
+            $findings[] = 'Google titles and location labels are descriptive, not proof of the booked area. A visual duplicate can be a separate original area record.';
+            $rows[] = array( 'event_id' => (string) ( $event['id'] ?? '' ), 'legacy_id' => $original, 'confidence' => $recommended ? 'verified_lineage_candidate' : ( $related ? 'reference_only_review_required' : 'overlap_only' ), 'findings' => $findings );
+        }
+        return array( 'action' => $op['action'] ?? 'review', 'summary' => $op['recommendation']['reason'] ?? $op['reason'] ?? 'Compare the original references, areas and dates.', 'candidates' => $rows, 'policy' => 'Explanations never select links. Saving a protected reference does not edit the estate event; unresolved overlaps remain blocked.' );
+    }
+
     public static function leaves( $row, $rows, $seen = array() ) {
         $row = (object) $row;
         if ( isset( $seen[$row->ref] ) || count( $seen ) > 8 ) return array();

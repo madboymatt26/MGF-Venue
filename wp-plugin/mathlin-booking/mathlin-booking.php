@@ -40,6 +40,7 @@ require_once MBS_PLUGIN_DIR . 'includes/class-billing-engine.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-invoice-payment.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-invoice-reservation.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-bookings.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-operator-guide.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-campsite-policy.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-space-selection.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-booking-validation.php';
@@ -213,6 +214,7 @@ function mbs_init() {
     $hirer_portal->init();
     ( new MBS_Hirer_Identity() )->init();
     ( new MBS_Integration_Health() )->init();
+    ( new MBS_Operator_Guide() )->init();
     ( new MBS_Series_Request() )->init();
     $accounting->init();
     $osm_integration->init();

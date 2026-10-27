@@ -1397,6 +1397,7 @@ jQuery(function ($) {
 (function($) {
     var $modal = null;
     var $opener = null;
+    var invoiceLoadGeneration = 0;
 
     function getModal() {
         if (!$modal) $modal = $('#mbs-invoice-modal');
@@ -1406,7 +1407,9 @@ jQuery(function ($) {
     function openInvoiceModal(documentId, invoiceRef, triggerEl) {
         var modal = getModal();
         if (!modal.length) return;
+        var generation = ++invoiceLoadGeneration;
         $opener = triggerEl || null;
+        modal.find('.mbs-modal__body').attr('aria-busy', 'true');
         modal.find('.mbs-modal__body').html('<p class="mbs-modal__loading">Loading invoice\u2026</p>');
         modal.find('.mbs-modal__title').text('Invoice ' + (invoiceRef || ''));
         var pdfUrl = MBS_Admin.ajax_url + '?action=mbs_invoice_document&document_id=' + encodeURIComponent(documentId) + '&format=pdf&mode=issued&nonce=' + encodeURIComponent(MBS_Admin.doc_nonce);
@@ -1425,6 +1428,8 @@ jQuery(function ($) {
                 nonce: MBS_Admin.doc_nonce
             },
             success: function(res) {
+                if (generation !== invoiceLoadGeneration || !modal.is(':visible')) return;
+                modal.find('.mbs-modal__body').attr('aria-busy', 'false');
                 if (res.success && res.data && res.data.html) {
                     modal.find('.mbs-modal__body').html(res.data.html);
                 } else {
@@ -1432,6 +1437,8 @@ jQuery(function ($) {
                 }
             },
             error: function() {
+                if (generation !== invoiceLoadGeneration || !modal.is(':visible')) return;
+                modal.find('.mbs-modal__body').attr('aria-busy', 'false');
                 modal.find('.mbs-modal__body').html('<p style="color:#dc3545;">Failed to fetch invoice. Please try again.</p>');
             }
         });
@@ -1440,6 +1447,7 @@ jQuery(function ($) {
     function closeInvoiceModal() {
         var modal = getModal();
         if (!modal.length || !modal.is(':visible')) return;
+        invoiceLoadGeneration++;
         modal.hide();
         modal.find('.mbs-modal__body').html('');
         if ($opener && $opener.length && $opener.is(':visible')) {
@@ -1457,7 +1465,15 @@ jQuery(function ($) {
 
     $(document).on('click', '.mbs-modal__close, .mbs-modal__close-btn, .mbs-modal__backdrop', closeInvoiceModal);
     $(document).on('keydown', function(e) {
-        if (e.key === 'Escape') closeInvoiceModal();
+        var modal = getModal();
+        if (!modal.length || !modal.is(':visible')) return;
+        if (e.key === 'Escape') { e.preventDefault(); closeInvoiceModal(); return; }
+        if (e.key !== 'Tab') return;
+        var controls = modal.find('a[href], button, input, select, textarea, [tabindex]').filter(':visible').filter(function() { return !this.disabled && this.getAttribute('tabindex') !== '-1'; });
+        var first = controls.first()[0], last = controls.last()[0];
+        if (!first) { e.preventDefault(); return; }
+        if (e.shiftKey && (document.activeElement === first || !modal[0].contains(document.activeElement))) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && (document.activeElement === last || !modal[0].contains(document.activeElement))) { e.preventDefault(); first.focus(); }
     });
 
     $(document).on('click', '.mbs-record-payment-toggle', function() {

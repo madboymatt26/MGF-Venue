@@ -1,6 +1,6 @@
 # Remaining programme — delivery and acceptance
 
-Authorised scope: the full remaining roadmap, confirmed 24 October 2026. Baseline: 3.40.0 is live on both sites. A checked-in plan, disabled scaffold or successful unit test is not proof of production completion.
+Authorised scope: the full remaining roadmap, confirmed 24 October 2026. Baseline: 3.42.0 is live on both sites, verified 27 October. The next requested development batch and its explicit built/not-built boundaries are in [next operations delivery](next-operations-delivery.md). A checked-in plan, disabled scaffold or successful unit test is not proof of production completion.
 
 ## Invariants for every release
 
@@ -15,13 +15,13 @@ Authorised scope: the full remaining roadmap, confirmed 24 October 2026. Baselin
 
 | Slice | Required implementation and acceptance | State |
 | --- | --- | --- |
-| Reusable extras | Optional catalogue in existing charges UI; exact money/quantity, server-side current-version checks, archive not delete, immutable invoice item snapshot, accounting mapping snapshot, existing cancellation/credit/archive flow | In development |
+| Reusable extras | Optional catalogue in existing charges UI; exact money/quantity, server-side current-version checks, archive not delete, immutable invoice item snapshot, accounting mapping snapshot, existing cancellation/credit/archive flow | Code deployed with 3.42.0; optional catalogue remains disabled |
 | Organisations and billing contacts | Explicit organiser/organisation/authorised billing recipient separation; no label-based portal access; recipient snapshots on new documents; audit and specific-document authorisation tests | Not started |
 | Equipment and waitlist | Independent optional modules; interval/quantity capacity under concurrency locks, no double allocation, FIFO staff-managed queue, explicit expiry, no implied booking or automatic customer email; promotion goes through normal booking preview/commit | Not started |
 | Private compliance | Quarantined private storage outside webroot, authorised download only, size/type checks, actual scanner adapter, review/expiry and attention tasks; fail closed without durable storage/scanner | Not started; hosting/scanner configuration required for activation |
 | Resource identities | Immutable additive IDs with label compatibility, dry-run/checksummed resumable backfill and mappings; preserve original import provenance; whole-site/child/sibling regression tests | Not started |
-| Operational reliability | Atomic HA intent/domain commit, shared interval adoption across remaining outputs, closure/buffer-aware usage, resumable consistent exports, shared attention/access readiness and queue diagnostics | Follow-up batch built and locally tested; not released. See [acceptance and release gates](invoice-reliability-acceptance.md) |
-| Calendar explanations | Explain evidence/confidence using original references, dates and areas; preserve one-to-many links and estate ownership; no uncertain automatic matching | Protected lifecycle live; explanation improvements outstanding |
+| Operational reliability | Atomic HA intent/domain commit, shared interval adoption across remaining outputs, closure/buffer-aware usage, resumable consistent exports, shared attention/access readiness and queue diagnostics | Follow-up batch deployed in 3.42.0; further legacy Scout/request hardening built locally in next increment |
+| Calendar explanations | Explain evidence/confidence using original references, dates and areas; preserve one-to-many links and estate ownership; no uncertain automatic matching | Evidence UI/API built locally in next increment; protected lifecycle already live |
 | Cross-site read-only view | Independently authorised connections, no shared database, HTTPS/SSRF/redirect protection, encrypted credentials, revoke/failure clears stale remote results | Not started |
 | Accounting APIs | Retain OSM reconciliation; optional direct provider OAuth, scoped credentials, mapping review, minor-unit credits/refunds/fees, idempotency, sandbox/recovery testing | Existing OSM/CSV live; direct connectors not implemented |
 | Access hardware | Provider-specific time-limited area permissions, cancellation revocation, outage handling and safety review | Disabled; hardware/provider not selected |

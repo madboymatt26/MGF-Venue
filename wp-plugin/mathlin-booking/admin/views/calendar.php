@@ -76,9 +76,10 @@ $selected_blocks   = $selected_date && isset( $blocked_dates[ $selected_date ] )
 
             <!-- Calendar grid -->
             <table class="nms-cal-grid">
+                <caption class="screen-reader-text"><?php echo esc_html( $months_list[$month] . ' ' . $year . ' bookings. Each date links to its booking details.' ); ?></caption>
                 <thead>
                     <tr>
-                        <th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th><th>Sat</th><th>Sun</th>
+                        <th scope="col">Mon</th><th scope="col">Tue</th><th scope="col">Wed</th><th scope="col">Thu</th><th scope="col">Fri</th><th scope="col">Sat</th><th scope="col">Sun</th>
                     </tr>
                 </thead>
                 <tbody>
