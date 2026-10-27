@@ -178,15 +178,21 @@ class MBS_Invoice_Document_Service {
             }
         }
 
+        // Commit approval and HA intent together. A crash after COMMIT must not
+        // lose the notification; the worker performs HTTP only after commit.
+        $booking->status = 'confirmed';
+        if ( method_exists('MBS_HomeAssistant','stage_within_transaction') ) {
+            $ha = MBS_HomeAssistant::stage_within_transaction($booking);
+            if(is_wp_error($ha)){ $wpdb->query('ROLLBACK'); return $ha; }
+        }
         // COMMIT
         if ( $wpdb->query( 'COMMIT' ) === false ) {
             $wpdb->query( 'ROLLBACK' );
             return new WP_Error( 'commit_failed', 'Could not commit the booking confirmation.' );
         }
 
-        // Post-commit: HA notification
-        $booking->status = 'confirmed';
-        MBS_HomeAssistant::notify( $booking );
+        // Old adapters without transactional intent support retain compatibility.
+        if ( ! method_exists('MBS_HomeAssistant','stage_within_transaction') ) MBS_HomeAssistant::notify( $booking );
 
         // Auto-promote £0 bookings to paid
         $amount_minor = MBS_Money::from_decimal_string( (string) $booking->amount );
@@ -195,7 +201,7 @@ class MBS_Invoice_Document_Service {
             MBS_Audit_Log::log( $booking->ref, 'paid', 'Auto-marked as Paid (£0 booking — no payment required)' );
         }
 
-        if ( function_exists( 'spawn_cron' ) ) spawn_cron();
+        if(method_exists('MBS_Email_Queue','wake'))MBS_Email_Queue::wake();
 
         return array( 'document_id' => $document_id, 'booking' => MBS_Bookings::get( $ref ), 'no_op' => false );
     }
@@ -383,6 +389,15 @@ class MBS_Invoice_Document_Service {
             'description'  => $description,
             'amount_minor' => (int) $total_minor,
         );
+        // Only pricing captured when the booking was priced may itemise an invoice.
+        // A fingerprint mismatch (for example after a legacy amendment) falls back
+        // to the agreed total, never to today's tariff.
+        if ( method_exists( 'MBS_Bookings', 'invoice_pricing_lines' ) ) {
+            $recorded = MBS_Bookings::invoice_pricing_lines( $booking );
+            if ( $recorded ) $line_items = $recorded;
+        }
+        $paid_minor = MBS_Money::from_decimal_string( (string) ( $booking->amount_paid ?? '0.00' ) );
+        if ( is_wp_error( $paid_minor ) || $paid_minor < 0 ) return new WP_Error( 'invalid_payment_snapshot', 'Recorded payments could not be captured safely.' );
 
         // Tax: for this release, only 0% tax is supported for individual invoice issuance.
         // Non-zero mbs_tax_rate_bps is rejected to prevent inconsistent tax treatment.
@@ -429,6 +444,7 @@ class MBS_Invoice_Document_Service {
             'payment_terms_days'     => (int) $bank['payment_days'],
             'bank_details'           => ( ! empty( $bank['sort_code'] ) || ! empty( $bank['account_number'] ) ) ? $bank : null,
             'payment_schedule'       => $payment_schedule,
+            'account_at_issue'       => array( 'payments_received_minor' => $paid_minor, 'outstanding_minor' => max( 0, $total_minor - $paid_minor ) ),
             'status_at_issue'        => 'confirmed',
         ) );
     }
@@ -482,7 +498,19 @@ class MBS_Invoice_Document_Service {
         $tax_label = get_option( 'mbs_tax_label', 'Charity exempt — not registered for VAT' );
 
         $line_items = array();
+        $remaining=count($items);
         foreach ( $items as $item ) {
+            $remaining--;
+            $pricing=json_decode((string)($item->pricing_snapshot_json??''),true);
+            $components=is_array($pricing)?($pricing['components']??array()):array();
+            $sum=0;$valid=is_array($components)&&count($components)>0&&count($components)<=2;
+            foreach($valid?$components:array()as$component){if(!is_int($component['amount_minor']??null)||$component['amount_minor']<0){$valid=false;break;}$sum+=$component['amount_minor'];}
+            // Keep the existing 200-line delivery bound. Older or unproven
+            // component records retain their agreed line total, never today's tariff.
+            if($valid&&$sum===(int)$item->line_total_minor&&count($line_items)+count($components)+$remaining<=200){
+                foreach($components as$component){$component['date']=$item->service_date;$line_items[]=$component;}
+                continue;
+            }
             $line_items[] = array(
                 'date'         => $item->service_date,
                 'space'        => $series ? $series->space : '',
@@ -521,6 +549,7 @@ class MBS_Invoice_Document_Service {
             'tax_amount_minor'       => $tax_amount_minor,
             'total_minor'            => $total_minor,
             'credits_minor'          => (int) $invoice->credited_minor,
+            'account_at_issue'       => $invoice->document_type==='invoice'?array('payments_received_minor'=>(int)$invoice->paid_minor,'outstanding_minor'=>max(0,(int)$invoice->total_minor-(int)$invoice->paid_minor-(int)$invoice->credited_minor)):null,
             'payment_method'         => $series ? $series->payment_method : 'online',
             'payment_terms_days'     => $series ? (int) $series->payment_terms_days : 14,
             'bank_details'           => ( $series && $series->payment_method === 'offline_bacs' && ( ! empty( $bank['sort_code'] ) || ! empty( $bank['account_number'] ) ) ) ? $bank : null,

@@ -37,6 +37,12 @@ $invoice_pdf_url = $invoice_document_id ? add_query_arg( array(
 
     <?php MBS_Additional_Charges::render_related($booking->ref); ?>
     <?php MBS_Terms_Acceptance::render($booking); ?>
+    <?php $access_readiness = MBS_Access_Details::readiness($booking); ?>
+    <div class="nms-card" style="padding:16px;margin-bottom:16px;">
+        <h2>Access email readiness</h2>
+        <p><strong><?php echo esc_html(str_replace('_',' ',$access_readiness['state'])); ?></strong> — <?php echo esc_html($access_readiness['action']); ?></p>
+        <?php if(!empty($access_readiness['due_at'])): ?><p>Delivery window opens: <?php echo esc_html($access_readiness['due_at']); ?></p><?php endif; ?>
+    </div>
     <div class="nms-single-layout">
         <!-- Details card -->
         <div class="nms-card">

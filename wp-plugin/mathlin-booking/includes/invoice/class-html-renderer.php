@@ -47,29 +47,37 @@ class MBS_HTML_Renderer {
 <meta charset="UTF-8">
 <title><?php echo esc_html( $s->document_type === 'credit_note' ? 'Credit Note' : 'Invoice' ); ?> <?php echo esc_html( $s->invoice_number ); ?></title>
 <style>
-body{font-family:Arial,sans-serif;color:#1a1a2e;max-width:800px;margin:0 auto;padding:40px 20px;font-size:14px;line-height:1.5;}
-.inv-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:32px;border-bottom:3px solid <?php echo $accent; ?>;padding-bottom:24px;}
+@page{size:A4 portrait;margin:14mm;}
+body{font-family:DejaVu Sans,Arial,sans-serif;color:#1a1a2e;max-width:800px;margin:0 auto;padding:0;font-size:11px;line-height:1.4;}
+.inv-header{display:table;table-layout:fixed;width:100%;margin-bottom:18px;border-bottom:2px solid <?php echo $accent; ?>;padding-bottom:14px;page-break-inside:avoid;}
+.inv-org,.inv-meta{display:table-cell;vertical-align:top;width:50%;overflow-wrap:break-word;}
 .inv-org h2{color:<?php echo $accent; ?>;margin:0 0 8px;font-size:18px;}
 .inv-org p{margin:0;color:#666;font-size:13px;line-height:1.6;}
 .inv-meta{text-align:right;}
 .inv-number{font-size:20px;font-weight:bold;color:<?php echo $accent; ?>;margin-bottom:8px;}
 .inv-meta p{margin:4px 0;font-size:13px;}
-.inv-parties{display:flex;gap:40px;margin-bottom:32px;}
-.inv-party{flex:1;}
+.inv-parties{display:table;table-layout:fixed;width:100%;margin-bottom:18px;page-break-inside:avoid;}
+.inv-party{display:table-cell;width:50%;vertical-align:top;}
 .inv-party h4{color:<?php echo $accent; ?>;margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:1px;}
 .inv-party p{margin:0;line-height:1.6;}
-table.inv-items{width:100%;border-collapse:collapse;margin-bottom:24px;}
+table.inv-items{width:100%;border-collapse:collapse;margin-bottom:14px;}
+table.inv-items thead{display:table-header-group;}
+table.inv-items tr{page-break-inside:avoid;}
 table.inv-items thead th{background:<?php echo $accent; ?>;color:#fff;padding:10px 12px;text-align:left;font-size:12px;}
 table.inv-items thead th.r{text-align:right;}
 table.inv-items tbody td{padding:10px 12px;border-bottom:1px solid #e0d0f0;vertical-align:top;}
 table.inv-items tbody td.r{text-align:right;white-space:nowrap;}
 table.inv-items tbody td small{color:#666;display:block;margin-top:2px;}
-.inv-totals{margin-left:auto;width:300px;}
-.inv-total-row{display:flex;justify-content:space-between;padding:8px 12px;border-bottom:1px solid #eee;}
+.inv-totals{margin-left:auto;width:340px;page-break-inside:avoid;}
+.inv-total-row{display:table;width:100%;table-layout:fixed;border-bottom:1px solid #eee;}
+.inv-total-row>span{display:table-cell;vertical-align:top;padding:6px 8px;}
+.inv-total-row>span:first-child{width:68%;}
+.inv-total-row>span:last-child{text-align:right;white-space:nowrap;}
 .inv-total-row.grand{background:#f5f0ff;font-weight:bold;font-size:16px;border:2px solid <?php echo $accent; ?>;border-radius:4px;margin-top:8px;}
-.inv-notes{margin-top:32px;padding:20px;background:#f9f7ff;border-radius:8px;border:1px solid #e0d0f0;}
+.inv-notes{margin-top:16px;padding:12px;background:#f9f7ff;border-radius:6px;border:1px solid #e0d0f0;page-break-inside:avoid;}
 .inv-notes h5{margin:0 0 8px;color:<?php echo $accent; ?>;font-size:13px;}
-.inv-notes p{margin:0 0 12px;line-height:1.8;}
+.inv-notes p{margin:0 0 8px;line-height:1.4;}
+.inv-notes p:last-child{margin-bottom:0;}
 .inv-status{display:inline-block;padding:4px 12px;border-radius:4px;font-weight:bold;font-size:12px;text-transform:uppercase;}
 .inv-status-paid{background:#d1fae5;color:#065f46;}
 .inv-status-overdue{background:#fee2e2;color:#991b1b;}
@@ -132,7 +140,7 @@ table.inv-items tbody td small{color:#666;display:block;margin-top:2px;}
 <?php foreach ( $s->line_items as $item ) : ?>
 <tr>
 <td><?php echo esc_html( self::format_date( $item['date'] ?? '' ) ); ?></td>
-<td><?php echo esc_html( $item['description'] ?? '' ); ?><?php if ( ! empty( $item['space'] ) ) : ?><small><?php echo esc_html( $item['space'] ); ?></small><?php endif; ?></td>
+<td><?php echo esc_html( $item['description'] ?? '' ); ?><?php if ( ! empty( $item['space'] ) ) : ?><small><?php echo esc_html( $item['space'] ); ?></small><?php endif; ?><?php if ( isset( $item['quantity'], $item['unit_amount_minor'], $item['unit'] ) ) : ?><small><?php echo esc_html( self::format_money( $item['unit_amount_minor'], $s->currency ) . ' per ' . $item['unit'] . ' × ' . $item['quantity'] . ' = ' . self::format_money( $item['amount_minor'], $s->currency ) ); ?></small><?php endif; ?></td>
 <td class="r"><?php echo esc_html( self::format_money( $item['amount_minor'] ?? 0, $s->currency ) ); ?></td>
 </tr>
 <?php endforeach; ?>
@@ -148,19 +156,26 @@ table.inv-items tbody td small{color:#666;display:block;margin-top:2px;}
 <div class="inv-total-row"><span>Credits applied</span><span style="color:#991b1b;">-<?php echo esc_html( self::format_money( $s->credits_minor, $s->currency ) ); ?></span></div>
 <?php endif; ?>
 <div class="inv-total-row grand"><span>Total</span><span><?php echo esc_html( self::format_money( $s->total_minor, $s->currency ) ); ?></span></div>
+<?php if ( is_array( $s->account_at_issue ) ) : ?>
+<div class="inv-total-row"><span>Payments received at issue</span><span><?php echo esc_html( self::format_money( $s->account_at_issue['payments_received_minor'], $s->currency ) ); ?></span></div>
+<div class="inv-total-row grand"><span>Outstanding at issue</span><span><?php echo esc_html( self::format_money( $s->account_at_issue['outstanding_minor'], $s->currency ) ); ?></span></div>
+<?php endif; ?>
 </div>
 
 <?php // Payment instructions (from immutable snapshot — no live URLs) ?>
-<?php if ( $s->status_at_issue !== 'void' && $s->total_minor > 0 ) : ?>
+<?php if ( $s->document_type === 'invoice' && $s->status_at_issue !== 'void' && $s->total_minor > 0 ) : ?>
 <div class="inv-notes">
-<?php if ( $s->payment_schedule ) : ?>
-<h5>Payment Schedule</h5>
+<?php if (is_array($s->account_at_issue)&&(int)$s->account_at_issue['outstanding_minor']===0): ?>
+<h5>Payment status at issue</h5><p>No payment was outstanding when this invoice was issued.</p>
+<?php elseif ( $s->payment_schedule ) : ?>
+<h5><?php echo $model->mode === 'current_account' ? 'Original payment schedule (at issue)' : 'Payment Schedule'; ?></h5>
 <?php echo self::render_payment_schedule( $s ); ?>
 <?php else : ?>
 <h5>Payment Terms</h5>
 <p>Payment due within <strong><?php echo (int) $s->payment_terms_days; ?> days</strong> of issue.</p>
 <?php endif; ?>
 
+<?php if(!is_array($s->account_at_issue)||(int)$s->account_at_issue['outstanding_minor']>0): ?>
 <h5>Payment Method</h5>
 <?php if ( $s->payment_method === 'offline_bacs' && $s->bank_details ) : ?>
 <p>Please quote reference <strong><?php echo esc_html( $s->invoice_number ); ?></strong> with all payments.<br>
@@ -169,6 +184,7 @@ Sort code: <strong><?php echo esc_html( $s->bank_details['sort_code'] ?? '' ); ?
 Account number: <strong><?php echo esc_html( $s->bank_details['account_number'] ?? '' ); ?></strong></p>
 <?php elseif ( $s->payment_method === 'online' ) : ?>
 <p><?php echo esc_html( $s->online_payment_instruction ); ?></p>
+<?php endif; ?>
 <?php endif; ?>
 </div>
 <?php endif; ?>
@@ -233,7 +249,12 @@ Account number: <strong><?php echo esc_html( $s->bank_details['account_number'] 
         if ( ! empty( $ps['no_charge'] ) ) {
             $html .= 'No charge applies.';
         } elseif ( ! empty( $ps['immediate'] ) ) {
-            $html .= 'Full payment of <strong>' . esc_html( self::format_money( $s->total_minor, $s->currency ) ) . '</strong> due immediately.';
+            if ( is_array( $s->account_at_issue ) ) {
+                $due = (int) $s->account_at_issue['outstanding_minor'];
+                $html .= $due > 0 ? 'Outstanding balance at issue: <strong>' . esc_html( self::format_money( $due, $s->currency ) ) . '</strong> due immediately.' : 'Paid in full at issue. No further payment was due.';
+            } else {
+                $html .= 'Invoice total <strong>' . esc_html( self::format_money( $s->total_minor, $s->currency ) ) . '</strong> was payable immediately, less payments already made. Check your booking account for the current balance.';
+            }
         } elseif ( ! empty( $ps['deposit_minor'] ) ) {
             $html .= 'Deposit due: <strong>' . esc_html( self::format_money( $ps['deposit_minor'], $s->currency ) ) . '</strong>';
             if ( ! empty( $ps['deposit_due_date'] ) ) $html .= ' by ' . esc_html( self::format_date( $ps['deposit_due_date'] ) );

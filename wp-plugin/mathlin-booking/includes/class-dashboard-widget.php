@@ -69,9 +69,12 @@ class MBS_Dashboard_Widget {
         <?php
         $email_stats    = MBS_Email_Queue::get_stats();
         $pending_reqs   = MBS_Modification::get_pending_count();
+        if ( empty($email_stats['available']) ) : ?>
+        <p role="alert">Email outbox is unavailable; delivery status is unknown. Check Integration health.</p>
+        <?php endif;
         if ( $email_stats['failed'] > 0 ) : ?>
         <div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:0.85rem;color:#991b1b;">
-            ⚠️ <strong><?php echo $email_stats['failed']; ?> email(s) failed to send</strong> after 3 retries.
+            ⚠️ <strong><?php echo $email_stats['failed']; ?> email(s) failed or became ineligible.</strong> Review delivery before retrying.
             <a href="<?php echo admin_url( 'admin.php?page=mathlin-analytics' ); ?>" style="color:#991b1b;">View details →</a>
         </div>
         <?php endif; ?>

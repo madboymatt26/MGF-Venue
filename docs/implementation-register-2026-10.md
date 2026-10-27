@@ -38,6 +38,8 @@ Status: the reliability baseline was published and deployed to both sites as 3.4
 
 ## Still outstanding — do not describe the whole proposal as finished
 
+The invoice/reliability follow-up batch is now implemented and tested locally; it is not deployed. See [detailed evidence, limitations and release gates](invoice-reliability-acceptance.md). The original follow-up list below describes the release baseline, not an assertion that those paths are still untouched.
+
 - Complete cross-output interval adoption and regression coverage for access/reminders/Google; preserve existing proven policy paths until characterised.
 - General large export resumability, concurrent-export consistency and explicit database-failure behaviour beyond the covered feeds/privacy routes.
 - Review Home Assistant intent atomicity with the booking commit and an operator recovery/retry workflow. Current outbox health is diagnostic, not exactly-once delivery.

@@ -40,10 +40,9 @@ if ( preg_match( '/generate_invoice|generate_payment_url|pay_url|Pay Now/i', $ap
 }
 $checks++;
 
-$notify_pos = strpos( $series, 'MBS_Email::notify_series_confirmed' );
-$sent_pos = strpos( $series, "array( 'confirmation_sent_at'", $notify_pos );
-if ( $notify_pos === false || $sent_pos === false || $sent_pos < $notify_pos ) {
-    fwrite( STDERR, "FAIL: confirmation_sent_at must only be written after the send attempt.\n" );
+$queue = file_get_contents($root.'/wp-plugin/mathlin-booking/includes/class-email-queue.php');
+if ( strpos($series,"array( 'confirmation_sent_at'")!==false || strpos($queue,"case 'series_confirmation':")===false || strpos($queue,"array( 'confirmation_sent_at' => \$now )")===false || strpos($approval_email,'MBS_Email_Queue::enqueue')===false ) {
+    fwrite( STDERR, "FAIL: confirmation_sent_at must be written by the accepted-transport worker, never by approval or resend.\n" );
     exit( 1 );
 }
 $checks++;

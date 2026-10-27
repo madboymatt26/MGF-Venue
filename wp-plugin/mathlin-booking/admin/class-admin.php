@@ -1151,6 +1151,7 @@ class MBS_Admin {
                 'count'       => $count,
                 'no_op'       => ! empty( $result['no_op'] ),
                 'email_sent'  => $result['email_sent'] ?? null,
+                'email_queued'=> $result['email_queued'] ?? false,
                 'new_version' => isset( $result['series']->version ) ? (int) $result['series']->version : $expected_version,
             ) );
         }
@@ -1158,6 +1159,9 @@ class MBS_Admin {
         // Legacy series retain their historical per-occurrence behaviour until
         // they are deliberately adopted into first-class series metadata.
         $result = MBS_Bookings::update_series_status( $series_id, $status );
+        if(is_wp_error($result))wp_send_json_error($result->get_error_message(),409);
+        if($result===false)wp_send_json_error('The legacy series could not be updated. No confirmation emails were sent.',409);
+        if($result===0)wp_send_json_success(array('series_id'=>$series_id,'status'=>$status,'count'=>0,'legacy'=>true,'no_op'=>true));
         if ( $status === 'confirmed' ) {
             foreach ( MBS_Bookings::get_series( $series_id ) as $booking ) {
                 if ( $booking->status === 'confirmed' ) {
@@ -1842,20 +1846,17 @@ class MBS_Admin {
         }
         $invariants = MBS_Booking_Validation::validate( array_merge( (array) $booking, $update ), true );
         if ( is_wp_error( $invariants ) ) wp_send_json_error( $invariants->get_error_message(), 400 );
+        if ( ! $is_custom_price ) $update = MBS_Bookings::with_pricing_evidence( $booking, $update );
         $update = MBS_Booking_Validation::delivery_update( $booking, $update );
         if ( class_exists( 'MBS_Space_Selection' ) && isset( $update['space'] ) ) MBS_Space_Selection::record_selection( $update['space'] );
-        $wpdb->update( $table, $update, array( 'ref' => $ref ) );
-
         // Auto-update status if cost changed and there's now a balance due
         $amount_paid_val = (float) ( $booking->amount_paid ?? 0 );
         if ( $new_amount > $amount_paid_val && $amount_paid_val > 0 && $booking->status === 'paid' ) {
             // Cost increased beyond what was paid — revert to confirmed
-            $wpdb->update( $table, array( 'status' => 'confirmed' ), array( 'ref' => $ref ) );
-            MBS_Audit_Log::log( $ref, 'status_changed', 'Status reverted to Confirmed: cost increased to £' . number_format( $new_amount, 2 ) . ' but only £' . number_format( $amount_paid_val, 2 ) . ' paid.' );
+            $update['status']='confirmed';
         } elseif ( $new_amount <= $amount_paid_val && $amount_paid_val > 0 && $booking->status === 'confirmed' ) {
             // Cost decreased to within what was paid — mark as paid
-            $wpdb->update( $table, array( 'status' => 'paid' ), array( 'ref' => $ref ) );
-            MBS_Audit_Log::log( $ref, 'status_changed', 'Status set to Paid: cost reduced to £' . number_format( $new_amount, 2 ) . ' (£' . number_format( $amount_paid_val, 2 ) . ' already paid).' );
+            $update['status']='paid';
         }
 
         // Build change summary for audit log
@@ -1871,13 +1872,8 @@ class MBS_Admin {
         if ( $is_custom_price ) $changes[] = 'CUSTOM PRICE: calculated £' . number_format( $calculated_amount, 2 ) . ' overridden to £' . number_format( $new_amount, 2 );
 
         $change_summary = ! empty( $changes ) ? implode( ', ', $changes ) : 'Details updated (no price change)';
-        MBS_Audit_Log::log( $ref, 'edited', 'Booking edited by admin. ' . $change_summary );
-
-        // Notify booker if requested
-        if ( ! empty( $_POST['notify'] ) ) {
-            $updated_booking = MBS_Bookings::get( $ref );
-            self::send_edit_notification( $updated_booking, $old_amount, $new_amount );
-        }
+        $saved=MBS_Booking_Change_Service::apply($booking,$update,array('financial_change'=>$billing_fields_changed,'reissue'=>$billing_fields_changed,'notify'=>!empty($_POST['notify'])?'booking_edit':false,'action'=>'edited','audit'=>'Booking edited by admin. '.$change_summary));
+        if(is_wp_error($saved))wp_send_json_error($saved->get_error_message(),409);
 
         wp_send_json_success( array( 'ref' => $ref, 'new_amount' => $new_amount ) );
     }
@@ -1885,7 +1881,7 @@ class MBS_Admin {
     /**
      * Send notification email when a booking is edited by admin.
      */
-    private static function send_edit_notification( $booking, $old_amount, $new_amount ) {
+    public static function build_edit_notification( $booking, $old_amount, $new_amount ) {
         $tpl       = MBS_Email_Templates::get_template( 'booking_edited' );
         $subject   = MBS_Email_Templates::replace_placeholders( $tpl['subject'], $booking );
         $body_text = MBS_Email_Templates::replace_placeholders( $tpl['body'], $booking );
@@ -1951,15 +1947,12 @@ class MBS_Admin {
         $body .= '<div style="text-align:center;padding:16px;color:#999;font-size:12px;">' . esc_html( $org['name'] ) . ' &bull; ' . esc_html( $org['address'] ) . '</div>';
         $body .= '</body></html>';
 
-        // Attach updated invoice
-        $attachments = MBS_Email::generate_invoice_attachment_for( $booking );
-
         $headers = array(
             'Content-Type: text/html; charset=UTF-8',
             'From: ' . $org['name'] . ' <' . get_option( 'admin_email', $admin_email ) . '>',
             'Reply-To: ' . $admin_email,
         );
-        MBS_Email_Queue::send( $booking->email, $subject, $body, $headers, $attachments );
+        return array('subject'=>$subject,'body'=>$body,'headers'=>$headers);
     }
 
     public function ajax_approve_request() {

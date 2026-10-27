@@ -50,7 +50,7 @@ $checks++;
 compat_has( $analytics, 'NOT EXISTS (SELECT 1 FROM {$allocation_table}', 'Financial analytics exclude allocated legacy occurrence values.' );
 compat_has( $analytics, '$invoice_collected_minor', 'Financial analytics include payment-ledger collections.' );
 compat_has( $accounting, 'normalise_records', 'Accounting export normalises both domains.' );
-compat_has( $accounting, 'SELECT DISTINCT booking_ref', 'Accounting export excludes every historically allocated booking.' );
+compat_has( $accounting, 'SELECT DISTINCT a.booking_ref', 'Accounting export excludes every historically allocated booking in the selected period.' );
 compat_has( $accounting, 'line_total_minor', 'Accounting export uses immutable invoice lines.' );
 compat_has( $accounting, "'SC' : 'SI'", 'Sage exports distinguish sales credits from sales invoices.' );
 compat_has( $accounting, "'Credit Memo' : 'Invoice'", 'QuickBooks exports distinguish credit memos from invoices.' );

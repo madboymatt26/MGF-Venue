@@ -1,5 +1,6 @@
 <?php
 if ( ! defined( 'ABSPATH' ) ) exit;
+require_once __DIR__.'/class-export-snapshots.php';
 
 /**
  * Accounting Export — generates CSV files compatible with Xero, Sage, and QuickBooks.
@@ -10,11 +11,14 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 class MBS_Accounting_Export {
 
     private static function write_csv( $output, $fields ) {
-        fputcsv( $output, MBS_CSV_Export::safe_fields( $fields ), ',', '"', '\\' );
+        if(fputcsv( $output, MBS_CSV_Export::safe_fields( $fields ), ',', '"', '\\' )===false)throw new RuntimeException('CSV row could not be written.');
+        if(ftell($output)>MBS_Export_Snapshots::MAX_BYTES)throw new LengthException('CSV exceeds the 5 MiB safety boundary.');
     }
 
     public function init() {
         add_action( 'wp_ajax_mbs_export_accounting', array( $this, 'handle_export' ) );
+        add_action( 'wp_ajax_mbs_download_accounting', array( $this, 'download' ) );
+        add_action( 'mbs_process_email_queue', array('MBS_Export_Snapshots','cleanup'), 20 );
     }
 
     /**
@@ -35,32 +39,14 @@ class MBS_Accounting_Export {
         }
         if ( $date_from && $date_to && $date_from > $date_to ) wp_die( 'Export end must not precede its start.', '', array( 'response' => 400 ) );
 
-        $bookings = MBS_Bookings::get_all( array(
-            'status'           => '',
-            'date_from'        => $date_from,
-            'date_to'          => $date_to,
-            'orderby'          => 'booking_date',
-            'order'            => 'ASC',
-            'limit'            => 10000,
-            'exclude_archived' => false,
-        ) );
-
         global $wpdb;
-        if ( ! is_array( $bookings ) || $wpdb->last_error ) wp_die( 'Export could not read all bookings. No CSV was generated.', '', array( 'response' => 503 ) );
-        if ( count( $bookings ) >= 10000 ) wp_die( 'This export reaches the 10,000-booking safety boundary. Choose a smaller date range; no partial CSV was generated.', '', array( 'response' => 413 ) );
-        try { $records = self::normalise_records( $bookings, $date_from, $date_to ); }
-        catch ( RuntimeException $e ) { wp_die( 'Export could not read the complete ledger. No CSV was generated.', '', array( 'response' => 503 ) ); }
-
-        $filename = 'invoices-' . $format . '-' . date( 'Y-m-d' ) . '.csv';
-
-        header( 'Content-Type: text/csv; charset=utf-8' );
-        header( 'Content-Disposition: attachment; filename="' . $filename . '"' );
-        header( 'Pragma: no-cache' );
-
-        $output = fopen( 'php://output', 'w' );
+        try { $records = self::consistent_records($date_from,$date_to); }
+        catch ( RuntimeException $e ) { wp_die( esc_html($e->getMessage()).' No CSV was generated.', '', array( 'response' => 503 ) ); }
+        $output = fopen( 'php://memory', 'w+' );
+        if(!$output)wp_die('Export buffer unavailable.','',array('response'=>503));
         fwrite( $output, "\xEF\xBB\xBF" ); // UTF-8 BOM
 
-        switch ( $format ) {
+        try { switch ( $format ) {
             case 'sage':
                 self::export_sage( $output, $records );
                 break;
@@ -70,18 +56,77 @@ class MBS_Accounting_Export {
             default:
                 self::export_xero( $output, $records );
                 break;
-        }
+        } } catch(Throwable $e){fclose($output);wp_die('CSV could not be completed within its safe size. Choose a smaller range.','',array('response'=>413));}
 
-        fclose( $output );
-        exit;
+        if(ftell($output)>MBS_Export_Snapshots::MAX_BYTES){fclose($output);wp_die('Export exceeds 5 MiB. Choose a smaller range.','',array('response'=>413));}
+        rewind($output);$csv=stream_get_contents($output);fclose($output);
+        self::serve_rest_csv($csv,$format);
+        $job=MBS_Export_Snapshots::save($csv,$format,get_current_user_id());
+        if(is_wp_error($job))wp_die(esc_html($job->get_error_message()),'',array('response'=>503));
+        wp_safe_redirect(self::download_url($job));exit;
+    }
+    public static function download_url($job){return add_query_arg(array('action'=>'mbs_download_accounting','slot'=>$job['slot'],'job'=>$job['id'],'nonce'=>wp_create_nonce('mbs_export_download_'.$job['id'])),admin_url('admin-ajax.php'));}
+
+    /** Preserve the authenticated MCP CSV contract: API clients must never
+     * follow a browser-cookie download redirect or receive an HTML login page.
+     * Called only after the existing export capability/nonce/feature checks.
+     */
+    public static function serve_rest_csv($csv,$format){
+        if(!defined('REST_REQUEST')||!REST_REQUEST)return;
+        nocache_headers();header('Cache-Control: private, no-store');
+        header('Content-Type: text/csv; charset=utf-8');header('X-Content-Type-Options: nosniff');
+        header('Content-Disposition: attachment; filename="'.($format==='bookings'?'bookings':'invoices-'.$format).'.csv"');
+        header('Content-Length: '.strlen($csv));echo $csv;exit;
+    }
+
+    /** All pages and ledger joins observe one repeatable-read database snapshot. */
+    public static function consistent_records($from,$to){
+        global $wpdb;
+        if($wpdb->query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ')===false||$wpdb->query('START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY')===false)throw new RuntimeException('Consistent export snapshot is unavailable.');
+        try{
+            $bookings=array();$last=0;$table=$wpdb->prefix.MBS_TABLE;
+            do{
+                $where='id>%d';$params=array($last);
+                if($from!==''){$where.=' AND booking_date>=%s';$params[]=$from;}
+                if($to!==''){$where.=' AND booking_date<=%s';$params[]=$to;}
+                $page=$wpdb->get_results($wpdb->prepare("SELECT id,ref,status,name,organisation,email,invoice_number,created_at,amount,space,booking_date,purpose FROM {$table} WHERE {$where} ORDER BY id LIMIT 500",$params));
+                if(!is_array($page)||$wpdb->last_error)throw new RuntimeException('Booking export read failed.');
+                foreach($page as$row){$bookings[]=$row;$last=(int)$row->id;}
+                if(count($bookings)>20000)throw new RuntimeException('Export exceeds 20,000 bookings; choose a smaller range.');
+            }while(count($page)===500);
+            $records=self::normalise_records($bookings,$from,$to);
+            if(count($records)>20000)throw new RuntimeException('Export exceeds 20,000 accounting lines; choose a smaller range.');
+            if($wpdb->query('COMMIT')===false)throw new RuntimeException('Export snapshot could not finish.');
+            return$records;
+        }catch(Throwable $e){$wpdb->query('ROLLBACK');throw new RuntimeException($e->getMessage());}
+    }
+    public function download(){
+        if(!current_user_can('manage_options'))wp_die('Forbidden','',array('response'=>403));
+        $id=sanitize_text_field(wp_unslash($_GET['job']??''));
+        check_ajax_referer('mbs_export_download_'.$id,'nonce');
+        $job=MBS_Export_Snapshots::read(get_current_user_id(),$_GET['slot']??'', $id);
+        if(is_wp_error($job))wp_die(esc_html($job->get_error_message()),'',array('response'=>404));
+        $length=strlen($job['csv']);$range=MBS_Export_Snapshots::byte_range($_SERVER['HTTP_RANGE']??'',$length);
+        nocache_headers();header('Cache-Control: private, no-store');header('Accept-Ranges: bytes');header('ETag: "'.$job['sha256'].'"');
+        if(is_wp_error($range)){header('Content-Range: bytes */'.$length);status_header(416);exit;}
+        list($a,$z,$partial)=$range;
+        if($partial){status_header(206);header('Content-Range: bytes '.$a.'-'.$z.'/'.$length);}
+        header('Content-Type: text/csv; charset=utf-8');header('X-Content-Type-Options: nosniff');
+        header('Content-Disposition: attachment; filename="'.($job['format']==='bookings'?'bookings':'invoices-'.$job['format']).'-'.substr($job['created_at'],0,10).'.csv"');
+        header('Content-Length: '.($z-$a+1));echo substr($job['csv'],$a,$z-$a+1);exit;
     }
 
     /** Combine legacy unallocated bookings and the immutable invoice domain once. */
     private static function normalise_records( $bookings, $date_from, $date_to ) {
         global $wpdb;
         $allocation_table = $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE;
-        $allocation_refs = $wpdb->get_col( "SELECT DISTINCT booking_ref FROM {$allocation_table}" );
+        $booking_table=$wpdb->prefix.MBS_TABLE;$allocation_where=array('1=1');$allocation_params=array();
+        if($date_from!==''){$allocation_where[]='b.booking_date>=%s';$allocation_params[]=$date_from;}
+        if($date_to!==''){$allocation_where[]='b.booking_date<=%s';$allocation_params[]=$date_to;}
+        $allocation_sql="SELECT DISTINCT a.booking_ref FROM {$allocation_table} a INNER JOIN {$booking_table} b ON b.ref=a.booking_ref WHERE ".implode(' AND ',$allocation_where).' LIMIT 20001';
+        $allocation_refs = $wpdb->get_col( $allocation_params?$wpdb->prepare($allocation_sql,$allocation_params):$allocation_sql );
         if ( ! is_array( $allocation_refs ) || ! empty( $wpdb->last_error ) ) throw new RuntimeException( 'Allocation read failed.' );
+        if(count($allocation_refs)>20000)throw new RuntimeException('Allocation export exceeds its safety boundary.');
         $allocated = array_fill_keys( $allocation_refs, true );
         $records = array();
         $bank = MBS_Bookings::get_bank_details();
@@ -106,9 +151,10 @@ class MBS_Accounting_Export {
 	        if ( $date_to ) { $where[] = $date_basis.' <= %s'; $params[] = $date_to; }
 	        $sql = "SELECT i.*, it.item_ref, it.booking_ref, it.description, it.line_total_minor, it.service_date, {$date_basis} AS accounting_date
 	                FROM {$invoice_table} i INNER JOIN {$item_table} it ON it.invoice_id = i.id
-	                WHERE " . implode( ' AND ', $where ) . ' ORDER BY accounting_date ASC, i.id ASC, it.id ASC';
+                WHERE " . implode( ' AND ', $where ) . ' ORDER BY accounting_date ASC, i.id ASC, it.id ASC LIMIT 20001';
         $rows = $params ? $wpdb->get_results( $wpdb->prepare( $sql, $params ) ) : $wpdb->get_results( $sql );
         if ( ! is_array( $rows ) || ! empty( $wpdb->last_error ) ) throw new RuntimeException( 'Ledger read failed.' );
+        if(count($rows)>20000)throw new RuntimeException('Ledger export exceeds 20,000 lines; choose a smaller range.');
         foreach ( $rows as $row ) {
             $records[] = (object) array(
                 'contact_name' => $row->contact_organisation ?: $row->contact_name, 'email' => $row->contact_email,

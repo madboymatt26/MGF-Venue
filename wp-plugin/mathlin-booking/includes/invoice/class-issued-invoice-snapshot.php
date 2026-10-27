@@ -109,6 +109,9 @@ class MBS_Issued_Invoice_Snapshot {
     /** @var array|null Payment schedule: {deposit_minor, deposit_due_date, balance_minor, balance_due_date, immediate, no_charge} */
     public $payment_schedule = null;
 
+    /** Payments/balance frozen at issue; null on historical documents (unknown, not zero). */
+    public $account_at_issue = null;
+
     /** @var string Status at time of issue */
     public $status_at_issue = 'issued';
 
@@ -209,6 +212,7 @@ class MBS_Issued_Invoice_Snapshot {
         $snapshot->online_payment_instruction = $params['online_payment_instruction']
             ?? get_option( 'mbs_online_payment_instruction', 'Pay securely through your venue booking account.' );
         $snapshot->payment_schedule = $params['payment_schedule'] ?? null;
+        $snapshot->account_at_issue = $params['account_at_issue'] ?? null;
 
         // Status
         $snapshot->status_at_issue = $params['status_at_issue'] ?? 'issued';

@@ -372,6 +372,7 @@ class MBS_Billing_Engine {
                     'booking_ref' => $booking->ref, 'source_amount_decimal' => (string) $booking->amount,
                     'pricing_tier' => $booking->pricing_tier, 'space' => $booking->space,
                     'kitchen' => (bool) $booking->kitchen, 'captured_at' => current_time( 'mysql' ),
+                    'components' => MBS_Bookings::invoice_pricing_lines($booking),
                 ),
             ), (int) $invoice->version );
             if ( is_wp_error( $added ) ) {

@@ -129,10 +129,8 @@ class MBS_Modification {
         }
 
         if ( $request->request_type === 'cancel' ) {
-            // Approve cancellation
-            MBS_Bookings::update_status( $request->booking_ref, 'cancelled' );
-            MBS_Email::notify_cancelled( $booking, 'Your cancellation request has been approved.' );
-            MBS_Audit_Log::log( $request->booking_ref, 'cancelled', 'Cancellation request approved by admin' );
+            $saved=MBS_Booking_Change_Service::apply($booking,array('status'=>'cancelled','access_sent'=>0),array('request'=>$request,'financial_change'=>true,'notify'=>'request_cancel','action'=>'cancelled','audit'=>'Cancellation request approved by admin; cancellation notice queued after commit.'));
+            return is_wp_error($saved)?$saved:true;
         } else {
             // Approve modification — apply the requested changes
 	            if ( ! empty( $changes ) ) {
@@ -306,6 +304,7 @@ class MBS_Modification {
 	                        $rc_days = max( 1, (int) round( ( strtotime( $rc_to ) - strtotime( $rc_from ) ) / 86400 ) + 1 );
 	                        $new_amount = MBS_Bookings::calculate_cost( $rc_space, $rc_start, $rc_end, (bool) $rc_kitchen, (bool) $rc_allday, $rc_days, (bool) $locked_booking->scout_use, MBS_Bookings::get_booking_tier( $locked_booking ) );
 	                        $update['amount'] = $new_amount;
+                            $update = MBS_Bookings::with_pricing_evidence( $locked_booking, $update );
 	                        $lk_paid = (float) ( $locked_booking->amount_paid ?? 0 );
 	                        $update['status'] = ( class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ) ? $locked_booking->status : ( ( $lk_paid >= (float) $new_amount ) ? 'paid' : 'confirmed' );
 
@@ -376,6 +375,10 @@ class MBS_Modification {
 	                            return new WP_Error( 'request_status_failed', 'Could not mark the modification request as approved.' );
 	                        }
 
+                            if ( method_exists('MBS_HomeAssistant','stage_within_transaction') ) {
+                                $ha = MBS_HomeAssistant::stage_within_transaction($updated_locked);
+                                if(is_wp_error($ha)){ $wpdb->query('ROLLBACK'); return $ha; }
+                            }
 	                        if ( $wpdb->query( 'COMMIT' ) === false ) {
 	                            $wpdb->query( 'ROLLBACK' );
 	                            return new WP_Error( 'commit_failed', 'Could not commit the modification.' );
@@ -383,20 +386,16 @@ class MBS_Modification {
 
 	                        // Post-commit: non-critical HA notification
 	                        $updated_booking = MBS_Bookings::get( $request->booking_ref );
-	                        if ( $updated_booking ) {
+	                        if ( $updated_booking && ! method_exists('MBS_HomeAssistant','stage_within_transaction') ) {
 	                            MBS_HomeAssistant::notify( $updated_booking );
 	                        }
-	                        if ( function_exists( 'spawn_cron' ) ) spawn_cron();
+                            if(method_exists('MBS_Email_Queue','wake'))MBS_Email_Queue::wake();
 	                        return true;
 
 	                    } else {
-	                        // Non-material or no existing document: simple update (no R2 needed)
-	                        if ( class_exists( 'MBS_Space_Selection' ) && isset( $update['space'] ) ) MBS_Space_Selection::record_selection( $update['space'] );
-	                        $booking_updated = $wpdb->update( $table, $update, array( 'ref' => $request->booking_ref ) );
-	                        if ( $booking_updated === false ) {
-	                            return new WP_Error( 'modification_update_failed', 'The booking change could not be saved.' );
-	                        }
-	                        MBS_Audit_Log::log( $request->booking_ref, 'modification_approved', 'Approved non-financial fields without changing issued financial history.' );
+                            if($financial_change)$update=MBS_Bookings::with_pricing_evidence($booking,$update);
+                            $saved=MBS_Booking_Change_Service::apply($booking,$update,array('request'=>$request,'financial_change'=>$financial_change,'notify'=>'request_change','action'=>'modification_approved','audit'=>'Approved booking change without rewriting issued financial history.'));
+                            return is_wp_error($saved)?$saved:true;
 	                    }
                 }
             }
@@ -524,6 +523,11 @@ class MBS_Modification {
      * Simple notification for non-material modifications (no invoice attachment).
      */
     private static function notify_booker_approved_simple( $booking ) {
+        if(!$booking)return;
+        $message=self::build_booker_approved_simple($booking);
+        MBS_Email_Queue::send($booking->email,$message['subject'],$message['body'],$message['headers']);
+    }
+    public static function build_booker_approved_simple( $booking ) {
         if ( ! $booking ) return;
         $tpl       = MBS_Email_Templates::get_template( 'modification_approved' );
         $subject   = MBS_Email_Templates::replace_placeholders( $tpl['subject'], $booking );
@@ -541,7 +545,7 @@ class MBS_Modification {
         $body .= nl2br( esc_html( $body_text ) );
         $body .= '</div></body></html>';
 
-        MBS_Email_Queue::send( $booking->email, $subject, $body, array(
+        return array('subject'=>$subject,'body'=>$body,'headers'=>array(
             'Content-Type: text/html; charset=UTF-8',
             'From: ' . $org['name'] . ' <' . get_option( 'admin_email', $admin_email ) . '>',
             'Reply-To: ' . $admin_email,

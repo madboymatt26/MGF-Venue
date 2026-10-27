@@ -3,21 +3,27 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 
 /** Local-time occupancy read model shared by exports, integrations and reports. */
 class MBS_Booking_Intervals {
-    public static function intervals( $booking ) {
+    public static function intervals( $booking, $zone = null, $max_days = 366 ) {
         $b = (object) $booking;
-        $zone = wp_timezone();
+        $zone = $zone ?: wp_timezone();
         $first = self::date( $b->booking_date, $zone );
         $last = self::date( empty( $b->booking_date_end ) ? $b->booking_date : $b->booking_date_end, $zone );
-        if ( $last < $first || $first->diff( $last )->days > 366 ) throw new InvalidArgumentException( 'Invalid booking date range.' );
-        $continuous = class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::span( $b ) === 'continuous';
+        if ( $last < $first || $first->diff( $last )->days > max(1,min(730,(int)$max_days)) ) throw new InvalidArgumentException( 'Invalid booking date range.' );
+        $meta = is_string($b->custom_fields??null)?json_decode($b->custom_fields,true):(array)($b->custom_fields??array());
+        $continuous = ($meta['_mbs_campsite_span']??'')==='continuous' || (class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::span( $b ) === 'continuous');
+        // Match the existing venue charging/creation rule: an overnight slot
+        // with the immediately following end date is ONE stay, not two nights.
+        $overnight = empty($b->all_day) && strcmp((string)$b->end_time,(string)$b->start_time)<=0;
+        $bridge = ! $continuous && $overnight && $first->diff($last)->days === 1;
         $out = array();
         for ( $day = $first; $day <= $last; $day = $day->modify( '+1 day' ) ) {
-            $end_day = $continuous || ! empty( $b->all_day ) ? $last : $day;
+            $end_day = $continuous || $bridge || ! empty( $b->all_day ) ? $last : $day;
             $start = ! empty( $b->all_day ) ? $day : self::wall_time( $day, $b->start_time );
             $end = ! empty( $b->all_day ) ? $end_day->modify( '+1 day' ) : self::wall_time( $end_day, $b->end_time );
+            if ( ! $continuous && ! $bridge && $overnight ) $end = self::wall_time($end_day->modify('+1 day'),$b->end_time);
             if ( $end <= $start ) throw new InvalidArgumentException( 'Booking end must be after its start.' );
             $out[] = array( 'start' => $start, 'end' => $end, 'day' => $day->format( 'Y-m-d' ), 'all_day' => ! empty( $b->all_day ) );
-            if ( $continuous || ! empty( $b->all_day ) ) break;
+            if ( $continuous || $bridge || ! empty( $b->all_day ) ) break;
         }
         return $out;
     }

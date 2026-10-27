@@ -393,6 +393,72 @@ class MBS_Bookings {
         return round( $cost, 2 );
     }
 
+    /** Identity of the billable facts; stale evidence must never itemise a changed booking. */
+    public static function pricing_fingerprint( $booking ) {
+        $b = (object) $booking;
+        $facts = array();
+        foreach ( array( 'space','booking_date','booking_date_end','start_time','end_time','all_day','kitchen','scout_use','pricing_tier','amount','purpose' ) as $key ) {
+            $value = $b->$key ?? '';
+            if ( $key === 'amount' ) $value = number_format( (float) $value, 2, '.', '' );
+            if ( in_array( $key, array( 'all_day','kitchen','scout_use' ), true ) ) $value = (int) $value;
+            $facts[$key] = (string) $value;
+        }
+        return hash( 'sha256', wp_json_encode( $facts ) );
+    }
+
+    /** Capture only at the moment the tariff is actually used, never on invoice reads. */
+    private static function capture_invoice_pricing( $booking, $custom_price = false ) {
+        if ( $custom_price || ! class_exists( 'MBS_Money' ) ) return null;
+        $b = (object) $booking;
+        if ( ! empty( $b->scout_use ) || (float) $b->amount <= 0 ) return null;
+        $days = (int) ( new DateTimeImmutable( $b->booking_date ) )->diff( new DateTimeImmutable( $b->booking_date_end ?: $b->booking_date ) )->days + 1;
+        $quantity = $days;
+        $unit = 'day';
+        if ( ! $b->all_day ) {
+            $start = strtotime( $b->start_time ); $end = strtotime( $b->end_time );
+            if ( $start === false || $end === false ) return null;
+            $overnight = $end <= $start;
+            if ( $overnight ) $end += 86400;
+            $quantity = (int) ceil( ( $end - $start ) / 3600 ) * ( $overnight && $days === 2 ? 1 : $days );
+            $unit = 'hour';
+        }
+        $rate = self::calculate_cost( $b->space, '00:00', '01:00', false, (bool) $b->all_day, 1, false, $b->pricing_tier );
+        $rate_minor = MBS_Money::from_decimal_string( number_format( $rate, 2, '.', '' ) );
+        $kitchen_minor = MBS_Money::from_decimal_string( number_format( $b->kitchen ? self::get_tiered_kitchen_price( $b->pricing_tier ) : 0, 2, '.', '' ) );
+        $total = MBS_Money::from_decimal_string( number_format( (float) $b->amount, 2, '.', '' ) );
+        if ( is_wp_error( $rate_minor ) || is_wp_error( $kitchen_minor ) || is_wp_error( $total ) || $rate_minor < 0 || $kitchen_minor < 0 || $quantity < 1 || $quantity > 10000 || $rate_minor * $quantity + $kitchen_minor !== $total ) return null;
+        $lines = array( array( 'date' => $b->booking_date, 'space' => $b->space, 'description' => $b->space . ' hire' . ( $b->purpose ? ' — ' . $b->purpose : '' ), 'quantity' => $quantity, 'unit' => $unit, 'unit_amount_minor' => $rate_minor, 'amount_minor' => $rate_minor * $quantity ) );
+        if ( $b->kitchen ) $lines[] = array( 'date' => $b->booking_date, 'space' => '', 'description' => 'Kitchen facilities (flat charge)', 'quantity' => 1, 'unit' => 'booking', 'unit_amount_minor' => $kitchen_minor, 'amount_minor' => $kitchen_minor );
+        return array( 'fingerprint' => self::pricing_fingerprint( $b ), 'lines' => $lines );
+    }
+
+    public static function invoice_pricing_lines( $booking ) {
+        $fields = json_decode( (string) ( $booking->custom_fields ?? '' ), true );
+        $evidence = is_array( $fields ) ? ( $fields['_mbs_invoice_pricing'] ?? null ) : null;
+        if ( ! is_array( $evidence ) || ! is_string( $evidence['fingerprint'] ?? null ) || ! hash_equals( self::pricing_fingerprint( $booking ), $evidence['fingerprint'] ) || ! is_array( $evidence['lines'] ?? null ) ) return array();
+        $sum = 0;
+        foreach ( $evidence['lines'] as $line ) {
+            if ( ! is_int( $line['amount_minor'] ?? null ) || $line['amount_minor'] < 0 ) return array();
+            $sum += $line['amount_minor'];
+        }
+        $total = MBS_Money::from_decimal_string( (string) $booking->amount );
+        return ! is_wp_error( $total ) && $sum === $total ? $evidence['lines'] : array();
+    }
+
+    /** Use only immediately after authoritative repricing, before the domain write. */
+    public static function with_pricing_evidence( $booking, $update ) {
+        $fresh = (object) array_merge( (array) $booking, $update );
+        $fresh->pricing_tier = self::get_booking_tier( $fresh );
+        $evidence = self::capture_invoice_pricing( $fresh );
+        $fields = json_decode( (string) ( $fresh->custom_fields ?? '' ), true );
+        if ( ! is_array($fields) ) $fields = array();
+        unset( $fields['_mbs_invoice_pricing'] );
+        if ( $evidence ) $fields['_mbs_invoice_pricing'] = $evidence;
+        $update['custom_fields'] = wp_json_encode( $fields );
+        $update['pricing_tier'] = $fresh->pricing_tier;
+        return $update;
+    }
+
     public static function generate_ref() {
         global $wpdb;
         $table = $wpdb->prefix . MBS_TABLE;
@@ -536,6 +602,12 @@ class MBS_Bookings {
         }
 
         $insert['modification_token'] = wp_generate_password( 32, false );
+        $price_evidence = self::capture_invoice_pricing( $insert, $trusted_admin_context && isset( $data['custom_amount'] ) && $data['custom_amount'] !== '' );
+        if ( $price_evidence ) {
+            $stored_fields = json_decode( (string) ( $insert['custom_fields'] ?? '{}' ), true ) ?: array();
+            $stored_fields['_mbs_invoice_pricing'] = $price_evidence;
+            $insert['custom_fields'] = wp_json_encode( $stored_fields );
+        }
         if ( isset( $accepted_terms ) ) {
             $stored_fields = json_decode( (string) ( $insert['custom_fields'] ?? '{}' ), true ) ?: array();
             $stored_fields['_mbs_terms_acceptance'] = $accepted_terms;
@@ -796,7 +868,9 @@ class MBS_Bookings {
             }
         }
 
-        if ( $sync_scout_series && $wpdb->query( 'START TRANSACTION' ) === false ) return false;
+        $ha_transaction = method_exists('MBS_HomeAssistant','stage_within_transaction') && get_option('mbs_ha_webhook_url','') && empty($current->scout_use);
+        $transaction = $sync_scout_series || $ha_transaction;
+        if ( $transaction && $wpdb->query( 'START TRANSACTION' ) === false ) return false;
         $result = $wpdb->update(
             $table,
             array( 'status' => $status ),
@@ -805,8 +879,14 @@ class MBS_Bookings {
         );
 
         if ( $result === false ) {
-            if ( $sync_scout_series ) $wpdb->query( 'ROLLBACK' );
+            if ( $transaction ) $wpdb->query( 'ROLLBACK' );
             return false;
+        }
+        // Replaying a committed status is a no-op, not another integration,
+        // payment hook, audit entry or access revocation.
+        if ( $result === 0 ) {
+            if ( $transaction ) $wpdb->query('ROLLBACK');
+            return 0;
         }
 
         if ( $sync_scout_series ) {
@@ -815,6 +895,13 @@ class MBS_Bookings {
                 $wpdb->query( 'ROLLBACK' );
                 return false;
             }
+        }
+        if ( $ha_transaction ) {
+            $ha_booking = clone $current; $ha_booking->status = $status;
+            $ha = MBS_HomeAssistant::stage_within_transaction($ha_booking,$current->status);
+            if(is_wp_error($ha)){ $wpdb->query('ROLLBACK'); return false; }
+        }
+        if ( $transaction ) {
             if ( $wpdb->query( 'COMMIT' ) === false ) {
                 $wpdb->query( 'ROLLBACK' );
                 return false;
@@ -829,7 +916,7 @@ class MBS_Bookings {
         if ( $result !== false && $status === 'confirmed' ) {
             $booking = self::get( $ref );
             if ( $booking ) {
-                MBS_HomeAssistant::notify( $booking );
+                if ( ! $ha_transaction ) MBS_HomeAssistant::notify( $booking );
 
                 // Auto-promote £0 bookings (scout use / free) straight to paid
                 $total_minor = MBS_Money::from_decimal_string( (string) $booking->amount );
@@ -843,7 +930,7 @@ class MBS_Bookings {
 
         if ( $result !== false && $status === 'cancelled' ) {
             $booking = self::get( $ref );
-            if ( $booking ) MBS_HomeAssistant::notify_cancelled( $booking );
+            if ( $booking && ! $ha_transaction ) MBS_HomeAssistant::notify_cancelled( $booking );
             // C-2: A cancelled booking must not retain an active access flag.
             $wpdb->update( $table, array( 'access_sent' => 0 ), array( 'ref' => $ref ) );
             MBS_Audit_Log::log( $ref, 'access_revoked', 'Access flag reset on cancellation. Consider rotating the keysafe code if already shared.' );
@@ -903,6 +990,8 @@ class MBS_Bookings {
              UNION SELECT 1 FROM {$items} ii WHERE ii.booking_ref = %s LIMIT 1",
             sanitize_text_field( $ref ), sanitize_text_field( $ref )
         ) );
+        // A failed financial-history read must never authorise an edit/delete.
+        if ( ! empty($wpdb->last_error) ) { error_log('[MGF Venue] Financial history could not be verified; booking mutation blocked.'); return true; }
         return (bool) $exists;
     }
 
@@ -1274,6 +1363,10 @@ class MBS_Bookings {
      * Update status for all bookings in a series.
      */
     public static function update_series_status( $series_id, $status ) {
+        if(class_exists('MBS_Space_Selection'))return MBS_Space_Selection::locked(static function()use($series_id,$status){return self::update_series_status_locked($series_id,$status);});
+        return self::update_series_status_locked($series_id,$status);
+    }
+    private static function update_series_status_locked( $series_id, $status ) {
         global $wpdb;
         $registered = MBS_Series::get( sanitize_text_field( $series_id ) );
         if ( $registered && ( empty( $registered->metadata_incomplete ) || $registered->billing_treatment !== 'legacy_per_occurrence' ) ) {
@@ -1282,7 +1375,13 @@ class MBS_Bookings {
         $table   = $wpdb->prefix . MBS_TABLE;
         $allowed = array( 'pending', 'confirmed', 'deposit_paid', 'cancelled', 'archived', 'paid' );
         if ( ! in_array( $status, $allowed ) ) return false;
-
+        if($wpdb->query('START TRANSACTION')===false)return false;
+        $affected=$wpdb->get_results($wpdb->prepare("SELECT * FROM {$table} WHERE series_id=%s ORDER BY id FOR UPDATE",$series_id));
+        if(!is_array($affected)||$wpdb->last_error){$wpdb->query('ROLLBACK');return false;}
+        foreach($affected as$source){
+            if(self::has_financial_history($source->ref)){$wpdb->query('ROLLBACK');return new WP_Error('financial_replacement_required','A billed occurrence must use the versioned credit-and-replace workflow.');}
+            if($status==='confirmed'&&(float)$source->amount>0&&empty($source->current_invoice_document_id)){$wpdb->query('ROLLBACK');return new WP_Error('invoice_approval_required','Approve these chargeable bookings individually, or review and adopt the series billing configuration first. No dates were changed.');}
+        }
         $result = $wpdb->update(
             $table,
             array( 'status' => $status ),
@@ -1290,21 +1389,14 @@ class MBS_Bookings {
             array( '%s' ), array( '%s' )
         );
 
-        if ( $result !== false ) {
-            MBS_Audit_Log::log( $series_id, 'series_' . $status, 'Entire series status changed to ' . $status );
+        if($result===false){$wpdb->query('ROLLBACK');return false;}
+        if($result===0){$wpdb->query('ROLLBACK');return 0;}
+        if(method_exists('MBS_HomeAssistant','stage_many_within_transaction')){
+            $ha=MBS_HomeAssistant::stage_many_within_transaction($affected,$status);
+            if(is_wp_error($ha)){$wpdb->query('ROLLBACK');return$ha;}
         }
-
-        // Trigger HA notifications for each booking in the series
-        if ( $result !== false && in_array( $status, array( 'confirmed', 'cancelled' ) ) ) {
-            $bookings = self::get_series( $series_id );
-            foreach ( $bookings as $booking ) {
-                if ( $status === 'confirmed' ) {
-                    MBS_HomeAssistant::notify( $booking );
-                } elseif ( $status === 'cancelled' ) {
-                    MBS_HomeAssistant::notify_cancelled( $booking );
-                }
-            }
-        }
+        if(!MBS_Audit_Log::log($series_id,'series_'.$status,'Entire legacy series status changed to '.$status)){$wpdb->query('ROLLBACK');return false;}
+        if($wpdb->query('COMMIT')===false){$wpdb->query('ROLLBACK');return false;}
 
         return $result;
     }
@@ -1441,6 +1533,7 @@ class MBS_Bookings {
                 $space, $start, $end, (bool) $b->kitchen, $all_day, 1, (bool) $b->scout_use,
                 self::get_booking_tier( $b )
             );
+            $update = self::with_pricing_evidence( $b, $update );
 
             $wpdb->update( $table, $update, array( 'ref' => $b->ref ) );
             $updated++;

@@ -49,6 +49,11 @@ check(strpos($ics,'DTSTART:20270710T180000Z')!==false,'summer local time convert
 check(strpos($ics,'DTEND:20270711T200000Z')!==false,'daily sessions include final day');
 check(substr_count($ics,'BEGIN:VEVENT')===2,'daily range emits two events');
 check(strpos($ics,'UID:FIXTURE@example.test')!==false,'first venue UID preserved');
+$night=clone$b;$night->start_time='22:00:00';$night->end_time='06:00:00';
+$night_intervals=MBS_Booking_Intervals::intervals($night);
+check(count($night_intervals)===1&&$night_intervals[0]['end']->format('Y-m-d H:i')==='2027-07-11 06:00','two-date overnight is one stay');
+$night->booking_date_end=$night->booking_date;
+check(MBS_Booking_Intervals::intervals($night)[0]['end']->format('Y-m-d H:i')==='2027-07-11 06:00','single-date overnight ends next morning');
 $b->status='cancelled';check(strpos(MBS_ICal::generate($b),'STATUS:CANCELLED')!==false,'cancelled ICS is not confirmed');$b->status='paid';
 MBS_Campsite_Policy::$enabled=true;$b->span='continuous';
 check(substr_count(MBS_ICal::generate($b),'BEGIN:VEVENT')===1,'continuous campsite span stays one event');

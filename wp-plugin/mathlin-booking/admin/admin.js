@@ -854,7 +854,7 @@ jQuery(function ($) {
         }, function (res) {
             $btn.prop('disabled', false);
             if (res.success) {
-                alert(res.data.sent ? 'Approval email sent.' : 'The email could not be sent immediately and was queued for retry.');
+                alert(res.data.sent ? 'Approval email accepted by the mail transport.' : 'Approval email queued for delivery. Check the outbox for transport acceptance.');
             } else {
                 alert('Error: ' + (res.data || 'Unknown error'));
             }

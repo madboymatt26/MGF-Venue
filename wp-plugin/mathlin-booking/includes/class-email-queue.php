@@ -17,11 +17,13 @@ class MBS_Email_Queue {
 
     const MAX_ATTEMPTS = 5;
     const LEASE_SECONDS = 300; // 5 minutes
+    const WAKE_HOOK = 'mbs_email_after_commit';
 
     private static $table_suffix = 'mathlin_email_queue';
 
     public function init() {
         add_action( 'mbs_process_email_queue', array( $this, 'process_queue' ) );
+        add_action( self::WAKE_HOOK, array( $this, 'process_queue' ) );
         add_filter( 'cron_schedules', array( $this, 'cron_schedules' ) );
         $event = wp_get_scheduled_event( 'mbs_process_email_queue' );
         if ( $event && $event->schedule !== 'mbs_email_five_minutes' ) {
@@ -46,6 +48,14 @@ class MBS_Email_Queue {
 
     public static function deactivate() {
         wp_clear_scheduled_hook( 'mbs_process_email_queue' );
+        wp_clear_scheduled_hook( self::WAKE_HOOK );
+    }
+    /** SQL scheduling only. Call after commit; never launch HTTP under a booking lock. */
+    public static function wake() {
+        try {
+            if(function_exists('wp_schedule_single_event')&&!wp_next_scheduled(self::WAKE_HOOK))return wp_schedule_single_event(time()+1,self::WAKE_HOOK);
+            return true;
+        }catch(Throwable $e){error_log('[MGF Venue] Post-commit email wake could not be scheduled; the regular outbox worker remains the fallback.');return false;}
     }
 
     private static function table() {
@@ -309,12 +319,38 @@ class MBS_Email_Queue {
         $failed = 0;
 
         foreach ( $claimed as $email ) {
+            if($email->message_type==='series_confirmation'){
+                $source=$wpdb->get_row($wpdb->prepare('SELECT * FROM '.$wpdb->prefix.MBS_SERIES_TABLE.' WHERE id=%d',(int)$email->reference_id));
+                if(!empty($wpdb->last_error)){self::release_for_retry($email->id,$worker_id,'Series source temporarily unavailable.');continue;}
+                $version=self::series_message_version($email);
+                if(!$source||$source->status!=='confirmed'||strcasecmp($source->contact_email,$email->to_email)!==0||($version!==null&&(int)$source->version!==(int)$version)){self::mark_failed($email->id,$worker_id);continue;}
+            }
+            if($email->message_type==='series_state'){
+                $meta=json_decode((string)$email->attachment_meta,true);
+                $series=is_array($meta)&&!empty($meta['series_ref'])?MBS_Series::get($meta['series_ref']):null;
+                if(!empty($wpdb->last_error)){self::release_for_retry($email->id,$worker_id,'Series source temporarily unavailable.');continue;}
+                if(!$series||!isset($meta['series_version'])||(int)$series->version!==(int)$meta['series_version']||strcasecmp($series->contact_email,$email->to_email)!==0){self::mark_failed($email->id,$worker_id);continue;}
+            }
+            if(in_array($email->message_type,array('booking_edit','request_change','request_cancel'),true)){
+                $booking=MBS_Bookings::get_by_id((int)$email->reference_id);
+                if(!empty($wpdb->last_error)){self::release_for_retry($email->id,$worker_id,'Booking source temporarily unavailable.');continue;}
+                if($email->message_type==='request_cancel'){
+                    // A committed cancellation remains a valid historical notice
+                    // after deletion; reopening it supersedes the queued notice.
+                    if($booking&&($booking->status!=='cancelled'||strcasecmp($booking->email,$email->to_email)!==0)){self::mark_failed($email->id,$worker_id);continue;}
+                }else{
+                    if(!$booking||!in_array($booking->status,array('pending','confirmed','deposit_paid','paid'),true)||$email->message_key!==$email->message_type.':'.MBS_Email::change_source_hash($booking)){self::mark_failed($email->id,$worker_id);continue;}
+                    $message=$email->message_type==='booking_edit'?MBS_Admin::build_edit_notification($booking,(float)$booking->amount,(float)$booking->amount):MBS_Modification::build_booker_approved_simple($booking);
+                    $email->subject=$message['subject'];$email->body=$message['body'];$email->headers=wp_json_encode($message['headers']);
+                }
+            }
             if ( $email->message_type === 'mailbox_verification' ) {
                 $created = new DateTimeImmutable( $email->created_at, wp_timezone() );
                 if ( $created->getTimestamp() + 900 <= time() ) { self::mark_failed( $email->id, $worker_id ); continue; }
             }
             if ( in_array( $email->message_type, array( 'feedback_request', 'feedback_manual' ), true ) ) {
                 $booking = MBS_Bookings::get_by_id( (int) $email->reference_id );
+                if(!empty($wpdb->last_error)){self::release_for_retry($email->id,$worker_id,'Feedback source temporarily unavailable.');continue;}
                 if ( ! $booking || strcasecmp( $booking->email, $email->to_email ) !== 0 || strpos( $email->message_key, 'feedback:' . MBS_Access_Details::source_hash( $booking ) ) !== 0 || ! in_array( $booking->status, array( 'confirmed','deposit_paid','paid' ), true ) || ! empty( $booking->scout_use ) ) { self::mark_failed( $email->id, $worker_id ); continue; }
                 if ( $email->message_type === 'feedback_request' && ! get_option( 'mbs_feedback_enabled', 0 ) ) { self::pause_for_policy( $email->id, $worker_id, 'Feedback is disabled; delivery paused.' ); continue; }
                 $message = MBS_Feedback::build_request_message( $booking );
@@ -322,8 +358,10 @@ class MBS_Email_Queue {
             }
             if ( $email->message_type === 'booking_reminder' ) {
                 $booking = MBS_Bookings::get_by_id( (int) $email->reference_id );
+                if(!empty($wpdb->last_error)){self::release_for_retry($email->id,$worker_id,'Reminder source temporarily unavailable.');continue;}
                 $now = new DateTimeImmutable( 'now', wp_timezone() );
-                $start = $booking ? new DateTimeImmutable( $booking->booking_date . ' ' . ( $booking->all_day ? '00:00' : $booking->start_time ), wp_timezone() ) : null;
+                try { $intervals = $booking ? MBS_Booking_Intervals::intervals($booking) : array(); $start = $intervals ? $intervals[0]['start'] : null; }
+                catch(Throwable $e){ self::mark_failed($email->id,$worker_id); continue; }
                 if ( ! $booking || ! in_array( $booking->status, array( 'confirmed','deposit_paid','paid' ), true ) || $now >= $start || $email->message_key !== 'reminder:' . MBS_Access_Details::source_hash( $booking ) ) { self::mark_failed( $email->id, $worker_id ); continue; }
                 $hours = (int) get_option( 'mbs_reminder_hours', 24 );
                 if ( $hours <= 0 || $now < $start->modify( '-' . $hours . ' hours' ) ) {
@@ -337,7 +375,7 @@ class MBS_Email_Queue {
             if ( in_array( $email->message_type, array( 'access_details', 'access_manual' ), true ) ) {
                 $message = MBS_Access_Details::queued_message( $email );
                 if ( is_wp_error( $message ) ) {
-                    if ( in_array( $message->get_error_code(), array( 'access_inactive','access_expired','access_stale','access_estate' ), true ) ) {
+                    if ( in_array( $message->get_error_code(), array( 'access_inactive','access_expired','access_stale','access_estate','access_invalid_schedule','access_already_sent' ), true ) ) {
                         self::mark_failed( $email->id, $worker_id );
                     } else {
                         // Policy/timing pauses do not exhaust transport retries.
@@ -387,6 +425,7 @@ class MBS_Email_Queue {
             // only after the confirmation transaction has committed.
             if ( $email->message_type === 'booking_confirmation' && $email->reference_type === 'booking' && ! empty( $email->reference_id ) ) {
                 $booking = MBS_Bookings::get_by_id( (int) $email->reference_id );
+                if(!empty($wpdb->last_error)){self::release_for_retry($email->id,$worker_id,'Confirmation source temporarily unavailable.');continue;}
                 if ( ! $booking || ! in_array( $booking->status, array( 'confirmed','deposit_paid','paid' ), true ) || strcasecmp( $email->to_email, $booking->email ) !== 0 ) {
                     self::mark_failed( $email->id, $worker_id );
                     continue;
@@ -538,23 +577,27 @@ class MBS_Email_Queue {
                 }
                 break;
             case 'booking_reminder':
-                $wpdb->update( $wpdb->prefix . MBS_TABLE, array( 'reminder_sent'=>1 ), array( 'id'=>(int) $email->reference_id ) );
+                $booking=MBS_Bookings::get_by_id((int)$email->reference_id);
+                if($booking&&$email->message_key==='reminder:'.MBS_Access_Details::source_hash($booking))$wpdb->update($wpdb->prefix.MBS_TABLE,array('reminder_sent'=>1),self::delivery_source_where($booking));
                 break;
             case 'access_details':
             case 'access_manual':
                 $booking = MBS_Bookings::get_by_id( (int) $email->reference_id );
-                if ( $booking ) {
-                    $wpdb->update( $wpdb->prefix . MBS_TABLE, array( 'access_sent' => 1 ), array( 'id' => (int) $booking->id ) );
+                if ( $booking && MBS_Access_Details::is_eligible_for_access($booking) && strpos((string)$email->message_key,'access:'.MBS_Access_Details::source_hash($booking))===0 ) {
+                    $marked=$wpdb->update( $wpdb->prefix . MBS_TABLE, array( 'access_sent' => 1 ), self::delivery_source_where($booking) );
+                    if($marked!==1)break;
                     MBS_Audit_Log::log( $booking->ref, 'access_sent', 'Access email accepted by the configured mail transport; inbox delivery not independently confirmed.' );
                     if ( $email->message_type === 'access_details' ) MBS_Access_Details::send_admin_notification( $booking );
                 }
                 break;
             case 'series_confirmation':
                 if ( $email->reference_type === 'series' ) {
+                    $where=array('id'=>(int)$email->reference_id,'status'=>'confirmed','contact_email'=>$email->to_email);
+                    $version=self::series_message_version($email);if($version!==null)$where['version']=$version;
                     $wpdb->update(
                         $wpdb->prefix . MBS_SERIES_TABLE,
                         array( 'confirmation_sent_at' => $now ),
-                        array( 'id' => (int) $email->reference_id )
+                        $where
                     );
                 }
                 break;
@@ -582,6 +625,17 @@ class MBS_Email_Queue {
                 }
                 break;
         }
+    }
+
+    private static function series_message_version($email){
+        $meta=json_decode((string)($email->attachment_meta??''),true);
+        if(isset($meta['series_version']))return(int)$meta['series_version'];
+        return preg_match('/:v(\d+)(?::manual[a-f0-9]+)?$/D',(string)$email->message_key,$match)?(int)$match[1]:null;
+    }
+    private static function delivery_source_where($booking){
+        $where=array('id'=>(int)$booking->id);
+        foreach(array('status','booking_date','booking_date_end','start_time','end_time','all_day','space','email','organisation','notes')as$key)$where[$key]=$booking->$key??null;
+        return$where;
     }
 
     // ── Legacy ─────────────────────────────────────────────────────────────────
@@ -613,16 +667,21 @@ class MBS_Email_Queue {
         global $wpdb;
         $table = self::table();
 
-        if ( $wpdb->get_var( "SHOW TABLES LIKE '{$table}'" ) !== $table ) {
-            return array( 'pending' => 0, 'processing' => 0, 'sent' => 0, 'failed' => 0 );
-        }
-
-        return array(
-            'pending'    => (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status='pending'" ),
-            'processing' => (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status='processing'" ),
-            'sent'       => (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status='sent'" ),
-            'failed'     => (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status='failed'" ),
-        );
+        // One consistent aggregate, with no customer payloads. An unavailable
+        // table/read is unknown, not a healthy empty outbox.
+        $row = $wpdb->get_row( $wpdb->prepare(
+            "SELECT SUM(status='pending') AS pending, SUM(status='processing') AS processing,
+             SUM(status='sent') AS sent, SUM(status='failed') AS failed,
+             MIN(CASE WHEN status='pending' THEN created_at END) AS oldest_pending_at,
+             MIN(CASE WHEN status='pending' THEN COALESCE(next_retry,created_at) END) AS next_due_at,
+             SUM(status='processing' AND lease_expires_at<%s) AS expired_leases
+             FROM {$table}", current_time( 'mysql' )
+        ) );
+        if ( ! $row || ! empty( $wpdb->last_error ) ) return array( 'available'=>false, 'pending'=>null, 'processing'=>null, 'sent'=>null, 'failed'=>null );
+        return array( 'available'=>true, 'pending'=>(int)$row->pending, 'processing'=>(int)$row->processing,
+            'sent'=>(int)$row->sent, 'failed'=>(int)$row->failed, 'oldest_pending_at'=>$row->oldest_pending_at,
+            'next_due_at'=>$row->next_due_at, 'expired_leases'=>(int)$row->expired_leases,
+            'delivery_evidence'=>'sent means transport accepted, not confirmed inbox delivery' );
     }
 
     /**

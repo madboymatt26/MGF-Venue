@@ -23,9 +23,11 @@ class MBS_Billing_Engine {
     }
 }
 class MBS_Email {
-    public static $sent = array();
-    public static function notify_series_changed($series, $rows) { self::$sent[] = 'changed'; }
-    public static function notify_series_cancelled($series, $rows) { self::$sent[] = 'cancelled'; }
+    // These are transactional outbox writes, not an SMTP transport mock.
+    // "sent" below records committed notification intents for legacy assertions.
+    public static $sent = array(), $pending = array();
+    public static function notify_series_changed($series, $rows) { global $wpdb;if(!$wpdb->transaction_open)throw new RuntimeException('Notification intent must share the domain transaction.');self::$pending[] = 'changed';return true; }
+    public static function notify_series_cancelled($series, $rows) { global $wpdb;if(!$wpdb->transaction_open)throw new RuntimeException('Notification intent must share the domain transaction.');self::$pending[] = 'cancelled';return true; }
 }
 class MBS_HomeAssistant {
     public static $refs = array();
@@ -38,6 +40,7 @@ class MBS_Audit_Log {
 class CutoffDB {
     public $prefix = '', $last_error = '', $series, $rows, $snapshot, $request = null, $fail_request = false;
     public $fail_remaining = false, $fail_update = false, $fail_version = false, $fail_commit = false;
+    public $transaction_open=false;
     public function __construct() {
         $this->series = (object)array('series_ref'=>'TEST', 'status'=>'confirmed', 'version'=>1);
         $this->rows = array();
@@ -63,9 +66,10 @@ class CutoffDB {
     }
     public function query($query) {
         if (is_string($query)) {
-            if ($query==='START TRANSACTION') $this->snapshot = serialize(array($this->series,$this->rows,$this->request));
-            if ($query==='ROLLBACK') [$this->series,$this->rows,$this->request] = unserialize($this->snapshot);
+            if ($query==='START TRANSACTION') { $this->transaction_open=true;$this->snapshot = serialize(array($this->series,$this->rows,$this->request,MBS_Email::$pending)); }
+            if ($query==='ROLLBACK') { [$this->series,$this->rows,$this->request,MBS_Email::$pending] = unserialize($this->snapshot);$this->transaction_open=false; }
             if ($query==='COMMIT' && $this->fail_commit) return false;
+            if ($query==='COMMIT') { MBS_Email::$sent=array_merge(MBS_Email::$sent,MBS_Email::$pending);MBS_Email::$pending=array();$this->transaction_open=false; }
             return 1;
         }
         [$sql,$args] = $query;
@@ -93,7 +97,7 @@ function cutoff_assert($condition, $message) {
 }
 function cutoff_reset() {
     global $wpdb; $wpdb = new CutoffDB();
-    MBS_Billing_Engine::$refs = MBS_Email::$sent = MBS_HomeAssistant::$refs = MBS_Audit_Log::$events = array();
+    MBS_Billing_Engine::$refs = MBS_Email::$sent = MBS_Email::$pending = MBS_HomeAssistant::$refs = MBS_Audit_Log::$events = array();
     MBS_Billing_Engine::$fail = false;
 }
 cutoff_reset();

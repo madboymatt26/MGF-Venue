@@ -625,9 +625,14 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
             <div style="padding:1rem 1.5rem;">
                 <table class="wp-list-table widefat fixed striped" style="font-size:0.85rem;">
                     <tbody>
-                        <tr><td>Pending (queued for retry)</td><td><strong><?php echo $email_stats['pending']; ?></strong></td></tr>
-                        <tr><td>Sent (retried successfully)</td><td><strong><?php echo $email_stats['sent']; ?></strong></td></tr>
-                        <tr><td>Failed or no longer eligible</td><td><strong style="color:#e74c3c;"><?php echo $email_stats['failed']; ?></strong></td></tr>
+                        <?php if(empty($email_stats['available'])): ?><tr><td colspan="2" role="alert">Outbox unavailable: delivery state is unknown.</td></tr><?php else: ?>
+                        <tr><td>Pending (queued or paused for policy/timing)</td><td><strong><?php echo (int)$email_stats['pending']; ?></strong></td></tr>
+                        <tr><td>Transport accepted (not proof of inbox delivery)</td><td><strong><?php echo (int)$email_stats['sent']; ?></strong></td></tr>
+                        <tr><td>Failed or no longer eligible</td><td><strong style="color:#e74c3c;"><?php echo (int)$email_stats['failed']; ?></strong></td></tr>
+                        <tr><td>Oldest pending</td><td><?php echo esc_html($email_stats['oldest_pending_at']??'None'); ?></td></tr>
+                        <tr><td>Next due</td><td><?php echo esc_html($email_stats['next_due_at']??'None'); ?></td></tr>
+                        <tr><td>Expired worker leases</td><td><?php echo (int)$email_stats['expired_leases']; ?></td></tr>
+                        <?php endif; ?>
                     </tbody>
                 </table>
                 <p class="nms-muted" style="margin-top:8px;font-size:0.8rem;">The queue is scheduled every five minutes, subject to host cron execution. Transport failures stop after five attempts; policy pauses do not consume attempts. Sent means the mail transport accepted the message, not confirmed inbox delivery. Old sent/failed rows are removed after 30 days.</p>
@@ -689,15 +694,16 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
         <div class="nms-card-header"><h2>📈 Occupancy / Utilisation (<?php echo esc_html( $fy_label ); ?>)</h2></div>
         <div style="padding:1rem 1.5rem;">
             <?php if ( $occupancy_error ) : ?><p role="alert"><?php echo esc_html( $occupancy_error ); ?></p><?php else : ?>
-            <p class="nms-muted">Approved booking-session occupancy for the complete selected period, including internal Scout use. Reporting hours: <?php echo (int) $occupancy['opening_hour']; ?>:00–<?php echo (int) $occupancy['closing_hour']; ?>:00. Parent and selected areas are expanded; overlapping hours are counted once. Setup/clear-down buffers and blocked-date closures are not included in these metrics. Scheduled utilisation, not measured attendance.</p>
+            <p class="nms-muted">Approved booking-session occupancy for the complete selected period, including internal Scout use. Reporting hours: <?php echo (int) $occupancy['opening_hour']; ?>:00–<?php echo (int) $occupancy['closing_hour']; ?>:00. Parent and selected areas are expanded; overlapping hours are counted once. Blocked-date closures reduce available hours. Optional setup/clear-down time is shown separately, not billed. Existing bookings overlapping a closure are flagged. Scheduled utilisation, not measured attendance.</p>
             <?php if ( $occupancy['invalid_refs'] ) : ?><p role="alert">Excluded invalid bookings: <?php echo esc_html( implode( ', ', $occupancy['invalid_refs'] ) ); ?></p><?php endif; endif; ?>
             <table class="wp-list-table widefat fixed striped" style="font-size:0.85rem;">
-                <thead><tr><th>Space</th><th>Hours Booked</th><th>Hours Available</th><th>Utilisation</th></tr></thead>
+                <thead><tr><th>Space</th><th>Hours Booked</th><th>Buffer Hours</th><th>Hours Available</th><th>Utilisation</th></tr></thead>
                 <tbody>
                 <?php foreach ( $occupancy_data as $occ ) : ?>
                     <tr>
-                        <td><?php echo esc_html( $occ['space'] ); ?></td>
+                        <td><?php echo esc_html( $occ['space'] ); ?><?php if($occ['closed_overlap_hours']>0): ?><br><strong>Review: <?php echo esc_html($occ['closed_overlap_hours']); ?> occupied hours overlap closures.</strong><?php endif; ?></td>
                         <td><?php echo esc_html( $occ['hours'] ); ?> hrs</td>
+                        <td><?php echo esc_html( $occ['buffer_hours'] ); ?> hrs</td>
                         <td><?php echo esc_html( $occ['total'] ); ?> hrs</td>
                         <td>
                             <div style="display:flex;align-items:center;gap:8px;">
@@ -722,6 +728,9 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
             <p>OSM uses the existing payout-to-bank reconciliation workflow. CSV exports below are separate, optional downloads; they do not post to OSM or connect another accounting account.</p>
             <?php if ( current_user_can( 'manage_options' ) ) : ?><p><a class="button button-primary" href="<?php echo esc_url( admin_url( 'admin.php?page=mathlin-osm' ) ); ?>">Open OSM integration</a></p><?php endif; ?>
             <h3>Optional accounting CSV downloads</h3>
+            <?php if(current_user_can('manage_options')): $retained_exports=MBS_Export_Snapshots::retained(get_current_user_id()); ?>
+            <p>CSV downloads are frozen snapshots, retained privately for one hour (up to three per administrator). You can resume the same download without mixing in later booking changes. Limits: 20,000 lines and 5 MiB; larger exports fail rather than truncate.</p>
+            <?php if($retained_exports): ?><details><summary>Your retained downloads</summary><ul><?php foreach($retained_exports as$export): ?><li><a href="<?php echo esc_url(MBS_Accounting_Export::download_url($export)); ?>"><?php echo esc_html(strtoupper($export['format']).' — '.$export['created_at']); ?></a> (expires <?php echo esc_html(wp_date('H:i',$export['expires'])); ?>)</li><?php endforeach; ?></ul></details><?php endif; endif; ?>
             <p>Choose a supported CSV layout for review before importing it into another accounting package.</p>
             <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-top:1rem;">
                 <div style="display:flex;gap:0.5rem;align-items:center;">

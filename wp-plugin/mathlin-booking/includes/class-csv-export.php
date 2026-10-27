@@ -1,5 +1,6 @@
 <?php
 if ( ! defined( 'ABSPATH' ) ) exit;
+require_once __DIR__.'/class-export-snapshots.php';
 
 /**
  * CSV Export for bookings.
@@ -20,7 +21,7 @@ class MBS_CSV_Export {
             foreach ( array( 6, 18, 19 ) as $index ) unset( $fields[$index] );
             $fields = array_values( $fields );
         }
-        fputcsv( $output, self::safe_fields( $fields ), ',', '"', '\\' );
+        if(fputcsv( $output, self::safe_fields( $fields ), ',', '"', '\\' )===false||ftell($output)>MBS_Export_Snapshots::MAX_BYTES)throw new RuntimeException('CSV exceeds its 5 MiB safety boundary or could not be written. Choose a smaller range.');
     }
 
     /**
@@ -47,28 +48,17 @@ class MBS_CSV_Export {
             'date_from'        => $date_from,
             'date_to'          => $date_to,
             'search'           => $search,
-            'orderby'          => 'booking_date',
+            'orderby'          => 'id',
             'order'            => 'ASC',
-            'limit'            => 10000,
+            'limit'            => 500,
             'exclude_archived' => false,
         );
 
-        $bookings = MBS_Bookings::get_all( $args );
-
-        // Build filename
-        $parts = array( 'bookings' );
-        if ( $status ) $parts[] = $status;
-        if ( $date_from ) $parts[] = 'from-' . $date_from;
-        if ( $date_to ) $parts[] = 'to-' . $date_to;
-        $filename = implode( '-', $parts ) . '-' . date( 'Y-m-d' ) . '.csv';
-
-        // Output headers
-        header( 'Content-Type: text/csv; charset=utf-8' );
-        header( 'Content-Disposition: attachment; filename="' . $filename . '"' );
-        header( 'Pragma: no-cache' );
-        header( 'Expires: 0' );
-
-        $output = fopen( 'php://output', 'w' );
+        global $wpdb;
+        $output = fopen( 'php://memory', 'w+' );
+        if(!$output)wp_die('Export buffer unavailable.','',array('response'=>503));
+        if($wpdb->query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ')===false||$wpdb->query('START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY')===false){fclose($output);wp_die('Consistent export snapshot unavailable.','',array('response'=>503));}
+        try {
 
         // UTF-8 BOM for Excel compatibility
         fwrite( $output, "\xEF\xBB\xBF" );
@@ -99,8 +89,14 @@ class MBS_CSV_Export {
             'Submitted',
         ) );
 
-        // Data rows
+        // Every page uses the same read-only database snapshot; no partial CSV
+        // escapes on read/size failure. OFFSET is stable within this snapshot.
+        $count=0;
+        for($offset=0;;$offset+=500){
+        $args['offset']=$offset;$bookings=MBS_Bookings::get_all($args);
+        if(!is_array($bookings)||$wpdb->last_error)throw new RuntimeException('Bookings could not be read completely.');
         foreach ( $bookings as $b ) {
+            if(++$count>20000)throw new RuntimeException('Export exceeds 20,000 bookings. Choose a smaller range.');
             self::write_row( $output, array(
                 $b->ref,
                 ucfirst( $b->status ),
@@ -126,8 +122,14 @@ class MBS_CSV_Export {
                 $b->created_at,
             ) );
         }
-
-        fclose( $output );
-        exit;
+        if(count($bookings)<500)break;
+        }
+        if($wpdb->query('COMMIT')===false)throw new RuntimeException('Export snapshot could not finish.');
+        }catch(Throwable $e){$wpdb->query('ROLLBACK');fclose($output);wp_die(esc_html($e->getMessage()).' No CSV was generated.','',array('response'=>503));}
+        rewind($output);$csv=stream_get_contents($output);fclose($output);
+        MBS_Accounting_Export::serve_rest_csv($csv,'bookings');
+        $job=MBS_Export_Snapshots::save($csv,'bookings',get_current_user_id());
+        if(is_wp_error($job))wp_die(esc_html($job->get_error_message()),'',array('response'=>503));
+        wp_safe_redirect(MBS_Accounting_Export::download_url($job));exit;
     }
 }

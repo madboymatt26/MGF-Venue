@@ -43,8 +43,8 @@ $options['mbs_campsite_mode']=1;
 foreach(['Estate','HP Business',' hp BUSINESS '] as $group){$b->organisation=$group;foreach([0,1] as $payments){$options['mbs_payments_enabled']=$payments;$b->status='paid';expect_access(!MBS_Access_Details::is_eligible_for_access($b),'Estate/HP Business excluded even if paid');}}
 $b->organisation='Custom Estate Contact';$b->notes="Estate reservation entered by staff.\nSynthetic booking";expect_access(!MBS_Access_Details::is_eligible_for_access($b),'Staff estate entry excluded with custom organisation');
 $b->notes='';$b->organisation='Estate Scouts';$b->status='confirmed';$options['mbs_payments_enabled']=0;expect_access(MBS_Access_Details::is_eligible_for_access($b),'No substring-based estate guess');$b->organisation='Synthetic Scout Group';
-foreach(['2027-03-28','2027-10-31'] as $date){$b->booking_date=$date;$start=new DateTimeImmutable($date.' 18:00',wp_timezone());$due=$start->modify('-1 day')->setTime(8,0);expect_access(!MBS_Access_Details::is_due($b,$due->modify('-1 second')),'Not early across DST');expect_access(MBS_Access_Details::is_due($b,$due),'08:00 previous local day across DST');expect_access(!MBS_Access_Details::is_due($b,$start),'Never after start');}
-$b->booking_date='2100-01-02';$b->all_day=1;expect_access(MBS_Access_Details::is_due($b,new DateTimeImmutable('2100-01-01 08:00',wp_timezone())),'All-day previous morning');
+foreach(['2027-03-28','2027-10-31'] as $date){$b->booking_date=$b->booking_date_end=$date;$start=new DateTimeImmutable($date.' 18:00',wp_timezone());$due=$start->modify('-1 day')->setTime(8,0);expect_access(!MBS_Access_Details::is_due($b,$due->modify('-1 second')),'Not early across DST');expect_access(MBS_Access_Details::is_due($b,$due),'08:00 previous local day across DST');expect_access(!MBS_Access_Details::is_due($b,$start),'Never after start');}
+$b->booking_date=$b->booking_date_end='2100-01-02';$b->all_day=1;expect_access(MBS_Access_Details::is_due($b,new DateTimeImmutable('2100-01-01 08:00',wp_timezone())),'All-day previous morning');
 $b->all_day=0;$options['mbs_access_hours_before']=48;expect_access(MBS_Access_Details::is_due($b,new DateTimeImmutable('2099-12-31 18:00',wp_timezone())),'Alternative hours window');$options['mbs_access_hours_before']=24;
 expect_access(MBS_Access_Details::queue($b)===true,'Queue accepted');MBS_Access_Details::queue($b);expect_access(count(MBS_Email_Queue::$rows)===1,'Repeated checks share key');$row=current(MBS_Email_Queue::$rows);expect_access(strpos(serialize($row),'SYNTHETIC-CODE')===false,'Code not stored in queued body');
 $email=(object)['reference_id'=>1,'message_key'=>$row['key'],'message_type'=>'access_manual'];$wpdb->rows=[$b];
@@ -62,4 +62,12 @@ expect_access(is_wp_error(MBS_Access_Details::save_settings(['enabled'=>true,'co
 expect_access($wpdb->updates===0,'No sent flags before transport acceptance');
 $GLOBALS['access_event']=(object)['schedule'=>'daily'];(new MBS_Access_Details())->init();expect_access($GLOBALS['access_cleared']==='mbs_daily_access_details'&&$GLOBALS['access_scheduled']['schedule']==='hourly','Old daily UTC schedule replaced by hourly local due checks');
 $GLOBALS['access_event']=(object)['schedule'=>'hourly'];unset($GLOBALS['access_scheduled']);(new MBS_Access_Details())->init();expect_access(!isset($GLOBALS['access_scheduled']),'Existing hourly event preserved');
+$b->status='confirmed';$b->all_day=0;$b->booking_date=$b->booking_date_end='2100-01-02';$b->start_time='18:00:00';$b->end_time='21:00:00';$b->access_sent=0;$b->organisation='Synthetic Scout Group';$b->notes='';
+$now=new DateTimeImmutable('2100-01-01 08:00',wp_timezone());$options['mbs_payments_enabled']=0;
+expect_access(MBS_Access_Details::readiness($b,$now)['state']==='due','Staff/MCP readiness uses same due window');
+$options['mbs_payments_enabled']=1;expect_access(MBS_Access_Details::readiness($b,$now)['state']==='awaiting_payment','Readiness respects enabled payment gate');
+$b->organisation='HP Business';expect_access(MBS_Access_Details::readiness($b,$now)['state']==='excluded_estate','Estate readiness remains excluded');
+$b->organisation='Synthetic Scout Group';$b->status='paid';$b->access_sent=1;
+$readiness=MBS_Access_Details::readiness($b,$now);expect_access($readiness['state']==='transport_accepted'&&strpos(serialize($readiness),'ROTATED-FAKE')===false,'Readiness reports evidence without exposing access secret');
+$b->access_sent=0;$b->booking_date='2100-02-30';expect_access(MBS_Access_Details::readiness($b,$now)['state']==='invalid_schedule','Malformed local dates are not normalised silently');
 echo "Access details: $checks checks passed.\n";

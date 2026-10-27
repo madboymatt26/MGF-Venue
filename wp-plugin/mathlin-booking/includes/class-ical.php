@@ -27,7 +27,9 @@ class MBS_ICal {
                 $status = $booking->status ?? 'confirmed';
                 $lines[] = 'STATUS:' . ( in_array( $status, array( 'cancelled','archived' ), true ) ? 'CANCELLED' : ( $status === 'pending' ? 'TENTATIVE' : 'CONFIRMED' ) );
                 if ( $private ) {
-                    $description = 'Booking Ref: ' . $booking->ref . "\nSpace: " . $booking->space . "\nAttendees: " . $booking->attendees . "\nPurpose: " . $booking->purpose;
+                    $description = 'Booking Ref: ' . $booking->ref . "\nSpace: " . $booking->space;
+                    if(isset($booking->attendees))$description .= "\nAttendees: " . $booking->attendees;
+                    $description .= "\nPurpose: " . $booking->purpose;
                     if ( ! empty( $booking->notes ) ) $description .= "\nNotes: " . $booking->notes;
                     if ( isset( $booking->amount ) ) $description .= "\nAmount: £" . number_format( $booking->amount, 2 );
                     $lines[] = 'DESCRIPTION:' . self::escape( $description );
