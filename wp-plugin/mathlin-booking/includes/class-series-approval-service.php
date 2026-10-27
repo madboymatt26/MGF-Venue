@@ -192,6 +192,10 @@ class MBS_Series_Approval_Service {
         // Invoice emails are already enqueued by MBS_Series_Issuance_Service::issue_within_transaction()
         // (Issue 2: exactly one outbox owner per invoice — the issuance service)
 
+        if(method_exists('MBS_HomeAssistant','stage_many_within_transaction')){
+            $ha=MBS_HomeAssistant::stage_many_within_transaction($affected,'confirmed');
+            if(is_wp_error($ha)){$wpdb->query('ROLLBACK');return$ha;}
+        }
         // ── COMMIT ─────────────────────────────────────────────────────────
         if ( $wpdb->query( 'COMMIT' ) === false ) {
             $wpdb->query( 'ROLLBACK' );
@@ -201,13 +205,11 @@ class MBS_Series_Approval_Service {
         // ── Post-commit: HA notifications ──────────────────────────────────
         foreach ( $affected as $booking ) {
             $booking->status = 'confirmed';
-            MBS_HomeAssistant::notify( $booking );
+            if(!method_exists('MBS_HomeAssistant','stage_many_within_transaction'))MBS_HomeAssistant::notify( $booking );
         }
 
-        // Optionally trigger cron for immediate email processing
-        if ( function_exists( 'spawn_cron' ) ) {
-            spawn_cron();
-        }
+        // The host/WordPress scheduler dispatches after this writer releases its lock.
+        if(method_exists('MBS_Email_Queue','wake'))MBS_Email_Queue::wake();
 
         $final_series = MBS_Series::get( $series_ref );
         return array(
@@ -216,6 +218,8 @@ class MBS_Series_Approval_Service {
             'no_op'        => false,
             'updated'      => (int) $confirmed_count,
             'documents'    => $created_documents,
+            'email_sent'   => false,
+            'email_queued' => (bool)$notify_hirer,
         );
     }
 
@@ -354,7 +358,8 @@ class MBS_Series_Approval_Service {
         $body .= '<h2 style="color:#7413DC;">Your recurring booking is approved</h2>';
         $body .= '<p>Hi ' . esc_html( $series->contact_name ) . ',</p>';
         $body .= '<p>Your recurring booking for <strong>' . esc_html( $series->space ) . '</strong> has been approved.</p>';
-        $body .= '<p><strong>Schedule:</strong> Weekly, ' . esc_html( substr( $series->start_time, 0, 5 ) . '–' . substr( $series->end_time, 0, 5 ) ) . '</p>';
+        $schedule = ! empty( $series->all_day ) ? 'All day' : substr( (string) $series->start_time, 0, 5 ) . '–' . substr( (string) $series->end_time, 0, 5 );
+        $body .= '<p><strong>Session times:</strong> ' . esc_html( $schedule ) . '</p>';
         $body .= '<p><strong>Dates:</strong> ' . count( $occurrences ) . ' sessions confirmed</p>';
         if ( $series->billing_treatment === 'none' ) {
             $body .= '<p>No hire charge or payment is required.</p>';

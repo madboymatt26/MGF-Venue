@@ -565,14 +565,19 @@ class MBS_Series {
             $new_repeat_until, count( $new_dates ), count( $created ), $new_conflicts, $new_blocked, wp_json_encode( $exceptions ), current_time( 'mysql' ), $series_ref, (int) $expected_version
         ) );
         if ( $updated !== 1 ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'series_precondition_failed', 'The recurring series changed during extension; no extension was saved.' ); }
+        if($status==='confirmed'&&method_exists('MBS_HomeAssistant','stage_many_within_transaction')){
+            $ha=MBS_HomeAssistant::stage_many_within_transaction($created,'confirmed');
+            if(is_wp_error($ha)){$wpdb->query('ROLLBACK');return$ha;}
+        }
+        if($notify_hirer){$mail=MBS_Email::notify_series_changed(self::get($series_ref),self::active_occurrences($series_ref));if(is_wp_error($mail)){$wpdb->query('ROLLBACK');return$mail;}}
         if ( $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'transaction_commit_failed', 'Could not commit the series extension.' ); }
+        if($notify_hirer&&method_exists('MBS_Email_Queue','wake'))MBS_Email_Queue::wake();
         foreach ( $created as $ref ) {
             $booking = MBS_Bookings::get( $ref );
-            if ( $booking && $status === 'confirmed' ) { MBS_HomeAssistant::notify( $booking ); }
+            if ( $booking && $status === 'confirmed' && !method_exists('MBS_HomeAssistant','stage_many_within_transaction') ) { MBS_HomeAssistant::notify( $booking ); }
         }
         $fresh = self::get( $series_ref );
         MBS_Audit_Log::log( $series_ref, 'series_extended', 'Extended request to ' . $new_repeat_until . '; created ' . count( $created ) . ' occurrence(s), skipped ' . ( count( $new_dates ) - count( $created ) ) . '.' );
-        if ( $notify_hirer ) MBS_Email::notify_series_changed( $fresh, self::active_occurrences( $series_ref ) );
         return array( 'series' => $fresh, 'created' => $created, 'skipped' => count( $new_dates ) - count( $created ) );
     }
 
@@ -703,39 +708,29 @@ class MBS_Series {
             $wpdb->query( 'ROLLBACK' );
             return new WP_Error( 'series_concurrent_update', 'The recurring series was updated by another request. Refresh and try again.' );
         }
+        if(method_exists('MBS_HomeAssistant','stage_many_within_transaction')){
+            $ha=MBS_HomeAssistant::stage_many_within_transaction($affected,'confirmed');
+            if(is_wp_error($ha)){$wpdb->query('ROLLBACK');return$ha;}
+        }
+        if(!MBS_Audit_Log::log($series_ref,'series_confirmed','Approved recurring series; confirmed '.(int)$updated.' pending occurrences.')){$wpdb->query('ROLLBACK');return new WP_Error('audit_failed','Could not record the series approval.');}
+        $email_queued=false;
+        if($notify_hirer){$mail=MBS_Email::notify_series_confirmed(self::get($series_ref),self::active_occurrences($series_ref));if(is_wp_error($mail)){$wpdb->query('ROLLBACK');return$mail;}$email_queued=true;}
         if ( $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'transaction_commit_failed', 'Could not commit series approval.' ); }
+        if($notify_hirer&&method_exists('MBS_Email_Queue','wake'))MBS_Email_Queue::wake();
 
         foreach ( $affected as $booking ) {
             $booking->status = 'confirmed';
-            MBS_HomeAssistant::notify( $booking );
+            if(!method_exists('MBS_HomeAssistant','stage_many_within_transaction'))MBS_HomeAssistant::notify( $booking );
         }
-        MBS_Audit_Log::log(
-            $series_ref,
-            'series_confirmed',
-            'Approved recurring series; confirmed ' . (int) $updated . ' pending occurrence(s). Preserved all non-pending statuses.'
-        );
-
         $fresh = self::get( $series_ref );
-        $email_sent = false;
-        if ( $notify_hirer && $fresh ) {
-            $email_sent = MBS_Email::notify_series_confirmed( $fresh, self::active_occurrences( $series_ref ) );
-            if ( $email_sent ) {
-                $sent_at = current_time( 'mysql' );
-                $wpdb->update(
-                    $series_table,
-                    array( 'confirmation_sent_at' => $sent_at ),
-                    array( 'series_ref' => $series_ref, 'status' => 'confirmed' )
-                );
-                $fresh->confirmation_sent_at = $sent_at;
-            }
-        }
 
         return array(
             'series'       => $fresh,
             'transitioned' => true,
             'no_op'        => false,
             'updated'      => (int) $updated,
-            'email_sent'   => $email_sent,
+            'email_sent'   => false,
+            'email_queued' => $email_queued,
         );
     }
 
@@ -750,17 +745,11 @@ class MBS_Series {
             return new WP_Error( 'series_not_confirmed', 'Only a confirmed recurring series has an approval email to resend.' );
         }
 
-        $sent = MBS_Email::notify_series_confirmed( $series, self::active_occurrences( $series_ref ) );
-        if ( $sent ) {
-            $sent_at = current_time( 'mysql' );
-            $wpdb->update(
-                $wpdb->prefix . MBS_SERIES_TABLE,
-                array( 'confirmation_sent_at' => $sent_at ),
-                array( 'series_ref' => $series_ref, 'status' => 'confirmed' )
-            );
-        }
-        MBS_Audit_Log::log( $series_ref, 'series_confirmation_resent', $sent ? 'Consolidated approval email resent.' : 'Consolidated approval email queued after immediate send failure.' );
-        return array( 'sent' => $sent, 'queued' => ! $sent );
+        $queued = MBS_Email::notify_series_confirmed( $series, self::active_occurrences( $series_ref ), true );
+        if(is_wp_error($queued))return$queued;
+        if(method_exists('MBS_Email_Queue','wake'))MBS_Email_Queue::wake();
+        MBS_Audit_Log::log($series_ref,'series_confirmation_queued','Explicitly requested approval email queued for transport; not yet accepted.');
+        return array('sent'=>false,'queued'=>true);
     }
 
     /** Safely cancel all occurrences or future occurrences only. */
@@ -895,22 +884,27 @@ class MBS_Series {
             $wpdb->query( 'ROLLBACK' );
             return new WP_Error( 'request_update_failed', 'The request could not be resolved; no cancellation has been applied.' );
         }
+        if(method_exists('MBS_HomeAssistant','stage_many_within_transaction')){
+            $ha=MBS_HomeAssistant::stage_many_within_transaction($affected,'cancelled');
+            if(is_wp_error($ha)){$wpdb->query('ROLLBACK');return$ha;}
+        }
+        if($notify_hirer){
+            $notice_series=self::get($series_ref);
+            $mail=($scope==='from_date'||$scope==='selected')&&$new_status!=='cancelled_future'
+                ?MBS_Email::notify_series_changed($notice_series,self::active_occurrences($series_ref))
+                :MBS_Email::notify_series_cancelled($notice_series,class_exists('MBS_Campsite_Policy')&&MBS_Campsite_Policy::enabled()?$affected:self::active_occurrences($series_ref));
+            if(is_wp_error($mail)){$wpdb->query('ROLLBACK');return$mail;}
+        }
         if ( $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'transaction_commit_failed', 'Could not commit series cancellation.' ); }
+        if($notify_hirer&&method_exists('MBS_Email_Queue','wake'))MBS_Email_Queue::wake();
 
         foreach ( $affected as $booking ) {
-            if ( ! empty( $booking->ha_notified ) ) {
+            if ( ! empty( $booking->ha_notified ) && !method_exists('MBS_HomeAssistant','stage_many_within_transaction') ) {
                 MBS_HomeAssistant::notify_cancelled( $booking );
             }
         }
         MBS_Audit_Log::log( $series_ref, 'series_cancelled', 'Cancelled ' . (int) $cancelled . ' ' . $scope . ' occurrence(s).' . ( $scope === 'from_date' ? ' From ' . $cutoff . ' inclusive; earlier sessions retained.' : '' ) );
         $fresh = self::get( $series_ref );
-        if ( $notify_hirer ) {
-            if ( ( $scope === 'from_date' || $scope === 'selected' ) && $new_status !== 'cancelled_future' ) {
-                MBS_Email::notify_series_changed( $fresh, self::active_occurrences( $series_ref ) );
-            } else {
-                MBS_Email::notify_series_cancelled( $fresh, class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ? $affected : self::active_occurrences( $series_ref ) );
-            }
-        }
         return array(
             'transitioned' => true,
             'no_op'        => false,

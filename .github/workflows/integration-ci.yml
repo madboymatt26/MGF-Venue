@@ -41,6 +41,8 @@ jobs:
         run: sh tests/integration/run-php-suite.sh
       - name: Run invoice document unit tests
         run: php tests/php-invoice-document-unit.php
+      - name: Render synthetic single-page and long invoices with Dompdf
+        run: php tests/php-invoice-layout.php --render
       - name: Verify multi-area selector state transitions
         run: node tests/space-selection-ui.mjs
       - name: Verify calendar booking/viewing separation
@@ -161,6 +163,14 @@ jobs:
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/cross-site-hardening.php --allow-root
       - name: Verify complete exports, privacy pagination and durable delivery
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/review-reliability.php --allow-root
+      - name: Verify invoice itemisation, payment snapshot and atomic HA rollback
+        run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/invoice-layout-reliability.php --allow-root
+      - name: Verify admin change, revision and delivery intents roll back atomically
+        run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/booking-change-atomicity.php --allow-root
+      - name: Verify free-series approvals, cancellations and transport flags
+        run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/series-outbox-atomicity.php --allow-root
+      - name: Verify consistent export under a concurrent booking writer
+        run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/export-snapshots.php --allow-root
       - name: Verify optional extras catalogue and immutable charge snapshots
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/extras-catalogue.php --allow-root
       - name: Run invoice lifecycle matrix after hardening acceptance

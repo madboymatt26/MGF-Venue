@@ -1,5 +1,6 @@
 <?php
 if ( ! defined( 'ABSPATH' ) ) exit;
+require_once __DIR__ . '/class-booking-intervals.php';
 
 /**
  * Access Details — sends access codes to eligible approved bookings.
@@ -104,10 +105,34 @@ class MBS_Access_Details {
      */
     public static function is_due( $booking, $now = null ) {
         $now = $now ?: new DateTimeImmutable( 'now', wp_timezone() );
-        $start = new DateTimeImmutable( $booking->booking_date . ' ' . ( ! empty( $booking->all_day ) ? '00:00:00' : $booking->start_time ), wp_timezone() );
+        try { list($start,$due) = self::delivery_window($booking); } catch(Throwable $e) { return false; }
+        return $now >= $due && $now < $start;
+    }
+
+    private static function delivery_window($booking) {
+        $intervals = MBS_Booking_Intervals::intervals($booking);
+        if(!$intervals)throw new InvalidArgumentException('Booking has no access window.');
+        $start = $intervals[0]['start'];
         $hours = max( 1, (int) get_option( 'mbs_access_hours_before', 24 ) );
         $due = $hours === 24 ? $start->modify( '-1 day' )->setTime( 8, 0 ) : $start->modify( '-' . $hours . ' hours' );
-        return $now >= $due && $now < $start;
+        return array($start,$due);
+    }
+
+    /** Payload-free read model shared by staff and MCP; never returns the code. */
+    public static function readiness( $booking, $now = null ) {
+        $now = $now ?: new DateTimeImmutable( 'now', wp_timezone() );
+        if ( self::is_estate_booking( $booking ) ) return array( 'state'=>'excluded_estate', 'action'=>'No Scout access email is required.' );
+        if ( ! in_array( $booking->status, array('confirmed','deposit_paid','paid'), true ) ) return array( 'state'=>'not_approved', 'action'=>'Access is not available for an unapproved or inactive booking.' );
+        $settings = self::get_settings();
+        if ( ! $settings['enabled'] || $settings['code'] === '' ) return array( 'state'=>'unconfigured', 'action'=>'Review access email settings.' );
+        try {
+            list($start,$due) = self::delivery_window($booking);
+        } catch ( Throwable $e ) { return array( 'state'=>'invalid_schedule', 'action'=>'Review the booking dates and times.' ); }
+        $out = array( 'due_at'=>$due->format(DATE_RFC3339), 'start_at'=>$start->format(DATE_RFC3339) );
+        if ( ! empty($booking->access_sent) ) return $out + array('state'=>'transport_accepted','action'=>'The mail transport accepted access details; this is not proof of inbox delivery.');
+        if ( $now >= $start ) return $out + array('state'=>'window_closed','action'=>'Automatic access delivery stops when the booking starts.');
+        if ( ! self::is_eligible_for_access($booking) ) return $out + array('state'=>'awaiting_payment','action'=>'Review full payment before releasing access.');
+        return $out + ( $now >= $due ? array('state'=>'due','action'=>'Eligible for the access worker; check outbox and scheduler if delayed.') : array('state'=>'scheduled','action'=>'No action; waiting for the access window.') );
     }
 
     /** Booking snapshot only; no code or private notes in the outbox key. */
@@ -133,11 +158,14 @@ class MBS_Access_Details {
 
     /** Revalidate on every retry; never send stale dates, contact or access policy. */
     public static function queued_message( $email ) {
+        global $wpdb;
         $booking = MBS_Bookings::get_by_id( (int) $email->reference_id );
+        if(!empty($wpdb->last_error))return new WP_Error('access_source_unavailable','Access source could not be read; delivery paused, not marked inactive.');
         $settings = self::get_settings();
         if ( $booking && self::is_estate_booking( $booking ) ) return new WP_Error( 'access_estate', 'Estate bookings do not receive Scout access emails.' );
+        if($booking&&$email->message_type==='access_details'&&!empty($booking->access_sent))return new WP_Error('access_already_sent','Access details have already been accepted by transport.');
         if ( ! $booking || ! in_array( $booking->status, array( 'confirmed','deposit_paid','paid' ), true ) ) return new WP_Error( 'access_inactive', 'Access source is no longer approved.' );
-        $start = new DateTimeImmutable( $booking->booking_date . ' ' . ( ! empty( $booking->all_day ) ? '00:00:00' : $booking->start_time ), wp_timezone() );
+        try { list($start) = self::delivery_window($booking); } catch(Throwable $e) { return new WP_Error('access_invalid_schedule','Booking dates or times are invalid.'); }
         if ( $email->message_type === 'access_details' && new DateTimeImmutable( 'now', wp_timezone() ) >= $start ) return new WP_Error( 'access_expired', 'Booking has already started.' );
         if ( ! $booking || ! self::is_eligible_for_access( $booking ) || ! $settings['enabled'] || $settings['code'] === '' ) return new WP_Error( 'access_ineligible', 'Access delivery paused: current booking/settings are not eligible.' );
         if ( strpos( $email->message_key, 'access:' . self::source_hash( $booking ) ) !== 0 ) return new WP_Error( 'access_stale', 'Booking changed; access email snapshot is stale.' );

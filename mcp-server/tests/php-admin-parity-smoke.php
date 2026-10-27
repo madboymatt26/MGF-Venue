@@ -58,7 +58,15 @@ $hook_actions = array_values( array_unique( $hook_actions ) );
 sort( $hook_actions );
 $mapped_actions = array_keys( $handlers );
 sort( $mapped_actions );
-foreach ( array_diff( $hook_actions, $mapped_actions ) as $missing_action ) {
+// A retained browser download has a user/job-specific nonce and Range headers,
+// not an admin-action payload. MCP exports keep returning CSV directly instead.
+$browser_only = array( 'download_accounting' );
+if ( isset( $handlers['download_accounting'] ) ) $errors[] = 'Browser download must not be dispatched with a generic admin-action nonce.';
+$download_source = file_get_contents( $plugin . '/includes/class-accounting-export.php' );
+foreach ( array( "current_user_can('manage_options')", "check_ajax_referer('mbs_export_download_'", 'MBS_Export_Snapshots::read(get_current_user_id()', 'public static function serve_rest_csv' ) as $guard ) {
+    if ( strpos( $download_source, $guard ) === false ) $errors[] = 'Private export download guard missing: ' . $guard;
+}
+foreach ( array_diff( $hook_actions, $mapped_actions, $browser_only ) as $missing_action ) {
     $errors[] = 'Privileged AJAX action missing from REST allow-list: ' . $missing_action;
 }
 

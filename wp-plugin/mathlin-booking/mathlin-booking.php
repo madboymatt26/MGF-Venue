@@ -3,7 +3,7 @@
  * Plugin Name: MGF Venue
  * Plugin URI:  https://github.com/madboymatt26/MGF-Venue
  * Description: Venue booking and management system with Home Assistant integration.
- * Version:     3.41.0
+ * Version:     3.42.0
  * Author:      MGF Venue
  * License:     GPL-2.0+
  * Text Domain: mathlin-booking
@@ -11,7 +11,7 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'MBS_VERSION',    '3.41.0' );
+define( 'MBS_VERSION',    '3.42.0' );
 define( 'MBS_DB_VERSION', '3.33.0-schema-12' );
 define( 'MBS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MBS_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -92,6 +92,7 @@ require_once MBS_PLUGIN_DIR . 'includes/invoice/class-current-account-state.php'
 require_once MBS_PLUGIN_DIR . 'includes/invoice/class-invoice-document-view-model.php';
 require_once MBS_PLUGIN_DIR . 'includes/invoice/class-invoice-builder.php';
 require_once MBS_PLUGIN_DIR . 'includes/invoice/class-document-service.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-booking-change-service.php';
 require_once MBS_PLUGIN_DIR . 'includes/invoice/class-series-issuance-service.php';
 require_once MBS_PLUGIN_DIR . 'includes/invoice/class-document-security.php';
 require_once MBS_PLUGIN_DIR . 'includes/invoice/class-html-renderer.php';

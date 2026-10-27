@@ -27,3 +27,6 @@ gilbertweb-ref
 tests/integration/.cache/
 tests/integration/.worker-*
 tests/integration/.exit-*
+
+# Synthetic invoice visual checks (generated locally, never customer records).
+tmp/pdfs/

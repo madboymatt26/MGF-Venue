@@ -4,8 +4,9 @@ function wp_timezone(){return new DateTimeZone('Europe/London');}
 function get_option($key,$default=false){return$GLOBALS['options'][$key]??$default;}
 function check($ok,$message){$GLOBALS['checks']++;if(!$ok)throw new RuntimeException($message);}
 class MBS_Campsite_Policy{public static $enabled=true;public static function enabled(){return self::$enabled;}public static function span($b){return$b->span??'daily';}}
-class MBS_Space_Selection{public static function members($space){return explode(' + ',$space);}}
+class MBS_Space_Selection{public static function members($space){return explode(' + ',$space);}public static function overlaps($a,$b){return$a===$b||$a==='Whole Park'||$b==='Whole Park';}}
 require __DIR__.'/../wp-plugin/mathlin-booking/includes/class-usage-report.php';
+require __DIR__.'/../wp-plugin/mathlin-booking/includes/class-booking-buffers.php';
 $spaces=array('Whole Park'=>array('parent'=>null),'A'=>array('parent'=>'Whole Park'),'B'=>array('parent'=>'Whole Park'));
 $b=(object)array('id'=>1,'ref'=>'B1','space'=>'Whole Park','booking_date'=>'2027-07-10','booking_date_end'=>'2027-07-12','start_time'=>'00:00:00','end_time'=>'23:59:00','all_day'=>1,'status'=>'confirmed','attendees'=>10);
 $before=serialize($b);$report=MBS_Usage_Report::calculate(array($b),$spaces,'2027-07-10','2027-07-12');
@@ -20,4 +21,13 @@ check($report['rows'][1]['reservations']===2&&$report['rows'][1]['attendees_esti
 $c->status='pending';$report=MBS_Usage_Report::calculate(array($c),$spaces,'2027-07-10','2027-07-10');check($report['rows'][0]['hours']===0.0,'pending requests excluded');
 $bad=clone$a;$bad->booking_date='2027-02-30';$report=MBS_Usage_Report::calculate(array($bad),$spaces,'2027-07-10','2027-07-10');check($report['invalid_refs']===array('B1'),'invalid source reported explicitly');
 $options['mbs_report_open_hour']=0;$options['mbs_report_close_hour']=24;$dst=clone$b;$dst->booking_date=$dst->booking_date_end='2027-03-28';$report=MBS_Usage_Report::calculate(array($dst),$spaces,'2027-03-28','2027-03-28');check($report['rows'][0]['hours']===23.0&&$report['rows'][0]['total']===23.0,'DST day uses actual elapsed occupied and available time');
+$options['mbs_report_open_hour']=8;$options['mbs_report_close_hour']=20;
+$options['mbs_buffers_enabled']=1;$options['mbs_resource_buffers']=array('A'=>array('before'=>30,'after'=>30));
+$report=MBS_Usage_Report::calculate(array($a),$spaces,'2027-07-10','2027-07-10');
+check($report['rows'][1]['hours']===2.0&&$report['rows'][1]['buffer_hours']===1.0&&$report['rows'][1]['physical_hours']===3.0,'buffer occupancy separate from service hours');
+check($report['rows'][2]['physical_hours']===0.0,'buffer does not occupy sibling');
+$blocks=array((object)array('date_from'=>'2027-07-10','date_to'=>'2027-07-10','space'=>'A'));
+$report=MBS_Usage_Report::calculate(array($a),$spaces,'2027-07-10','2027-07-10',$blocks);
+check($report['rows'][1]['total']===0.0&&$report['rows'][1]['hours']===0.0&&$report['rows'][1]['closed_overlap_hours']===3.0,'closure removes capacity and explicitly reports existing overlap');
+check($report['rows'][2]['total']===12.0,'child closure does not close sibling');
 echo "PASS {$checks} usage-report assertions\n";

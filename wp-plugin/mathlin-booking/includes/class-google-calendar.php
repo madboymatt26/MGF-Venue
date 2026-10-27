@@ -1,6 +1,7 @@
 <?php
 /** Protected Google projection. Estate references are immutable; owned lifecycle is opt-in. */
 if ( ! defined( 'ABSPATH' ) ) exit;
+require_once __DIR__.'/class-booking-intervals.php';
 require_once __DIR__ . '/class-calendar-reference-links.php';
 
 class MBS_Google_Calendar {
@@ -190,19 +191,16 @@ class MBS_Google_Calendar {
             $source[$ref] = (string) $b->status;
             if ( ! in_array( $b->status, $pending ? array( 'confirmed', 'paid', 'deposit_paid', 'pending' ) : array( 'confirmed', 'paid', 'deposit_paid' ), true ) ) continue;
             try {
-            $first = self::date( $b->booking_date, $zone ); $last = self::date( $b->booking_date_end ?: $b->booking_date, $zone );
-            if ( $last < $first || $first->diff( $last )->days > 730 ) self::error( 'Invalid booking date range: ' . $ref );
             $meta = is_string( $b->custom_fields ?? null ) ? json_decode( $b->custom_fields, true ) : (array) ( $b->custom_fields ?? array() );
             $continuous = ( $meta['_mbs_campsite_span'] ?? '' ) === 'continuous';
-            for ( $day = $first; $day <= $last; $day = $day->modify( '+1 day' ) ) {
-                $end_day = $continuous || ! empty( $b->all_day ) ? $last : $day;
-                $key = $ref . '|' . ( $continuous || ! empty( $b->all_day ) ? 'stay' : $day->format( 'Y-m-d' ) );
+            // Preserve existing event keys, titles and ownership. Only interval
+            // calculation is shared; no linkage or Google event is rewritten here.
+            foreach ( MBS_Booking_Intervals::intervals($b,$zone,730) as $interval ) {
+                $key = $ref . '|' . ( $continuous || ! empty( $b->all_day ) ? 'stay' : $interval['day'] );
                 if ( ! empty( $b->all_day ) ) {
-                    $start = array( 'date' => $day->format( 'Y-m-d' ) ); $end = array( 'date' => $end_day->modify( '+1 day' )->format( 'Y-m-d' ) );
+                    $start = array( 'date' => $interval['start']->format( 'Y-m-d' ) ); $end = array( 'date' => $interval['end']->format( 'Y-m-d' ) );
                 } else {
-                    $a = self::wall_time( $day, $b->start_time, $zone ); $z = self::wall_time( $end_day, $b->end_time, $zone );
-                    if ( $z <= $a && $end_day == $day ) $z = $z->modify( '+1 day' );
-                    if ( $z <= $a ) self::error( 'Invalid booking endpoints: ' . $ref );
+                    $a = $interval['start']; $z = $interval['end'];
                     $start = array( 'dateTime' => $a->format( DATE_RFC3339 ), 'timeZone' => $zone->getName() ); $end = array( 'dateTime' => $z->format( DATE_RFC3339 ), 'timeZone' => $zone->getName() );
                 }
                 $end_instant = new DateTimeImmutable( $end['date'] ?? $end['dateTime'], $zone );
@@ -216,7 +214,6 @@ class MBS_Google_Calendar {
                     $legacy[$key] = MBS_Calendar_Reference_Links::leaves( $b, $row_map );
                     $imports[$key] = isset( $meta['_mbs_legacy'] ) || isset( $meta['_mbs_whole_park_sources'] ) || isset( $meta['_mbs_multiday_sources'] );
                 }
-                if ( $continuous || ! empty( $b->all_day ) ) break;
             }
             } catch ( Throwable $e ) {
                 $source[$ref] = 'exception';

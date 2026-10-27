@@ -191,10 +191,13 @@ class MBS_Campsite_Policy {
             }
             $snapshot = reset( $changes ); $snapshot['version'] = (int) $series->version + 1; $snapshot['updated_at'] = current_time( 'mysql' );
             if ( $wpdb->update( $table, $snapshot, array( 'series_ref' => $ref, 'version' => (int) $version ) ) !== 1 ) throw new RuntimeException( 'The series changed concurrently. Nothing was saved.' );
+            $ha=MBS_HomeAssistant::stage_many_within_transaction(array_keys($changes));
+            if(is_wp_error($ha))throw new RuntimeException($ha->get_error_message());
+            if(!MBS_Audit_Log::log($ref,'campsite_series_edited','Updated '.count($changes).' future sessions. Agreed rule exception: '.($exception?'yes':'no')))throw new RuntimeException('Could not record the campsite schedule audit.');
+            if($notify){$mail=MBS_Email::notify_series_changed(MBS_Series::get($ref),MBS_Series::active_occurrences($ref));if(is_wp_error($mail))throw new RuntimeException($mail->get_error_message());}
             if ( $wpdb->query( 'COMMIT' ) === false ) throw new RuntimeException( 'Could not commit the schedule change.' );
-        } catch ( Exception $error ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'campsite_edit_failed', $error->getMessage() ); }
-        MBS_Audit_Log::log( $ref, 'campsite_series_edited', 'Updated ' . count( $changes ) . ' future sessions. Agreed rule exception: ' . ( $exception ? 'yes' : 'no' ) );
-        if ( $notify ) MBS_Email::notify_series_changed( MBS_Series::get( $ref ), MBS_Series::active_occurrences( $ref ) );
+            if($notify)MBS_Email_Queue::wake();
+        } catch ( Throwable $error ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'campsite_edit_failed', $error->getMessage() ); }
         return array( 'updated' => count( $changes ), 'skipped' => array() );
     }
 

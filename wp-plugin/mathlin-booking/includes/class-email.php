@@ -3,6 +3,26 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 
 class MBS_Email {
 
+    /** Stable source facts, excluding delivery flags and live payment receipts. */
+    public static function change_source_hash($booking) {
+        $facts=array();
+        foreach(array('ref','status','name','organisation','email','phone','address','space','booking_date','booking_date_end','start_time','end_time','all_day','kitchen','scout_use','attendees','pricing_tier','amount','purpose','notes','custom_fields','current_invoice_document_id') as $key) $facts[$key]=(string)($booking->$key??'');
+        return hash('sha256',wp_json_encode($facts));
+    }
+    public static function enqueue_booking_change($booking,$kind,$document_id=0) {
+        if(!in_array($kind,array('booking_edit','request_change','request_cancel'),true))return new WP_Error('change_message_type','Unknown booking-change notification.');
+        $key=$kind.':'.self::change_source_hash($booking);
+        $subject='Booking updated — '.$booking->ref;
+        $body='<p>Booking details will be prepared from the committed source at dispatch.</p>';
+        if($kind==='request_cancel'){
+            $message=self::build_cancelled_message($booking,'Your cancellation request has been approved.');
+            $subject=$message['subject'];$body=$message['body'];
+        }
+        $headers=self::email_headers();
+        $meta=$document_id>0?array('document_id'=>(int)$document_id,'format'=>'pdf'):null;
+        return MBS_Email_Queue::enqueue($booking->email,$subject,$body,$headers,$key,MBS_Email_Queue::compute_payload_hash($booking->email,$subject,$body,$headers,$meta),$meta,array('message_type'=>$kind,'reference_type'=>'booking','reference_id'=>(int)$booking->id));
+    }
+
     /**
      * Get the admin email address(es).
      * Returns the primary email. For multiple recipients, use get_notification_emails().
@@ -231,6 +251,10 @@ class MBS_Email {
      * Send a cancellation/denial notification to the booker.
      */
     public static function notify_cancelled( $booking, $reason = '' ) {
+        $message = self::build_cancelled_message($booking,$reason);
+        self::send($booking->email,$message['subject'],$message['body']);
+    }
+    public static function build_cancelled_message( $booking, $reason = '' ) {
         $tpl       = MBS_Email_Templates::get_template( 'booking_cancelled' );
         $extra     = array( '{reason}' => $reason ? 'Reason: ' . $reason : '' );
         $subject   = MBS_Email_Templates::replace_placeholders( $tpl['subject'], $booking, $extra );
@@ -241,7 +265,7 @@ class MBS_Email {
         $body .= nl2br( esc_html( $body_text ) );
         $body .= self::booking_table_obj( $booking );
         $body .= self::footer();
-        self::send( $booking->email, $subject, $body );
+        return array('subject'=>$subject,'body'=>$body,'headers'=>self::email_headers());
     }
 
     public static function notify_paid( $booking ) {
@@ -354,7 +378,7 @@ class MBS_Email {
     }
 
     /** Send the single approval email for a first-class recurring series. */
-    public static function notify_series_confirmed( $series, $bookings ) {
+    public static function notify_series_confirmed( $series, $bookings, $manual = false ) {
         $template = MBS_Email_Templates::get_template( 'series_confirmed' );
         $data = self::series_placeholder_data( $series );
         $subject = MBS_Email_Templates::replace_placeholders( $template['subject'], $data );
@@ -376,7 +400,10 @@ class MBS_Email {
         }
         $body .= '<p>If you have any questions, just reply to this email.</p>';
         $body .= self::footer();
-        return self::send( $series->contact_email, $subject, $body );
+        $headers=self::email_headers();
+        $meta=array('series_ref'=>$series->series_ref,'series_version'=>(int)$series->version);
+        $key='series_confirmation:'.$series->series_ref.':v'.$series->version.($manual?':manual'.substr(hash('sha256',wp_generate_uuid4()),0,16):'');
+        return MBS_Email_Queue::enqueue($series->contact_email,$subject,$body,$headers,$key,MBS_Email_Queue::compute_payload_hash($series->contact_email,$subject,$body,$headers,$meta),$meta,array('message_type'=>'series_confirmation','reference_type'=>'series','reference_id'=>(int)$series->id));
     }
 
     /** Send one customer-branded notification for an issued invoice. */
@@ -432,7 +459,10 @@ class MBS_Email {
             $body .= self::series_dates_html( $dates, false );
         }
         $body .= '<p>If you have any questions, just reply to this email.</p>' . self::footer();
-        return self::send( $series->contact_email, $subject, $body );
+        $headers=self::email_headers();
+        $meta=array('series_ref'=>$series->series_ref,'series_version'=>(int)$series->version,'state_template'=>$type);
+        $key='series_state:'.hash('sha256',$type.'|'.$series->series_ref.'|'.$series->version.'|'.$body);
+        return MBS_Email_Queue::enqueue($series->contact_email,$subject,$body,$headers,$key,MBS_Email_Queue::compute_payload_hash($series->contact_email,$subject,$body,$headers,$meta),$meta,array('message_type'=>'series_state','reference_type'=>'series','reference_id'=>(int)$series->id));
     }
 
     /** Send the sole automatic reminder for a consolidated invoice. */

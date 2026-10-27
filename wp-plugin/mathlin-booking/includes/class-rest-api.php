@@ -1149,7 +1149,7 @@ class MBS_Rest_API {
             rest_sanitize_boolean( $request->get_param( 'notify_hirer' ) )
         );
         if ( is_wp_error( $result ) ) return $result;
-        $response = array( 'series' => $this->format_admin_series( $result['series'] ), 'changed' => ! empty( $result['transitioned'] ), 'notified_hirer' => ! empty( $result['email_sent'] ), 'idempotent_replay' => false );
+        $response = array( 'series' => $this->format_admin_series( $result['series'] ), 'changed' => ! empty( $result['transitioned'] ), 'notified_hirer' => ! empty( $result['email_sent'] ), 'notification_queued'=>!empty($result['email_queued']), 'idempotent_replay' => false );
         set_transient( $key, $response, DAY_IN_SECONDS );
         return rest_ensure_response( $response );
     }
@@ -1501,6 +1501,7 @@ class MBS_Rest_API {
         $safe['invoice_scope'] = $series_managed ? 'series' : ( (float) $booking->amount > 0 ? 'booking' : 'none' );
         $safe['invoice_document_id'] = ! $series_managed && $document_id ? $document_id : null;
         $safe['pdf_invoice_available'] = ! $series_managed && $document_id > 0;
+        $safe['access_readiness'] = MBS_Access_Details::readiness( $booking );
         return $safe;
     }
 

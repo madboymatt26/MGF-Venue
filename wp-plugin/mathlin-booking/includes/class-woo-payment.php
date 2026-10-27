@@ -99,6 +99,7 @@ class MBS_Woo_Payment {
      * @return string  Checkout URL, or empty string if WooCommerce unavailable
      */
     public static function generate_payment_url( $booking ) {
+        if(isset($booking->status)&&!in_array($booking->status,array('confirmed','deposit_paid','paid'),true))return '';
         if ( ! self::is_available() ) return '';
 
         // UX-002: Don't generate payment URLs for £0 bookings (scout use etc)

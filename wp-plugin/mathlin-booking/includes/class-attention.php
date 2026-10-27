@@ -18,10 +18,16 @@ class MBS_Attention {
             else foreach($invoices as$i)$items[]=array('kind'=>'payment','ref'=>$i->invoice_ref,'since'=>$i->due_at,'finding'=>'Issued invoice overdue under its existing due date','action'=>'Review outstanding balance and reconciliation before chasing','url'=>admin_url('admin.php?page=mathlin-analytics'));
         }
         $mail=MBS_Email_Queue::get_stats();
-        if(!empty($mail['failed']))$items[]=array('kind'=>'email','ref'=>'Outbox','since'=>null,'finding'=>(int)$mail['failed'].' emails failed or exhausted retries','action'=>'Review delivery and current booking state before retrying','url'=>admin_url('admin.php?page=mathlin-health'));
+        if(isset($mail['available'])&&!$mail['available'])$issues[]='Email outbox could not be read; delivery state is unknown.';
+        if(!empty($mail['failed']))$items[]=array('kind'=>'email','ref'=>'Outbox','since'=>null,'finding'=>(int)$mail['failed'].' emails failed or became ineligible/stale','action'=>'Review delivery and current booking state before retrying; do not resend obsolete messages','url'=>admin_url('admin.php?page=mathlin-health'));
         foreach(MBS_Integration_Health::job_status()as$hook=>$state)if($state['needs_attention'])$items[]=array('kind'=>'scheduler','ref'=>$hook,'since'=>$state['started_at']??null,'finding'=>'Scheduled job is overdue or has not finished','action'=>'Inspect scheduler and hosting logs','url'=>admin_url('admin.php?page=mathlin-health'));
         $google=MBS_Google_Calendar::status();
         if($google['connected']&&preg_match('/(\d+) (?:need|needs) review/',$google['last_result'],$match)&&(int)$match[1]>0)$items[]=array('kind'=>'calendar','ref'=>'Protected calendar references','since'=>$google['last_success'],'finding'=>$match[1].' references need a decision; this does not mean sync is paused','action'=>'Compare original references, spaces and dates; preserve estate events','url'=>admin_url('admin.php?page=mathlin-google-calendar&sync_view=review'));
+        foreach($items as&$item){
+            $item['owner_role']=in_array($item['kind'],array('email','scheduler'),true)?'site_administrator':'booking_manager';
+            $item['age_seconds']=null;
+            if(!empty($item['since'])){try{$since=is_numeric($item['since'])?(int)$item['since']:(new DateTimeImmutable($item['since'],wp_timezone()))->getTimestamp();$item['age_seconds']=max(0,time()-$since);}catch(Throwable $e){$issues[]='An attention-item date could not be interpreted.';}}
+        }unset($item);
         return array('checked_at'=>gmdate(DATE_RFC3339),'per_category_limit'=>$limit,'items'=>$items,'partial_failures'=>$issues,'read_only'=>true);
     }
     public static function render(){
