@@ -1,6 +1,6 @@
 <?php
 /** Reproducible local benchmark, not a production load test. Fixtures rolled back. */
-if(!defined('WP_CLI')||!WP_CLI||!preg_match('/127\.0\.0\.1|localhost|wordpress/',home_url()))throw new RuntimeException('Disposable runtime required.');
+if(!defined('WP_CLI')||!WP_CLI||!in_array(strtolower((string)parse_url(home_url(),PHP_URL_HOST)),array('127.0.0.1','localhost','wordpress'),true))throw new RuntimeException('Disposable runtime required.');
 global $wpdb;$table=$wpdb->prefix.MBS_TABLE;$spaces=get_option('mbs_spaces',null);$mode=get_option('mbs_campsite_mode',null);$results=array();
 try{
     update_option('mbs_spaces',array('Performance Test'=>array('rate_hourly'=>0,'rate_daily'=>0,'capacity'=>100)));update_option('mbs_campsite_mode',0);

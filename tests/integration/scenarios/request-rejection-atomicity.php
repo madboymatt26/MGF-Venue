@@ -1,5 +1,5 @@
 <?php
-if(!defined('WP_CLI')||!WP_CLI||!preg_match('/127\.0\.0\.1|localhost|wordpress/',home_url()))throw new RuntimeException('Disposable runtime required.');
+if(!defined('WP_CLI')||!WP_CLI||!in_array(strtolower((string)parse_url(home_url(),PHP_URL_HOST)),array('127.0.0.1','localhost','wordpress'),true))throw new RuntimeException('Disposable runtime required.');
 global $wpdb;$bookings=$wpdb->prefix.MBS_TABLE;$requests=$wpdb->prefix.'mathlin_mod_requests';$queue=$wpdb->prefix.'mathlin_email_queue';$ids=array();$ref='';$fail='';$checks=0;$mail=0;$prior=$wpdb->suppress_errors(true);
 $assert=static function($ok,$why)use(&$checks){$checks++;if(!$ok)throw new RuntimeException($why);};
 $filter=static function($sql)use(&$fail,$queue){if($fail==='queue'&&strpos($sql,'INSERT INTO')!==false&&strpos($sql,$queue)!==false)return'INVALID SYNTHETIC QUEUE INSERT';if($fail==='audit'&&strpos($sql,'INSERT INTO')!==false&&strpos($sql,'mathlin_audit_log')!==false)return'INVALID SYNTHETIC AUDIT INSERT';return$sql;};

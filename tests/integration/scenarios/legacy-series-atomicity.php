@@ -1,6 +1,6 @@
 <?php
 /** Disposable DB only; every fixture uses reserved 2098 dates and invalid mail. */
-if(!defined('WP_CLI')||!WP_CLI||!preg_match('/127\.0\.0\.1|localhost|wordpress/',home_url()))throw new RuntimeException('Disposable runtime required.');
+if(!defined('WP_CLI')||!WP_CLI||!in_array(strtolower((string)parse_url(home_url(),PHP_URL_HOST)),array('127.0.0.1','localhost','wordpress'),true))throw new RuntimeException('Disposable runtime required.');
 global $wpdb;$table=$wpdb->prefix.MBS_TABLE;$parents=$wpdb->prefix.MBS_SERIES_TABLE;$checks=0;$ref='';$refs=array();$fail='';$updates=0;$prior=$wpdb->suppress_errors(true);
 $saved=array();foreach(array('mbs_spaces','mbs_campsite_mode','mbs_min_duration_hours')as$key)$saved[$key]=get_option($key,null);
 $assert=static function($ok,$why)use(&$checks){$checks++;if(!$ok)throw new RuntimeException($why);};
