@@ -1429,10 +1429,10 @@ class MBS_Bookings {
             if ( ! self::is_legacy_scout_series( $series_id ) ) return new WP_Error( 'canonical_series_required', 'Choose an internal Scout series.' );
             if ( $wpdb->query( 'START TRANSACTION' ) === false ) return new WP_Error( 'legacy_start_failed', 'Could not start the series change.' );
             try {
-                $rows = $wpdb->get_results( $wpdb->prepare( 'SELECT ref,scout_use FROM ' . $wpdb->prefix . MBS_TABLE . ' WHERE series_id=%s ORDER BY id LIMIT 1001 FOR UPDATE', $series_id ) );
+                $rows = $wpdb->get_results( $wpdb->prepare( 'SELECT ref,scout_use,amount,current_invoice_document_id FROM ' . $wpdb->prefix . MBS_TABLE . ' WHERE series_id=%s ORDER BY id LIMIT 1001 FOR UPDATE', $series_id ) );
                 if ( ! is_array( $rows ) || $wpdb->last_error || ! $rows || count( $rows ) > 1000 ) throw new RuntimeException( 'Cannot verify the complete Scout series (maximum 1,000 occurrences). Nothing changed.' );
                 foreach ( $rows as $row ) {
-                    if ( empty( $row->scout_use ) ) throw new RuntimeException( 'This action is limited to internal Scout occurrences.' );
+                    if ( empty( $row->scout_use ) || (float) $row->amount !== 0.0 || ! empty( $row->current_invoice_document_id ) ) throw new RuntimeException( 'This action is limited to no-charge internal Scout occurrences without issued invoices.' );
                 }
                 $bookings = $wpdb->prefix . MBS_TABLE;
                 $allocation = $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE;

@@ -17,6 +17,8 @@ try{
     $created=MBS_Bookings::create_recurring($data,'2098-03-17',true);$assert(!is_wp_error($created),'Create series fixture');$ref=$created['series_id'];$refs=$created['refs'];
     $series=MBS_Series::get($ref);$approved=MBS_Series::approve($ref,'pending',(int)$series->version,false);$assert(!is_wp_error($approved),'Approve fixture without mail');
     $before=wp_json_encode(MBS_Bookings::get_series($ref));
+    $wpdb->update($table,array('amount'=>'1.00'),array('ref'=>$refs[0]));$r=MBS_Bookings::cancel_series_future($ref);$assert(is_wp_error($r),'Chargeable row cannot use the free Scout bulk path');$wpdb->update($table,array('amount'=>'0.00'),array('ref'=>$refs[0]));
+    $before=wp_json_encode(MBS_Bookings::get_series($ref));
     $fail='second_update';$r=MBS_Bookings::update_series_future($ref,array('purpose'=>'Changed'));$fail='';$assert(is_wp_error($r)&&wp_json_encode(MBS_Bookings::get_series($ref))===$before,'Second-row failure rolls back first-row edit');
     $fail='audit';$r=MBS_Bookings::cancel_series_future($ref);$fail='';$assert(is_wp_error($r)&&wp_json_encode(MBS_Bookings::get_series($ref))===$before,'Audit failure rolls back bulk cancellation');
     $r=MBS_Bookings::update_series_future($ref,array('start_time'=>'25:00'));$assert(is_wp_error($r),'Invalid times fail before mutation');
