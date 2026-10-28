@@ -703,7 +703,47 @@ button.mbs-invoice-card__ref:hover { color: #5a0fb0; }
     .mbs-preview-table tbody td::before { content: attr(data-label); font-weight: 600; color: #555; margin-right: 8px; }
 }
 /* Section navigation supplements, but never replaces, the original page URLs. */
-.mbs-section-navigation .nav-tab-wrapper { display:flex; flex-wrap:wrap; gap:4px; }
-.mbs-section-navigation .nav-tab { float:none; margin:0; white-space:normal; }
-.mbs-section-navigation .nav-tab-active { border-top:3px solid #7413dc; }
+.mbs-section-navigation .nav-tab-wrapper { display:flex; flex-wrap:wrap; gap:4px; width:fit-content; max-width:100%; box-sizing:border-box; padding:6px; background:#fff; border:1px solid var(--border); border-radius:10px; box-shadow:0 1px 4px rgba(0,0,0,.06); }
+.mbs-section-navigation .nav-tab { float:none; margin:0; padding:9px 14px; border:0; border-radius:6px; background:transparent; color:#50575e; font-weight:600; line-height:1.4; white-space:normal; }
+.mbs-section-navigation .nav-tab:hover { background:#f5f0ff; color:var(--scout-purple); }
+.mbs-section-navigation .nav-tab.nav-tab-active { background:var(--scout-purple); color:#fff; }
 .mbs-section-navigation a:focus-visible { outline:3px solid #7413dc; outline-offset:2px; }
+
+/* Shared panel interior: one padding layer, including nested forms and tables. */
+.mbs-admin .mbs-card-body { padding:1.25rem 1.5rem; min-width:0; overflow-wrap:anywhere; }
+.mbs-admin .mbs-card-body > :first-child { margin-top:0; }
+.mbs-admin .mbs-card-body > :last-child { margin-bottom:0; }
+.mbs-admin .mbs-table-scroll { max-width:100%; overflow-x:auto; }
+.mbs-admin .mbs-panel-table { width:100%; margin:0; }
+.mbs-admin .mbs-panel-table thead th { background:var(--scout-purple); color:#fff; font-weight:600; text-align:left; }
+.mbs-admin .mbs-panel-table tbody th { background:#f9f7ff; color:#1d2327; font-weight:600; text-align:left; }
+.mbs-admin .mbs-panel-table th, .mbs-admin .mbs-panel-table td { padding:10px 12px; vertical-align:top; overflow-wrap:anywhere; }
+.mbs-admin .mbs-panel-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:16px; }
+.mbs-admin .mbs-list-pagination { display:flex; flex-wrap:wrap; justify-content:flex-end; align-items:center; gap:12px; margin:16px 0; }
+.mbs-admin .mbs-disclosure { margin:16px 0 24px; padding:0; }
+.mbs-admin .mbs-disclosure > summary { cursor:pointer; list-style:none; justify-content:flex-start; gap:10px; }
+.mbs-admin .mbs-disclosure > summary::-webkit-details-marker { display:none; }
+.mbs-admin .mbs-disclosure > summary::before { content:'›'; display:inline-block; font-size:1.5rem; line-height:1; transition:transform .15s; }
+.mbs-admin .mbs-disclosure[open] > summary::before { transform:rotate(90deg); }
+.mbs-admin .mbs-disclosure > summary:focus-visible { outline:3px solid #ffdd00; outline-offset:-5px; }
+.mbs-admin .mbs-inline-disclosure { margin-top:16px; padding:12px; background:#f9f7ff; border:1px solid var(--border); border-radius:6px; }
+.mbs-admin .mbs-inline-disclosure > summary { cursor:pointer; color:var(--scout-purple); font-weight:600; }
+.mbs-admin .mbs-extras-settings input.regular-text { box-sizing:border-box; max-width:100%; }
+.mbs-admin .mbs-attention .mbs-panel-table { min-width:560px; }
+.mbs-admin .mbs-extras-settings .mbs-panel-table { min-width:580px; }
+.mbs-admin .mbs-buffer-table input { box-sizing:border-box; width:90px; max-width:100%; }
+.mbs-admin .mbs-operational-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin:16px 0; }
+.mbs-admin .mbs-operational-fields p { margin:0; }
+.mbs-admin .mbs-operational-fields label { display:block; margin-bottom:6px; font-weight:600; }
+.mbs-admin .mbs-operational-fields input { width:100%; max-width:160px; }
+.mbs-admin .nms-settings-layout { width:100%; min-width:0; }
+.mbs-admin .mbs-settings-table-scroll { margin:0 1.5rem; max-width:calc(100% - 3rem); }
+.mbs-admin .mbs-settings-table-scroll > table { width:100%; margin:0; }
+.mbs-admin .nms-settings-layout .regular-text, .mbs-admin .nms-settings-layout textarea, .mbs-admin .nms-settings-layout select { box-sizing:border-box; max-width:100%; }
+@media(max-width:782px) {
+    .mbs-admin .mbs-card-body { padding:1rem; }
+    .mbs-admin .mbs-settings-table-scroll { margin:0 1rem; max-width:calc(100% - 2rem); }
+    .mbs-admin .mbs-operational-fields { grid-template-columns:minmax(0,1fr); }
+    .mbs-admin .mbs-buffer-table th, .mbs-admin .mbs-buffer-table td { padding:8px; }
+}
+@media(prefers-reduced-motion:reduce) { .mbs-admin .mbs-disclosure > summary::before { transition:none; } }

@@ -9,31 +9,38 @@
         <?php $operations = MBS_Integration_Health::operational_settings(); ?>
         <div class="nms-card">
             <div class="nms-card-header"><h2>Operational reporting and compatibility</h2></div>
+            <div class="mbs-card-body">
             <p>Reporting hours affect utilisation estimates only, not booking availability or charges. The legacy option protects the original booking system for comparison; it does not activate or synchronise that plugin.</p>
             <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
                 <?php wp_nonce_field('mbs_operational_settings'); ?>
                 <input type="hidden" name="action" value="mbs_operational_settings"><input type="hidden" name="expected" value="<?php echo esc_attr(hash('sha256',wp_json_encode($operations))); ?>">
-                <p><label>Reporting opens at <input type="number" name="report_open_hour" min="0" max="23" value="<?php echo (int)$operations['report_open_hour']; ?>" required> hour</label></p>
-                <p><label>Reporting closes at <input type="number" name="report_close_hour" min="1" max="24" value="<?php echo (int)$operations['report_close_hour']; ?>" required> hour</label></p>
+                <div class="mbs-operational-fields">
+                <p><label for="mbs-report-open">Reporting opens (hour, 0–23)</label><input id="mbs-report-open" type="number" name="report_open_hour" min="0" max="23" value="<?php echo (int)$operations['report_open_hour']; ?>" required></p>
+                <p><label for="mbs-report-close">Reporting closes (hour, 1–24)</label><input id="mbs-report-close" type="number" name="report_close_hour" min="1" max="24" value="<?php echo (int)$operations['report_close_hour']; ?>" required></p>
+                </div>
                 <?php if(MBS_Campsite_Policy::enabled()): ?><p><label>Original booking system read-only protection <select name="legacy_read_only"><option value="1" <?php selected($operations['legacy_read_only'],1); ?>>Enabled</option><option value="0" <?php selected($operations['legacy_read_only'],0); ?>>Disabled</option></select></label></p><p class="description">Keep protection enabled while comparing legacy data. Disabling it allows the old plugin to write if separately activated.</p><?php else: ?><input type="hidden" name="legacy_read_only" value="0"><?php endif; ?>
                 <h3>Optional setup and clear-down buffers</h3>
                 <p>Default off. Buffers reserve physical occupancy only; invoice and booking times stay unchanged. Review existing adjacent bookings before enabling. For a whole-venue booking, set the whole-venue resource rule explicitly.</p>
                 <p><label>Buffers <select name="buffers_enabled"><option value="0" <?php selected($operations['buffers_enabled'],0); ?>>Disabled</option><option value="1" <?php selected($operations['buffers_enabled'],1); ?>>Enabled</option></select></label></p>
-                <table class="widefat"><thead><tr><th>Space</th><th>Setup minutes</th><th>Clear-down minutes</th></tr></thead><tbody>
+                <div class="mbs-table-scroll" role="region" aria-label="Setup and clear-down buffers" tabindex="0"><table class="widefat mbs-panel-table mbs-buffer-table"><thead><tr><th scope="col">Space</th><th scope="col">Setup minutes</th><th scope="col">Clear-down minutes</th></tr></thead><tbody>
                 <?php foreach(MBS_Bookings::get_spaces()as$name=>$space): ?><tr><th><?php echo esc_html($name); ?></th><?php foreach(array('before','after')as$field): ?><td><input aria-label="<?php echo esc_attr($name.' '.$field.' buffer minutes'); ?>" type="number" name="resource_buffers[<?php echo esc_attr($name); ?>][<?php echo esc_attr($field); ?>]" min="0" max="240" value="<?php echo (int)($operations['resource_buffers'][$name][$field]??0); ?>"></td><?php endforeach; ?></tr><?php endforeach; ?>
-                </tbody></table>
+                </tbody></table></div>
                 <p><label><input type="checkbox" name="ack_buffers" value="1"> I have reviewed the impact of buffers on existing adjacent bookings.</label></p>
-                <button class="button">Save operational settings</button> <a class="button" href="<?php echo esc_url(admin_url('admin.php?page=mathlin-health')); ?>">Integration health</a>
+                <div class="mbs-panel-actions"><button type="submit" class="button button-primary">Save operational settings</button> <a class="button" href="<?php echo esc_url(admin_url('admin.php?page=mathlin-health')); ?>">Integration health</a></div>
             </form>
+            </div>
         </div>
         <div class="nms-card">
             <div class="nms-card-header"><h2>Google Calendar</h2></div>
+            <div class="mbs-card-body">
             <p>Synchronise bookings one-way to an existing shared calendar. Preview manual events first to prevent duplicates; private booking/contact details are not exported.</p>
             <p><?php $gcal = MBS_Google_Calendar::status(); echo esc_html( ( $gcal['enabled'] ? 'Sync enabled: ' : 'Sync off: ' ) . ( $gcal['calendar'] ?: 'not connected' ) ); ?></p>
             <a class="button" href="<?php echo esc_url( admin_url( 'admin.php?page=mathlin-google-calendar' ) ); ?>">Configure and review Google Calendar</a>
+            </div>
         </div>
         <div class="nms-card" id="mbs-payment-features">
             <div class="nms-card-header"><h2>Payment features</h2></div>
+            <div class="mbs-card-body">
             <p>Turn payments off for a free venue. Existing financial records are retained; new invoices, charges, checkout and payment reminders are stopped. Payment-provider reconciliation for payments already in progress continues.</p>
             <table class="form-table">
             <?php foreach ( MBS_Payment_Features::state() as $feature => $setting ) : $key = $feature === 'payments' ? 'payments_enabled' : 'payment_feature_' . $feature; ?>
@@ -48,6 +55,7 @@
             </table>
             <p><button class="button button-primary" id="mbs-save-payment-features" type="button">Save payment features</button> <span id="mbs-payment-features-result" role="status"></span></p>
             <p class="description">These switches save separately from the other settings below. Reload after saving to show only the enabled settings. Turning a feature off does not erase its configuration.</p>
+            </div>
         </div>
         <script>
         jQuery(function($){ $('#mbs-save-payment-features').on('click',function(){
@@ -92,7 +100,7 @@
             <p>Configure the spaces available for booking. You can add, remove, or change pricing at any time. Changes take effect immediately on the public booking form.</p>
 
             <?php $spaces = MBS_Bookings::get_spaces(); ?>
-            <table class="widefat nms-spaces-table" id="nms-spaces-table">
+            <div class="mbs-table-scroll mbs-settings-table-scroll" role="region" aria-label="Bookable spaces and prices" tabindex="0"><table class="widefat nms-spaces-table" id="nms-spaces-table">
                 <thead>
                     <tr>
                         <th>Space Name</th>
@@ -115,7 +123,7 @@
                     </tr>
                     <?php endforeach; ?>
                 </tbody>
-            </table>
+            </table></div>
             <p style="margin-top:12px;">
                 <button type="button" class="button" id="nms-add-space">+ Add Space</button>
             </p>
@@ -737,7 +745,7 @@ rest:
             <div class="nms-card-header"><h2>🏷️ Pricing Tiers</h2></div>
             <p>Configure pricing multipliers for different customer types. Assign tiers to hirers via their WordPress user profile.</p>
             <?php $tiers = MBS_Bookings::get_pricing_tiers(); ?>
-            <table class="widefat" id="nms-tiers-table">
+            <div class="mbs-table-scroll mbs-settings-table-scroll" role="region" aria-label="Pricing tiers" tabindex="0"><table class="widefat" id="nms-tiers-table">
                 <thead>
                     <tr>
                         <th>Tier Key</th>
@@ -760,7 +768,7 @@ rest:
                     </tr>
                     <?php endforeach; ?>
                 </tbody>
-            </table>
+            </table></div>
             <p style="margin-top:12px;">
                 <button type="button" class="button" id="nms-add-tier">+ Add Tier</button>
             </p>

@@ -5,11 +5,6 @@
     <?php if ( MBS_Payment_Features::enabled( 'additional_charges' ) ) : ?><a class="page-title-action" href="<?php echo esc_url(MBS_Additional_Charges::admin_url()); ?>">Additional charges</a><?php endif; ?>
     <hr class="wp-header-end">
     <?php MBS_Attention::render(); ?>
-    <nav aria-label="Booking pages" style="display:flex;gap:12px;align-items:center;margin:16px 0;">
-        <?php if ( ( $bookings_page ?? 1 ) > 1 ) : ?><a class="button" href="<?php echo esc_url( add_query_arg( array( 'page' => 'mathlin-booking', 's' => $search, 'status' => $status, 'paged' => $bookings_page - 1 ), admin_url( 'admin.php' ) ) ); ?>">Previous page</a><?php endif; ?>
-        <span>Page <?php echo (int) ( $bookings_page ?? 1 ); ?> · up to 50 reservations per page</span>
-        <?php if ( ! empty( $bookings_has_next ) ) : ?><a class="button" href="<?php echo esc_url( add_query_arg( array( 'page' => 'mathlin-booking', 's' => $search, 'status' => $status, 'paged' => ( $bookings_page ?? 1 ) + 1 ), admin_url( 'admin.php' ) ) ); ?>">Next page</a><?php endif; ?>
-    </nav>
 
     <!-- Stats -->
     <div class="nms-stats-row">
@@ -69,6 +64,12 @@
             <?php endif; ?>
         </div>
     </div>
+
+    <nav class="mbs-list-pagination" aria-label="Booking pages">
+        <?php if ( ( $bookings_page ?? 1 ) > 1 ) : ?><a class="button" href="<?php echo esc_url( add_query_arg( array( 'page' => 'mathlin-booking', 's' => $search, 'status' => $status, 'paged' => $bookings_page - 1 ), admin_url( 'admin.php' ) ) ); ?>">Previous page</a><?php endif; ?>
+        <span>Page <?php echo (int) ( $bookings_page ?? 1 ); ?> · up to 50 reservations per page</span>
+        <?php if ( ! empty( $bookings_has_next ) ) : ?><a class="button" href="<?php echo esc_url( add_query_arg( array( 'page' => 'mathlin-booking', 's' => $search, 'status' => $status, 'paged' => ( $bookings_page ?? 1 ) + 1 ), admin_url( 'admin.php' ) ) ); ?>">Next page</a><?php endif; ?>
+    </nav>
 
     <!-- Table -->
     <?php if ( empty( $bookings ) ) : ?>
