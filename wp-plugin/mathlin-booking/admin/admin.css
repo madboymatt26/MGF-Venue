@@ -702,3 +702,8 @@ button.mbs-invoice-card__ref:hover { color: #5a0fb0; }
     .mbs-preview-table tbody td { display: flex; justify-content: space-between; padding: 3px 0; border: none; }
     .mbs-preview-table tbody td::before { content: attr(data-label); font-weight: 600; color: #555; margin-right: 8px; }
 }
+/* Section navigation supplements, but never replaces, the original page URLs. */
+.mbs-section-navigation .nav-tab-wrapper { display:flex; flex-wrap:wrap; gap:4px; }
+.mbs-section-navigation .nav-tab { float:none; margin:0; white-space:normal; }
+.mbs-section-navigation .nav-tab-active { border-top:3px solid #7413dc; }
+.mbs-section-navigation a:focus-visible { outline:3px solid #7413dc; outline-offset:2px; }
