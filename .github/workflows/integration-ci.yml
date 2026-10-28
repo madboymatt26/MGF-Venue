@@ -177,6 +177,8 @@ jobs:
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/legacy-series-atomicity.php --allow-root
       - name: Verify request rejection commits with a durable notification
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/request-rejection-atomicity.php --allow-root
+      - name: Verify grouped navigation retains original WordPress routes and capabilities
+        run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/admin-navigation.php --allow-root
       - name: Measure synthetic 300, 3000 and 20000 record query baseline
         if: matrix.php == '8.3' && matrix.wordpress == '6.6.2'
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/performance-baseline.php --allow-root

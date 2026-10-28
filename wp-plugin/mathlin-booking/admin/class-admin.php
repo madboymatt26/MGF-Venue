@@ -4,6 +4,7 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 class MBS_Admin {
 
     public function init() {
+        ( new MBS_Admin_Navigation() )->init();
         add_action( 'admin_menu',            array( $this, 'add_menu' ) );
         add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
         add_action( 'admin_head',            array( $this, 'menu_icon_css' ) );
