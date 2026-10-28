@@ -34,10 +34,10 @@ class MBS_Attention {
         if(!current_user_can('mbs_manage_bookings')&&!current_user_can('manage_options'))return;
         $result=self::summary(5);
         if(!$result['items']&&!$result['partial_failures'])return;
-        echo '<details class="nms-card" style="margin:16px 0;padding:16px" open><summary><strong>Needs attention</strong></summary><p>Read-only summary, up to five items per category. Opening a link does not approve, send or change anything.</p>';
+        echo '<details class="nms-card mbs-disclosure mbs-attention" open><summary class="nms-card-header"><h2>Needs attention</h2></summary><div class="mbs-card-body"><p>Read-only summary, up to five items per category. Opening a link does not approve, send or change anything.</p>';
         foreach($result['partial_failures']as$issue)echo '<p role="alert">'.esc_html($issue).'</p>';
-        echo '<table class="widefat striped"><thead><tr><th>Reference</th><th>Finding</th><th>Next action</th></tr></thead><tbody>';
+        echo '<div class="mbs-table-scroll" role="region" aria-label="Outstanding booking actions" tabindex="0"><table class="widefat striped mbs-panel-table"><thead><tr><th scope="col">Reference</th><th scope="col">Finding</th><th scope="col">Next action</th></tr></thead><tbody>';
         foreach($result['items']as$item)echo '<tr><td>'.esc_html($item['ref']).'</td><td>'.esc_html($item['finding']).'</td><td><a href="'.esc_url($item['url']).'">'.esc_html($item['action']).'</a></td></tr>';
-        echo '</tbody></table></details>';
+        echo '</tbody></table></div></div></details>';
     }
 }

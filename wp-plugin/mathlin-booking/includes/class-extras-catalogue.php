@@ -139,10 +139,10 @@ class MBS_Extras_Catalogue {
     public function render_settings() {
         if ( ! self::allowed() || ! MBS_Payment_Features::enabled( 'additional_charges' ) ) return;
         $state = self::state();
-        echo '<details class="nms-card" style="padding:16px;margin:16px 0"><summary><strong>Reusable extras catalogue</strong></summary><p>Optional shortcuts for agreed cleaning, equipment and other extras. Saving a catalogue item never bills or emails anyone. Existing invoices keep their saved price and description. Accounting codes are stored as reference mappings, not posted automatically.</p>';
+        echo '<details class="nms-card mbs-disclosure mbs-extras-settings"><summary class="nms-card-header"><h2>Reusable extras catalogue</h2></summary><div class="mbs-card-body"><p>Optional shortcuts for agreed cleaning, equipment and other extras. Saving a catalogue item never bills or emails anyone. Existing invoices keep their saved price and description. Accounting codes are stored as reference mappings, not posted automatically.</p>';
         self::start_form( $state, 'enable' );
         echo '<p><label><input type="checkbox" name="enabled" value="1" ' . checked( $state['enabled'], true, false ) . '>Enable reusable extras on this site</label> <button class="button">Save preference</button></p></form>';
-        echo '<table class="widefat striped"><thead><tr><th>Extra</th><th>Unit price</th><th>Mapping (reference only)</th><th>Status / action</th></tr></thead><tbody>';
+        echo '<div class="mbs-table-scroll" role="region" aria-label="Reusable extras" tabindex="0"><table class="widefat striped mbs-panel-table"><thead><tr><th scope="col">Extra</th><th scope="col">Unit price</th><th scope="col">Mapping (reference only)</th><th scope="col">Status / action</th></tr></thead><tbody>';
         foreach ( $state['items'] as $item ) {
             echo '<tr><td>' . esc_html( $item['description'] ) . '</td><td>' . esc_html( MBS_Money::format( $item['unit_amount_minor'] ) . ' / ' . $item['unit'] ) . '</td><td>' . esc_html( $item['account_code'] . ' / ' . $item['tax_code'] ) . '</td><td>' . ( $item['archived'] ? 'Archived' : 'Available' );
             self::start_form( $state, $item['archived'] ? 'restore' : 'archive', $item['id'] );
@@ -150,7 +150,7 @@ class MBS_Extras_Catalogue {
             self::item_form( $state, $item ); echo '</details></td></tr>';
         }
         if ( ! $state['items'] ) echo '<tr><td colspan="4">No extras configured.</td></tr>';
-        echo '</tbody></table><details><summary>Add an extra</summary>'; self::item_form( $state, array() ); echo '</details></details>';
+        echo '</tbody></table></div><details class="mbs-inline-disclosure"><summary>Add an extra</summary>'; self::item_form( $state, array() ); echo '</details></div></details>';
     }
 
     private static function item_form( $state, $item ) {
