@@ -503,6 +503,7 @@ class MBS_Google_Calendar {
             $inventory = array(); foreach ( $snapshot['events'] as $event ) $inventory[$event['id']] = self::event_hash( $event );
             return array( 'status' => self::status(), 'fingerprint' => $fingerprint, 'google_inventory' => $inventory, 'items' => array_map( static function( $op ) {
                 return array( 'hash' => $op['hash'], 'ref' => $op['ref'], 'key' => $op['key'], 'action' => $op['action'], 'reason' => $op['reason'], 'booking' => self::display_event( $op['want'] ), 'original_sources' => $op['original_sources'] ?? array(), 'recommendation' => $op['recommendation'] ?? null,
+                    'explanation' => MBS_Calendar_Reference_Links::explain( $op ),
                     'linked_ids' => array_column( $op['linked_events'] ?? array_filter( array( $op['event'] ) ), 'id' ),
                     'candidates' => array_map( static function( $e ) { return array_merge( self::display_event( $e ), array( 'id' => $e['id'], 'legacy_id' => MBS_Calendar_Reference_Links::event_legacy_id( $e ) ) ); }, $op['candidates'] ) );
             }, $snapshot['ops'] ) );

@@ -49,6 +49,8 @@ jobs:
         run: node tests/calendar-viewing-ui.mjs
       - name: Verify reusable extras picker state
         run: node tests/extras-picker-ui.mjs
+      - name: Verify invoice modal keyboard and stale-response behaviour
+        run: node tests/invoice-modal-ui.mjs
       - name: Run correctness regression tests
         run: php tests/php-correctness-regression.php
       - name: Validate Composer dependencies
@@ -171,6 +173,13 @@ jobs:
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/series-outbox-atomicity.php --allow-root
       - name: Verify consistent export under a concurrent booking writer
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/export-snapshots.php --allow-root
+      - name: Verify legacy Scout actions roll back complete batches
+        run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/legacy-series-atomicity.php --allow-root
+      - name: Verify request rejection commits with a durable notification
+        run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/request-rejection-atomicity.php --allow-root
+      - name: Measure synthetic 300, 3000 and 20000 record query baseline
+        if: matrix.php == '8.3' && matrix.wordpress == '6.6.2'
+        run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/performance-baseline.php --allow-root
       - name: Verify optional extras catalogue and immutable charge snapshots
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/extras-catalogue.php --allow-root
       - name: Run invoice lifecycle matrix after hardening acceptance

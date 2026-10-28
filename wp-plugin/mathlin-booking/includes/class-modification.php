@@ -175,9 +175,8 @@ class MBS_Modification {
                             $check_allday, $request->booking_ref
                         );
                         if ( ! empty( $conflicts ) ) {
-                            self::update_request_status( $request_id, 'rejected', 'Conflicts with existing booking: ' . MBS_Bookings::format_conflict_message( $conflicts ) );
-                            self::notify_booker_rejected( $booking, 'modify', 'Your requested changes conflict with an existing booking.' );
-                            MBS_Audit_Log::log( $request->booking_ref, 'modification_rejected', 'Auto-rejected: conflicts with existing booking' );
+                            foreach ( $conflicts as $conflict ) if ( empty( $conflict->ref ) ) return new WP_Error( 'availability_unavailable', 'Availability could not be verified. No request decision was made; retry after checking the service.' );
+                            self::reject( $request_id, 'Your requested changes conflict with an existing booking.' );
                             return false;
                         }
 
@@ -190,9 +189,7 @@ class MBS_Modification {
                             $check_start, $check_end, $check_allday, $mod_num_days, (bool) $booking->scout_use
                         );
                         if ( is_wp_error( $dur_check ) ) {
-                            self::update_request_status( $request_id, 'rejected', $dur_check->get_error_message() );
-                            self::notify_booker_rejected( $booking, 'modify', $dur_check->get_error_message() );
-                            MBS_Audit_Log::log( $request->booking_ref, 'modification_rejected', 'Auto-rejected: below minimum booking duration' );
+                            self::reject( $request_id, $dur_check->get_error_message() );
                             return false;
                         }
                     }
@@ -415,19 +412,32 @@ class MBS_Modification {
     // ── Reject ─────────────────────────────────────────────────────────────────
 
     public static function reject( $request_id, $reason = '' ) {
+        return MBS_Space_Selection::locked( static function() use ( $request_id, $reason ) { return self::reject_locked( $request_id, $reason ); } );
+    }
+
+    private static function reject_locked( $request_id, $reason ) {
+        global $wpdb;
         $request = self::get_request( $request_id );
         if ( ! $request || $request->status !== 'pending' ) return false;
         if ( MBS_Series_Request::is_series_request( $request ) ) {
             return MBS_Series_Request::resolve( $request_id, $reason ?: 'We are unable to accept this request. Please contact the venue to discuss alternatives.', 'rejected' );
         }
 
-        $booking = MBS_Bookings::get( $request->booking_ref );
-        if ( ! $booking ) return false;
-
-        self::update_request_status( $request_id, 'rejected', $reason );
-        self::notify_booker_rejected( $booking, $request->request_type, $reason );
-        MBS_Audit_Log::log( $request->booking_ref, 'modification_rejected', 'Request rejected by admin' . ( $reason ? ': ' . $reason : '' ) );
-        return true;
+        if ( $wpdb->query( 'START TRANSACTION' ) === false ) return false;
+        try {
+            $request = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . self::table() . ' WHERE id=%d FOR UPDATE', $request_id ) );
+            if ( ! $request || $wpdb->last_error || $request->status !== 'pending' ) throw new RuntimeException( 'The request changed.' );
+            $booking = MBS_Bookings::get( $request->booking_ref );
+            if ( ! $booking || $wpdb->last_error ) throw new RuntimeException( 'Booking source unavailable.' );
+            if ( self::update_request_status( $request_id, 'rejected', $reason ) !== 1 ) throw new RuntimeException( 'Could not reject the request.' );
+            if ( ! MBS_Audit_Log::log( $request->booking_ref, 'modification_rejected', 'Request rejected by admin' . ( $reason ? ': ' . sanitize_textarea_field( $reason ) : '' ) ) ) throw new RuntimeException( 'Could not record the decision.' );
+            $message = self::build_booker_rejected( $booking, $request->request_type, $reason );
+            $meta = array( 'request_id' => (int) $request_id, 'booking_ref' => $booking->ref );
+            $queued = MBS_Email_Queue::enqueue( $booking->email, $message['subject'], $message['body'], $message['headers'], 'request_rejected:' . (int) $request_id, MBS_Email_Queue::compute_payload_hash( $booking->email, $message['subject'], $message['body'], $message['headers'], $meta ), $meta, array( 'message_type' => 'request_rejected', 'reference_type' => 'request', 'reference_id' => (int) $request_id ) );
+            if ( is_wp_error( $queued ) || $queued === false || $wpdb->query( 'COMMIT' ) === false ) throw new RuntimeException( 'Could not commit the decision and notification.' );
+            MBS_Email_Queue::wake();
+            return true;
+        } catch ( Throwable $e ) { $wpdb->query( 'ROLLBACK' ); return false; }
     }
 
     // ── Public form submission ──────────────────────────────────────────────────
@@ -552,7 +562,7 @@ class MBS_Modification {
         ) );
     }
 
-    private static function notify_booker_rejected( $booking, $type, $reason ) {
+    public static function build_booker_rejected( $booking, $type, $reason ) {
         $tpl       = MBS_Email_Templates::get_template( 'modification_rejected' );
         $extra     = array( '{reason}' => $reason ? 'Reason: ' . $reason : '' );
         $subject   = MBS_Email_Templates::replace_placeholders( $tpl['subject'], $booking, $extra );
@@ -570,7 +580,7 @@ class MBS_Modification {
         $body .= nl2br( esc_html( $body_text ) );
         $body .= '</div></body></html>';
 
-        MBS_Email_Queue::send( $booking->email, $subject, $body, array(
+        return array( 'subject' => $subject, 'body' => $body, 'headers' => array(
             'Content-Type: text/html; charset=UTF-8',
             'From: ' . $org['name'] . ' <' . get_option( 'admin_email', $admin_email ) . '>',
             'Reply-To: ' . $admin_email,
