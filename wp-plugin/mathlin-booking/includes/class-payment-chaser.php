@@ -65,18 +65,23 @@ class MBS_Payment_Chaser {
         $table    = $wpdb->prefix . MBS_TABLE;
         $overdue  = wp_date( 'Y-m-d H:i:s', strtotime( "-{$payment_days} days" ) );
 
-        $bookings = $wpdb->get_results( $wpdb->prepare(
+        $bookings = self::eligible_batch(
             "SELECT * FROM {$table}
              WHERE status = 'confirmed'
              AND created_at <= %s
+             AND COALESCE(scout_use, 0) = 0
+             AND amount - COALESCE(amount_paid, 0) > 0.01
              AND (chase_count < %d OR chase_count IS NULL)
              AND (last_chased IS NULL OR last_chased <= %s)
-             ORDER BY created_at ASC
-             LIMIT 20",
-            $overdue,
-            $max_chases,
-            wp_date( 'Y-m-d H:i:s', strtotime( "-{$chase_interval} days" ) )
-        ) );
+             ORDER BY created_at ASC, ref ASC
+             LIMIT 100 OFFSET %d",
+            array(
+                $overdue,
+                $max_chases,
+                wp_date( 'Y-m-d H:i:s', strtotime( "-{$chase_interval} days" ) )
+            ),
+            20
+        );
 
         if ( empty( $bookings ) ) $bookings = array();
 
@@ -84,17 +89,22 @@ class MBS_Payment_Chaser {
         $deposit_settings = MBS_Bookings::get_deposit_settings();
         if ( $deposit_settings['enabled'] ) {
             $balance_due_date = wp_date( 'Y-m-d', strtotime( '+' . $deposit_settings['balance_days'] . ' days' ) );
-            $deposit_bookings = $wpdb->get_results( $wpdb->prepare(
+            $deposit_bookings = self::eligible_batch(
                 "SELECT * FROM {$table}
                  WHERE status = 'deposit_paid'
                  AND booking_date <= %s
+                 AND COALESCE(scout_use, 0) = 0
+                 AND amount - COALESCE(amount_paid, 0) > 0.01
                  AND (chase_count < 2 OR chase_count IS NULL)
                  AND (last_chased IS NULL OR last_chased <= %s)
-                 ORDER BY booking_date ASC
-                 LIMIT 10",
-                $balance_due_date,
-                wp_date( 'Y-m-d H:i:s', strtotime( "-{$chase_interval} days" ) )
-            ) );
+                 ORDER BY booking_date ASC, ref ASC
+                 LIMIT 100 OFFSET %d",
+                array(
+                    $balance_due_date,
+                    wp_date( 'Y-m-d H:i:s', strtotime( "-{$chase_interval} days" ) )
+                ),
+                10
+            );
             if ( ! empty( $deposit_bookings ) ) {
                 $bookings = array_merge( $bookings, $deposit_bookings );
             }
@@ -112,6 +122,30 @@ class MBS_Payment_Chaser {
         if ( $count > 0 ) {
             error_log( "[MGF Venue] Auto-chased {$count} overdue payment(s)." );
         }
+    }
+
+    /**
+     * Apply the send cap after billing eligibility, not before it. Read all
+     * candidate pages before sending so chase tracking cannot shift offsets.
+     * SQL excludes free/settled/Scout rows; the policy check also excludes
+     * consolidated series while preserving orphaned legacy occurrences.
+     */
+    private static function eligible_batch( $query, $args, $limit ) {
+        global $wpdb;
+        $eligible = array();
+        $offset = 0;
+        do {
+            $page = $wpdb->get_results( $wpdb->prepare( $query, array_merge( $args, array( $offset ) ) ) );
+            if ( ! is_array( $page ) ) break;
+            foreach ( $page as $booking ) {
+                if ( self::should_chase_occurrence( $booking ) ) {
+                    $eligible[] = $booking;
+                    if ( count( $eligible ) >= $limit ) return $eligible;
+                }
+            }
+            $offset += count( $page );
+        } while ( count( $page ) === 100 );
+        return $eligible;
     }
 
     /**
