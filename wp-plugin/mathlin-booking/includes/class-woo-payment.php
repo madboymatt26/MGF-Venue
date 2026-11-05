@@ -508,6 +508,10 @@ class MBS_Woo_Payment {
     public function on_order_completed( $order_id ) {
         $expiry_order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
         $expiry_ref = $expiry_order ? $expiry_order->get_meta( '_mbs_booking_ref' ) : '';
+        if ( ! $expiry_ref && $expiry_order && class_exists( 'MBS_Payment_Expiry' ) && MBS_Payment_Expiry::enabled() ) {
+            $refs = array(); foreach ( $expiry_order->get_items() as $item ) { $candidate = $item->get_meta( '_mbs_booking_ref' ); if ( $candidate ) $refs[$candidate] = true; }
+            if ( count( $refs ) === 1 ) $expiry_ref = (string) key( $refs );
+        }
         if ( class_exists( 'MBS_Payment_Expiry' ) && $expiry_ref && MBS_Payment_Expiry::get( $expiry_ref ) ) {
             $result = MBS_Space_Selection::locked( function() use ( $order_id ) { return $this->complete_order_locked( $order_id ); } );
             if ( is_wp_error( $result ) ) throw new RuntimeException( 'Payment reconciliation is busy; retry the payment callback.' );

@@ -36,10 +36,6 @@ class MBS_Payment_Expiry {
         add_filter( 'cron_schedules', static function( $s ) { $s['mbs_expiry_five_minutes'] = array( 'interval' => 300, 'display' => 'MGF payment deadline checks' ); return $s; } );
         if ( self::enabled() && ! wp_next_scheduled( self::HOOK ) ) wp_schedule_event( time() + 60, 'mbs_expiry_five_minutes', self::HOOK );
         add_action( 'admin_post_mbs_payment_expiry', array( __CLASS__, 'admin_action' ) );
-        add_filter( 'woocommerce_order_data_store_cpt_get_orders_query', static function( $query, $vars ) {
-            if ( ! empty( $vars['mbs_expiry_ref'] ) ) $query['meta_query'][] = array( 'key' => '_mbs_booking_ref', 'value' => $vars['mbs_expiry_ref'], 'compare' => '=' );
-            return $query;
-        }, 10, 2 );
         add_filter( 'woocommerce_order_needs_payment', static function( $needs, $order ) {
             $ref = $order->get_meta( '_mbs_booking_ref' );
             return $ref && self::get( $ref ) && ! self::checkout_allowed( $ref ) ? false : $needs;
@@ -64,7 +60,7 @@ class MBS_Payment_Expiry {
             $review = array( 'operational_issue' => 'Manual short-notice approval after cutoff: verify full payment before releasing access.' );
         }
         $ok = $wpdb->insert( self::table(), array( 'booking_ref' => $b->ref, 'state' => $state, 'policy_json' => wp_json_encode( $policy ), 'review_json' => wp_json_encode( $review ), 'created_at' => current_time( 'mysql' ), 'updated_at' => current_time( 'mysql' ) ) );
-        if ( $ok !== 1 || ! MBS_Audit_Log::log( $b->ref, 'payment_policy_enrolled', 'New approval enrolled in payment expiry policy v1; deadlines frozen at approval.' ) ) return new WP_Error( 'expiry_enroll_failed', 'Could not safely record the approval payment policy.' );
+        if ( $ok !== 1 || ! MBS_Audit_Log::log( $b->ref, 'payment_policy_enrolled', $state === 'manual' ? 'Explicit administrator short-notice approval after cutoff: ' . $manual_reason : 'New approval enrolled in payment expiry policy v1; deadlines frozen at approval.' ) ) return new WP_Error( 'expiry_enroll_failed', 'Could not safely record the approval payment policy.' );
         return true;
     }
     public static function warning( $b ) {
@@ -125,15 +121,16 @@ class MBS_Payment_Expiry {
     }
     /** A returned WP_Error or ambiguous order always blocks cancellation. */
     public static function orders( $ref ) {
-        if ( ! function_exists( 'wc_get_orders' ) ) return new WP_Error( 'expiry_checkout_unavailable', 'Cannot verify checkout state.' );
+        global $wpdb;
+        if ( ! function_exists( 'wc_get_order' ) ) return new WP_Error( 'expiry_checkout_unavailable', 'Cannot verify checkout state.' );
         try {
-            // Order-level reference is set on creation by the Woo payment adapter.
-            $args = array( 'limit' => 1001, 'return' => 'objects' );
-            if ( class_exists( '\Automattic\WooCommerce\Utilities\OrderUtil' ) && \Automattic\WooCommerce\Utilities\OrderUtil::custom_orders_table_usage_is_enabled() ) $args['meta_query'] = array( array( 'key' => '_mbs_booking_ref', 'value' => $ref, 'compare' => '=' ) );
-            else $args['mbs_expiry_ref'] = $ref;
-            $orders = wc_get_orders( $args );
-            if ( ! is_array( $orders ) || count( $orders ) > 1000 ) return new WP_Error( 'expiry_orders_unknown', 'Cannot completely verify checkout orders.' );
-            foreach ( $orders as $order ) if ( $order->get_meta( '_mbs_booking_ref' ) !== $ref ) return new WP_Error( 'expiry_order_query_mismatch', 'Order-reference query returned an unrelated order; cancellation blocked.' );
+            // Line-item association is authoritative and also covers checkout
+            // started before approval. Woo uses these item tables in CPT/HPOS;
+            // load each order through its native data store, never postmeta.
+            $ids = $wpdb->get_col( $wpdb->prepare( "SELECT DISTINCT i.order_id FROM {$wpdb->prefix}woocommerce_order_items i INNER JOIN {$wpdb->prefix}woocommerce_order_itemmeta m ON m.order_item_id=i.order_item_id WHERE m.meta_key='_mbs_booking_ref' AND m.meta_value=%s ORDER BY i.order_id LIMIT 1001", $ref ) );
+            if ( ! is_array( $ids ) || $wpdb->last_error || count( $ids ) > 1000 ) return new WP_Error( 'expiry_orders_unknown', 'Cannot completely verify checkout orders.' );
+            $orders = array();
+            foreach ( $ids as $id ) { $order = wc_get_order( (int) $id ); if ( ! $order ) return new WP_Error( 'expiry_order_missing', 'Associated payment order cannot be verified.' ); $orders[] = $order; }
             return $orders;
         } catch ( Throwable $e ) { return new WP_Error( 'expiry_orders_unknown', 'Checkout state could not be verified.' ); }
     }
@@ -141,6 +138,7 @@ class MBS_Payment_Expiry {
         if ( is_wp_error( $orders ) ) return false;
         $captured = 0;
         foreach ( $orders as $order ) {
+            foreach ( $order->get_items() as $item ) if ( $item->get_meta( '_mbs_booking_ref' ) !== $b->ref ) return false;
             if ( $order->get_status() === 'on-hold' ) return false;
             if ( $order->get_status() === 'pending' && $order->get_date_modified() && time() - $order->get_date_modified()->getTimestamp() < 900 ) return false;
             if ( $order->is_paid() && $order->get_meta( '_mbs_payment_processed' ) !== 'yes' ) return false;
@@ -159,7 +157,17 @@ class MBS_Payment_Expiry {
         do {
             $page = $wpdb->get_results( $wpdb->prepare( 'SELECT id,booking_ref FROM ' . self::table() . " WHERE state='active' AND id>%d ORDER BY id LIMIT 100", $after ) );
             if ( ! is_array( $page ) ) return;
-            foreach ( $page as $row ) { $after = (int) $row->id; self::check( $row->booking_ref ); }
+            foreach ( $page as $row ) {
+                $after = (int) $row->id; $result = self::check( $row->booking_ref );
+                if ( is_wp_error( $result ) ) {
+                    $fresh = self::get( $row->booking_ref );
+                    if ( $fresh && $fresh->state === 'active' ) {
+                        $review = json_decode( $fresh->review_json, true ) ?: array();
+                        $review['operational_issue'] = 'Deadline check failed safely: ' . $result->get_error_message();
+                        self::save( $fresh, 'active', json_decode( $fresh->policy_json, true ), $review );
+                    }
+                }
+            }
         } while ( count( $page ) === 100 );
         MBS_Email_Queue::wake();
     }
@@ -200,6 +208,10 @@ class MBS_Payment_Expiry {
                     if ( $paid > 0 ) $text .= 'We have recorded £' . number_format( $paid / 100, 2 ) . " already paid. This is awaiting manual review; this email does not confirm a refund or retention decision.\n\n";
                     $text .= 'Please contact us if you believe payment has already been made.';
                     foreach ( array( self::queue( $b, 'cancel', $text, 'expiry_cancel:' . $ref ), self::queue( $b, 'admin', 'Booking ' . $ref . ' was cancelled due to non-payment. ' . ( $paid > 0 ? 'Money is held and requires a refund/retention review. ' : '' ) . admin_url( 'admin.php?page=mathlin-booking&action=view&ref=' . rawurlencode( $ref ) ), 'expiry_admin:' . $ref, true ) ) as $queued ) if ( is_wp_error( $queued ) ) throw new RuntimeException( 'Could not queue cancellation notifications.' );
+                }
+                if ( in_array( $decision['action'], array( 'none', 'warn', 'wait' ), true ) && ! empty( $review['operational_issue'] ) ) {
+                    unset( $review['operational_issue'] );
+                    if ( ! self::save( $row, 'active', $p, $review ) ) throw new RuntimeException( 'Could not clear a resolved operational review.' );
                 }
                 if ( $wpdb->query( 'COMMIT' ) === false ) throw new RuntimeException( 'Could not commit deadline check.' );
                 return true;
@@ -375,7 +387,7 @@ class MBS_Payment_Expiry {
                         }
                     }
                 } else throw new RuntimeException( 'That action is not valid in this review state.' );
-                $r['decisions'][] = array( 'operation' => $op, 'reason' => $reason, 'reviewer' => get_current_user_id(), 'at' => time() );
+                $r['decisions'][] = array( 'operation' => $op, 'reason' => $reason, 'reviewer' => get_current_user_id(), 'at' => time(), 'amount_minor' => in_array( $op, array( 'retain', 'bank_refund' ), true ) ? $minor : null, 'prior_retained_minor' => (int) ( ( json_decode( $row->review_json, true ) ?: array() )['retained_minor'] ?? 0 ) );
                 if ( ! self::save( $row, $state, $p, $r ) || ! MBS_Audit_Log::log( $ref, 'payment_policy_review', 'Manual review action: ' . $op . '. ' . $reason . ' Booking/payment receipt history was not rewritten.' ) ) throw new RuntimeException( 'Could not save review/audit.' );
                 if ( $wpdb->query( 'COMMIT' ) === false ) throw new RuntimeException( 'Could not commit review.' );
                 return true;

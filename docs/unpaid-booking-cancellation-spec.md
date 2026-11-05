@@ -1,6 +1,8 @@
 # Unpaid booking expiry and money-held review
 
-Status: approved requirements; implementation in progress. No production activation.
+Status: approved requirements; first local implementation built. Not released,
+deployed or enabled. Hosted database/concurrency and browser acceptance remain
+mandatory before release. GitHub upload for hosted tests awaits explicit approval.
 
 ## Agreed policy
 
@@ -95,3 +97,27 @@ and unrelated-site fingerprints; permissions/nonces/stale edits/HTML escaping.
 Browser: desktop/mobile/keyboard approval warning, exact deadline, action review,
 refund links and confirmations; free-site controls absent. Full existing CI must
 pass before publication. Deployment/activation status must be reported separately.
+
+## Implementation map and current evidence
+
+* `class-payment-expiry-policy.php`: pure frozen deadline/decision rules.
+* `class-money-held-review.php`: exact minor-unit reconciliation/evidence checks.
+* `class-payment-expiry.php`: separate transactional policy/review records,
+  opt-in settings, expiry worker, transactional cancellation/admin notifications,
+  checkout guards, attention items, extensions/exemptions and manual decisions.
+* Approval/document, email/chaser/outbox, Woo payment/refund and booking-view
+  adapters keep the policy separate from immutable invoice/payment history.
+* Schema v14 adds an empty policy table; no existing booking is enrolled.
+* 41 pure policy/money assertions and the existing local PHP regression suite
+  pass. A disposable WordPress scenario has been written for approval rollback,
+  warning idempotency/staleness, cancellation atomicity, held deposits and native
+  partial refunds. That scenario is not claimed passed until actually executed.
+* Source checks are not evidence of real simultaneous payment/expiry safety.
+  New separate-process race fixtures and real-browser acceptance are still
+  required. No live automatic cancellation or refund has been tested/enabled.
+
+WooCommerce API reference used while inspecting order-storage compatibility:
+https://developer.woocommerce.com/docs/features/orders/wc-get-orders/
+Order objects are loaded with WooCommerce's data-store API; booking associations
+come from the plugin's order-line reference, not an assumption that an order has
+already completed or that legacy postmeta is authoritative under HPOS.
