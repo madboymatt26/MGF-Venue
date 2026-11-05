@@ -1,8 +1,9 @@
 # Unpaid booking expiry and money-held review
 
-Status: approved requirements; first local implementation built. Not released,
-deployed or enabled. Hosted database/concurrency and browser acceptance remain
-mandatory before release. GitHub upload for hosted tests awaits explicit approval.
+Status: approved requirements; implementation in PR #47. Not released, deployed
+or enabled. Matthew authorised GitHub upload/testing on 5 November. All ten hosted
+checks passed for code commit `1efdc79e342edf63b002227bbbde6cb14c42dc33` in run
+`42065184474`. Real-browser acceptance remains mandatory before release.
 
 ## Agreed policy
 
@@ -108,13 +109,22 @@ pass before publication. Deployment/activation status must be reported separatel
 * Approval/document, email/chaser/outbox, Woo payment/refund and booking-view
   adapters keep the policy separate from immutable invoice/payment history.
 * Schema v14 adds an empty policy table; no existing booking is enrolled.
-* 41 pure policy/money assertions and the existing local PHP regression suite
-  pass. A disposable WordPress scenario has been written for approval rollback,
-  warning idempotency/staleness, cancellation atomicity, held deposits and native
-  partial refunds. That scenario is not claimed passed until actually executed.
-* Source checks are not evidence of real simultaneous payment/expiry safety.
-  New separate-process race fixtures and real-browser acceptance are still
-  required. No live automatic cancellation or refund has been tested/enabled.
+* 41 pure policy/money assertions and all 83 local PHP programs pass. Hosted
+  source and WordPress/WooCommerce compatibility jobs passed on PHP 7.4, 8.0,
+  8.2 and 8.3, plus the latest WordPress/WooCommerce job.
+* The disposable real WordPress scenario passed 35 assertions for approval
+  rollback, warning idempotency/staleness, cancellation atomicity, held deposits
+  and native partial refunds. Intentional outbox-insert failures prove rollback;
+  their SQL errors in the job log are expected test injections, not production
+  failures. All email and gateway transport was intercepted.
+* The separate-process expiry/late-capture fixture passed: simultaneous workers
+  and duplicate callbacks leave one cancellation, one exact held receipt and
+  a review that remains visible after archive. Existing financial/concurrency
+  and authenticated MCP mutation-protection scenarios also passed.
+* Real-browser approval/review/permissions acceptance is still required. No live
+  automatic cancellation or refund has been tested/enabled. Do not infer broad
+  payment-gateway, all short-notice browser flows or production clock guarantees
+  from the passing synthetic scenarios.
 
 WooCommerce API reference used while inspecting order-storage compatibility:
 https://developer.woocommerce.com/docs/features/orders/wc-get-orders/
