@@ -48,7 +48,7 @@ class MBS_Invoice_Document_Service {
      * @param bool   $notify_hirer  Queue confirmation email.
      * @return array|WP_Error  {document_id, booking} on success.
      */
-    public static function confirm_and_issue( $ref, $logo_ref = null, $notify_hirer = true ) {
+    public static function confirm_and_issue( $ref, $logo_ref = null, $notify_hirer = true, $approval_options = array() ) {
         if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'invoices' ) ) return MBS_Payment_Features::error( 'invoices' );
         global $wpdb;
         $booking_table = $wpdb->prefix . MBS_TABLE;
@@ -87,6 +87,10 @@ class MBS_Invoice_Document_Service {
             return new WP_Error( 'invalid_status', 'Booking cannot be confirmed from status: ' . $booking->status );
         }
 
+        if ( class_exists( 'MBS_Payment_Expiry' ) && $booking->status === 'pending' ) {
+            $enrolled = MBS_Payment_Expiry::enroll( $booking, $notify_hirer, ! empty( $approval_options['short_notice_ack'] ), (string) ( $approval_options['manual_reason'] ?? '' ) );
+            if ( is_wp_error( $enrolled ) ) { $wpdb->query( 'ROLLBACK' ); return $enrolled; }
+        }
         // Confirm the booking
         $confirmed = $wpdb->update( $booking_table,
             array( 'status' => 'confirmed' ),

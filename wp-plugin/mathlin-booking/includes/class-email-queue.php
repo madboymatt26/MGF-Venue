@@ -319,6 +319,7 @@ class MBS_Email_Queue {
         $failed = 0;
 
         foreach ( $claimed as $email ) {
+            if ( class_exists( 'MBS_Payment_Expiry' ) && in_array( $email->message_type, array( 'expiry_warning', 'expiry_cancel', 'expiry_admin' ), true ) && ! MBS_Payment_Expiry::email_current( $email ) ) { self::mark_failed( $email->id, $worker_id ); continue; }
             if ( $email->message_type === 'request_rejected' ) {
                 $request = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . $wpdb->prefix . 'mathlin_mod_requests WHERE id=%d', (int) $email->reference_id ) );
                 if ( $wpdb->last_error ) { self::release_for_retry( $email->id, $worker_id, 'Request source temporarily unavailable.' ); continue; }

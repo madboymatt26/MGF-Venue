@@ -12,7 +12,7 @@
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 define( 'MBS_VERSION',    '3.44.2' );
-define( 'MBS_DB_VERSION', '3.33.0-schema-12' );
+define( 'MBS_DB_VERSION', '3.45.0-schema-14' );
 define( 'MBS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MBS_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'MBS_TABLE',      'mathlin_bookings' );
@@ -77,6 +77,9 @@ require_once MBS_PLUGIN_DIR . 'includes/class-audit-log.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-woo-payment.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-auto-archive.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-payment-chaser.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-payment-expiry-policy.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-money-held-review.php';
+require_once MBS_PLUGIN_DIR . 'includes/class-payment-expiry.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-email-templates.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-email-queue.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-custom-fields.php';
@@ -166,6 +169,7 @@ function mbs_init() {
         }
     }
 
+    MBS_Payment_Expiry::init();
     $admin   = new MBS_Admin();
     $public  = new MBS_Public();
     $api     = new MBS_Rest_API();

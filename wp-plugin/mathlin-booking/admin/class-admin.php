@@ -368,7 +368,7 @@ class MBS_Admin {
             wp_send_json_error( 'Record payment against the consolidated invoice, not an individual occurrence.', 409 );
         }
 
-        $result = MBS_Bookings::update_status( $ref, $status, $status === 'confirmed' );
+        $result = MBS_Bookings::update_status( $ref, $status, $status === 'confirmed', array( 'short_notice_ack' => ! empty( $_POST['expiry_ack'] ), 'manual_reason' => sanitize_textarea_field( wp_unslash( $_POST['expiry_manual_reason'] ?? '' ) ) ) );
         if ( $result === false ) wp_send_json_error( 'This booking cannot be changed because it has financial history.', 409 );
 
         if ( $status === 'confirmed' ) {
@@ -420,6 +420,7 @@ class MBS_Admin {
         $ref = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
         $booking = MBS_Bookings::get( $ref );
         if ( ! $booking ) wp_send_json_error( 'Booking not found.' );
+        if ( class_exists( 'MBS_Payment_Expiry' ) && MBS_Payment_Expiry::get( $ref ) ) wp_send_json_error( 'Use the payment-policy money-held review and original payment refund controls. This legacy action must not reopen a cancelled booking.', 409 );
         if ( self::invoice_manages_occurrence( $booking ) ) wp_send_json_error( 'Record credits or refunds through the consolidated invoice ledger.', 409 );
 
         // Set amount_paid = amount to balance the books (refund has been processed)

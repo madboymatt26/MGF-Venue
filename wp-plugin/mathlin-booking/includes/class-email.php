@@ -164,6 +164,10 @@ class MBS_Email {
         $body .= '<h2 style="color:#7413DC;">Your Booking is Confirmed!</h2>';
         $body .= nl2br( esc_html( $body_text ) );
         $body .= self::booking_table_obj( $booking );
+        if ( class_exists( 'MBS_Payment_Expiry' ) ) {
+            $expiry_warning = MBS_Payment_Expiry::approval_text( $booking );
+            if ( $expiry_warning !== '' ) $body .= '<p><strong>' . esc_html( $expiry_warning ) . '</strong></p>';
+        }
 
         // Deposit-aware payment terms
         $deposit_settings = MBS_Bookings::get_deposit_settings();

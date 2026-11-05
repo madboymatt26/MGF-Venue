@@ -17,6 +17,7 @@ class MBS_Attention {
             if(!is_array($invoices)||$wpdb->last_error)$issues[]='Overdue invoices could not be read.';
             else foreach($invoices as$i)$items[]=array('kind'=>'payment','ref'=>$i->invoice_ref,'since'=>$i->due_at,'finding'=>'Issued invoice overdue under its existing due date','action'=>'Review outstanding balance and reconciliation before chasing','url'=>admin_url('admin.php?page=mathlin-analytics'));
         }
+        if(class_exists('MBS_Payment_Expiry'))$items=array_merge($items,MBS_Payment_Expiry::needs_attention($limit));
         $mail=MBS_Email_Queue::get_stats();
         if(isset($mail['available'])&&!$mail['available'])$issues[]='Email outbox could not be read; delivery state is unknown.';
         if(!empty($mail['failed']))$items[]=array('kind'=>'email','ref'=>'Outbox','since'=>null,'finding'=>(int)$mail['failed'].' emails failed or became ineligible/stale','action'=>'Review delivery and current booking state before retrying; do not resend obsolete messages','url'=>admin_url('admin.php?page=mathlin-health'));

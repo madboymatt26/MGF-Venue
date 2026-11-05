@@ -41,7 +41,7 @@ booking_invoice_has( $admin, "'pdf_available'     => true", 'Admin invoice resou
 booking_invoice_has( $admin, 'empty( $booking->current_invoice_document_id )', 'Admin confirmation avoids a second legacy invoice email.' );
 
 booking_invoice_has( $bookings, '$notify_hirer = true', 'Status transitions retain an explicit notification policy.' );
-booking_invoice_has( $bookings, 'confirm_and_issue( $ref, null, (bool) $notify_hirer )', 'Atomic one-off confirmation honours the notification policy.' );
+booking_invoice_has( $bookings, 'confirm_and_issue( $ref, null, (bool) $notify_hirer, $approval_options )', 'Atomic one-off confirmation honours notification and explicit deadline acknowledgement.' );
 booking_invoice_has( $email, 'enqueue_confirmed_document', 'Confirmation emails support immutable document attachments.' );
 booking_invoice_has( $email, "'format' => 'pdf'", 'Confirmation document attachments request PDF rendering.' );
 booking_invoice_has( $email, 'queue worker hydrates', 'Transactional confirmation enqueueing defers rendering side effects.' );

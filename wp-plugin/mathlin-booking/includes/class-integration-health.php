@@ -32,7 +32,9 @@ class MBS_Integration_Health {
         add_action( 'admin_post_mbs_operational_settings', array( $this, 'save_operational_settings' ) );
     }
     private static function job_hooks() {
-        return array( 'mbs_daily_access_details','mbs_daily_reminders','mbs_daily_payment_chase','mbs_daily_auto_archive','mbs_daily_feedback','mbs_google_calendar_tick','mbs_process_email_queue','mbs_ha_outbox' );
+        $hooks = array( 'mbs_daily_access_details','mbs_daily_reminders','mbs_daily_payment_chase','mbs_daily_auto_archive','mbs_daily_feedback','mbs_google_calendar_tick','mbs_process_email_queue','mbs_ha_outbox' );
+        if ( class_exists( 'MBS_Payment_Expiry' ) && MBS_Payment_Expiry::enabled() ) $hooks[] = MBS_Payment_Expiry::HOOK;
+        return $hooks;
     }
     public static function job_status() {
         $out = array();

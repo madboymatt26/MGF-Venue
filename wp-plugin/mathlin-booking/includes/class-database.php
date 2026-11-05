@@ -1,5 +1,6 @@
 <?php
 if ( ! defined( 'ABSPATH' ) ) exit;
+require_once __DIR__ . '/class-payment-expiry.php';
 
 class MBS_Database {
 
@@ -519,7 +520,10 @@ class MBS_Database {
         $migrated = self::maybe_run_migrations();
         if ( $migrated !== true ) return self::fail_migration( $migrated, 'Database migration operations failed.' );
 
+        $expiry_sql = MBS_Payment_Expiry::schema();
+        dbDelta( $expiry_sql );
         $schema_sql = array(
+            $wpdb->prefix . 'mathlin_payment_expiry' => $expiry_sql,
             $table => $sql,
             $series_table => $series_sql,
             $invoice_table => $invoice_sql,
@@ -580,7 +584,7 @@ class MBS_Database {
             $wpdb->prefix.MBS_DOCUMENT_ASSETS_TABLE, $wpdb->prefix.MBS_DOWNLOAD_TOKENS_TABLE,
             $wpdb->prefix.'mathlin_blocked_dates',
             $wpdb->prefix.'mathlin_audit_log', $wpdb->prefix.'mathlin_email_queue',
-            $wpdb->prefix.'mathlin_mod_requests',
+            $wpdb->prefix.'mathlin_mod_requests', $wpdb->prefix.'mathlin_payment_expiry',
         );
         foreach($tables as $table){$row=$wpdb->get_row($wpdb->prepare('SHOW TABLE STATUS LIKE %s',$table));if($row&&!empty($row->Engine)&&strtolower($row->Engine)!=='innodb'){if($wpdb->query("ALTER TABLE `{$table}` ENGINE=InnoDB")===false)return new WP_Error('transactional_engine_required',"{$table} is not transactional and could not be converted to InnoDB. Restore a backup, correct database permissions/capacity, and retry.");}}
         return true;
@@ -678,6 +682,7 @@ class MBS_Database {
     private static function verify_schema_legacy() {
         global $wpdb;
         $requirements = array(
+            $wpdb->prefix . 'mathlin_payment_expiry' => array( 'columns' => array( 'id','booking_ref','version','state','policy_json','review_json','created_at','updated_at' ), 'indexes' => array( 'PRIMARY','booking_ref','state' ) ),
             $wpdb->prefix . MBS_TABLE => array(
                 'columns' => array( 'id','ref','status','name','organisation','email','phone','address','space','kitchen','booking_date','booking_date_end','all_day','scout_use','pricing_tier','start_time','end_time','attendees','purpose','notes','amount','deposit_paid','amount_paid','invoice_number','ha_notified','reminder_sent','access_sent','feedback_sent','chase_count','last_chased','series_id','legacy_billing_excluded','admin_notes','custom_fields','modification_token','is_public','user_id','created_at','updated_at' ),
                 'indexes' => array( 'PRIMARY','idx_date','idx_status','idx_ref','idx_series','idx_email','idx_chase' ),
