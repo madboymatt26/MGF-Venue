@@ -83,6 +83,15 @@ run_guard_mutation_control || audit_failed=1
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/reservation-state-machine.php --allow-root || audit_failed=1
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/woocommerce-callbacks.php --allow-root || audit_failed=1
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/financial-flows.php --allow-root || audit_failed=1
+$compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/payment-expiry.php --allow-root || audit_failed=1
+$compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/payment-expiry-race.php seed --allow-root
+( $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/payment-expiry-race.php expire --allow-root >tests/integration/.worker-expiry-a 2>&1 ) &
+expiry_a=$!
+( $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/payment-expiry-race.php pay --allow-root >tests/integration/.worker-expiry-b 2>&1 ) &
+expiry_b=$!
+wait "$expiry_a" || { cat tests/integration/.worker-expiry-a; audit_failed=1; }
+wait "$expiry_b" || { cat tests/integration/.worker-expiry-b; audit_failed=1; }
+$compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/payment-expiry-race.php assert --allow-root || audit_failed=1
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/invoice-document-flows.php --allow-root || audit_failed=1
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/invoice-document-extended.php --allow-root || audit_failed=1
 $compose run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/invoice-supplement-lifecycle.php --allow-root || audit_failed=1

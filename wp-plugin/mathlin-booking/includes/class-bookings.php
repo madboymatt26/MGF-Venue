@@ -809,15 +809,15 @@ class MBS_Bookings {
         return $map;
     }
 
-    public static function update_status( $ref, $status, $notify_hirer = true ) {
+    public static function update_status( $ref, $status, $notify_hirer = true, $approval_options = array() ) {
         if ( class_exists( 'MBS_Space_Selection' ) ) {
-            $result = MBS_Space_Selection::locked( static function() use ( $ref, $status, $notify_hirer ) { return self::update_status_locked( $ref, $status, $notify_hirer ); } );
-            return is_wp_error( $result ) ? false : $result;
+            $result = MBS_Space_Selection::locked( static function() use ( $ref, $status, $notify_hirer, $approval_options ) { return self::update_status_locked( $ref, $status, $notify_hirer, $approval_options ); } );
+            return is_wp_error( $result ) && empty( $approval_options['return_error'] ) ? false : $result;
         }
-        return self::update_status_locked( $ref, $status, $notify_hirer );
+        return self::update_status_locked( $ref, $status, $notify_hirer, $approval_options );
     }
 
-    private static function update_status_locked( $ref, $status, $notify_hirer ) {
+    private static function update_status_locked( $ref, $status, $notify_hirer, $approval_options = array() ) {
         global $wpdb;
         $table   = $wpdb->prefix . MBS_TABLE;
         $allowed = array( 'pending', 'confirmed', 'cancelled', 'archived', 'paid', 'deposit_paid' );
@@ -862,8 +862,8 @@ class MBS_Bookings {
 
             if ( $is_chargeable ) {
                 // Delegate to the atomic confirmation service
-                $atomic_result = MBS_Invoice_Document_Service::confirm_and_issue( $ref, null, (bool) $notify_hirer );
-                if ( is_wp_error( $atomic_result ) ) return false;
+                $atomic_result = MBS_Invoice_Document_Service::confirm_and_issue( $ref, null, (bool) $notify_hirer, $approval_options );
+                if ( is_wp_error( $atomic_result ) ) return ! empty( $approval_options['return_error'] ) ? $atomic_result : false;
                 return true; // Both fresh-issue and idempotent no-op are successful
             }
         }

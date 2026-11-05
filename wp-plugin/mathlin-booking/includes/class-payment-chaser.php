@@ -238,6 +238,10 @@ class MBS_Payment_Chaser {
         }
 
         $body .= nl2br( esc_html( $body_text ) );
+        if ( class_exists( 'MBS_Payment_Expiry' ) ) {
+            $expiry_warning = MBS_Payment_Expiry::warning( $booking );
+            if ( $expiry_warning !== '' ) $body .= '<p><strong>' . esc_html( $expiry_warning ) . '</strong></p>';
+        }
 
         // Pay Now button if WooCommerce available
         if ( MBS_Woo_Payment::is_available() ) {

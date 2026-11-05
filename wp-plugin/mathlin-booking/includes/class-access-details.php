@@ -87,6 +87,7 @@ class MBS_Access_Details {
      * Pricing tiers cannot bypass this rule.
      */
     public static function is_eligible_for_access( $booking ) {
+        if ( class_exists( 'MBS_Payment_Expiry' ) ) { $policy = MBS_Payment_Expiry::get( $booking->ref ); if ( $policy && $policy->state === 'money_review' ) return false; }
         if ( self::is_estate_booking( $booking ) ) return false;
         if ( ! in_array( $booking->status, array( 'confirmed', 'deposit_paid', 'paid' ), true ) ) return false;
         return ! MBS_Payment_Features::enabled( 'payments' ) || $booking->status === 'paid';

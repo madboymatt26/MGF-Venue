@@ -1077,6 +1077,8 @@ jQuery(function ($) {
             status: status
         };
         if (reason) data.reason = reason;
+        data.expiry_ack = $('#mbs-expiry-short-ack').is(':checked') ? 1 : 0;
+        data.expiry_manual_reason = $('#mbs-expiry-manual-reason').val() || '';
 
         $.post(MBS_Admin.ajax_url, data, function (res) {
             if (res.success) {
@@ -1097,7 +1099,7 @@ jQuery(function ($) {
                     $btn.prop('disabled', false);
                 }
             } else {
-                alert('Error: ' + (res.data && res.data.message ? res.data.message : 'Could not update booking status.'));
+                alert('Error: ' + (typeof res.data === 'string' ? res.data : (res.data && res.data.message ? res.data.message : 'Could not update booking status.')));
                 $btn.prop('disabled', false).text(origText);
             }
         }).fail(function () {

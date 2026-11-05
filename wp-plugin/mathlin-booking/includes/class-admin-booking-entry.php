@@ -86,6 +86,7 @@ class MBS_Admin_Booking_Entry {
         $amount = MBS_Bookings::calculate_cost( $d['space'], $d['start_time'], $d['end_time'], $d['kitchen'], $d['all_day'], $days, $d['scout_use'], $d['pricing_tier'] );
         if ( $recurring && $amount > 0 && $d['status'] !== 'pending' ) return self::fail( 'Create paid series as Pending, then configure billing and approve in Recurring Series.' );
         if ( ! $recurring && $amount > 0 && $d['status'] === 'confirmed' && ! MBS_Payment_Features::enabled( 'invoices' ) ) return self::fail( 'Invoicing is disabled. Save as Pending rather than confirming a chargeable booking.' );
+        if ( ! $recurring && $amount > 0 && $d['status'] === 'confirmed' && class_exists( 'MBS_Payment_Expiry' ) && MBS_Payment_Expiry::enabled() && MBS_Payment_Expiry::eligible( (object) array_merge( $d, array( 'amount' => $amount ) ) ) ) return self::fail( 'Save this hire as Pending, then review its payment cancellation deadlines and approve it from View booking. This avoids a silent or unacknowledged policy-controlled approval.' );
         $schedule = array();
         foreach ( $dates as $date ) {
             $occurrence = $d; $occurrence['booking_date'] = $date;

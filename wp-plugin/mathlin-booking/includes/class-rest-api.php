@@ -1371,7 +1371,7 @@ class MBS_Rest_API {
             'mbs_scout_volunteer_emails', 'mbs_scout_nights_enabled', 'mbs_admin_email',
             'mbs_bank_sort_code', 'mbs_bank_account_number', 'mbs_bank_account_name',
             'mbs_payment_terms_days', 'mbs_deposit_enabled', 'mbs_deposit_percentage',
-            'mbs_deposit_balance_days', 'mbs_access_enabled', 'mbs_access_instructions',
+            'mbs_deposit_balance_days', 'mbs_access_enabled', 'mbs_access_instructions', 'mbs_payment_expiry_enabled',
             'mbs_access_health_safety', 'mbs_access_hours_before', 'mbs_venue_capacity',
             'mbs_curfew_saturday', 'mbs_curfew_sunday', 'mbs_payment_days_required',
             'mbs_terms_text', 'mbs_booking_notice', 'mbs_facilities_text',

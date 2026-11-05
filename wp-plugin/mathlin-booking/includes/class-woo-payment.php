@@ -178,6 +178,7 @@ class MBS_Woo_Payment {
         }
 
         // Determine payment amount based on deposit settings
+        if ( class_exists( 'MBS_Payment_Expiry' ) && ! MBS_Payment_Expiry::checkout_allowed( $ref ) ) wp_die( 'The payment deadline has passed or this booking requires manual review. Please contact the booking coordinator.' );
         $deposit_settings = MBS_Bookings::get_deposit_settings();
         $total_amount     = floatval( $booking->amount );
         $amount_paid      = floatval( $booking->amount_paid ?? 0 );
@@ -325,6 +326,7 @@ class MBS_Woo_Payment {
     public static function save_order_meta( $item, $cart_item_key, $values, $order ) {
         if ( isset( $values['mbs_booking_ref'] ) ) {
             $item->add_meta_data( '_mbs_booking_ref', $values['mbs_booking_ref'], true );
+            if ( class_exists( 'MBS_Payment_Expiry' ) && MBS_Payment_Expiry::enabled() && MBS_Payment_Expiry::get( $values['mbs_booking_ref'] ) ) $order->update_meta_data( '_mbs_booking_ref', $values['mbs_booking_ref'] );
         }
         if ( isset( $values['mbs_invoice_ref'] ) ) {
             $item->add_meta_data( '_mbs_invoice_ref', $values['mbs_invoice_ref'], true );
@@ -360,6 +362,7 @@ class MBS_Woo_Payment {
         if ( ! WC()->cart ) return;
         $invoice_items = 0;
         foreach ( WC()->cart->get_cart() as $cart_item ) {
+            if ( ! empty( $cart_item['mbs_booking_ref'] ) && class_exists( 'MBS_Payment_Expiry' ) && ! MBS_Payment_Expiry::checkout_allowed( $cart_item['mbs_booking_ref'] ) ) $errors->add( 'booking_payment_deadline', 'This hire has reached its payment deadline or requires manual review. Please contact the booking coordinator.' );
             if ( empty( $cart_item['mbs_invoice_ref'] ) ) continue;
             $invoice_items++;
             $invoice = MBS_Billing_Ledger::get_invoice( $cart_item['mbs_invoice_ref'] );
@@ -503,6 +506,21 @@ class MBS_Woo_Payment {
      * Guarded against duplicate processing via order meta flag.
      */
     public function on_order_completed( $order_id ) {
+        $expiry_order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
+        $expiry_ref = $expiry_order ? $expiry_order->get_meta( '_mbs_booking_ref' ) : '';
+        if ( ! $expiry_ref && $expiry_order && class_exists( 'MBS_Payment_Expiry' ) && MBS_Payment_Expiry::enabled() ) {
+            $refs = array(); foreach ( $expiry_order->get_items() as $item ) { $candidate = $item->get_meta( '_mbs_booking_ref' ); if ( $candidate ) $refs[$candidate] = true; }
+            if ( count( $refs ) === 1 ) $expiry_ref = (string) key( $refs );
+        }
+        if ( class_exists( 'MBS_Payment_Expiry' ) && $expiry_ref && MBS_Payment_Expiry::get( $expiry_ref ) ) {
+            $result = MBS_Space_Selection::locked( function() use ( $order_id ) { return $this->complete_order_locked( $order_id ); } );
+            if ( is_wp_error( $result ) ) throw new RuntimeException( 'Payment reconciliation is busy; retry the payment callback.' );
+            return;
+        }
+        $this->complete_order_locked( $order_id );
+    }
+
+    private function complete_order_locked( $order_id ) {
         $order = wc_get_order( $order_id );
         if ( ! $order ) return;
 
@@ -585,6 +603,22 @@ class MBS_Woo_Payment {
             $booking = MBS_Bookings::get( $ref );
             if ( ! $booking ) continue;
 
+            if ( class_exists( 'MBS_Payment_Expiry' ) && MBS_Payment_Expiry::enabled() ) {
+                $policy_row = MBS_Payment_Expiry::get( $ref );
+                $policy = $policy_row ? json_decode( $policy_row->policy_json, true ) : null;
+                if ( $policy_row && MBS_Payment_Expiry_Policy::valid( $policy ) && ! $policy['exempt'] ) {
+                    $prior_paid = MBS_Money::from_decimal_string( (string) $booking->amount_paid );
+                    $paid_at = $order->get_date_paid();
+                    if ( ! is_wp_error( $prior_paid ) && ( ! $paid_at || $paid_at->getTimestamp() >= MBS_Payment_Expiry_Policy::next_deadline( $policy, $prior_paid )['at'] ) ) {
+                        MBS_Payment_Expiry::check( $ref, $order_id );
+                        MBS_Payment_Expiry::late_payment( $ref, $order );
+                        $order->update_meta_data( '_mbs_booking_ref', $ref );
+                        $processed_any = true;
+                        continue;
+                    }
+                }
+            }
+
             // Process payment if there's a balance due (any non-cancelled/archived status)
             $current_balance = (float) $booking->amount - (float) ( $booking->amount_paid ?? 0 );
             if ( $current_balance > 0.01 && ! in_array( $booking->status, array( 'cancelled', 'archived' ) ) ) {
@@ -641,6 +675,7 @@ class MBS_Woo_Payment {
                 $processed_any = true;
 
             } elseif ( $booking->status === 'cancelled' ) {
+                if ( class_exists( 'MBS_Payment_Expiry' ) ) MBS_Payment_Expiry::late_payment( $ref, $order );
                 // SEC-FIX-005: Payment received for a cancelled booking — flag for manual refund
                 $order->add_order_note(
                     sprintf( '⚠️ CRITICAL: Payment received for CANCELLED booking %s. Manual refund required.', $ref ),
@@ -706,6 +741,11 @@ class MBS_Woo_Payment {
             if ( ! $booking ) continue;
 
             // Only revert if currently paid
+            if ( class_exists( 'MBS_Payment_Expiry' ) && MBS_Payment_Expiry::get( $ref ) ) {
+                $reviewed = MBS_Payment_Expiry::refund_review( $ref, $order_id, $refund_id );
+                if ( is_wp_error( $reviewed ) ) throw new RuntimeException( $reviewed->get_error_message() );
+                continue;
+            }
             if ( $booking->status === 'paid' ) {
                 global $wpdb;
                 $table = $wpdb->prefix . MBS_TABLE;

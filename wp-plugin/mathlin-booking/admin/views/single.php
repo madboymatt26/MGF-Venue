@@ -35,6 +35,7 @@ $invoice_pdf_url = $invoice_document_id ? add_query_arg( array(
         &nbsp; Booking <?php echo esc_html( $booking->ref ); ?>
     </h1>
 
+    <?php if ( class_exists( 'MBS_Payment_Expiry' ) ) MBS_Payment_Expiry::render_booking( $booking ); ?>
     <?php MBS_Additional_Charges::render_related($booking->ref); ?>
     <?php MBS_Terms_Acceptance::render($booking); ?>
     <?php $access_readiness = MBS_Access_Details::readiness($booking); ?>
