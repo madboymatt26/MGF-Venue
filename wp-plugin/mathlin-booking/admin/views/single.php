@@ -26,7 +26,6 @@ $invoice_pdf_url = $invoice_document_id ? add_query_arg( array(
 ), admin_url( 'admin-ajax.php' ) ) : '';
 ?>
 <div class="wrap mbs-admin">
-    <?php if ( class_exists( 'MBS_Payment_Expiry' ) ) MBS_Payment_Expiry::render_booking( $booking ); ?>
     <h1>
         <?php if ( ! empty( $booking->scout_use ) && empty( $booking->series_id ) ) : ?>
             <a href="<?php echo esc_url( admin_url( 'admin.php?page=mathlin-scout-nights&tab=one-off&scope=all' ) ); ?>" class="nms-back-link">&#8592; One-off Scout bookings</a>
@@ -36,6 +35,7 @@ $invoice_pdf_url = $invoice_document_id ? add_query_arg( array(
         &nbsp; Booking <?php echo esc_html( $booking->ref ); ?>
     </h1>
 
+    <?php if ( class_exists( 'MBS_Payment_Expiry' ) ) MBS_Payment_Expiry::render_booking( $booking ); ?>
     <?php MBS_Additional_Charges::render_related($booking->ref); ?>
     <?php MBS_Terms_Acceptance::render($booking); ?>
     <?php $access_readiness = MBS_Access_Details::readiness($booking); ?>

@@ -1099,7 +1099,7 @@ jQuery(function ($) {
                     $btn.prop('disabled', false);
                 }
             } else {
-                alert('Error: ' + (res.data && res.data.message ? res.data.message : 'Could not update booking status.'));
+                alert('Error: ' + (typeof res.data === 'string' ? res.data : (res.data && res.data.message ? res.data.message : 'Could not update booking status.')));
                 $btn.prop('disabled', false).text(origText);
             }
         }).fail(function () {

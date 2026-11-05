@@ -344,6 +344,10 @@ class MBS_Payment_Expiry {
     }
     public static function settings_page() {
         if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Administrator access required.' );
+        if ( MBS_Campsite_Policy::enabled() || ! MBS_Payment_Features::enabled( 'payments' ) ) {
+            echo '<div class="wrap mbs-admin"><h1>Payment expiry policy</h1><p>Automatic unpaid-hire expiry is unavailable on free/campsite sites. No bookings are enrolled.</p></div>';
+            return;
+        }
         echo '<div class="wrap mbs-admin"><h1>Payment expiry policy</h1><p>New approvals only. No existing bookings are enrolled. Deposits: 48 hours from approval; final cancellation cutoff: 08:00 Europe/London the day before the hire. Free, Scout, estate, offline and series billing are excluded. Scheduled processing may run after the nominal deadline if hosting cron is delayed.</p>';
         self::form( null, 'settings' ); echo '<label><input type="checkbox" name="enabled" value="1" ' . checked( self::enabled(), true, false ) . '> Enable for new paid one-off approvals on this site</label><p><button class="button button-primary">Save policy</button></p></form></div>';
     }

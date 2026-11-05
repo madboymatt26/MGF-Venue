@@ -40,6 +40,9 @@ try {
     $check(strpos(MBS_Email::build_confirmation_message(MBS_Bookings::get($normal))['body'],'48 hours of approval')!==false,'Approval email contains agreed warning');
     $short=$seed(2); $result=MBS_Invoice_Document_Service::confirm_and_issue($short,array(),true);
     $check(is_wp_error($result)&&!MBS_Payment_Expiry::get($short),'Short notice requires explicit acknowledgement');
+    $result=MBS_Bookings::update_status($short,'confirmed',true,array('return_error'=>true));
+    $check(is_wp_error($result)&&$result->get_error_code()==='expiry_short_notice_ack_required','Admin receives the exact acknowledgement rejection');
+    $check(MBS_Bookings::update_status($short,'confirmed',true)===false,'Legacy boolean status contract retained');
     $result=MBS_Invoice_Document_Service::confirm_and_issue($short,array(),true,array('short_notice_ack'=>true));
     $check(!is_wp_error($result)&&json_decode(MBS_Payment_Expiry::get($short)->policy_json,true)['deposit_due_at']===null,'Acknowledged short notice uses full-payment cutoff');
     $past=$seed(0); $result=MBS_Invoice_Document_Service::confirm_and_issue($past,array(),true,array('short_notice_ack'=>true));

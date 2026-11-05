@@ -368,7 +368,8 @@ class MBS_Admin {
             wp_send_json_error( 'Record payment against the consolidated invoice, not an individual occurrence.', 409 );
         }
 
-        $result = MBS_Bookings::update_status( $ref, $status, $status === 'confirmed', array( 'short_notice_ack' => ! empty( $_POST['expiry_ack'] ), 'manual_reason' => sanitize_textarea_field( wp_unslash( $_POST['expiry_manual_reason'] ?? '' ) ) ) );
+        $result = MBS_Bookings::update_status( $ref, $status, $status === 'confirmed', array( 'return_error' => true, 'short_notice_ack' => ! empty( $_POST['expiry_ack'] ), 'manual_reason' => sanitize_textarea_field( wp_unslash( $_POST['expiry_manual_reason'] ?? '' ) ) ) );
+        if ( is_wp_error( $result ) ) wp_send_json_error( $result->get_error_message() );
         if ( $result === false ) wp_send_json_error( 'This booking cannot be changed because it has financial history.', 409 );
 
         if ( $status === 'confirmed' ) {

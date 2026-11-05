@@ -3,7 +3,11 @@
 Status: approved requirements; implementation in PR #47. Not released, deployed
 or enabled. Matthew authorised GitHub upload/testing on 5 November. All ten hosted
 checks passed for code commit `1efdc79e342edf63b002227bbbde6cb14c42dc33` in run
-`42065184474`. Real-browser acceptance remains mandatory before release.
+`42065184474`. Local Chrome acceptance has now passed 25 paid-venue checks and
+three free/campsite checks, including actual approval/review submissions,
+keyboard/mobile rendering, nonce/role and stale-version rejection. Acceptance
+found and fixed swallowed approval errors and hidden free-site controls.
+The final versioned source must pass CI again before release/deployment.
 
 ## Agreed policy
 
