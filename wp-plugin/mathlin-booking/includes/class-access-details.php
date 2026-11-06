@@ -90,7 +90,8 @@ class MBS_Access_Details {
         if ( class_exists( 'MBS_Payment_Expiry' ) ) { $policy = MBS_Payment_Expiry::get( $booking->ref ); if ( $policy && $policy->state === 'money_review' ) return false; }
         if ( self::is_estate_booking( $booking ) ) return false;
         if ( ! in_array( $booking->status, array( 'confirmed', 'deposit_paid', 'paid' ), true ) ) return false;
-        return ! MBS_Payment_Features::enabled( 'payments' ) || $booking->status === 'paid';
+        return ! MBS_Payment_Features::enabled( 'payments' ) || $booking->status === 'paid'
+            || ( class_exists( 'MBS_Credit_Accounts' ) && MBS_Credit_Accounts::context( $booking, true ) !== null );
     }
 
     /** Estate entries never receive Scout access mail, regardless of payment. */

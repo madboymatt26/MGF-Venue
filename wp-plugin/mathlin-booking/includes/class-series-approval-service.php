@@ -85,6 +85,14 @@ class MBS_Series_Approval_Service {
         }
 
         // ── Save billing configuration ─────────────────────────────────────
+        if ( class_exists( 'MBS_Credit_Accounts' ) && MBS_Credit_Accounts::assignment( 'series', $series_ref ) ) {
+            $credit_booking = (object) array( 'ref' => '', 'series_id' => $series_ref, 'email' => $series->contact_email, 'booking_date' => $series->repeat_until ?: $series->start_date );
+            $credit = MBS_Credit_Accounts::context( $credit_booking, false, true );
+            if ( ! $credit || $billing_config['billing_treatment'] !== 'invoice_managed' || (int) ( $billing_config['payment_terms_days'] ?? 14 ) !== $credit['terms_days'] ) {
+                $wpdb->query( 'ROLLBACK' );
+                return new WP_Error( 'credit_series_review', 'Review the assigned invoice agreement and matching invoice-managed terms before approving this series.' );
+            }
+        }
         $now = current_time( 'mysql' );
         $billing_update = array(
             'billing_mode'              => sanitize_key( $billing_config['billing_mode'] ),

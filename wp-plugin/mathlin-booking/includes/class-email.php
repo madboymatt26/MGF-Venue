@@ -172,8 +172,11 @@ class MBS_Email {
         $deposit_settings = MBS_Bookings::get_deposit_settings();
         $total_amount     = (float) $booking->amount;
         $amount_paid_val  = (float) ( $booking->amount_paid ?? 0 );
+        $credit_assignment = class_exists( 'MBS_Credit_Accounts' ) ? MBS_Credit_Accounts::for_booking( $booking ) : null;
 
-        if ( $deposit_settings['enabled'] && $total_amount > 0 ) {
+        if ( $credit_assignment ) {
+            $body .= self::credit_terms_block( $booking );
+        } elseif ( $deposit_settings['enabled'] && $total_amount > 0 ) {
             $requires_full  = MBS_Bookings::requires_full_payment( $booking->booking_date );
             $deposit_amount = MBS_Bookings::calculate_deposit( $total_amount );
             $balance_amount = $total_amount - $deposit_amount;
@@ -213,7 +216,10 @@ class MBS_Email {
 
         // Add Pay Now button if WooCommerce is available (suppressed for offline tiers)
         $is_offline = MBS_Bookings::booking_is_offline( $booking );
-        if ( $is_offline && $total_amount > 0 ) {
+        if ( $credit_assignment ) {
+            // Credit is not an offline pricing tier. Do not create a deposit order
+            // or change a saved payment method merely to render a confirmation.
+        } elseif ( $is_offline && $total_amount > 0 ) {
             // B2B: show BACS / PO instructions instead of a card payment button
             $body .= self::offline_payment_block( $booking, $total_amount - $amount_paid_val );
         } elseif ( $total_amount > 0 && MBS_Woo_Payment::is_available() ) {
@@ -248,6 +254,23 @@ class MBS_Email {
         $body .= self::footer();
 
         return array( 'subject' => $subject, 'body' => $body );
+    }
+
+    private static function credit_terms_block( $booking ) {
+        $info = MBS_Credit_Accounts::invoice_info( $booking );
+        $credit = MBS_Credit_Accounts::context( $booking );
+        $text = $info ? 'Please pay by the due date on your issued invoice: ' . $info['due_date'] . '.' : 'Please follow the payment dates on your issued invoice or reviewed series billing schedule.';
+        $text .= ' The ordinary 48-hour deposit and previous-day automatic cancellation rules do not apply to this explicitly assigned invoice account. Outstanding invoices remain payable and are subject to staff review.';
+        $text .= $credit && ! empty( $credit['allow_unpaid_access'] ) ? ' Access before payment has been expressly authorised under this agreement, subject to the agreement remaining active and valid.' : ' Access before full payment has not been authorised; please contact the booking coordinator before your hire.';
+        return '<div style="background:#f5f0ff;border:1px solid #e0d0f0;border-radius:6px;padding:16px;margin:16px 0;"><strong>Approved invoice-account treatment</strong><p>' . esc_html( $text ) . '</p></div>';
+    }
+
+    /** No deposit demand, cancellation threat or mutable agreement deadline. */
+    public static function build_credit_reminder( $booking ) {
+        $info = MBS_Credit_Accounts::invoice_info( $booking );
+        if ( ! $info ) return new WP_Error( 'credit_invoice_missing', 'Review the issued invoice before reminding this account.' );
+        $body = self::header() . '<h2 style="color:#7413DC;">Invoice account reminder</h2><p>Hi ' . esc_html( $booking->name ) . ',</p><p>Our records show an outstanding hire balance of &pound;' . number_format( max( 0, (float) $booking->amount - (float) $booking->amount_paid ), 2 ) . '. Please arrange payment or contact us if it has already been sent.</p>' . self::booking_table_obj( $booking ) . self::credit_terms_block( $booking ) . '<p>Please use the payment instructions on your issued invoice. If you need help, reply to this email.</p>' . self::footer();
+        return array( 'subject' => 'Invoice account reminder — ' . $booking->ref, 'body' => $body, 'headers' => self::email_headers() );
     }
 
     /**

@@ -180,7 +180,8 @@ foreach ( $invoices as $invoice ) $invoices_by_series[ $invoice->series_ref ][] 
                             $total_amount     = (float) $b->amount;
                             $amount_paid_val  = (float) ( $b->amount_paid ?? 0 );
                             $deposit_amount   = MBS_Bookings::calculate_deposit( $total_amount );
-                            $is_deposit_mode  = $deposit_settings['enabled'] && $total_amount > 0;
+                            $credit_assignment = class_exists( 'MBS_Credit_Accounts' ) ? MBS_Credit_Accounts::for_booking( $b ) : null;
+                            $is_deposit_mode  = $deposit_settings['enabled'] && $total_amount > 0 && ! $credit_assignment;
                         ?>
                         <tr style="border-bottom:1px solid #f0f0f0;<?php echo $is_past ? 'opacity:0.6;' : ''; ?>">
                             <td style="padding:10px 8px;font-weight:600;"><?php echo esc_html( $b->ref ); ?></td>
@@ -199,6 +200,7 @@ foreach ( $invoices as $invoice ) $invoices_by_series[ $invoice->series_ref ][] 
                                 <span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:0.7rem;font-weight:700;text-transform:uppercase;<?php echo $badge_style; ?>">
                                     <?php echo esc_html( MBS_Bookings::status_label( $b->status ) ); ?>
                                 </span>
+                                <?php if ( $credit_assignment ): ?><br><small>Invoice account — see issued invoice / series schedule. Unpaid balance remains due.</small><?php endif; ?>
                             </td>
                             <td style="padding:10px 8px;">
                                 <div style="display:flex;gap:4px;flex-wrap:wrap;">

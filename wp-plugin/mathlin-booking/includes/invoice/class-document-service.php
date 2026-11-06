@@ -87,6 +87,10 @@ class MBS_Invoice_Document_Service {
             return new WP_Error( 'invalid_status', 'Booking cannot be confirmed from status: ' . $booking->status );
         }
 
+        if ( class_exists( 'MBS_Credit_Accounts' ) ) {
+            $credit_guard = MBS_Credit_Accounts::approval_guard( $booking );
+            if ( is_wp_error( $credit_guard ) ) { $wpdb->query( 'ROLLBACK' ); return $credit_guard; }
+        }
         if ( class_exists( 'MBS_Payment_Expiry' ) && $booking->status === 'pending' ) {
             $enrolled = MBS_Payment_Expiry::enroll( $booking, $notify_hirer, ! empty( $approval_options['short_notice_ack'] ), (string) ( $approval_options['manual_reason'] ?? '' ) );
             if ( is_wp_error( $enrolled ) ) { $wpdb->query( 'ROLLBACK' ); return $enrolled; }
@@ -415,6 +419,12 @@ class MBS_Invoice_Document_Service {
 
         // Payment schedule (complete — never null for chargeable bookings)
         $payment_schedule = self::compute_payment_schedule( $booking, $total_minor, $deposit_settings, $bank );
+        $credit = class_exists( 'MBS_Credit_Accounts' ) ? MBS_Credit_Accounts::context( $booking ) : null;
+        if ( class_exists( 'MBS_Credit_Accounts' ) && MBS_Credit_Accounts::for_booking( $booking ) && ! $credit ) return new WP_Error( 'credit_invoice_review', 'Review the disabled, suspended, expired or mismatched invoice agreement before issuing a new document.' );
+        if ( $credit ) {
+            $bank['payment_days'] = $credit['terms_days'];
+            $payment_schedule = array( 'standard_terms' => true, 'terms_days' => $credit['terms_days'], 'due_date' => wp_date( 'Y-m-d', strtotime( '+' . $credit['terms_days'] . ' days' ) ) );
+        }
 
         // Due date
         $due_date = wp_date( 'Y-m-d', strtotime( '+' . $bank['payment_days'] . ' days' ) );

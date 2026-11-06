@@ -27,6 +27,10 @@ class MBS_Payment_Chaser {
     public static function should_chase_occurrence( $booking ) {
         if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'reminders' ) ) return false;
         $treatment = MBS_Series::billing_treatment_for_booking( $booking );
+        if ( class_exists( 'MBS_Credit_Accounts' ) && MBS_Credit_Accounts::for_booking( $booking ) && in_array( $treatment, array( 'one_off', 'legacy_per_occurrence' ), true ) ) {
+            $invoice = MBS_Credit_Accounts::invoice_info( $booking );
+            return $invoice && $invoice['due_date'] < wp_date( 'Y-m-d' );
+        }
         return in_array( $treatment, array( 'one_off', 'legacy_per_occurrence' ), true );
     }
 
@@ -64,11 +68,13 @@ class MBS_Payment_Chaser {
         global $wpdb;
         $table    = $wpdb->prefix . MBS_TABLE;
         $overdue  = wp_date( 'Y-m-d H:i:s', strtotime( "-{$payment_days} days" ) );
+        $credit_candidate = class_exists( 'MBS_Credit_Accounts' ) && MBS_Credit_Accounts::supported()
+            ? ' OR EXISTS (SELECT 1 FROM ' . MBS_Credit_Accounts::table( true ) . " ca WHERE ca.scope_kind='booking' AND ca.scope_ref={$table}.ref)" : '';
 
         $bookings = self::eligible_batch(
             "SELECT * FROM {$table}
              WHERE status = 'confirmed'
-             AND created_at <= %s
+             AND (created_at <= %s {$credit_candidate})
              AND COALESCE(scout_use, 0) = 0
              AND amount - COALESCE(amount_paid, 0) > 0.01
              AND (chase_count < %d OR chase_count IS NULL)
@@ -173,6 +179,9 @@ class MBS_Payment_Chaser {
 
         // B2B EXEMPTION: offline-invoicing tiers get a gentle statement reminder
         // instead of the escalating "pay now or cancel" chase sequence.
+        if ( class_exists( 'MBS_Credit_Accounts' ) && MBS_Credit_Accounts::for_booking( $booking ) ) {
+            return MBS_Credit_Accounts::queue_reminder( $booking->ref );
+        }
         if ( MBS_Bookings::booking_is_offline( $booking ) ) {
             self::send_b2b_statement_reminder( $booking, $balance_due, $manual );
             return true;

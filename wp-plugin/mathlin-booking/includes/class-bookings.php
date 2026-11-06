@@ -615,6 +615,11 @@ class MBS_Bookings {
         }
 
         // Public/private visibility
+        if ( class_exists( 'MBS_Credit_Accounts' ) && MBS_Credit_Accounts::enabled() && ! empty( $data['request_invoice_terms'] ) ) {
+            $stored_fields = json_decode( (string) ( $insert['custom_fields'] ?? '{}' ), true ) ?: array();
+            $stored_fields['_mbs_credit_requested'] = true; // Request only; never an agreement/assignment ID.
+            $insert['custom_fields'] = wp_json_encode( $stored_fields );
+        }
         $insert['is_public'] = ! empty( $data['is_public'] ) ? 1 : 0;
 
         // Link to logged-in user if applicable
