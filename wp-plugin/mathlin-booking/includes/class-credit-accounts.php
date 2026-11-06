@@ -288,7 +288,7 @@ class MBS_Credit_Accounts {
     public static function page() {
         global $wpdb;
         if ( ! current_user_can( 'manage_options' ) || ! self::supported() ) wp_die( 'Invoice accounts are available only to paid venue administrators.' );
-        echo '<div class="wrap nms-admin-wrap"><h1>Approved invoice accounts</h1><p>Credit is separate from pricing, website logins and payment method. No booking is approved, payment recorded or email sent here.</p><section class="nms-card"><div class="mbs-card-body">';
+        echo '<div class="wrap mbs-admin mbs-credit-page"><h1>Approved invoice accounts</h1><p>Credit is separate from pricing, website logins and payment method. No booking is approved, payment recorded or email sent here.</p><section class="nms-card"><div class="mbs-card-body">';
         self::form_start( 'enable' );
         echo '<label><input type="checkbox" name="enabled" value="1" ' . checked( self::enabled(), true, false ) . '> Enable explicitly approved invoice accounts</label><p>Disabling stops new grants and unpaid access. Existing cancellation exemptions are retained for manual review.</p><button class="button">Save feature preference</button></form></div></section>';
         if ( ! self::enabled() ) { echo '</div>'; return; }

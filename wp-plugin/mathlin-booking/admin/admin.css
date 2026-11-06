@@ -747,3 +747,6 @@ button.mbs-invoice-card__ref:hover { color: #5a0fb0; }
     .mbs-admin .mbs-buffer-table th, .mbs-admin .mbs-buffer-table td { padding:8px; }
 }
 @media(prefers-reduced-motion:reduce) { .mbs-admin .mbs-disclosure > summary::before { transition:none; } }
+.mbs-credit-page input, .mbs-credit-page select, .mbs-credit-page textarea { box-sizing:border-box; max-width:100%; }
+.mbs-credit-page .button { white-space:normal; height:auto; }
+.mbs-credit-page details { overflow-wrap:anywhere; }

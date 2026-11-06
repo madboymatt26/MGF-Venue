@@ -27,6 +27,8 @@ Defaults: module off; no account creation/backfill; no automatic customer enrolm
 
 ## Operational handover
 
+Local acceptance: 85 PHP programs, 23 pure agreement assertions, 52 real SQL assertions and 14 synthetic Chrome checks. SQL coverage includes audited rollback, invoice immutability, account isolation, funds-review/cancellation guards, monthly scope, suspension, feature-off and idempotent/stale reminder handling. Browser checks exercise nonce/capability rejection, explicit permission defaults, stale assignment, keyboard disclosure and desktop/narrow layout; screenshots reviewed. Hosted CI and production preservation checks remain mandatory release gates.
+
 Enable only after reviewing this policy. Create an agreement with authorised contacts, terms, expiry date and the access decision. Bind it before approving the booking; normal staff approval is still required. For an existing issued invoice, its printed deadline remains authoritative; credit assignment changes cancellation/access handling, not that document. For a monthly series, configure and review its normal billing schedule first.
 
 Suspended/expired agreements and overdue invoices appear in Needs attention. Staff reconcile payments, contact the account and decide whether to suspend future credit. They do not silently mark money paid, cancel already-confirmed sessions, revoke a code already delivered, refund, or restore a released slot. Disabling the module stops new grants and unpaid access but does not undo exemptions or erase audit history. Roll back by disabling it and retaining additive tables; review affected upcoming access first.
