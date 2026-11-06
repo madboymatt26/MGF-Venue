@@ -8,7 +8,7 @@ $check = static function( $ok, $message ) use ( &$checks ) { $checks++; if ( ! $
 $mail = static function() use ( &$transport ) { $transport++; return true; };
 $http = static function() { throw new RuntimeException( 'No HTTP allowed in expiry fixtures.' ); };
 $options = array();
-foreach ( array( 'mbs_payment_expiry_enabled','mbs_campsite_mode','mbs_payments_enabled','mbs_invoices_enabled','mbs_deposit_enabled','mbs_deposit_percentage','mbs_ha_webhook_url','timezone_string' ) as $key ) $options[$key] = get_option( $key, null );
+foreach ( array( 'mbs_additional_emails','mbs_payment_expiry_enabled','mbs_campsite_mode','mbs_payments_enabled','mbs_invoices_enabled','mbs_deposit_enabled','mbs_deposit_percentage','mbs_ha_webhook_url','timezone_string' ) as $key ) $options[$key] = get_option( $key, null );
 $seed = static function( $days = 10 ) use ( &$refs, $wpdb, $table, $check ) {
     $ref = 'EXP-' . substr( hash( 'sha256', wp_generate_uuid4() ), 0, 12 ); $refs[] = $ref;
     $b = (object) array( 'ref'=>$ref,'status'=>'pending','name'=>'Synthetic expiry fixture','email'=>'fixture@example.invalid','phone'=>'','address'=>'','space'=>'Main Scout Hall','booking_date'=>wp_date('Y-m-d',strtotime('+' . $days . ' days')),'booking_date_end'=>wp_date('Y-m-d',strtotime('+' . $days . ' days')),'start_time'=>'10:00:00','end_time'=>'12:00:00','attendees'=>1,'purpose'=>'Synthetic payment expiry','amount'=>'30.00','amount_paid'=>'0.00','scout_use'=>0,'pricing_tier'=>'standard' );
@@ -55,13 +55,19 @@ try {
     $check((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$queue} WHERE message_key LIKE %s",'expiry_warning:'.$warn.':%'))===1,'Repeated worker does not duplicate warning');
     $wpdb->update($table,array('amount_paid'=>'7.50','status'=>'deposit_paid'),array('ref'=>$warn));
     $check(!MBS_Payment_Expiry::email_current($warning),'Deposit payment suppresses obsolete warning before transport');
+    update_option('mbs_additional_emails','extra-admin@example.invalid, EXTRA-ADMIN@example.invalid, invalid, '.MBS_Bookings::get_admin_email());
     $due=$seed(); MBS_Invoice_Document_Service::confirm_and_issue($due,array(),true); $age_deposit($due,49);
     add_filter('query',$fail,PHP_INT_MAX); $result=MBS_Payment_Expiry::check($due); remove_filter('query',$fail,PHP_INT_MAX);
     $check(is_wp_error($result)&&MBS_Bookings::get($due)->status==='confirmed'&&MBS_Payment_Expiry::get($due)->state==='active','Failed outbox rolls cancellation and review back');
+    $fail_extra=static function($sql)use($queue){return strpos($sql,'INSERT INTO')!==false&&strpos($sql,$queue)!==false&&strpos($sql,'extra-admin@example.invalid')!==false?'INVALID SYNTHETIC ADDITIONAL ADMIN INSERT':$sql;};
+    add_filter('query',$fail_extra,PHP_INT_MAX);$result=MBS_Payment_Expiry::check($due);remove_filter('query',$fail_extra,PHP_INT_MAX);
+    $check(is_wp_error($result)&&MBS_Bookings::get($due)->status==='confirmed'&&MBS_Payment_Expiry::get($due)->state==='active','Additional-recipient failure also rolls cancellation back');
+    $check((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$queue} WHERE reference_id=%d AND message_type IN ('expiry_cancel','expiry_admin')",MBS_Bookings::get($due)->id))===0,'No partial hirer/admin intents escape rollback');
     $check(!is_wp_error(MBS_Payment_Expiry::check($due)),'Due unpaid deposit cancels after failure is removed');
     $check(MBS_Bookings::get($due)->status==='cancelled'&&MBS_Payment_Expiry::get($due)->state==='cancelled','No-money cancellation releases booking');
     MBS_Payment_Expiry::check($due);
-    $check((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$queue} WHERE message_key IN (%s,%s)",'expiry_cancel:'.$due,'expiry_admin:'.$due))===2,'Cancellation and admin intent occur once each');
+    $check((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$queue} WHERE reference_type='booking' AND reference_id=%d AND message_type='expiry_admin'",MBS_Bookings::get($due)->id))===2,'Primary and deduplicated additional admin intent each occur once');
+    $check((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$queue} WHERE message_key=%s",'expiry_cancel:'.$due))===1,'Hirer cancellation occurs once, separately from admin copies');
     $held=$seed(); MBS_Invoice_Document_Service::confirm_and_issue($held,array(),true);
     $wpdb->update($table,array('amount_paid'=>'7.50','deposit_paid'=>'7.50','status'=>'deposit_paid'),array('ref'=>$held));
     $row=MBS_Payment_Expiry::get($held); $p=json_decode($row->policy_json,true);

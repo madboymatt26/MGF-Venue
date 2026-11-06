@@ -112,12 +112,20 @@ class MBS_Payment_Expiry {
         return $wpdb->update( self::table(), array( 'state' => $state, 'policy_json' => wp_json_encode( $policy ), 'review_json' => wp_json_encode( $review ), 'version' => (int) $row->version + 1, 'updated_at' => current_time( 'mysql' ) ), array( 'id' => $row->id, 'version' => $row->version ) ) === 1;
     }
     private static function queue( $b, $type, $text, $key, $admin = false ) {
-        $to = $admin ? MBS_Bookings::get_admin_email() : $b->email;
+        $recipients = $admin ? MBS_Email::get_notification_emails() : array( $b->email );
+        if ( ! $recipients ) return new WP_Error( 'expiry_admin_recipients', 'No valid administrator notification recipient is configured.' );
         $subject = ( $type === 'cancel' ? 'Booking cancelled due to non-payment — ' : ( $admin ? 'Booking payment review required — ' : 'Payment deadline — ' ) ) . $b->ref;
         $org = MBS_Email_Templates::get_org_settings();
         $body = '<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;color:#1a1a2e;max-width:600px;margin:auto"><h2 style="color:#7413DC">' . esc_html( $org['name'] ) . '</h2><p>' . nl2br( esc_html( $text ) ) . '</p><p>Kind regards,<br>' . esc_html( $org['name'] ) . '</p></body></html>';
         $headers = array( 'Content-Type: text/html; charset=UTF-8', 'Reply-To: ' . MBS_Bookings::get_admin_email() );
-        return MBS_Email_Queue::enqueue( $to, $subject, $body, $headers, $key, MBS_Email_Queue::compute_payload_hash( $to, $subject, $body, $headers ), null, array( 'message_type' => 'expiry_' . $type, 'reference_type' => 'booking', 'reference_id' => (int) $b->id ) );
+        foreach ( $recipients as $to ) {
+            // Preserve the original primary-recipient key so upgrades/retries do
+            // not resend accepted primary alerts. Extras have independent leases.
+            $recipient_key = $admin && strcasecmp( $to, trim( MBS_Bookings::get_admin_email() ) ) !== 0 ? $key . ':to:' . substr( hash( 'sha256', $to ), 0, 16 ) : $key;
+            $result = MBS_Email_Queue::enqueue( $to, $subject, $body, $headers, $recipient_key, MBS_Email_Queue::compute_payload_hash( $to, $subject, $body, $headers ), null, array( 'message_type' => 'expiry_' . $type, 'reference_type' => 'booking', 'reference_id' => (int) $b->id ) );
+            if ( is_wp_error( $result ) ) return $result;
+        }
+        return true;
     }
     /** A returned WP_Error or ambiguous order always blocks cancellation. */
     public static function orders( $ref ) {
