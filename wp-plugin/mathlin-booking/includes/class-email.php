@@ -35,19 +35,18 @@ class MBS_Email {
      * Get all notification email addresses (comma-separated in settings).
      */
     private static function notification_emails() {
-        $primary    = MBS_Bookings::get_admin_email();
-        $additional = get_option( 'mbs_additional_emails', '' );
+        return self::get_notification_emails();
+    }
 
-        $emails = array( $primary );
-        if ( ! empty( $additional ) ) {
-            $extras = array_map( 'trim', explode( ',', $additional ) );
-            foreach ( $extras as $email ) {
-                if ( is_email( $email ) && $email !== $primary ) {
-                    $emails[] = $email;
-                }
-            }
+    /** Shared recipient policy for ordinary and transactional admin alerts. */
+    public static function get_notification_emails() {
+        $candidates = array_merge( array( MBS_Bookings::get_admin_email() ), explode( ',', (string) get_option( 'mbs_additional_emails', '' ) ) );
+        $emails = array();
+        foreach ( $candidates as $candidate ) {
+            $email = strtolower( trim( (string) $candidate ) );
+            if ( is_email( $email ) ) $emails[$email] = $email;
         }
-        return $emails;
+        return array_values( $emails );
     }
 
     public static function notify_admin( $booking ) {
