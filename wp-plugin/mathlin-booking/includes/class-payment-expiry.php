@@ -25,6 +25,7 @@ class MBS_Payment_Expiry {
         return (bool) get_option( 'mbs_payment_expiry_enabled', false ) && MBS_Payment_Features::enabled( 'payments' ) && ! MBS_Campsite_Policy::enabled();
     }
     public static function eligible( $b ) {
+        if ( class_exists( 'MBS_Credit_Accounts' ) && MBS_Credit_Accounts::for_booking( $b ) ) return false;
         return empty( $b->scout_use ) && empty( $b->series_id ) && ! MBS_Access_Details::is_estate_booking( $b ) && ! MBS_Bookings::booking_is_offline( $b ) && (float) $b->amount > 0;
     }
     public static function get( $ref ) {
@@ -201,7 +202,7 @@ class MBS_Payment_Expiry {
                 $orders = self::orders( $ref );
                 if ( $late_order_id && is_array( $orders ) ) $orders = array_filter( $orders, static function( $o ) use ( $late_order_id ) { return (int) $o->get_id() !== (int) $late_order_id; } );
                 $decision = MBS_Payment_Expiry_Policy::decision( $p, $now, $paid, $b->status, self::payment_clear( $b, $orders ), $total, $b->booking_date );
-                if ( ! self::eligible( $b ) ) $decision = array( 'action' => 'review', 'reason' => 'billing_treatment_changed' );
+                if ( ! self::eligible( $b ) && empty( $p['exempt'] ) ) $decision = array( 'action' => 'review', 'reason' => 'billing_treatment_changed' );
                 $starts = new DateTimeImmutable( $b->booking_date . ' ' . ( $b->start_time ?: '00:00:00' ), wp_timezone() );
                 if ( $decision['action'] === 'cancel' && $now >= $starts->getTimestamp() ) $decision = array( 'action' => 'review', 'reason' => 'missed_deadline_hire_started' );
                 if ( $decision['action'] === 'review' ) {

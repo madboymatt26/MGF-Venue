@@ -186,7 +186,7 @@ class MBS_Woo_Payment {
         if ( $amount_paid > 0 ) {
             // Pay whatever is still owed
             $amount = $total_amount - $amount_paid;
-        } elseif ( $deposit_settings['enabled'] && ! MBS_Bookings::requires_full_payment( $booking->booking_date ) ) {
+        } elseif ( $deposit_settings['enabled'] && ! MBS_Bookings::requires_full_payment( $booking->booking_date ) && ! ( class_exists( 'MBS_Credit_Accounts' ) && MBS_Credit_Accounts::for_booking( $booking ) ) ) {
             // Pay deposit only
             $amount = MBS_Bookings::calculate_deposit( $total_amount );
         } else {
@@ -306,7 +306,7 @@ class MBS_Woo_Payment {
                     if ( $amount_paid > 0 ) {
                         // Pay whatever is still owed
                         $price = $total_amount - $amount_paid;
-                    } elseif ( $deposit_settings['enabled'] && ! MBS_Bookings::requires_full_payment( $booking->booking_date ) ) {
+                    } elseif ( $deposit_settings['enabled'] && ! MBS_Bookings::requires_full_payment( $booking->booking_date ) && ! ( class_exists( 'MBS_Credit_Accounts' ) && MBS_Credit_Accounts::for_booking( $booking ) ) ) {
                         // Deposit payment
                         $price = MBS_Bookings::calculate_deposit( $total_amount );
                     } else {

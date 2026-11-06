@@ -186,6 +186,8 @@ jobs:
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/extras-catalogue.php --allow-root
       - name: Run invoice lifecycle matrix after hardening acceptance
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/invoice-lifecycle-matrix.php --allow-root
+      - name: Verify explicit credit accounts, immutable invoices and cancellation/access isolation
+        run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/credit-accounts.php --allow-root
       - name: Collect service diagnostics
         if: always()
         run: docker compose -f tests/integration/docker-compose.yml logs --no-color > integration-services.log

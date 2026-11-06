@@ -54,6 +54,14 @@ class MBS_Billing_Engine {
         }
         $lead_days = max( 0, min( 365, (int) ( $configuration['invoice_lead_days'] ?? 28 ) ) );
         $terms_days = max( 0, min( 365, (int) ( $configuration['payment_terms_days'] ?? 14 ) ) );
+        if ( class_exists( 'MBS_Credit_Accounts' ) && MBS_Credit_Accounts::supported() ) {
+            $assignment = MBS_Credit_Accounts::assignment( 'series', $series_ref );
+            if ( $assignment ) {
+                $account = MBS_Credit_Accounts::account( $assignment->account_id );
+                $agreement = $account ? json_decode( $account->agreement_json, true ) : null;
+                if ( ! $agreement || $treatment !== 'invoice_managed' || $terms_days !== (int) $agreement['terms_days'] ) return new WP_Error( 'credit_billing_mismatch', 'This series has an explicit invoice agreement. Review/reassign that agreement before changing invoice treatment or payment days.' );
+            }
+        }
         $schedule = $configuration['billing_schedule'] ?? array();
         if ( ! is_array( $schedule ) ) return new WP_Error( 'invalid_billing_schedule', 'Billing schedule must be structured data.' );
 

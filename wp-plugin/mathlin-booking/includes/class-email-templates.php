@@ -257,7 +257,8 @@ class MBS_Email_Templates {
 
         // Build pay URL
         $pay_url = '';
-        if ( is_object( $booking ) && MBS_Woo_Payment::is_available() ) {
+        if ( is_object( $booking ) && MBS_Woo_Payment::is_available()
+            && ! ( class_exists( 'MBS_Credit_Accounts' ) && MBS_Credit_Accounts::for_booking( $booking ) ) ) {
             $pay_url = MBS_Woo_Payment::generate_payment_url( $booking );
         }
 

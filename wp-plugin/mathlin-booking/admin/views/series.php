@@ -40,6 +40,7 @@ $pattern_label = static function( $item ) { $schedule = json_decode( (string) $i
     <?php else : ?>
         <p><a href="<?php echo esc_url( admin_url( 'admin.php?page=mathlin-series' ) ); ?>">← All recurring series</a></p>
         <?php MBS_Additional_Charges::render_related($series->series_ref); ?>
+        <?php if ( class_exists( 'MBS_Credit_Accounts' ) && MBS_Credit_Accounts::enabled() && current_user_can( 'manage_options' ) ): ?><p><a class="button" href="<?php echo esc_url( MBS_Credit_Accounts::url( 'series', $series->series_ref ) ); ?>">Review series invoice-account permission</a></p><?php endif; ?>
         <?php if ( class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() && $series->billing_treatment === 'none' ) : ?>
         <details class="postbox" style="padding:16px;"><summary style="cursor:pointer;font-weight:600;">Change future campsite sessions</summary>
             <form class="mbs-campsite-series-edit" style="display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin-top:12px;">

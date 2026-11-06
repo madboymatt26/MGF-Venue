@@ -71,6 +71,10 @@ $free_campsite = class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::e
                         <label for="nms-org">Organisation / Group</label>
                         <input type="text" id="nms-org" name="organisation" placeholder="<?php echo $free_campsite ? 'Scout group or district' : 'e.g. Acme Ltd'; ?>"
                                value="<?php echo esc_attr( $hirer['organisation'] ?? '' ); ?>">
+                        <?php if ( class_exists( 'MBS_Credit_Accounts' ) && MBS_Credit_Accounts::enabled() ): ?>
+                        <p><label><input type="checkbox" name="request_invoice_terms" value="1" aria-describedby="nms-credit-request-help"> Request invoice / monthly account terms</label></p>
+                        <p id="nms-credit-request-help" class="nms-muted">This is a request for staff review, not permission to pay later. Normal payment deadlines apply unless we explicitly approve an invoice account for this booking.</p>
+                        <?php endif; ?>
                     </div>
                 </div>
                 <div class="nms-form-row">

@@ -70,6 +70,7 @@ $required = array(
     'wp_mathlin_blocked_dates',
     'wp_mathlin_audit_log', 'wp_mathlin_email_queue', 'wp_mathlin_mod_requests',
     'wp_mathlin_payment_expiry',
+    'wp_mathlin_credit_accounts', 'wp_mathlin_credit_assignments',
 );
 foreach ( $required as $table ) {
     if ( empty( $mbs_test_created_tables[ $table ] ) || $mbs_test_dbdelta_calls[ $table ] !== 2 ) {

@@ -1,6 +1,7 @@
 <?php
 if ( ! defined( 'ABSPATH' ) ) exit;
 require_once __DIR__ . '/class-payment-expiry.php';
+require_once __DIR__ . '/class-credit-accounts.php';
 
 class MBS_Database {
 
@@ -541,6 +542,10 @@ class MBS_Database {
             $queue_table => $sql4,
             $mod_table => $sql5,
         );
+        foreach ( MBS_Credit_Accounts::schemas() as $credit_table => $credit_sql ) {
+            dbDelta( $credit_sql );
+            $schema_sql[$credit_table] = $credit_sql;
+        }
         $engines = self::ensure_transactional_engines();
         $verified = is_wp_error( $engines ) ? $engines : self::verify_schema( $schema_sql );
         if ( ! is_wp_error( $verified ) ) $verified = self::verify_legacy_financial_backfill();
@@ -585,6 +590,7 @@ class MBS_Database {
             $wpdb->prefix.'mathlin_blocked_dates',
             $wpdb->prefix.'mathlin_audit_log', $wpdb->prefix.'mathlin_email_queue',
             $wpdb->prefix.'mathlin_mod_requests', $wpdb->prefix.'mathlin_payment_expiry',
+            $wpdb->prefix.'mathlin_credit_accounts', $wpdb->prefix.'mathlin_credit_assignments',
         );
         foreach($tables as $table){$row=$wpdb->get_row($wpdb->prepare('SHOW TABLE STATUS LIKE %s',$table));if($row&&!empty($row->Engine)&&strtolower($row->Engine)!=='innodb'){if($wpdb->query("ALTER TABLE `{$table}` ENGINE=InnoDB")===false)return new WP_Error('transactional_engine_required',"{$table} is not transactional and could not be converted to InnoDB. Restore a backup, correct database permissions/capacity, and retry.");}}
         return true;

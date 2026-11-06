@@ -1,6 +1,7 @@
 <?php if ( ! defined( 'ABSPATH' ) ) exit; ?>
 <div class="wrap mbs-admin">
     <h1><?php echo MBS_Admin::brand_mark(); ?>MGF Venue – Settings</h1>
+    <?php if ( class_exists( 'MBS_Credit_Accounts' ) && current_user_can( 'manage_options' ) && MBS_Credit_Accounts::supported() ): ?><p><a class="button" href="<?php echo esc_url( MBS_Credit_Accounts::url() ); ?>">Approved invoice accounts and credit permissions</a></p><?php endif; ?>
     <?php if ( current_user_can( 'manage_options' ) && MBS_Payment_Features::enabled( 'payments' ) && ! MBS_Campsite_Policy::enabled() ): ?><p><a class="button" href="<?php echo esc_url( admin_url( 'admin.php?page=mathlin-payment-expiry' ) ); ?>">Unpaid-booking cancellation policy and money-held reviews</a></p><?php endif; ?>
     <?php foreach ( MBS_Integration_Health::payment_policy_warnings() as $warning ) : ?><div class="notice notice-warning inline"><p><?php echo esc_html( $warning ); ?></p></div><?php endforeach; ?>
 
