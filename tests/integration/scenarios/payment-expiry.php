@@ -51,6 +51,9 @@ try {
     $check(!is_wp_error(MBS_Payment_Expiry::check($warn)),'Warning check succeeds');
     $warning=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$queue} WHERE message_key LIKE %s",'expiry_warning:'.$warn.':%'));
     $check($warning&&MBS_Payment_Expiry::email_current($warning),'Warning is durable/current');
+    $render_queue=new ReflectionMethod('MBS_Payment_Expiry','queue');if(PHP_VERSION_ID<80100)$render_queue->setAccessible(true);
+    $check($render_queue->invoke(null,MBS_Bookings::get($warn),'warning','A newer presentation must not rewrite this committed warning.',$warning->message_key)===true,'Formatting upgrade keeps committed warning idempotent');
+    $check($wpdb->get_var($wpdb->prepare("SELECT body FROM {$queue} WHERE id=%d",$warning->id))===$warning->body,'Existing warning payload is not rewritten');
     MBS_Payment_Expiry::check($warn);
     $check((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$queue} WHERE message_key LIKE %s",'expiry_warning:'.$warn.':%'))===1,'Repeated worker does not duplicate warning');
     $wpdb->update($table,array('amount_paid'=>'7.50','status'=>'deposit_paid'),array('ref'=>$warn));

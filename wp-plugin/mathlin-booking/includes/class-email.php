@@ -668,16 +668,48 @@ class MBS_Email {
         return self::booking_table_obj( (object) $b );
     }
 
-    private static function booking_table_obj( $b ) {
+    /** Branded, read-only expiry message. Does not generate payment/access tokens. */
+    public static function build_payment_expiry_message( $b, $type, $text, $admin = false ) {
+        if ( ! in_array( $type, array( 'warning', 'cancel', 'admin' ), true ) ) return new WP_Error( 'expiry_email_type', 'Unknown payment expiry message.' );
+        $total = MBS_Money::from_decimal_string( (string) $b->amount );
+        $paid = MBS_Money::from_decimal_string( (string) ( $b->amount_paid ?? 0 ) );
+        if ( is_wp_error( $total ) || is_wp_error( $paid ) || $total < 0 || $paid < 0 ) return new WP_Error( 'expiry_email_money', 'Cannot display unverified payment amounts.' );
+        $cancelled = $b->status === 'cancelled' || $type === 'cancel';
+        $inactive = $cancelled || $b->status === 'archived';
+        $title = $type === 'cancel' ? 'Booking cancelled' : ( $admin ? 'Booking payment review required' : 'Payment deadline — action required' );
+        $subject = ( $type === 'cancel' ? 'Booking cancelled due to non-payment — ' : ( $admin ? 'Booking payment review required — ' : 'Payment deadline — ' ) ) . $b->ref;
+        $manage = admin_url( 'admin.php?page=mathlin-booking&action=view&ref=' . rawurlencode( $b->ref ) );
+        // The action button replaces the bare administrator URL in legacy text.
+        if ( $admin ) $text = str_replace( $manage, '', $text );
+        $body = self::header() . '<h2 style="color:#7413DC;margin:0 0 16px;">' . esc_html( $title ) . '</h2>';
+        $notice = $cancelled ? 'Booking cancelled — no access code will be issued.' : ( $admin ? 'Please review the booking and payment record before deciding what to do next.' : 'Please pay by the deadline below to keep your booking.' );
+        $body .= '<div style="background:' . ( $cancelled ? '#fef2f2' : '#fff7ed' ) . ';border-left:4px solid ' . ( $cancelled ? '#b91c1c' : '#c2410c' ) . ';padding:16px;margin:16px 0;"><strong>' . esc_html( $notice ) . '</strong></div>';
+        foreach ( preg_split( '/(?:\r?\n){2,}/', trim( $text ) ) as $paragraph ) $body .= '<p style="margin:12px 0;line-height:1.5;">' . nl2br( esc_html( $paragraph ) ) . '</p>';
+        $body .= '<div style="background:#f5f0ff;border:1px solid #e0d0f0;border-radius:6px;padding:16px;margin:20px 0;"><h3 style="color:#7413DC;margin:0 0 12px;">Payment record</h3><table role="presentation" style="width:100%;border-collapse:collapse;">';
+        foreach ( array( 'Booking charge' => $total, 'Recorded paid' => $paid, $cancelled ? 'Unpaid amount at cancellation' : ( $inactive ? 'Unpaid amount recorded' : 'Outstanding hire balance' ) => max( 0, $total - $paid ) ) as $label => $minor ) {
+            $body .= '<tr><td style="padding:6px 0;">' . esc_html( $label ) . '</td><td style="padding:6px 0;text-align:right;font-weight:bold;">&pound;' . number_format( $minor / 100, 2 ) . '</td></tr>';
+        }
+        $body .= '</table>' . ( $inactive ? '<p style="font-size:13px;margin:12px 0 0;">This is a payment record, not a new payment request. Any refund or retention decision is handled separately.</p>' : '' ) . '</div>';
+        $body .= '<h3 style="color:#7413DC;">Booking details</h3>' . self::booking_table_obj( $b, 'Booking charge' );
+        if ( $admin || ! $inactive ) {
+            $url = $admin ? $manage : MBS_Hirer_Identity::manage_url();
+            $body .= '<p style="margin:24px 0;"><a href="' . esc_url( $url ) . '" style="display:inline-block;background:#7413DC;color:#fff;padding:12px 20px;border-radius:6px;text-decoration:none;font-weight:bold;">' . ( $admin ? 'Review booking and payment' : 'Sign in to your booking account' ) . '</a></p>';
+        }
+        $org = MBS_Email_Templates::get_org_settings();
+        $body .= '<p style="line-height:1.5;">Kind regards,<br>' . esc_html( $org['name'] ) . '</p>' . self::footer();
+        return array( 'subject' => $subject, 'body' => $body, 'headers' => self::email_headers() );
+    }
+
+    private static function booking_table_obj( $b, $amount_label = 'Amount Due' ) {
         $spaces   = MBS_Bookings::get_spaces();
         $is_daily = ! empty( $b->all_day ) || ( isset( $spaces[ $b->space ] ) && ( $spaces[ $b->space ]['unit'] ?? '' ) === 'day' );
         $time     = $is_daily ? 'All day' : ( $b->start_time . ' – ' . $b->end_time );
-        $html = self::table_html( $b->ref, $b->space, $b->booking_date, $time, $b->attendees, $b->purpose, $b->amount );
+        $html = self::table_html( $b->ref, $b->space, $b->booking_date, $time, $b->attendees, $b->purpose, $b->amount, $amount_label );
         if ( ! empty( $b->booking_date_end ) && $b->booking_date_end !== $b->booking_date ) $html .= '<p>Booking runs through ' . esc_html( date( 'l j F Y', strtotime( $b->booking_date_end ) ) ) . ' (' . esc_html( MBS_Campsite_Policy::span( $b ) === 'continuous' ? 'continuous stay' : 'same session each day' ) . ').</p>';
         return $html;
     }
 
-    private static function table_html( $ref, $space, $date, $time, $attendees, $purpose, $amount ) {
+    private static function table_html( $ref, $space, $date, $time, $attendees, $purpose, $amount, $amount_label = 'Amount Due' ) {
         $rows = array(
             'Reference'  => esc_html( $ref ),
             'Space'      => esc_html( $space ),
@@ -685,7 +717,7 @@ class MBS_Email {
             'Time'       => esc_html( $time ),
             'Attendees'  => esc_html( $attendees ),
             'Purpose'    => esc_html( $purpose ),
-            'Amount Due' => '&pound;' . number_format( $amount, 2 ),
+            $amount_label => '&pound;' . number_format( $amount, 2 ),
         );
         if ( (float) $amount === 0.0 && class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ) {
             unset( $rows['Amount Due'] );
