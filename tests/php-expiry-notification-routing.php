@@ -35,6 +35,9 @@ $check(MBS_Email_Queue::$rows['expiry_admin:SYNTHETIC']['to']==='primary@example
 $check($queue()===true&&count(MBS_Email_Queue::$rows)===3,'Replay does not duplicate recipients');
 $old=MBS_Email_Queue::$rows['expiry_admin:SYNTHETIC']['body'];MBS_Email_Queue::$rows['expiry_admin:SYNTHETIC']['body']='Legacy-format committed intent';
 $check($queue()===true&&MBS_Email_Queue::$rows['expiry_admin:SYNTHETIC']['body']==='Legacy-format committed intent','Formatting upgrade preserves existing payload without conflict or resend');
+MBS_Email_Queue::$rows['expiry_admin:SYNTHETIC']['context']['reference_id']=999;
+$check(is_wp_error($queue()),'Same key with different booking source still rejected');
+MBS_Email_Queue::$rows['expiry_admin:SYNTHETIC']['context']['reference_id']=1;
 $check($queue(false,'expiry_cancel:SYNTHETIC')===true,'Customer cancellation unchanged');
 $check(MBS_Email_Queue::$rows['expiry_cancel:SYNTHETIC']['to']==='customer@example.invalid','Customer not replaced by admin list');
 foreach(array_keys(MBS_Email_Queue::$rows)as$key)$check(strlen($key)<=100,'Keys fit database limit');
@@ -58,6 +61,9 @@ $admin=MBS_Email::build_payment_expiry_message($b,'admin','Review the held payme
 $check(strpos($admin['body'],'Review booking and payment')!==false,'Admin review action');
 $check(strpos($admin['body'],'Sign in to your booking account')===false,'Admin does not get customer action');
 $check(strpos(implode('|',$admin['headers']),'Reply-To: primary@example.invalid')!==false,'Existing reply-to headers reused');
+$b->status='archived';$archived=MBS_Email::build_payment_expiry_message($b,'admin','Review a refund for this completed hire.',true);
+$check(strpos($archived['body'],'Booking cancelled')===false&&strpos($archived['body'],'Unpaid amount recorded')!==false,'Archived hire not falsely described as cancelled');
+$b->status='cancelled';
 $b->purpose='<img src=x onerror=alert(1)>';$escaped=MBS_Email::build_payment_expiry_message($b,'cancel','Cancelled');
 $check(strpos($escaped['body'],'onerror=alert(1)>')===false,'Booking details escaped');
 $b->amount_paid='unknown';$check(is_wp_error(MBS_Email::build_payment_expiry_message($b,'cancel','Cancelled')),'Invalid payment display fails closed');

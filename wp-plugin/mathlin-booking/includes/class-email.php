@@ -674,7 +674,8 @@ class MBS_Email {
         $total = MBS_Money::from_decimal_string( (string) $b->amount );
         $paid = MBS_Money::from_decimal_string( (string) ( $b->amount_paid ?? 0 ) );
         if ( is_wp_error( $total ) || is_wp_error( $paid ) || $total < 0 || $paid < 0 ) return new WP_Error( 'expiry_email_money', 'Cannot display unverified payment amounts.' );
-        $cancelled = in_array( $b->status, array( 'cancelled', 'archived' ), true ) || $type === 'cancel';
+        $cancelled = $b->status === 'cancelled' || $type === 'cancel';
+        $inactive = $cancelled || $b->status === 'archived';
         $title = $type === 'cancel' ? 'Booking cancelled' : ( $admin ? 'Booking payment review required' : 'Payment deadline — action required' );
         $subject = ( $type === 'cancel' ? 'Booking cancelled due to non-payment — ' : ( $admin ? 'Booking payment review required — ' : 'Payment deadline — ' ) ) . $b->ref;
         $manage = admin_url( 'admin.php?page=mathlin-booking&action=view&ref=' . rawurlencode( $b->ref ) );
@@ -685,12 +686,12 @@ class MBS_Email {
         $body .= '<div style="background:' . ( $cancelled ? '#fef2f2' : '#fff7ed' ) . ';border-left:4px solid ' . ( $cancelled ? '#b91c1c' : '#c2410c' ) . ';padding:16px;margin:16px 0;"><strong>' . esc_html( $notice ) . '</strong></div>';
         foreach ( preg_split( '/(?:\r?\n){2,}/', trim( $text ) ) as $paragraph ) $body .= '<p style="margin:12px 0;line-height:1.5;">' . nl2br( esc_html( $paragraph ) ) . '</p>';
         $body .= '<div style="background:#f5f0ff;border:1px solid #e0d0f0;border-radius:6px;padding:16px;margin:20px 0;"><h3 style="color:#7413DC;margin:0 0 12px;">Payment record</h3><table role="presentation" style="width:100%;border-collapse:collapse;">';
-        foreach ( array( 'Booking charge' => $total, 'Recorded paid' => $paid, $cancelled ? 'Unpaid amount at cancellation' : 'Outstanding hire balance' => max( 0, $total - $paid ) ) as $label => $minor ) {
+        foreach ( array( 'Booking charge' => $total, 'Recorded paid' => $paid, $cancelled ? 'Unpaid amount at cancellation' : ( $inactive ? 'Unpaid amount recorded' : 'Outstanding hire balance' ) => max( 0, $total - $paid ) ) as $label => $minor ) {
             $body .= '<tr><td style="padding:6px 0;">' . esc_html( $label ) . '</td><td style="padding:6px 0;text-align:right;font-weight:bold;">&pound;' . number_format( $minor / 100, 2 ) . '</td></tr>';
         }
-        $body .= '</table>' . ( $cancelled ? '<p style="font-size:13px;margin:12px 0 0;">This is a payment record, not a new payment request. Any refund or retention decision is handled separately.</p>' : '' ) . '</div>';
+        $body .= '</table>' . ( $inactive ? '<p style="font-size:13px;margin:12px 0 0;">This is a payment record, not a new payment request. Any refund or retention decision is handled separately.</p>' : '' ) . '</div>';
         $body .= '<h3 style="color:#7413DC;">Booking details</h3>' . self::booking_table_obj( $b, 'Booking charge' );
-        if ( $admin || ! $cancelled ) {
+        if ( $admin || ! $inactive ) {
             $url = $admin ? $manage : MBS_Hirer_Identity::manage_url();
             $body .= '<p style="margin:24px 0;"><a href="' . esc_url( $url ) . '" style="display:inline-block;background:#7413DC;color:#fff;padding:12px 20px;border-radius:6px;text-decoration:none;font-weight:bold;">' . ( $admin ? 'Review booking and payment' : 'Sign in to your booking account' ) . '</a></p>';
         }
