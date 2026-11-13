@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import logging
 from datetime import datetime, timedelta
 from typing import Any
@@ -51,6 +52,7 @@ class MathlinCoordinator(DataUpdateCoordinator[list[dict[str, Any]]]):
         self.website_url = entry.data[CONF_WEBSITE_URL]
         self._cancel_midnight: list[Any] = []
         self._cancel_timers: list[Any] = []
+        self._timer_data = None
 
     async def _async_update_data(self) -> list[dict[str, Any]]:
         """Fetch and validate today's confirmed bookings."""
@@ -111,11 +113,17 @@ class MathlinCoordinator(DataUpdateCoordinator[list[dict[str, Any]]]):
         return valid_bookings
 
     @callback
-    def async_set_updated_data(self, data: list[dict[str, Any]]) -> None:
-        """Store fresh data and rebuild all timers after a successful refresh."""
-        super().async_set_updated_data(data)
-        self.cancel_booking_timers()
-        self.schedule_booking_timers()
+    def async_update_listeners(self) -> None:
+        """Reconcile timers for polled AND pushed updates, never failed polls.
+
+        HA's regular polling assigns data directly; it does not call the push-only
+        async_set_updated_data hook. Entity-boundary notifications must not keep
+        rebuilding the same timers, hence the independent content snapshot.
+        """
+        if self.last_update_success and self.data != self._timer_data:
+            self._timer_data = deepcopy(self.data)
+            self.schedule_booking_timers()
+        super().async_update_listeners()
 
     def schedule_midnight_poll(self) -> None:
         """Schedule an extra refresh at each local midnight."""
@@ -142,6 +150,7 @@ class MathlinCoordinator(DataUpdateCoordinator[list[dict[str, Any]]]):
 
     def schedule_booking_timers(self) -> None:
         """Schedule automation events and exact entity updates for fresh data."""
+        self.cancel_booking_timers()
         if not self.data:
             return
 

@@ -46,7 +46,10 @@ not only the legacy midnight poll.
 
 1. Actual controllers inspected and backed up. Fresh 13 November UI reads confirm
    the two target controllers and ASHP target controller match the reviewed backup.
-   Browser access is restored. No live automation has yet been changed.
+   Both shared-demand guards were saved on 13 November and survived UI reload.
+   Scout days, attendance conditions, temperatures and the ASHP controller remain
+   unchanged. A natural booking-controller trace evaluated all demand flags
+   successfully without issuing heating commands.
 2. Verify the prepared 2.0.0 patch against its installed dependencies without
    downgrading authentication or interval handling. Verify
    current credentials privately; never copy browser tokens into the repository.
@@ -75,7 +78,12 @@ been written by this development work.
   permission, stale version, explicit boolean, one-off scope, inactive records,
   malformed metadata, lock release and nonfinancial/non-notifying service options.
   This is an isolated adapter test, not real SQL rollback certification.
-- `tests/python-heating-policy.py`: five pure Python contract tests.
+- `tests/python-heating-policy.py`: six pure Python contract tests.
+- `tests/python-heating-coordinator.py`: six synthetic coordinator tests covering
+  poll removal, duplicate notifications, setup idempotency, replacement, failed
+  refresh preservation and unload. Regular HA polling uses listener notification,
+  not the push-only setter; changed successful data rebuilds timers, including
+  removal to an empty list. Failed refreshes preserve the last valid timers.
 - Both legacy and prepared 2.0.0 coordinators compile. This is not a Home
   Assistant runtime integration test or independent-schedule arbitration test.
 - Seven synthetic shared-demand tests pass: room isolation, preheat boundary,
@@ -85,5 +93,10 @@ been written by this development work.
   Whole Headquarters alias, retaining venue_space; stored WP spaces are unchanged.
 - All 87 PHP programs pass with a writable test temporary directory. The first
   sandbox run had a temporary-file permission failure, not an updater regression.
-- Real SQL and browser acceptance remain release gates. Do not equate pure Jinja
-  tests with an actual HA runtime validation or physical heating test.
+- Real SQL acceptance passed 23 assertions, including forced outbox failure
+  rollback. Browser acceptance passed opt-in/out persistence, stale-save refusal,
+  keyboard control, 390px layout and series/external read-only policy. It caught
+  and corrected a hidden action input shadowing the form action URL.
+- Final exact-head CI, producer deployment, targeted HA component installation
+  and live refresh verification remain release gates. Do not equate pure Jinja
+  tests with a physical heating test.
