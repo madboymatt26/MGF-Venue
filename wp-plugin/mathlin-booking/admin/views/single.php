@@ -56,7 +56,7 @@ $invoice_pdf_url = $invoice_document_id ? add_query_arg( array(
         document.getElementById('mbs-booking-heating').addEventListener('submit',async function(e){
             e.preventDefault(); var form=this,button=form.querySelector('button'),result=document.getElementById('mbs-heating-result');
             var data=new FormData(form);data.set('heating_required',document.getElementById('mbs-heating-choice').checked?'1':'0');button.disabled=true;
-            try{var response=await fetch(form.action,{method:'POST',body:data,credentials:'same-origin'});var json=await response.json();if(!json.success)throw new Error(typeof json.data==='string'?json.data:'Could not save. Reload before retrying.');result.textContent=json.data.message;window.location.reload();}
+            try{var response=await fetch(form.getAttribute('action'),{method:'POST',body:data,credentials:'same-origin'});var json=await response.json();if(!json.success)throw new Error(typeof json.data==='string'?json.data:'Could not save. Reload before retrying.');result.textContent=json.data.message;window.location.reload();}
             catch(error){result.textContent=error.message;button.disabled=false;}
         });
         </script>

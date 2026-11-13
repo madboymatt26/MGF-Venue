@@ -33,3 +33,4 @@ tests/integration/.exit-*
 tmp/pdfs/
 tmp/heating-test-deps/
 tmp/heating-private/
+browser-artifacts/

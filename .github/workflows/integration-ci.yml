@@ -175,6 +175,9 @@ jobs:
       - name: Verify Scout heating metadata and outbox roll back atomically
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/scout-heating.php --allow-root
       - name: Verify existing admin change, revision and delivery intents roll back atomically
+        if: matrix.php == '8.2'
+        run: MGF_BROWSER_MODULE="$RUNNER_TEMP/mgf-browser/node_modules/playwright/index.mjs" node tests/integration/scout-heating-browser.mjs
+      - name: Verify existing booking-change atomicity
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/booking-change-atomicity.php --allow-root
       - name: Verify free-series approvals, cancellations and transport flags
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/series-outbox-atomicity.php --allow-root

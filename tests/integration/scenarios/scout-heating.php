@@ -34,3 +34,9 @@ try{
  if($previous===null)delete_option('mbs_ha_webhook_url');else update_option('mbs_ha_webhook_url',$previous,false);
  $wpdb->suppress_errors($errors);wp_cache_flush();
 }
+// Separate synthetic browser fixtures in this disposable database only.
+foreach(array('ONEOFF'=>array(1,''),'SERIES'=>array(1,'SYN-HEAT-SERIES'),'EXTERNAL'=>array(0,''))as$kind=>$scope){
+ $ui_ref='HEAT-UI-'.$kind;
+ if(!MBS_Bookings::get($ui_ref))$wpdb->insert($table,array('ref'=>$ui_ref,'status'=>'confirmed','name'=>'Synthetic heating UI','email'=>'heating-ui@example.invalid','space'=>'Main Scout Hall','booking_date'=>'2098-11-13','booking_date_end'=>'2098-11-13','start_time'=>'18:00:00','end_time'=>'20:00:00','scout_use'=>$scope[0],'series_id'=>$scope[1],'all_day'=>0,'amount'=>0,'custom_fields'=>'{}'));
+ $wpdb->update($table,array('custom_fields'=>'{}'),array('ref'=>$ui_ref));
+}
