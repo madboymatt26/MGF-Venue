@@ -6,13 +6,13 @@ if ( ! defined( 'ABSPATH' ) ) exit;
  *
  * Base URL: /wp-json/mathlin/v1/
  *
- * Public (no auth):
- *   GET /bookings/upcoming
- *   GET /bookings/today
+ * Public (no auth, subject to campsite policy):
  *   GET /bookings/calendar?year=&month=
  *   GET /bookings/date/{YYYY-MM-DD}
  *
  * Admin only (WP Application Password or cookie auth):
+ *   GET /bookings/upcoming, /bookings/today (heating only)
+ *   GET /bookings/occupancy-today (all approved bookings, explicit heat flags)
  *   GET  /bookings
  *   GET  /bookings/{ref}
  *   POST /bookings/{ref}/status   { "status": "confirmed" }
@@ -27,7 +27,7 @@ class MBS_Rest_API {
     }
 
     public function campsite_public_permission( $result, $server, $request ) {
-        if ( $request->get_method() === 'GET' && current_user_can('mbs_read_bookings') && preg_match('#^/mathlin/v1/bookings/(today|upcoming)$#D',$request->get_route()) ) return $result;
+        if ( $request->get_method() === 'GET' && current_user_can('mbs_read_bookings') && preg_match('#^/mathlin/v1/bookings/(today|upcoming|occupancy-today)$#D',$request->get_route()) ) return $result;
         if ( class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() && preg_match( '#^/mathlin/v1/bookings/(upcoming|today|calendar|date/|ical|[A-Z0-9-]+/ical)#', $request->get_route() ) && ! MBS_Campsite_Policy::can_book() ) return new WP_Error( 'campsite_access_denied', 'Sign in with an approved campsite account.', array( 'status' => 403 ) );
         return $result;
     }
@@ -46,6 +46,12 @@ class MBS_Rest_API {
         register_rest_route( self::API_NAMESPACE, '/bookings/today', array(
             'methods'             => 'GET',
             'callback'            => array( $this, 'get_today' ),
+            'permission_callback' => array( $this, 'booking_manager_permission' ),
+        ) );
+
+        register_rest_route( self::API_NAMESPACE, '/bookings/occupancy-today', array(
+            'methods'             => 'GET',
+            'callback'            => array( $this, 'get_occupancy_today' ),
             'permission_callback' => array( $this, 'booking_manager_permission' ),
         ) );
 
@@ -359,6 +365,11 @@ class MBS_Rest_API {
         catch ( Throwable $e ) { return new WP_Error( 'occupancy_unavailable', 'Today booking occupancy could not be read completely.', array( 'status' => 503 ) ); }
     }
 
+    public function get_occupancy_today( WP_REST_Request $request ) {
+        try { return rest_ensure_response( MBS_HomeAssistant::get_todays_bookings( false ) ); }
+        catch ( Throwable $e ) { return new WP_Error( 'occupancy_unavailable', 'Today occupancy is unavailable.', array( 'status' => 503 ) ); }
+    }
+
     public function get_calendar( WP_REST_Request $request ) {
         return rest_ensure_response(
             MBS_Bookings::get_booked_dates( $request->get_param('year'), $request->get_param('month') )
@@ -424,7 +435,7 @@ class MBS_Rest_API {
 
     public function booking_manager_permission( $request = null ) {
         if ( current_user_can( 'manage_options' ) || current_user_can( 'mbs_manage_bookings' ) ) return true;
-        return $request instanceof WP_REST_Request && $request->get_method() === 'GET' && current_user_can( 'mbs_read_bookings' ) && (bool) preg_match( '#^/mathlin/v1/(?:bookings/(?:today|upcoming)|admin/(?:capabilities|bookings(?:/[A-Z0-9-]+(?:/audit)?)?|availability|dashboard|blocked-dates|requests|audit))$#D', $request->get_route() );
+        return $request instanceof WP_REST_Request && $request->get_method() === 'GET' && current_user_can( 'mbs_read_bookings' ) && (bool) preg_match( '#^/mathlin/v1/(?:bookings/(?:today|upcoming|occupancy-today)|admin/(?:capabilities|bookings(?:/[A-Z0-9-]+(?:/audit)?)?|availability|dashboard|blocked-dates|requests|audit))$#D', $request->get_route() );
     }
 
     private function integration_idempotency_transient( $scope, $key, $payload = array() ) {

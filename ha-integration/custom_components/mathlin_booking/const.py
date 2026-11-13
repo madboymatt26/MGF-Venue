@@ -5,6 +5,8 @@ PLATFORMS = ["sensor", "binary_sensor"]
 
 # Config entry keys
 CONF_WEBSITE_URL = "website_url"
+CONF_USERNAME = "username"
+CONF_APPLICATION_PASSWORD = "application_password"
 
 # Options keys (configurable after setup)
 CONF_PRE_EVENT_MINUTES  = "pre_event_minutes"   # fire start event N mins before booking
@@ -18,11 +20,17 @@ DEFAULT_GAP_MINUTES        = 30   # 30 min gap = skip shutdown
 
 # REST API path (appended to the website URL)
 API_PATH_TODAY    = "/wp-json/mathlin/v1/bookings/today"
+API_PATH_OCCUPANCY_TODAY = "/wp-json/mathlin/v1/bookings/occupancy-today"
 API_PATH_UPCOMING = "/wp-json/mathlin/v1/bookings/upcoming"
 
 # HA event names fired by this integration
 EVENT_BOOKING_START = "mathlin_booking_start"
 EVENT_BOOKING_END   = "mathlin_booking_end"
+
+# Known bookable spaces — used to create per-space sensors
+# "Whole Headquarters" is a parent space that encompasses Main Scout Hall + Meeting Room
+SPACES = ["Main Scout Hall", "Meeting Room"]
+PARENT_SPACE = "Whole Headquarters"
 
 # Sensor attributes
 ATTR_REF        = "ref"

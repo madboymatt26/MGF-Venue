@@ -2,239 +2,269 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import logging
-from datetime import date, datetime, time, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 import aiohttp
-from .heating_policy import heating_requested
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_point_in_time
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
+from .booking_time import parse_booking_interval
+from .heating_policy import heating_requested, normalise_heating_booking
 from .const import (
-    DOMAIN,
-    CONF_WEBSITE_URL,
-    CONF_PRE_EVENT_MINUTES,
-    CONF_POST_EVENT_MINUTES,
+    API_PATH_OCCUPANCY_TODAY,
+    CONF_APPLICATION_PASSWORD,
     CONF_GAP_MINUTES,
-    DEFAULT_PRE_EVENT_MINUTES,
-    DEFAULT_POST_EVENT_MINUTES,
+    CONF_POST_EVENT_MINUTES,
+    CONF_PRE_EVENT_MINUTES,
+    CONF_USERNAME,
+    CONF_WEBSITE_URL,
     DEFAULT_GAP_MINUTES,
-    API_PATH_TODAY,
-    EVENT_BOOKING_START,
+    DEFAULT_POST_EVENT_MINUTES,
+    DEFAULT_PRE_EVENT_MINUTES,
+    DOMAIN,
     EVENT_BOOKING_END,
+    EVENT_BOOKING_START,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class MathlinCoordinator(DataUpdateCoordinator):
-    """
-    Fetches today's bookings from the WordPress plugin REST API.
-
-    Polling strategy:
-      - Fetches once on startup
-      - Polls again every day at midnight (via a scheduled timer)
-      - Does NOT use a fixed scan_interval — we control timing ourselves
-    """
+class MathlinCoordinator(DataUpdateCoordinator[list[dict[str, Any]]]):
+    """Fetch today's bookings and schedule booking boundary events."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            # No automatic polling — we drive it manually
-            update_interval=None,
+            update_interval=timedelta(minutes=5),
         )
-        self.entry        = entry
-        self.website_url  = entry.data[CONF_WEBSITE_URL]
+        self.entry = entry
+        self.website_url = entry.data[CONF_WEBSITE_URL]
         self._cancel_midnight: list[Any] = []
-        self._cancel_timers:   list[Any] = []
+        self._cancel_timers: list[Any] = []
+        self._timer_data = None
 
-    # ── Data fetch ─────────────────────────────────────────────────────────────
+    async def _async_update_data(self) -> list[dict[str, Any]]:
+        """Fetch and validate today's confirmed bookings."""
+        username = self.entry.data.get(CONF_USERNAME)
+        application_password = self.entry.data.get(CONF_APPLICATION_PASSWORD)
+        if not username or not application_password:
+            raise ConfigEntryAuthFailed("WordPress credentials are required")
 
-    async def _async_update_data(self) -> list[dict]:
-        """Fetch today's confirmed bookings from the REST API."""
-        url = self.website_url + API_PATH_TODAY
+        url = self.website_url + API_PATH_OCCUPANCY_TODAY
+        session = async_get_clientsession(self.hass)
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    url, timeout=aiohttp.ClientTimeout(total=15)
-                ) as resp:
-                    if resp.status != 200:
-                        raise UpdateFailed(f"API returned HTTP {resp.status}")
-                    payload = await resp.json()
-                    # The endpoint returns a list directly
-                    if not isinstance(payload, list):
-                        raise UpdateFailed("Unexpected API response format")
-                    _LOGGER.debug(
-                        "Fetched %d booking(s) for today from %s", len(payload), url
-                    )
-                    return [booking for booking in payload if heating_requested(booking)]
+            async with session.get(
+                url,
+                auth=aiohttp.BasicAuth(username, application_password),
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as response:
+                if response.status in (401, 403):
+                    raise ConfigEntryAuthFailed("WordPress authentication failed")
+                if response.status != 200:
+                    raise UpdateFailed(f"Booking API returned HTTP {response.status}")
+                payload = await response.json()
+        except asyncio.TimeoutError as err:
+            raise UpdateFailed("Booking API request timed out") from err
+        except ConfigEntryAuthFailed:
+            raise
         except aiohttp.ClientError as err:
-            raise UpdateFailed(f"Network error fetching bookings: {err}") from err
+            raise UpdateFailed(f"Booking API request failed: {type(err).__name__}") from err
 
-    # ── Midnight poll ──────────────────────────────────────────────────────────
+        if not isinstance(payload, list):
+            raise UpdateFailed("Booking API returned an unexpected payload")
+
+        today = dt_util.now().date()
+        valid_bookings: list[dict[str, Any]] = []
+        invalid_count = 0
+        for booking in payload:
+            booking = normalise_heating_booking(booking)
+            if (not isinstance(booking, dict)
+                or not isinstance(booking.get("heating_required"), bool)
+                or not isinstance(booking.get("scout_use"), bool)
+                or booking.get("integration_scope") != "booking_occupancy"):
+                raise UpdateFailed("Booking API lacks the separate occupancy/heating contract")
+            if (
+                not isinstance(booking, dict)
+                or not isinstance(booking.get("space"), str)
+                or not booking["space"].strip()
+                or not isinstance(booking.get("all_day", False), bool)
+                or parse_booking_interval(
+                    booking, today, dt_util.DEFAULT_TIME_ZONE
+                )
+                is None
+            ):
+                invalid_count += 1
+                continue
+            valid_bookings.append(booking)
+
+        if invalid_count:
+            _LOGGER.warning(
+                "Ignored %d malformed or wrong-date booking record(s)", invalid_count
+            )
+        _LOGGER.debug("Fetched %d valid booking(s) for today", len(valid_bookings))
+        return valid_bookings
+
+    @callback
+    def async_update_listeners(self) -> None:
+        """Reconcile timers for polled AND pushed updates, never failed polls.
+
+        HA's regular polling assigns data directly; it does not call the push-only
+        async_set_updated_data hook. Entity-boundary notifications must not keep
+        rebuilding the same timers, hence the independent content snapshot.
+        """
+        if self.last_update_success and self.data != self._timer_data:
+            self._timer_data = deepcopy(self.data)
+            self.schedule_booking_timers()
+        super().async_update_listeners()
 
     def schedule_midnight_poll(self) -> None:
-        """Schedule a refresh at midnight every day."""
+        """Schedule an extra refresh at each local midnight."""
         self._schedule_next_midnight()
 
     def _schedule_next_midnight(self) -> None:
-        now       = dt_util.now()
-        tomorrow  = (now + timedelta(days=1)).date()
-        midnight  = dt_util.as_local(
-            datetime.combine(tomorrow, time(0, 0, 0))
+        now = dt_util.now()
+        tomorrow = (now + timedelta(days=1)).date()
+        midnight = datetime.combine(
+            tomorrow, datetime.min.time(), tzinfo=dt_util.DEFAULT_TIME_ZONE
         )
-        _LOGGER.debug("Next midnight poll scheduled for %s", midnight)
 
         @callback
-        def _midnight_callback(now_dt: datetime) -> None:
-            _LOGGER.info("Midnight poll: refreshing today's bookings")
+        def _midnight_callback(_now: datetime) -> None:
             self.hass.async_create_task(self._midnight_refresh())
 
         cancel = async_track_point_in_time(self.hass, _midnight_callback, midnight)
         self._cancel_midnight.append(cancel)
 
     async def _midnight_refresh(self) -> None:
-        """Refresh data and reschedule timers, then queue next midnight poll."""
+        """Refresh at day rollover and schedule the following midnight."""
         await self.async_refresh()
-        self.cancel_booking_timers()
-        self.schedule_booking_timers()
         self._schedule_next_midnight()
 
-    # ── Booking event timers ───────────────────────────────────────────────────
-
     def schedule_booking_timers(self) -> None:
-        """
-        For each booking today, schedule:
-          - A 'booking_start' event N minutes before start_time
-          - A 'booking_end'   event M minutes after end_time
-            (UNLESS another booking on the same space starts within the gap window)
-        """
+        """Schedule automation events and exact entity updates for fresh data."""
+        self.cancel_booking_timers()
         if not self.data:
             return
 
-        pre_mins  = self.entry.options.get(CONF_PRE_EVENT_MINUTES,  DEFAULT_PRE_EVENT_MINUTES)
-        post_mins = self.entry.options.get(CONF_POST_EVENT_MINUTES, DEFAULT_POST_EVENT_MINUTES)
-        gap_mins  = self.entry.options.get(CONF_GAP_MINUTES,        DEFAULT_GAP_MINUTES)
-        now       = dt_util.now()
-        today     = now.date()
+        pre_mins = self.entry.options.get(
+            CONF_PRE_EVENT_MINUTES, DEFAULT_PRE_EVENT_MINUTES
+        )
+        post_mins = self.entry.options.get(
+            CONF_POST_EVENT_MINUTES, DEFAULT_POST_EVENT_MINUTES
+        )
+        gap_mins = self.entry.options.get(CONF_GAP_MINUTES, DEFAULT_GAP_MINUTES)
+        now = dt_util.now()
+        today = now.date()
 
-        # Parse all bookings into structured data for gap analysis
-        parsed = []
+        parsed: list[dict[str, Any]] = []
         for booking in self.data:
+            interval = parse_booking_interval(
+                booking, today, dt_util.DEFAULT_TIME_ZONE
+            )
+            if interval is None:
+                continue
+            start_dt, end_dt = interval
+            # Exact general-occupancy boundaries still update lights/kitchen
+            # when this booking explicitly requests no heating.
+            if start_dt > now:
+                self._schedule_entity_update(start_dt)
+            if end_dt > now:
+                self._schedule_entity_update(end_dt)
             if not heating_requested(booking):
                 continue
-            ref       = booking.get("ref", "unknown")
-            space     = booking.get("space", "")
-            all_day   = booking.get("all_day", False)
-            start_str = booking.get("start_time")
-            end_str   = booking.get("end_time")
+            parsed.append(
+                {
+                    "booking": booking,
+                    "space": booking["space"],
+                    "start_dt": start_dt,
+                    "end_dt": end_dt,
+                }
+            )
 
-            if all_day:
-                start_dt = dt_util.as_local(datetime.combine(today, time(8, 0)))
-                end_dt   = dt_util.as_local(datetime.combine(today, time(20, 0)))
-            elif start_str and end_str:
-                try:
-                    sh, sm = map(int, start_str[:5].split(":"))
-                    eh, em = map(int, end_str[:5].split(":"))
-                    start_dt = dt_util.as_local(datetime.combine(today, time(sh, sm)))
-                    end_dt   = dt_util.as_local(datetime.combine(today, time(eh, em)))
-                except (ValueError, AttributeError):
-                    _LOGGER.warning("Could not parse times for booking %s", ref)
-                    continue
-            else:
-                continue
+        parsed.sort(key=lambda item: item["start_dt"])
 
-            parsed.append({
-                "booking": booking,
-                "ref": ref,
-                "space": space,
-                "start_dt": start_dt,
-                "end_dt": end_dt,
-            })
-
-        # Sort by start time
-        parsed.sort(key=lambda x: x["start_dt"])
-
-        for i, p in enumerate(parsed):
-            ref      = p["ref"]
-            space    = p["space"]
-            start_dt = p["start_dt"]
-            end_dt   = p["end_dt"]
-            booking  = p["booking"]
-
+        for index, item in enumerate(parsed):
+            booking = item["booking"]
+            space = item["space"]
+            start_dt = item["start_dt"]
+            end_dt = item["end_dt"]
             fire_start = start_dt - timedelta(minutes=pre_mins)
-            fire_end   = end_dt   + timedelta(minutes=post_mins)
+            fire_end = end_dt + timedelta(minutes=post_mins)
 
-            # Schedule start event
             if fire_start > now:
-                self._schedule_event(fire_start, EVENT_BOOKING_START, booking, ref)
-                _LOGGER.debug("Booking %s: start event at %s", ref, fire_start)
+                self._schedule_event(fire_start, EVENT_BOOKING_START, booking)
 
-            # Smart gap detection: check if another booking on the SAME space
-            # starts within gap_mins of this booking's end
             skip_end = False
             if gap_mins > 0:
-                for j in range(i + 1, len(parsed)):
-                    next_p = parsed[j]
-                    if next_p["space"] == space:
-                        gap = (next_p["start_dt"] - end_dt).total_seconds() / 60
-                        if gap <= gap_mins:
-                            skip_end = True
-                            _LOGGER.info(
-                                "Booking %s: skipping end event — next booking %s "
-                                "on same space starts in %.0f min (gap threshold: %d min)",
-                                ref, next_p["ref"], gap, gap_mins,
-                            )
-                        break  # Only check the next booking on same space
+                for next_item in parsed[index + 1 :]:
+                    if next_item["space"] != space:
+                        continue
+                    gap = (next_item["start_dt"] - end_dt).total_seconds() / 60
+                    skip_end = 0 <= gap <= gap_mins
+                    break
 
             if not skip_end and fire_end > now:
-                self._schedule_event(fire_end, EVENT_BOOKING_END, booking, ref)
-                _LOGGER.debug("Booking %s: end event at %s", ref, fire_end)
+                self._schedule_event(fire_end, EVENT_BOOKING_END, booking)
+
+    def _schedule_entity_update(self, fire_at: datetime) -> None:
+        """Notify coordinator entities at an exact booking boundary."""
+
+        @callback
+        def _update(_now: datetime) -> None:
+            self.async_update_listeners()
+
+        self._cancel_timers.append(
+            async_track_point_in_time(self.hass, _update, fire_at)
+        )
 
     def _schedule_event(
-        self,
-        fire_at: datetime,
-        event_name: str,
-        booking: dict,
-        ref: str,
+        self, fire_at: datetime, event_name: str, booking: dict[str, Any]
     ) -> None:
-        """Schedule a single HA event to fire at a specific datetime."""
+        """Schedule one sanitized Home Assistant booking event."""
 
         @callback
         def _fire(_now: datetime) -> None:
-            _LOGGER.info("Firing event %s for booking %s", event_name, ref)
-            self.hass.bus.async_fire(event_name, {
-                "ref":          booking.get("ref"),
-                "space":        booking.get("space"),
-                "booking_date": booking.get("booking_date"),
-                "start_time":   booking.get("start_time"),
-                "end_time":     booking.get("end_time"),
-                "attendees":    booking.get("attendees"),
-                "purpose":      booking.get("purpose"),
-                "kitchen":      booking.get("kitchen"),
-                "all_day":      booking.get("all_day"),
-            })
+            _LOGGER.info("Firing booking event %s", event_name)
+            self.hass.bus.async_fire(
+                event_name,
+                {
+                    "heating_required": heating_requested(booking),
+                    "scout_use": booking.get("scout_use", False),
+                    "ref": booking.get("ref"),
+                    "space": booking.get("space"),
+                    "booking_date": booking.get("booking_date"),
+                    "start_time": booking.get("start_time"),
+                    "end_time": booking.get("end_time"),
+                    "attendees": booking.get("attendees"),
+                    "purpose": booking.get("purpose"),
+                    "kitchen": booking.get("kitchen"),
+                    "all_day": booking.get("all_day"),
+                },
+            )
 
-        cancel = async_track_point_in_time(self.hass, _fire, fire_at)
-        self._cancel_timers.append(cancel)
-
-    # ── Cleanup ────────────────────────────────────────────────────────────────
+        self._cancel_timers.append(
+            async_track_point_in_time(self.hass, _fire, fire_at)
+        )
 
     def cancel_booking_timers(self) -> None:
-        """Cancel all pending booking event timers."""
+        """Cancel all pending booking timers."""
         for cancel in self._cancel_timers:
             cancel()
         self._cancel_timers.clear()
 
     def cancel_all_timers(self) -> None:
-        """Cancel everything — called on unload."""
+        """Cancel all timers when the config entry unloads."""
         self.cancel_booking_timers()
         for cancel in self._cancel_midnight:
             cancel()
