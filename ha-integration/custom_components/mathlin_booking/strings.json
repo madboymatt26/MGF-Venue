@@ -3,23 +3,37 @@
     "step": {
       "user": {
         "title": "Mathlin Booking System",
-        "description": "Enter the URL of your Scout Group website. The booking plugin must be installed and active.",
+        "description": "Enter the website URL and a WordPress user with an Application Password.",
         "data": {
-          "website_url": "Website URL"
+          "website_url": "Website URL",
+          "username": "WordPress username",
+          "application_password": "WordPress Application Password"
         },
         "data_description": {
-          "website_url": "e.g. https://needhamscouts.uk"
+          "website_url": "e.g. https://needhamscouts.uk",
+          "application_password": "Create this in the WordPress user's profile."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reconnect Mathlin Booking System",
+        "description": "Enter a WordPress username and Application Password for the booking API.",
+        "data": {
+          "username": "WordPress username",
+          "application_password": "WordPress Application Password"
         }
       }
     },
     "error": {
-      "cannot_connect":   "Could not connect to the website. Check the URL and try again.",
-      "plugin_not_found": "Connected to the website but the booking plugin API was not found. Make sure the Mathlin Booking plugin is installed and active.",
-      "invalid_url":      "That doesn't look like a valid URL.",
-      "unknown":          "An unexpected error occurred."
+      "cannot_connect": "Could not connect to the website. Check the URL and try again.",
+      "invalid_auth": "WordPress rejected the username or Application Password.",
+      "invalid_response": "The booking API returned an unexpected response.",
+      "plugin_not_found": "Connected to the website but the booking plugin API was not found.",
+      "invalid_url": "That doesn't look like a valid URL.",
+      "unknown": "An unexpected error occurred."
     },
     "abort": {
-      "already_configured": "This website is already configured."
+      "already_configured": "This website is already configured.",
+      "reauth_successful": "Authentication updated successfully."
     }
   },
   "options": {
@@ -28,14 +42,14 @@
         "title": "Booking Automation Timing",
         "description": "Configure how many minutes before and after each booking the automation events fire.",
         "data": {
-          "pre_event_minutes":  "Minutes before booking start",
+          "pre_event_minutes": "Minutes before booking start",
           "post_event_minutes": "Minutes after booking end",
-          "gap_minutes":        "Gap threshold (minutes)"
+          "gap_minutes": "Gap threshold (minutes)"
         },
         "data_description": {
-          "pre_event_minutes":  "Fire the 'booking_start' event this many minutes before the booking begins. Use this to pre-heat the hall, turn on lights, etc. (0 = fire exactly at start time)",
-          "post_event_minutes": "Fire the 'booking_end' event this many minutes after the booking finishes. Use this to turn off heating, lights, etc. (0 = fire exactly at end time)",
-          "gap_minutes":        "If another booking on the same space starts within this many minutes, skip the shutdown event to keep heating/lights on between bookings. (0 = always fire end events)"
+          "pre_event_minutes": "Fire the booking_start event this many minutes before the booking begins.",
+          "post_event_minutes": "Fire the booking_end event this many minutes after the booking finishes.",
+          "gap_minutes": "Skip booking_end when another booking on the same space starts within this period."
         }
       }
     }

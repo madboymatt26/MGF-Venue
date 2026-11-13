@@ -58,6 +58,8 @@ jobs:
           python -m pip install Jinja2==3.1.6
           python tests/python-heating-policy.py
           python tests/python-heating-coordinator.py
+          python tests/python-heating-entities.py
+          python tests/python-heating-wiring.py
           python tests/python-shared-demand.py
       - name: Validate Composer dependencies
         run: |

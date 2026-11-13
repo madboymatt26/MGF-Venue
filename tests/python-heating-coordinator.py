@@ -36,11 +36,11 @@ module('homeassistant.helpers.update_coordinator',DataUpdateCoordinator=Base,Upd
 module('homeassistant.util.dt',now=lambda:now,DEFAULT_TIME_ZONE=timezone.utc)
 module('heating_patch').__path__=[]
 module('heating_patch.booking_time',parse_booking_interval=lambda b,*_: (b['start'],b['end']))
-constants={name:name for name in ('API_PATH_TODAY','CONF_APPLICATION_PASSWORD','CONF_GAP_MINUTES','CONF_POST_EVENT_MINUTES','CONF_PRE_EVENT_MINUTES','CONF_USERNAME','CONF_WEBSITE_URL','DOMAIN','EVENT_BOOKING_END','EVENT_BOOKING_START')}
+constants={name:name for name in ('API_PATH_OCCUPANCY_TODAY','CONF_APPLICATION_PASSWORD','CONF_GAP_MINUTES','CONF_POST_EVENT_MINUTES','CONF_PRE_EVENT_MINUTES','CONF_USERNAME','CONF_WEBSITE_URL','DOMAIN','EVENT_BOOKING_END','EVENT_BOOKING_START')}
 constants.update(DEFAULT_GAP_MINUTES=30,DEFAULT_POST_EVENT_MINUTES=15,DEFAULT_PRE_EVENT_MINUTES=60)
 module('heating_patch.const',**constants)
 root=Path(__file__).resolve().parents[1]
-for name,path in [('heating_policy','ha-integration/custom_components/mathlin_booking/heating_policy.py'),('coordinator','ha-integration/patches/2.0.0/coordinator.py')]:
+for name,path in [('heating_policy','ha-integration/custom_components/mathlin_booking/heating_policy.py'),('coordinator','ha-integration/custom_components/mathlin_booking/coordinator.py')]:
     spec=importlib.util.spec_from_file_location('heating_patch.'+name,root/path)
     loaded=importlib.util.module_from_spec(spec);sys.modules[spec.name]=loaded;spec.loader.exec_module(loaded)
 Coordinator=sys.modules['heating_patch.coordinator'].MathlinCoordinator
@@ -68,10 +68,41 @@ class CoordinatorTests(unittest.TestCase):
     def test_failed_poll_preserves_last_valid_timers(self):
         self.poll([self.booking]);self.coordinator.last_update_success=False;self.coordinator.async_update_listeners();self.assertEqual(sum(not x['cancelled'] for x in scheduled),4)
 
-    def test_explicit_opt_out_never_schedules(self):
-        self.poll([{**self.booking,'heating_required':False}]);self.assertEqual(scheduled,[])
+    def test_explicit_opt_out_has_occupancy_boundaries_but_no_heating_events(self):
+        self.poll([{**self.booking,'heating_required':False}]);self.assertEqual(len(scheduled),2)
+
+    def test_opt_out_reconciles_old_heating_callbacks_without_losing_occupancy(self):
+        self.poll([self.booking]);self.poll([{**self.booking,'heating_required':False}])
+        self.assertTrue(all(x['cancelled'] for x in scheduled[:4]))
+        self.assertEqual(sum(not x['cancelled'] for x in scheduled),2)
 
     def test_unload_cancels_every_timer(self):
         self.poll([self.booking]);self.coordinator.cancel_all_timers();self.assertTrue(all(x['cancelled'] for x in scheduled))
+
+    def fetch(self, payload):
+        import asyncio
+        class Response:
+            status = 200
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): pass
+            async def json(self): return payload
+        class Session:
+            def get(self, *args, **kwargs): return Response()
+        source = sys.modules['heating_patch.coordinator']
+        source.aiohttp.BasicAuth = lambda *args: None
+        source.aiohttp.ClientTimeout = lambda **kwargs: None
+        source.async_get_clientsession = lambda _: Session()
+        self.coordinator.entry.data.update(CONF_USERNAME='synthetic', CONF_APPLICATION_PASSWORD='not-a-real-secret')
+        return asyncio.run(self.coordinator._async_update_data())
+
+    def test_new_contract_retains_unheated_rows_for_occupancy(self):
+        b = {**self.booking, 'heating_required': False, 'scout_use': True,
+             'integration_scope': 'booking_occupancy'}
+        self.assertEqual(self.fetch([b]), [b])
+
+    def test_old_or_wrong_scope_producer_fails_instead_of_clearing_demand(self):
+        for data in ([self.booking], [{**self.booking, 'scout_use': True,
+                     'integration_scope': 'booking_heating'}]):
+            with self.assertRaises(sys.modules['heating_patch.coordinator'].UpdateFailed): self.fetch(data)
 
 if __name__=='__main__': unittest.main()

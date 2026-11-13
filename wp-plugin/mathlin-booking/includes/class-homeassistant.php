@@ -170,9 +170,14 @@ class MBS_HomeAssistant {
         $through = ( new DateTimeImmutable( 'now', wp_timezone() ) )->modify( '+' . max( 0, min( 366, (int) $days_ahead ) ) . ' days' )->format( 'Y-m-d' );
         return array_values(array_map( array( __CLASS__, 'payload' ), array_filter(MBS_Booking_Intervals::approved( $through ),array(__CLASS__,'heating_required')) ));
     }
-    public static function get_todays_bookings() {
+    public static function get_todays_bookings( $heating_only = true ) {
         $rows = MBS_Bookings::get_by_date( wp_date( 'Y-m-d' ) );
         if ( ! is_array( $rows ) ) throw new RuntimeException( 'Today occupancy is unavailable.' );
-        return array_values( array_map( array( __CLASS__, 'payload' ), array_filter( $rows, static function( $b ) { return self::heating_required($b) && in_array( $b->status, array( 'confirmed','deposit_paid','paid' ), true ); } ) ) );
+        $active = array_filter( $rows, static function( $b ) use ( $heating_only ) { return ( ! $heating_only || self::heating_required($b) ) && in_array( $b->status, array( 'confirmed','deposit_paid','paid' ), true ); } );
+        return array_values( array_map( static function( $b ) use ( $heating_only ) {
+            $payload = self::payload( $b );
+            if ( ! $heating_only ) $payload['integration_scope'] = 'booking_occupancy';
+            return $payload;
+        }, $active ) );
     }
 }

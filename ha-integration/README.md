@@ -1,6 +1,15 @@
 # Mathlin Booking System – Home Assistant Integration
 
-A custom Home Assistant integration that connects to the Mathlin Booking WordPress plugin and automatically fires events before and after each booking so you can run automations for heating, lighting, access control, etc.
+A custom Home Assistant integration with separate general occupancy and heating
+demand. Version 2.1.0 requires WordPress plugin 3.47.1 or later and its
+authenticated occupancy-today endpoint. Existing general entity identities are
+preserved; nine additional Heating entities are created. Heating events apply
+only to eligible bookings, not to general lighting/kitchen/access control.
+
+Read [the rollout contract](../docs/scout-heating-choice.md) before upgrading.
+Do not install the obsolete patches/2.0.0 coordinator. Historical examples below
+are not production-safe shutdown arbitration: protect overlapping demand and
+independent Scout schedules before using any thermostat-off action.
 
 ---
 
@@ -27,7 +36,10 @@ A custom Home Assistant integration that connects to the Mathlin Booking WordPre
 1. Go to **Settings → Devices & Services → Add Integration**
 2. Search for **Mathlin Booking System**
 3. Enter your website URL: `https://needhamscouts.uk`
-4. HA will test the connection — if the plugin is active you'll see a success screen
+4. Enter the dedicated WordPress username and application password with booking
+   read permission. Do not use a personal login password.
+5. HA tests the authenticated connection and refreshes every five minutes, plus
+   midnight. General occupancy includes unheated Scouts; Heating entities do not.
 
 That's it. The integration will immediately fetch today's bookings and schedule timers.
 
