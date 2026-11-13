@@ -1017,6 +1017,7 @@ class MBS_Rest_API {
             'reopen_scout_series'   => array( 'MBS_Admin', 'ajax_reopen_scout_series' ),
             'delete_scout_series'   => array( 'MBS_Admin', 'ajax_delete_scout_series' ),
             'save_admin_notes'      => array( 'MBS_Admin', 'ajax_save_admin_notes' ),
+            'set_booking_heating'   => array( 'MBS_Admin', 'ajax_set_booking_heating' ),
             'chase_payment'         => array( 'MBS_Admin', 'ajax_chase_payment' ),
             'save_email_settings'   => array( 'MBS_Admin', 'ajax_save_email_settings' ),
             'save_custom_fields'    => array( 'MBS_Admin', 'ajax_save_custom_fields' ),

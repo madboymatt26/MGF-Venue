@@ -53,6 +53,11 @@ jobs:
         run: node tests/invoice-modal-ui.mjs
       - name: Run correctness regression tests
         run: php tests/php-correctness-regression.php
+      - name: Verify pure heating policy and shared-demand guards
+        run: |
+          python -m pip install Jinja2==3.1.6
+          python tests/python-heating-policy.py
+          python tests/python-shared-demand.py
       - name: Validate Composer dependencies
         run: |
           cd wp-plugin/mathlin-booking
@@ -167,7 +172,9 @@ jobs:
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/review-reliability.php --allow-root
       - name: Verify invoice itemisation, payment snapshot and atomic HA rollback
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/invoice-layout-reliability.php --allow-root
-      - name: Verify admin change, revision and delivery intents roll back atomically
+      - name: Verify Scout heating metadata and outbox roll back atomically
+        run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/scout-heating.php --allow-root
+      - name: Verify existing admin change, revision and delivery intents roll back atomically
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/booking-change-atomicity.php --allow-root
       - name: Verify free-series approvals, cancellations and transport flags
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/series-outbox-atomicity.php --allow-root

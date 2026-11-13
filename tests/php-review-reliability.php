@@ -12,7 +12,7 @@ function wp_generate_uuid4() { static $id=0; return 'test-uuid-' . ++$id; }
 function wp_next_scheduled( $hook ) { return false; }
 function wp_schedule_single_event( $time, $hook ) {}
 function wp_json_encode( $data ) { return json_encode( $data ); }
-function wp_remote_post( $url, $args ) { $GLOBALS['http']++; if ( isset( $GLOBALS['during_http'] ) ) { $callback=$GLOBALS['during_http']; unset($GLOBALS['during_http']); $callback(); } return array( 'response'=>array('code'=>$GLOBALS['http_status']) ); }
+function wp_remote_post( $url, $args ) { $GLOBALS['http']++; $GLOBALS['last_ha_payload']=json_decode($args['body'],true); if ( isset( $GLOBALS['during_http'] ) ) { $callback=$GLOBALS['during_http']; unset($GLOBALS['during_http']); $callback(); } return array( 'response'=>array('code'=>$GLOBALS['http_status']) ); }
 function wp_remote_retrieve_response_code( $r ) { return $r['response']['code']; }
 function is_wp_error( $v ) { return false; }
 function wp_parse_url( $url, $component ) { return parse_url( $url, $component ); }
