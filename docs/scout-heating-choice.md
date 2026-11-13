@@ -1,5 +1,21 @@
 # Scout booking heating choice — implementation and rollout contract
 
+## 13 November rollout stop: general occupancy is not heating demand
+
+3.47.0 passed all ten CI checks and was briefly deployed to Needham, then rolled
+back to 3.46.0. It is now a prerelease, not the latest stable update. Operational
+booking/payment/email/settings fingerprints were unchanged across both operations.
+The installed original HA coordinator was restored and HA restarted. The new
+helper remains on disk but is not imported by the original coordinator.
+
+Live dependency inspection showed the same HA occupancy and kitchen sensors also
+drive oven/hob and lighting automations. Filtering those entities would erase
+unheated Scout one-offs from non-heating controls. The corrected design must keep
+existing general-occupancy entities intact and supply separate heating-demand
+entities/feeds to heating controllers (including ASHP and heating forecasts).
+Do not activate the current heating-only consumer as complete venue occupancy.
+The two approved overlap guards remain live; schedules and setpoints are unchanged.
+
 Not deployed. Do not install the repository's old HA component over the live HQ
 component: Chrome verified live version 2.0.0 on 9 November 2026, while this
 checkout contains 1.1.0. The installed coordinator was downloaded read-only and
