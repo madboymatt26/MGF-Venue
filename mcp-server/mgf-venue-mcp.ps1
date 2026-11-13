@@ -564,7 +564,7 @@ $script:Tools = @(
                         'configure_series_billing', 'pause_series', 'catch_up_series_billing', 'extend_external_series',
                         'cancel_scout_series', 'edit_scout_series',
                         'extend_scout_series', 'reopen_scout_series', 'delete_scout_series',
-                        'save_admin_notes', 'chase_payment', 'save_email_settings',
+                        'save_admin_notes', 'set_booking_heating', 'chase_payment', 'save_email_settings',
                         'save_custom_fields', 'edit_booking', 'approve_request', 'reject_request',
                         'bulk_action', 'save_osm_settings', 'test_osm_connection', 'osm_get_sections',
                         'osm_discover', 'osm_sync_woopayments', 'osm_retry_event', 'osm_resolve_event'

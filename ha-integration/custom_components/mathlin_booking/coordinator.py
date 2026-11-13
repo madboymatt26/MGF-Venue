@@ -7,6 +7,7 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 
 import aiohttp
+from .heating_policy import heating_requested
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
@@ -73,7 +74,7 @@ class MathlinCoordinator(DataUpdateCoordinator):
                     _LOGGER.debug(
                         "Fetched %d booking(s) for today from %s", len(payload), url
                     )
-                    return payload
+                    return [booking for booking in payload if heating_requested(booking)]
         except aiohttp.ClientError as err:
             raise UpdateFailed(f"Network error fetching bookings: {err}") from err
 
@@ -127,6 +128,8 @@ class MathlinCoordinator(DataUpdateCoordinator):
         # Parse all bookings into structured data for gap analysis
         parsed = []
         for booking in self.data:
+            if not heating_requested(booking):
+                continue
             ref       = booking.get("ref", "unknown")
             space     = booking.get("space", "")
             all_day   = booking.get("all_day", False)

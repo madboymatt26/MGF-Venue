@@ -37,7 +37,7 @@ class MBS_Booking_Change_Service {
                 $fresh = MBS_Bookings::get($locked->ref);
                 if(!$fresh)throw new RuntimeException('Could not verify the revised invoice link.');
             }
-            $ha = MBS_HomeAssistant::stage_within_transaction($fresh,$locked->status);
+            $ha = MBS_HomeAssistant::stage_within_transaction($fresh,$locked->status,$locked);
             if (is_wp_error($ha)) throw new RuntimeException($ha->get_error_message());
             if (!MBS_Audit_Log::log($locked->ref, $options['action'] ?? 'edited', $options['audit'] ?? 'Booking changed by an authorised manager.')) throw new RuntimeException('Could not record the booking-change audit.');
             if ($request && $wpdb->update($requests, array('status'=>'approved', 'resolved_at'=>current_time('mysql'), 'resolved_by'=>get_current_user_id()), array('id'=>(int)$request->id, 'status'=>'pending')) !== 1) throw new RuntimeException('Could not resolve the booking request.');

@@ -5,6 +5,22 @@ require_once __DIR__ . '/class-booking-intervals.php';
 /** Durable coalescing intents; HTTP runs in a worker, never a booking writer. */
 class MBS_HomeAssistant {
     const HOOK = 'mbs_ha_outbox';
+    const HEATING_KEY = '_mbs_heating_required';
+    /** Billing classification is not a heating instruction. Scout series are
+     * deliberately excluded even if an occurrence contains old opt-in metadata. */
+    public static function heating_required( $booking ) {
+        if ( empty( $booking->scout_use ) ) return true;
+        if ( ! empty( $booking->series_id ) ) return false;
+        $fields = json_decode( (string) ( $booking->custom_fields ?? '' ), true );
+        return is_array( $fields ) && ( $fields[self::HEATING_KEY] ?? false ) === true;
+    }
+    public static function heating_version( $booking ) {
+        return hash( 'sha256', wp_json_encode( (array) $booking ) );
+    }
+    private static function heating_event( $booking ) {
+        if (!in_array($booking->status,array('confirmed','deposit_paid','paid'),true)) return 'booking_cancelled';
+        return self::heating_required($booking) ? 'booking_confirmed' : 'heating_request_removed';
+    }
     private static $storage_checks=array();
     private static function transactional_storage(){
         global $wpdb;$table=$wpdb->options;
@@ -58,13 +74,14 @@ class MBS_HomeAssistant {
      * cron, HTTP, PDF or mail side effects may escape a subsequent rollback.
      * The recurring five-minute worker reads these rows directly from SQL.
      */
-    public static function stage_within_transaction( $booking, $previous_status = null ) {
+    public static function stage_within_transaction( $booking, $previous_status = null, $previous_booking = null ) {
         global $wpdb;
-        if ( ! get_option('mbs_ha_webhook_url','') || ! empty($booking->scout_use) ) return true;
+        if ( ! get_option('mbs_ha_webhook_url','') ) return true;
+        if ( ! self::heating_required($booking) && empty($booking->ha_notified) && !($previous_booking && self::heating_required($previous_booking)) ) return true;
         if($booking->status==='pending'&&!in_array($previous_status,array('confirmed','deposit_paid','paid'),true)&&empty($booking->ha_notified))return true;
         if(!self::transactional_storage())return new WP_Error('ha_storage_not_transactional','Home Assistant intent storage must use InnoDB. Review Integration health before changing bookings; nothing was committed.');
         $key = 'mbs_ha_event_' . hash('sha256',$booking->ref);
-        $intent = array('ref'=>$booking->ref,'event'=>in_array($booking->status,array('confirmed','deposit_paid','paid'),true)?'booking_confirmed':'booking_cancelled','version'=>wp_generate_uuid4(),'at'=>time(),'next'=>time(),'attempts'=>0,'state'=>'pending');
+        $intent = array('ref'=>$booking->ref,'event'=>self::heating_event($booking),'version'=>wp_generate_uuid4(),'at'=>time(),'next'=>time(),'attempts'=>0,'state'=>'pending');
         if($intent['event']==='booking_cancelled')$intent['cancelled_source']=self::cancelled_source($booking);
         $ok = $wpdb->query($wpdb->prepare("INSERT INTO {$wpdb->options} (option_name,option_value,autoload) VALUES (%s,%s,'off') ON DUPLICATE KEY UPDATE option_value=VALUES(option_value),autoload='off'",$key,maybe_serialize($intent)));
         return $ok === false ? new WP_Error('ha_intent_failed','The integration notification could not be saved; no booking change was committed.') : true;
@@ -85,7 +102,7 @@ class MBS_HomeAssistant {
         return$out;
     }
     private static function queue( $booking, $event ) {
-        if ( ! get_option( 'mbs_ha_webhook_url', '' ) || ! empty( $booking->scout_use ) ) return false;
+        if ( ! get_option( 'mbs_ha_webhook_url', '' ) || (!self::heating_required($booking) && empty($booking->ha_notified)) ) return false;
         $key = 'mbs_ha_event_' . hash( 'sha256', $booking->ref );
         $intent = array( 'ref' => $booking->ref, 'event' => $event, 'version' => wp_generate_uuid4(), 'at' => time(), 'next' => time(), 'attempts' => 0, 'state' => 'pending' );
         if($event==='booking_cancelled')$intent['cancelled_source']=self::cancelled_source($booking);
@@ -99,6 +116,8 @@ class MBS_HomeAssistant {
             'ref' => $b->ref, 'space' => $b->space, 'spaces' => class_exists( 'MBS_Space_Selection' ) ? MBS_Space_Selection::members( $b->space ) : array( $b->space ),
             'booking_date' => $b->booking_date, 'booking_date_end' => $b->booking_date_end ?: $b->booking_date,
             'start_time' => $b->start_time, 'end_time' => $b->end_time, 'all_day' => (bool) $b->all_day,
+            'scout_use' => !empty($b->scout_use), 'heating_required' => self::heating_required($b),
+            'booking_status' => $b->status, 'integration_scope' => 'booking_heating',
             'attendees' => (int) $b->attendees, 'purpose' => $b->purpose, 'kitchen' => (bool) $b->kitchen, 'amount' => (float) $b->amount,
             'intervals' => array_map( static function( $i ) { return array( 'start' => $i['start']->format( DATE_RFC3339 ), 'end' => $i['end']->format( DATE_RFC3339 ) ); }, $intervals ) );
     }
@@ -116,9 +135,9 @@ class MBS_HomeAssistant {
                 $booking = MBS_Bookings::get( $intent['ref'] );
                 if(!$booking&&($intent['event']??'')==='booking_cancelled'&&!empty($intent['cancelled_source']))$booking=(object)$intent['cancelled_source'];
                 $url = get_option( 'mbs_ha_webhook_url', '' );
-                if ( ! $booking || ! empty( $booking->scout_use ) ) { self::replace( $row, null ); continue; }
+                if ( ! $booking ) { self::replace( $row, null ); continue; }
                 if ( ! $url ) continue; // Configuration pause must not discard an intent.
-                $event = in_array( $booking->status, array( 'confirmed','deposit_paid','paid' ), true ) ? 'booking_confirmed' : 'booking_cancelled';
+                $event = self::heating_event($booking);
                 try {
                     $payload = self::payload( $booking, $event, $intent['version'] );
                     $response = wp_remote_post( $url, array( 'timeout' => 10, 'redirection' => 0, 'headers' => array( 'Content-Type' => 'application/json' ), 'body' => wp_json_encode( $payload ) ) );
@@ -126,7 +145,7 @@ class MBS_HomeAssistant {
                 } catch ( Throwable $e ) { $ok = false; }
                 if ( $ok ) {
                     if ( self::replace( $row, null ) ) {
-                        if ( $event === 'booking_confirmed' ) $wpdb->update( $wpdb->prefix . MBS_TABLE, array( 'ha_notified' => 1 ), array( 'ref' => $booking->ref ) );
+                        $wpdb->update( $wpdb->prefix . MBS_TABLE, array( 'ha_notified' => $event === 'booking_confirmed' ? 1 : 0 ), array( 'ref' => $booking->ref ) );
                         MBS_Audit_Log::log( $booking->ref, 'ha_accepted', 'Home Assistant endpoint accepted the current booking notification.' );
                     }
                 } else {
@@ -149,11 +168,11 @@ class MBS_HomeAssistant {
     }
     public static function get_upcoming_for_ha( $days_ahead = 30 ) {
         $through = ( new DateTimeImmutable( 'now', wp_timezone() ) )->modify( '+' . max( 0, min( 366, (int) $days_ahead ) ) . ' days' )->format( 'Y-m-d' );
-        return array_map( array( __CLASS__, 'payload' ), MBS_Booking_Intervals::approved( $through ) );
+        return array_values(array_map( array( __CLASS__, 'payload' ), array_filter(MBS_Booking_Intervals::approved( $through ),array(__CLASS__,'heating_required')) ));
     }
     public static function get_todays_bookings() {
         $rows = MBS_Bookings::get_by_date( wp_date( 'Y-m-d' ) );
         if ( ! is_array( $rows ) ) throw new RuntimeException( 'Today occupancy is unavailable.' );
-        return array_values( array_map( array( __CLASS__, 'payload' ), array_filter( $rows, static function( $b ) { return in_array( $b->status, array( 'confirmed','deposit_paid','paid' ), true ); } ) ) );
+        return array_values( array_map( array( __CLASS__, 'payload' ), array_filter( $rows, static function( $b ) { return self::heating_required($b) && in_array( $b->status, array( 'confirmed','deposit_paid','paid' ), true ); } ) ) );
     }
 }

@@ -48,6 +48,7 @@ class MBS_Admin {
         add_action( 'wp_ajax_mbs_save_email_settings', array( $this, 'ajax_save_email_settings' ) );
         add_action( 'wp_ajax_mbs_save_custom_fields', array( $this, 'ajax_save_custom_fields' ) );
         add_action( 'wp_ajax_mbs_edit_booking',      array( $this, 'ajax_edit_booking' ) );
+        add_action( 'wp_ajax_mbs_set_booking_heating', array( $this, 'ajax_set_booking_heating' ) );
         add_action( 'wp_ajax_mbs_approve_request',  array( $this, 'ajax_approve_request' ) );
         add_action( 'wp_ajax_mbs_reject_request',   array( $this, 'ajax_reject_request' ) );
         add_action( 'wp_ajax_mbs_bulk_action',       array( $this, 'ajax_bulk_action' ) );
@@ -1725,6 +1726,28 @@ class MBS_Admin {
 
         MBS_Custom_Fields::save_fields( $fields );
         wp_send_json_success( array( 'saved' => true, 'count' => count( $fields ) ) );
+    }
+
+    public function ajax_set_booking_heating() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
+        $ref = strtoupper( sanitize_text_field( wp_unslash( $_POST['ref'] ?? '' ) ) );
+        $version = sanitize_text_field( wp_unslash( $_POST['expected_version'] ?? '' ) );
+        $choice = $_POST['heating_required'] ?? null;
+        if ( ! in_array( $choice, array('0','1'), true ) ) wp_send_json_error( 'Choose heating on or off explicitly.', 400 );
+        $result = MBS_Space_Selection::locked( static function() use ($ref,$version,$choice) {
+            $booking = MBS_Bookings::get($ref);
+            if (!$booking || !hash_equals(MBS_HomeAssistant::heating_version($booking),$version)) return new WP_Error('heating_stale','The booking changed. Reload before saving.');
+            if (empty($booking->scout_use) || !empty($booking->series_id)) return new WP_Error('heating_scope','Only one-off Scout bookings can use this control. Scout series remain off; external hires retain their normal heating policy.');
+            if (!in_array($booking->status,array('pending','confirmed','deposit_paid','paid'),true)) return new WP_Error('heating_inactive','Heating cannot be enabled or changed on an inactive booking.');
+            $fields = json_decode((string)($booking->custom_fields ?? ''),true);
+            if (!is_array($fields) && !empty($booking->custom_fields)) return new WP_Error('heating_metadata','Existing booking metadata could not be read. Nothing was changed.');
+            if (!is_array($fields)) $fields=array();
+            $fields[MBS_HomeAssistant::HEATING_KEY] = $choice === '1';
+            return MBS_Booking_Change_Service::apply($booking,array('custom_fields'=>wp_json_encode($fields)),array('action'=>'heating_changed','audit'=>'One-off Scout booking heating request '.($choice==='1'?'enabled':'disabled').'; booking, payment and customer emails unchanged.'));
+        });
+        if (is_wp_error($result)) wp_send_json_error($result->get_error_message(),409);
+        wp_send_json_success(array('message'=>'Heating preference saved. This is a request to HA, not confirmation that the heating is running.'));
     }
 
     public function ajax_edit_booking() {

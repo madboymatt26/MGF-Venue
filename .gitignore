@@ -8,6 +8,7 @@ Thumbs.db
 
 # Python venv for the marketing PDF/logo build scripts
 .pdfvenv/
+__pycache__/
 
 # Secrets — never commit these
 *.env
@@ -30,3 +31,6 @@ tests/integration/.exit-*
 
 # Synthetic invoice visual checks (generated locally, never customer records).
 tmp/pdfs/
+tmp/heating-test-deps/
+tmp/heating-private/
+browser-artifacts/

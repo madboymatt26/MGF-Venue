@@ -39,6 +39,33 @@ $invoice_pdf_url = $invoice_document_id ? add_query_arg( array(
     <?php if ( class_exists( 'MBS_Credit_Accounts' ) ) MBS_Credit_Accounts::render_booking( $booking ); ?>
     <?php MBS_Additional_Charges::render_related($booking->ref); ?>
     <?php MBS_Terms_Acceptance::render($booking); ?>
+    <section class="nms-card" style="padding:16px;margin-bottom:16px;" aria-labelledby="mbs-heating-heading">
+        <h2 id="mbs-heating-heading">Home Assistant heating</h2>
+        <?php if (!empty($booking->scout_use) && empty($booking->series_id) && in_array($booking->status,array('pending','confirmed','deposit_paid','paid'),true)): ?>
+        <form id="mbs-booking-heating" action="<?php echo esc_url(admin_url('admin-ajax.php')); ?>" method="post">
+            <input type="hidden" name="action" value="mbs_set_booking_heating">
+            <input type="hidden" name="nonce" value="<?php echo esc_attr(wp_create_nonce('mbs_admin_nonce')); ?>">
+            <input type="hidden" name="ref" value="<?php echo esc_attr($booking->ref); ?>">
+            <input type="hidden" name="expected_version" value="<?php echo esc_attr(MBS_HomeAssistant::heating_version($booking)); ?>">
+            <label><input type="checkbox" id="mbs-heating-choice" <?php checked(MBS_HomeAssistant::heating_required($booking)); ?> aria-describedby="mbs-heating-help"> Heating required for this one-off Scout booking</label>
+            <p id="mbs-heating-help">Off by default. Enabling requests heating only while the booking is approved. It does not change charges, access emails or existing Scout heating schedules. Saving is not proof of physical heating.</p>
+            <button class="button button-primary" type="submit">Save heating preference</button>
+            <p id="mbs-heating-result" role="status" aria-live="polite"></p>
+        </form>
+        <script>
+        document.getElementById('mbs-booking-heating').addEventListener('submit',async function(e){
+            e.preventDefault(); var form=this,button=form.querySelector('button'),result=document.getElementById('mbs-heating-result');
+            var data=new FormData(form);data.set('heating_required',document.getElementById('mbs-heating-choice').checked?'1':'0');button.disabled=true;
+            try{var response=await fetch(form.getAttribute('action'),{method:'POST',body:data,credentials:'same-origin'});var json=await response.json();if(!json.success)throw new Error(typeof json.data==='string'?json.data:'Could not save. Reload before retrying.');result.textContent=json.data.message;window.location.reload();}
+            catch(error){result.textContent=error.message;button.disabled=false;}
+        });
+        </script>
+        <?php elseif (!empty($booking->scout_use) && !empty($booking->series_id)): ?>
+            <p>Off — Scout series use their separately configured Home Assistant schedules. Individual one-off Scout bookings can opt in.</p>
+        <?php else: ?>
+            <p><?php echo empty($booking->scout_use)?'External hire — existing heating policy applies while approved.':'Inactive Scout booking — no heating request.'; ?></p>
+        <?php endif; ?>
+    </section>
     <?php $access_readiness = MBS_Access_Details::readiness($booking); ?>
     <div class="nms-card" style="padding:16px;margin-bottom:16px;">
         <h2>Access email readiness</h2>
