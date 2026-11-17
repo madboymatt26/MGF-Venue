@@ -220,11 +220,13 @@ class MBS_Woo_Payment {
         exit;
     }
 
-    /** Add one consolidated invoice balance to checkout. */
+    /** Invoice links are read-only until the payer submits the confirmation form. */
     private static function handle_invoice_payment_redirect() {
         if ( ! self::is_available() ) return;
-        $invoice_ref = sanitize_text_field( $_GET['invoice_ref'] ?? '' );
-        $token = sanitize_text_field( $_GET['invoice_token'] ?? '' );
+        $method = strtoupper( $_SERVER['REQUEST_METHOD'] ?? 'GET' );
+        $input = $method === 'POST' ? $_POST : $_GET;
+        $invoice_ref = sanitize_text_field( wp_unslash( $input['invoice_ref'] ?? '' ) );
+        $token = sanitize_text_field( wp_unslash( $input['invoice_token'] ?? '' ) );
         $invoice = MBS_Billing_Ledger::get_invoice( $invoice_ref );
         if ( ! $invoice || ! MBS_Invoice_Payment::verify_token( $invoice, $token ) ) {
             wp_die( 'Invalid invoice payment link. Please contact us for assistance.' );
@@ -237,10 +239,22 @@ class MBS_Woo_Payment {
         if ( ! MBS_Invoice_Payment::is_payable( $invoice ) ) {
             wp_die( 'This invoice is not available for payment. It may already be settled or void.' );
         }
+        self::require_invoice_checkout_intent( $invoice, $token, $method );
+        if ( ! WC()->session || ! WC()->cart ) {
+            wp_die( 'Checkout could not be started. Please enable cookies and open your invoice link again.', '', array( 'response' => 503 ) );
+        }
         $session_key = 'mbs_invoice_reservation_' . substr( hash( 'sha256', $invoice->invoice_ref ), 0, 16 );
         $existing_reservation = WC()->session ? (string) WC()->session->get( $session_key, '' ) : '';
         $reservation = MBS_Invoice_Reservation::acquire( $invoice, $existing_reservation );
-        if ( is_wp_error( $reservation ) ) wp_die( esc_html( $reservation->get_error_message() ) );
+        if ( is_wp_error( $reservation ) ) {
+            $message = $reservation->get_error_code() === 'invoice_payment_reserved'
+                ? 'A payment checkout is already open for this invoice. Return to that checkout, or wait 20 minutes if it was abandoned, then open your invoice link again. If a payment is processing, please contact us before trying again.'
+                : $reservation->get_error_message();
+            wp_die( esc_html( $message ), 'Invoice checkout unavailable', array( 'response' => 409 ) );
+        }
+        if ( $reservation['status'] !== 'active' ) {
+            wp_die( 'This invoice already has a payment order. Please return to that order or contact us before trying again.', '', array( 'response' => 409 ) );
+        }
         if ( WC()->session ) WC()->session->set( $session_key, $reservation['reservation_ref'] );
         $decimal = MBS_Money::decimal( $balance_minor );
         if ( is_wp_error( $decimal ) ) wp_die( 'The invoice balance could not be prepared for checkout.' );
@@ -250,13 +264,45 @@ class MBS_Woo_Payment {
         add_filter( 'woocommerce_product_get_price', function( $price, $product ) use ( $decimal, $product_id ) {
             return $product->get_id() == $product_id ? $decimal : $price;
         }, 10, 2 );
-        WC()->cart->add_to_cart( $product_id, 1, 0, array(), array(
+        $added = WC()->cart->add_to_cart( $product_id, 1, 0, array(), array(
             'mbs_invoice_ref' => $invoice->invoice_ref,
             'mbs_invoice_amount_minor' => $balance_minor,
             'mbs_invoice_reservation_ref' => $reservation['reservation_ref'],
         ) );
-        wp_redirect( wc_get_checkout_url() );
+        if ( ! $added ) {
+            MBS_Invoice_Reservation::release( $invoice->invoice_ref, $reservation['reservation_ref'], 'cart_setup_failed' );
+            wp_die( 'Checkout could not be prepared. Please open your invoice link and try again.', '', array( 'response' => 503 ) );
+        }
+        wp_safe_redirect( wc_get_checkout_url(), 303 );
         exit;
+    }
+
+    /** No reservation, cart change or payment-token generation occurs here. */
+    private static function require_invoice_checkout_intent( $invoice, $token, $method ) {
+        nocache_headers();
+        if ( ! headers_sent() ) {
+            header( 'Referrer-Policy: no-referrer' );
+            header( 'X-Robots-Tag: noindex, nofollow, noarchive' );
+        }
+        // Mail/link scanners commonly probe with HEAD before opening a browser.
+        if ( $method === 'HEAD' ) wp_die( '', '', array( 'response' => 200 ) );
+        if ( ! in_array( $method, array( 'GET', 'POST' ), true ) ) {
+            if ( ! headers_sent() ) header( 'Allow: GET, HEAD, POST' );
+            wp_die( 'This payment link supports GET, HEAD and POST only.', '', array( 'response' => 405 ) );
+        }
+        $balance = MBS_Billing_Ledger::balance_minor( $invoice );
+        $action = 'mbs_invoice_checkout:' . $invoice->invoice_ref . ':' . (int) $invoice->version . ':' . $balance;
+        if ( $method === 'POST' ) {
+            $nonce = sanitize_text_field( wp_unslash( $_POST['_mbs_invoice_nonce'] ?? '' ) );
+            if ( ( $_POST['mbs_invoice_confirm'] ?? '' ) !== '1' || ! wp_verify_nonce( $nonce, $action ) ) {
+                wp_die( 'Your invoice confirmation expired or the balance changed. Please reopen the original invoice link and confirm again.', '', array( 'response' => 403 ) );
+            }
+            return;
+        }
+        ob_start();
+        include MBS_PLUGIN_DIR . 'public/views/invoice-payment-confirm.php';
+        $html = ob_get_clean();
+        wp_die( $html, 'Confirm invoice payment', array( 'response' => 200 ) );
     }
 
     /**
