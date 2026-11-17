@@ -150,6 +150,7 @@ jobs:
           export MGF_BROWSER_MODULE="$RUNNER_TEMP/mgf-browser/node_modules/playwright/index.mjs"
           export MGF_BROWSER_FIXTURE="$(docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp option get mbs_extra_browser_fixture --format=json --allow-root)"
           node tests/integration/additional-charges-browser.mjs
+          node tests/integration/invoice-checkout-intent-browser.mjs
       - name: Upload browser acceptance screenshots
         if: always() && matrix.php == '8.2'
         uses: actions/upload-artifact@v4
