@@ -259,7 +259,8 @@ jQuery(function ($) {
         var end     = $('#nms-end').val();
         var kitchen = $('#nms-kitchen').val() === '1';
         var allDay  = $('#nms-allday').val() === '1';
-        var info    = NMS.spaces[space];
+        var spaces  = NMS.spaces || {};
+        var info    = spaces[space];
 
         var spaceCost  = 0;
         var spaceLabel = 'Space hire';
@@ -389,8 +390,9 @@ jQuery(function ($) {
     $('#nms-space, #nms-start, #nms-end, #nms-kitchen, #nms-allday, #nms-date, #nms-date-end, #nms-recurring, #nms-repeat-until, #nms-scout-use').on('change', updateCost);
     function updateAttendanceCapacity() {
         var value = $('#nms-space').val() || '', capacities = [];
-        var names = NMS.spaces[value] ? [value] : value.split(' + ');
-        names.forEach(function(name) { if (NMS.spaces[name] && Number(NMS.spaces[name].capacity) > 0) capacities.push(Number(NMS.spaces[name].capacity)); });
+        var spaces = NMS.spaces || {};
+        var names = spaces[value] ? [value] : value.split(' + ');
+        names.forEach(function(name) { if (spaces[name] && Number(spaces[name].capacity) > 0) capacities.push(Number(NMS.spaces[name].capacity)); });
         var input = document.getElementById('nms-attendees');
         if (input) { if (capacities.length) input.max = Math.min.apply(null, capacities); else input.removeAttribute('max'); }
     }
