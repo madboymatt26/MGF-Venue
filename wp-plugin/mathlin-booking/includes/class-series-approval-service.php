@@ -385,11 +385,6 @@ class MBS_Series_Approval_Service {
         return $body;
     }
 
-    private static function build_invoice_email_body( $doc ) {
-        // Placeholder — will use the template system in Stage 8
-        return '<p>Your invoice ' . esc_html( $doc['invoice_ref'] ) . ' is attached.</p>';
-    }
-
     private static function build_email_headers() {
         $org = class_exists( 'MBS_Email_Templates' ) ? MBS_Email_Templates::get_org_settings() : array();
         $from_email = get_option( 'admin_email' );

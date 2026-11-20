@@ -127,32 +127,6 @@ class MBS_Invoice_Document_Security {
     }
 
     /**
-     * Validate a document request before rendering.
-     *
-     * @param int $document_id
-     * @return true|WP_Error
-     */
-    public static function validate_document_request( $document_id ) {
-        if ( ! $document_id || ! is_numeric( $document_id ) || (int) $document_id < 1 ) {
-            return new WP_Error( 'invalid_document_id', 'Invalid document identifier.' );
-        }
-        return true;
-    }
-
-    /**
-     * Validate a booking reference format.
-     *
-     * @param string $ref
-     * @return true|WP_Error
-     */
-    public static function validate_ref_format( $ref ) {
-        if ( ! preg_match( '/^[A-Z0-9\-]{4,30}$/i', $ref ) ) {
-            return new WP_Error( 'invalid_ref_format', 'Invalid reference format.' );
-        }
-        return true;
-    }
-
-    /**
      * Sanitise customer-controlled text for snapshot storage.
      * Preserves legal content but strips control characters.
      * Does NOT destructively alter names/addresses.
@@ -169,17 +143,6 @@ class MBS_Invoice_Document_Security {
             $text = mb_substr( $text, 0, $max_length );
         }
         return $text;
-    }
-
-    /**
-     * Check if a rendered PDF exceeds the email attachment threshold.
-     *
-     * @param string $pdf_binary
-     * @return bool True if oversized (should use download link instead).
-     */
-    public static function exceeds_email_attachment_limit( $pdf_binary ) {
-        $limit = (int) get_option( 'mbs_email_attachment_max_bytes', self::EMAIL_ATTACHMENT_MAX_BYTES );
-        return strlen( $pdf_binary ) > $limit;
     }
 
     /**

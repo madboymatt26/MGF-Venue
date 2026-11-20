@@ -185,12 +185,6 @@ $selected_blocks   = $selected_date && isset( $blocked_dates[ $selected_date ] )
                     </div>
                     <?php endforeach; ?>
                 <?php endif; ?>
-            <?php else : ?>
-                <h3>Select a Day</h3>
-                <p class="nms-muted">Click on a day in the calendar to see its bookings.</p>
-                <?php if ( ! empty( $bookings ) ) : ?>
-                    <p style="margin-top:1rem;"><strong><?php echo count( $bookings ); ?></strong> booking<?php echo count( $bookings ) !== 1 ? 's' : ''; ?> this month.</p>
-                <?php endif; ?>
             <?php endif; ?>
         </div>
     </div>

@@ -142,12 +142,12 @@ class MBS_Custom_Fields {
         }, ARRAY_FILTER_USE_BOTH );
         if ( ! $responses ) return;
 
-        echo '<div class="nms-detail-item nms-detail-full" style="margin-top:0.5rem;">';
-        echo '<label>Additional Information</label>';
-        echo '<div style="margin-top:4px;">';
+        echo '<div class="mbs-dl-item mbs-dl-item--full">';
+        echo '<dt>Additional Information</dt>';
+        echo '<dd><ul class="mbs-plain-list">';
         foreach ( $responses as $id => $data ) {
-            echo '<div style="margin-bottom:4px;"><strong>' . esc_html( $data['label'] ) . ':</strong> ' . esc_html( $data['value'] ) . '</div>';
+            echo '<li><strong>' . esc_html( $data['label'] ) . ':</strong> ' . esc_html( $data['value'] ) . '</li>';
         }
-        echo '</div></div>';
+        echo '</ul></dd></div>';
     }
 }

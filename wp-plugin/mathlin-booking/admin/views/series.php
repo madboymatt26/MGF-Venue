@@ -21,6 +21,7 @@ $pattern_label = static function( $item ) { $schedule = json_decode( (string) $i
             </select>
             <button class="button">Filter</button>
         </form>
+        <div class="mbs-table-scroll">
         <table class="widefat striped">
             <thead><tr><th>Series</th><th>Customer</th><th>Schedule</th><th>Dates</th><?php if ( MBS_Payment_Features::enabled() ) : ?><th>Billing</th><?php endif; ?><th>Status</th></tr></thead>
             <tbody>
@@ -37,6 +38,7 @@ $pattern_label = static function( $item ) { $schedule = json_decode( (string) $i
             <?php endforeach; ?>
             </tbody>
         </table>
+        </div>
     <?php else : ?>
         <p><a href="<?php echo esc_url( admin_url( 'admin.php?page=mathlin-series' ) ); ?>">← All recurring series</a></p>
         <?php MBS_Additional_Charges::render_related($series->series_ref); ?>

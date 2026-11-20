@@ -35,8 +35,8 @@ foreach ( $handlers as $action => $handler ) {
     }
 }
 
-if ( count( $handlers ) !== 53 ) {
-    $errors[] = 'Expected 53 mapped admin actions; found ' . count( $handlers );
+if ( count( $handlers ) !== 56 ) {
+    $errors[] = 'Expected 56 mapped admin actions; found ' . count( $handlers );
 }
 
 // Every privileged AJAX hook in the admin surfaces must remain represented in

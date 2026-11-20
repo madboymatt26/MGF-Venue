@@ -278,24 +278,42 @@ class MBS_Payment_Chaser {
             'From: ' . $org['name'] . ' <' . get_option( 'admin_email', $admin_email ) . '>',
             'Reply-To: ' . $admin_email,
         );
-        wp_mail( $booking->email, $subject, $body, $headers );
 
-        // Update chase tracking
-        global $wpdb;
-        $table = $wpdb->prefix . MBS_TABLE;
-        $wpdb->update(
-            $table,
-            array(
-                'chase_count' => $chase_count + 1,
-                'last_chased' => current_time( 'mysql' ),
-            ),
-            array( 'ref' => $booking->ref )
+        $meta = array(
+            'chase_type' => $chase_type,
+            'amount_due' => (float) $amount_due,
+            'manual'     => (bool) $manual,
         );
+        $message_key  = 'payment_chase:' . $booking->ref . ':' . ( $chase_count + 1 ) . ':' . ( $manual ? 'manual:' . bin2hex( random_bytes( 4 ) ) : wp_date( 'Y-m-d' ) );
+        $payload_hash = MBS_Email_Queue::compute_payload_hash( $booking->email, $subject, $body, $headers, $meta );
+        $queued       = MBS_Email_Queue::enqueue(
+            $booking->email,
+            $subject,
+            $body,
+            $headers,
+            $message_key,
+            $payload_hash,
+            $meta,
+            array(
+                'message_type'   => 'payment_chase',
+                'reference_type' => 'booking',
+                'reference_id'   => (int) $booking->id,
+            )
+        );
+        if ( is_wp_error( $queued ) ) {
+            return $queued;
+        }
 
-        // Audit log
-        $type = $manual ? 'Manual payment chase' : 'Auto payment chase';
-        $what = ' (' . $chase_type . ' £' . number_format( $amount_due, 2 ) . ')';
-        MBS_Audit_Log::log( $booking->ref, 'payment_chase', $type . ' (chase #' . ( $chase_count + 1 ) . ')' . $what );
+        global $wpdb;
+        $msg_id = (int) $wpdb->get_var( $wpdb->prepare(
+            'SELECT id FROM ' . $wpdb->prefix . 'mathlin_email_queue WHERE message_key = %s',
+            $message_key
+        ) );
+        if ( $msg_id > 0 ) {
+            MBS_Email_Queue::dispatch_message( $msg_id );
+        } else {
+            MBS_Email_Queue::wake();
+        }
         return true;
     }
 
@@ -357,23 +375,41 @@ class MBS_Payment_Chaser {
             'From: ' . $org['name'] . ' <' . get_option( 'admin_email', $admin_email ) . '>',
             'Reply-To: ' . $admin_email,
         );
-        wp_mail( $booking->email, $subject, $body, $headers );
 
-        // Update chase tracking (so we respect the chase interval / max cap)
-        global $wpdb;
-        $table = $wpdb->prefix . MBS_TABLE;
-        $wpdb->update(
-            $table,
-            array(
-                'chase_count' => $chase_count + 1,
-                'last_chased' => current_time( 'mysql' ),
-            ),
-            array( 'ref' => $booking->ref )
+        $meta = array(
+            'amount_due' => (float) $balance_due,
+            'manual'     => (bool) $manual,
         );
+        $message_key  = 'b2b_statement:' . $booking->ref . ':' . ( $chase_count + 1 ) . ':' . ( $manual ? 'manual:' . bin2hex( random_bytes( 4 ) ) : wp_date( 'Y-m-d' ) );
+        $payload_hash = MBS_Email_Queue::compute_payload_hash( $booking->email, $subject, $body, $headers, $meta );
+        $queued       = MBS_Email_Queue::enqueue(
+            $booking->email,
+            $subject,
+            $body,
+            $headers,
+            $message_key,
+            $payload_hash,
+            $meta,
+            array(
+                'message_type'   => 'b2b_statement_reminder',
+                'reference_type' => 'booking',
+                'reference_id'   => (int) $booking->id,
+            )
+        );
+        if ( is_wp_error( $queued ) ) {
+            return $queued;
+        }
 
-        // Audit log
-        $type = $manual ? 'Manual B2B statement reminder' : 'Auto B2B statement reminder';
-        MBS_Audit_Log::log( $booking->ref, 'payment_chase', $type . ' (reminder #' . ( $chase_count + 1 ) . ', balance £' . number_format( $balance_due, 2 ) . ')' );
+        global $wpdb;
+        $msg_id = (int) $wpdb->get_var( $wpdb->prepare(
+            'SELECT id FROM ' . $wpdb->prefix . 'mathlin_email_queue WHERE message_key = %s',
+            $message_key
+        ) );
+        if ( $msg_id > 0 ) {
+            MBS_Email_Queue::dispatch_message( $msg_id );
+        } else {
+            MBS_Email_Queue::wake();
+        }
         return true;
     }
 }

@@ -5,9 +5,7 @@ require_once __DIR__ . '/class-booking-intervals.php';
 /** One local-time renderer; keeps existing event UIDs and public redaction. */
 class MBS_ICal {
     public static function generate( $booking ) { return self::render( array( $booking ), true ); }
-    public static function get_feed_url() { return rest_url( 'mathlin/v1/bookings/ical' ); }
     public static function generate_feed() { return self::render( self::public_rows( MBS_Booking_Intervals::approved() ), false ); }
-    public static function campsite_calendar( $bookings ) { return self::render( $bookings, false, true ); }
     private static function render( $bookings, $private, $campsite = null ) {
         $campsite = $campsite === null ? class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() : $campsite;
         $utc = new DateTimeZone( 'UTC' );

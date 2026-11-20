@@ -353,6 +353,18 @@ class MBS_Rest_API {
             'callback'            => array( $this, 'get_admin_analytics' ),
             'permission_callback' => array( $this, 'booking_manager_permission' ),
         ) );
+
+        register_rest_route( self::API_NAMESPACE, '/admin/email-queue', array(
+            'methods'             => 'GET',
+            'callback'            => array( $this, 'get_admin_email_queue' ),
+            'permission_callback' => array( $this, 'booking_manager_permission' ),
+        ) );
+
+        register_rest_route( self::API_NAMESPACE, '/admin/email-queue/(?P<id>\d+)/resend', array(
+            'methods'             => 'POST',
+            'callback'            => array( $this, 'resend_admin_email_queue' ),
+            'permission_callback' => array( $this, 'booking_manager_permission' ),
+        ) );
     }
 
     public function get_upcoming( WP_REST_Request $request ) {
@@ -1036,6 +1048,9 @@ class MBS_Rest_API {
             'approve_request'       => array( 'MBS_Admin', 'ajax_approve_request' ),
             'reject_request'        => array( 'MBS_Admin', 'ajax_reject_request' ),
             'bulk_action'           => array( 'MBS_Admin', 'ajax_bulk_action' ),
+            'email_queue_list'      => array( 'MBS_Admin', 'ajax_email_queue_list' ),
+            'email_queue_resend'    => array( 'MBS_Admin', 'ajax_email_queue_resend' ),
+            'email_queue_dismiss'   => array( 'MBS_Admin', 'ajax_email_queue_dismiss' ),
             'save_osm_settings'     => array( 'MBS_OSM_Integration', 'ajax_save_settings' ),
             'test_osm_connection'   => array( 'MBS_OSM_Integration', 'ajax_test_connection' ),
             'osm_get_sections'      => array( 'MBS_OSM_Integration', 'ajax_get_sections' ),
@@ -1055,7 +1070,7 @@ class MBS_Rest_API {
         $reads    = array(
             'bookings', 'booking', 'availability', 'audit', 'global_audit',
             'dashboard', 'blocked_dates', 'series', 'series_list', 'invoices', 'invoice', 'requests', 'analytics',
-            'additional_charges', 'additional_charge', 'additional_charge_document', 'extras_catalogue',
+            'additional_charges', 'additional_charge', 'additional_charge_document', 'extras_catalogue', 'email_queue',
         );
 
         if ( $is_admin ) {
@@ -1065,7 +1080,7 @@ class MBS_Rest_API {
             ) );
         } else {
             $admin_only_actions = array(
-                'delete_booking', 'resolve_invoice_reconciliation', 'reconcile_zero_bound_invoice_order', 'save_settings', 'test_ha', 'check_update',
+                'delete_booking', 'delete_archive_series', 'email_queue_dismiss', 'resolve_invoice_reconciliation', 'reconcile_zero_bound_invoice_order', 'save_settings', 'test_ha', 'check_update',
                 'delete_scout_series', 'save_email_settings', 'save_custom_fields',
                 'save_osm_settings', 'test_osm_connection', 'osm_get_sections', 'osm_discover',
                 'osm_sync_woopayments', 'osm_retry_event', 'osm_resolve_event',
@@ -1619,5 +1634,29 @@ class MBS_Rest_API {
         $response->header( 'Content-Type', 'text/calendar; charset=utf-8' );
         $response->header( 'Content-Disposition', 'inline; filename="scout-hall-bookings.ics"' );
         return $response;
+    }
+
+    // ── Admin Email Queue Diagnostics ──────────────────────────────────────────
+
+    public function get_admin_email_queue( WP_REST_Request $request ) {
+        $result = MBS_Email_Queue::query_diagnostics( array(
+            'status'           => $request->get_param( 'status' ) ?? '',
+            'failure_category' => $request->get_param( 'failure_category' ) ?? '',
+            'reference_type'   => $request->get_param( 'reference_type' ) ?? '',
+            'reference_id'     => $request->get_param( 'reference_id' ) ?? 0,
+            'booking_ref'      => $request->get_param( 'booking_ref' ) ?? '',
+            'limit'            => $request->get_param( 'limit' ) ?? 50,
+            'offset'           => $request->get_param( 'offset' ) ?? 0,
+        ) );
+        return rest_ensure_response( $result );
+    }
+
+    public function resend_admin_email_queue( WP_REST_Request $request ) {
+        $id     = absint( $request->get_param( 'id' ) );
+        $result = MBS_Email_Queue::resend_row( $id, get_current_user_id() );
+        if ( is_wp_error( $result ) ) {
+            return $result;
+        }
+        return rest_ensure_response( $result );
     }
 }

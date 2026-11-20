@@ -139,12 +139,8 @@ class MBS_Feedback {
      * booking doesn't already have one (same column/pattern as modifications).
      */
     public static function get_feedback_url( $booking ) {
-        $token = $booking->modification_token;
-        if ( empty( $token ) ) {
-            $token = wp_generate_password( 32, false );
-            global $wpdb;
-            $wpdb->update( $wpdb->prefix . MBS_TABLE, array( 'modification_token' => $token ), array( 'ref' => $booking->ref ) );
-        }
+        $token = MBS_Bookings::scoped_token( $booking, 'feedback' );
+        if ( $token === '' ) return '';
 
         $base = self::feedback_form_base_url();
         if ( empty( $base ) ) $base = home_url();
@@ -160,6 +156,9 @@ class MBS_Feedback {
      * Returns '' if no such page exists yet.
      */
     private static function feedback_form_base_url() {
+        if ( class_exists( 'MBS_Public' ) && method_exists( 'MBS_Public', 'shortcode_page_url' ) ) {
+            return MBS_Public::shortcode_page_url( 'mathlin_feedback' );
+        }
         $pages = get_posts( array(
             'post_type'   => 'page',
             'post_status' => 'publish',
@@ -174,8 +173,8 @@ class MBS_Feedback {
      */
     public static function verify_token( $ref, $token ) {
         $booking = MBS_Bookings::get( $ref );
-        if ( ! $booking || empty( $booking->modification_token ) || empty( $token ) ) return false;
-        return hash_equals( $booking->modification_token, $token );
+        if ( ! $booking || empty( $token ) ) return false;
+        return MBS_Bookings::verify_scoped_token( $booking, 'feedback', (string) $token );
     }
 
     // ── Email to the hirer ────────────────────────────────────────────────────────
@@ -339,7 +338,14 @@ class MBS_Feedback {
                     .then(function (r) { return r.json(); })
                     .then(function (res) {
                         if (res && res.success) {
-                            form.innerHTML = '<h3 style="color:#2ecc71;">Thank you!</h3><p>' + (res.data && res.data.message ? res.data.message : 'Your feedback has been received.') + '</p>';
+                            form.textContent = '';
+                            var heading = document.createElement('h3');
+                            heading.style.color = '#2ecc71';
+                            heading.textContent = 'Thank you!';
+                            var para = document.createElement('p');
+                            para.textContent = (res.data && res.data.message) ? res.data.message : 'Your feedback has been received.';
+                            form.appendChild(heading);
+                            form.appendChild(para);
                         } else {
                             msg.style.color = '#e74c3c';
                             msg.textContent = (res && res.data && res.data.message) ? res.data.message : 'Something went wrong. Please try again.';

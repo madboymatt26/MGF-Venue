@@ -119,17 +119,16 @@ class MBS_Updater {
      */
     private function get_download_url( $release ) {
         $expected = 'MGF-Venue-' . $this->parse_version( $release['tag_name'] ) . '.zip';
-        // Check for an attached .zip asset first
+        // Require the exact named release asset; never fall back to unverified zipball_url.
         if ( ! empty( $release['assets'] ) ) {
             foreach ( $release['assets'] as $asset ) {
-                if ( $asset['name'] === $expected ) {
+                if ( ( $asset['name'] ?? '' ) === $expected && ! empty( $asset['browser_download_url'] ) ) {
                     return $asset['browser_download_url'];
                 }
             }
         }
 
-        // Fallback: GitHub auto-generated source zipball
-        return $release['zipball_url'];
+        return '';
     }
 
     /**
@@ -149,6 +148,9 @@ class MBS_Updater {
 
         if ( version_compare( $remote_version, $this->current_version, '>' ) ) {
             $download_url = $this->get_download_url( $release );
+            if ( $download_url === '' ) {
+                return $transient;
+            }
 
             $transient->response[ $this->plugin_basename ] = (object) array(
                 'slug'        => $this->slug,
@@ -264,7 +266,12 @@ class MBS_Updater {
 
     /** Verify the exact named release asset before WordPress extracts/installs it. */
     public function verify_release_download( $reply, $package, $upgrader, $hook_extra ) {
-        if ( $reply !== false || ( $hook_extra['plugin'] ?? '' ) !== $this->plugin_basename || strpos( $package, 'https://github.com/' . $this->repo . '/releases/download/' ) !== 0 ) return $reply;
+        if ( $reply !== false || ( $hook_extra['plugin'] ?? '' ) !== $this->plugin_basename ) return $reply;
+        // Preserve local manual plugin ZIP uploads (non-URL filesystem paths).
+        if ( ! is_string( $package ) || ! preg_match( '#^[a-z][a-z0-9+.-]*://#i', $package ) ) return $reply;
+        if ( strpos( $package, 'https://github.com/' . $this->repo . '/releases/download/' ) !== 0 ) {
+            return new WP_Error( 'mgf_release_untrusted_source', 'MGF Venue updates must come from an approved GitHub release asset with SHA-256 verification.' );
+        }
         $release = $this->fetch_latest_release();
         if ( ! $release || $this->get_download_url( $release ) !== $package ) return new WP_Error( 'mgf_release_changed', 'The release changed or cannot be verified. Refresh Updates before retrying.' );
         $digest = '';

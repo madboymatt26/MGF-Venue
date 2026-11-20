@@ -80,7 +80,8 @@ $resolved = array_filter( $all, function( $r ) { return $r->status !== 'pending'
     <?php if ( ! empty( $resolved ) ) : ?>
     <div class="nms-card">
         <div class="nms-card-header"><h2>📋 Recent Resolved Requests</h2></div>
-        <div style="padding:1rem 1.5rem;">
+        <div class="mbs-card-body">
+            <div class="mbs-table-scroll">
             <table class="wp-list-table widefat fixed striped" style="font-size:0.85rem;">
                 <thead>
                     <tr><th>Booking</th><th>Type</th><th>Booker</th><th>Submitted</th><th>Result</th><th>Resolved</th></tr>
@@ -102,6 +103,7 @@ $resolved = array_filter( $all, function( $r ) { return $r->status !== 'pending'
                 <?php endforeach; ?>
                 </tbody>
             </table>
+            </div>
         </div>
     </div>
     <?php endif; ?>

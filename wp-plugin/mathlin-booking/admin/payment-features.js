@@ -20,8 +20,9 @@ jQuery(function ($) {
     }
     if (!on('payments')) {
         $('#payment_days_required,#offline_payment_instructions,#payment_terms_days,#kitchen_price').closest('tr').prop('hidden',true).hide();
+        $('[data-payment-field="1"]').prop('hidden',true).hide();
         $('.nms-detail-item').filter(function () { return /^(Amount|Invoice No\.|Billing Address)$/.test($(this).find('label').first().text().trim()); }).prop('hidden',true).hide();
-        $('#nms-edit-custom-amount,#nms-edit-use-custom,#nms-edit-address').closest('.nms-form-group,tr').prop('hidden',true).hide();
+        $('#nms-edit-custom-amount,#nms-edit-custom-price,#nms-edit-address').closest('.mbs-edit-field,.nms-detail-full,.nms-form-group,tr').prop('hidden',true).hide();
         $('.nms-spaces-table tr').each(function () { $(this).children().eq(1).prop('hidden',true).hide(); $(this).children().eq(2).prop('hidden',true).hide(); });
     }
     if (!on('reports')) {

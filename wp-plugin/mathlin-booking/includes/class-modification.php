@@ -23,30 +23,33 @@ class MBS_Modification {
 
     // ── Token & URL ────────────────────────────────────────────────────────────
 
-    public static function get_modification_url( $booking ) {
-        $token = $booking->modification_token;
-        if ( empty( $token ) ) {
-            $token = wp_generate_password( 32, false );
-            global $wpdb;
-            $wpdb->update( $wpdb->prefix . MBS_TABLE, array( 'modification_token' => $token ), array( 'ref' => $booking->ref ) );
+    public static function get_modification_url( $booking, $base_url = null ) {
+        $token = MBS_Bookings::scoped_token( $booking, 'modify' );
+        if ( $token === '' ) return '';
+        if ( $base_url === null ) {
+            $base_url = class_exists( 'MBS_Public' ) && method_exists( 'MBS_Public', 'shortcode_page_url' )
+                ? MBS_Public::shortcode_page_url( 'mathlin_status' )
+                : '';
+            if ( $base_url === '' ) {
+                $base_url = home_url();
+                $pages = get_posts( array( 'post_type' => 'page', 'post_status' => 'publish', 's' => 'mathlin_status', 'numberposts' => 1 ) );
+                if ( ! empty( $pages ) ) $base_url = get_permalink( $pages[0]->ID );
+            }
         }
-        $base_url = home_url();
-        $pages = get_posts( array( 'post_type' => 'page', 'post_status' => 'publish', 's' => 'mathlin_status', 'numberposts' => 1 ) );
-        if ( ! empty( $pages ) ) $base_url = get_permalink( $pages[0]->ID );
         return add_query_arg( array( 'mbs_modify' => '1', 'ref' => $booking->ref, 'token' => $token ), $base_url );
     }
 
     public static function verify_token( $ref, $token ) {
         $booking = MBS_Bookings::get( $ref );
-        if ( ! $booking || empty( $booking->modification_token ) ) return false;
-        return hash_equals( $booking->modification_token, $token );
+        if ( ! $booking ) return false;
+        return MBS_Bookings::verify_scoped_token( $booking, 'modify', (string) $token );
     }
 
     // ── CRUD ───────────────────────────────────────────────────────────────────
 
     public static function create_request( $data ) {
         global $wpdb;
-        return $wpdb->insert( self::table(), array(
+        $inserted = $wpdb->insert( self::table(), array(
             'booking_ref'    => sanitize_text_field( $data['ref'] ),
             'request_type'   => sanitize_text_field( $data['type'] ), // 'modify' or 'cancel'
             'status'         => 'pending',
@@ -54,6 +57,10 @@ class MBS_Modification {
             'notes'          => sanitize_textarea_field( $data['notes'] ?? '' ),
             'created_at'     => current_time( 'mysql' ),
         ) );
+        if ( $inserted ) {
+            self::invalidate_pending_count_cache();
+        }
+        return $inserted;
     }
 
     public static function get_pending() {
@@ -85,21 +92,43 @@ class MBS_Modification {
         return $wpdb->get_row( $wpdb->prepare( "SELECT * FROM " . self::table() . " WHERE id = %d", $id ) );
     }
 
+    public static function invalidate_pending_count_cache() {
+        if ( function_exists( 'delete_transient' ) ) {
+            delete_transient( 'mbs_pending_mod_requests_count' );
+        }
+    }
+
     public static function get_pending_count() {
+        if ( function_exists( 'get_transient' ) ) {
+            $cached = get_transient( 'mbs_pending_mod_requests_count' );
+            if ( $cached !== false ) {
+                return (int) $cached;
+            }
+        }
         global $wpdb;
         $table = self::table();
-        if ( $wpdb->get_var( "SHOW TABLES LIKE '{$table}'" ) !== $table ) return 0;
-        return (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status = 'pending'" );
+        $count = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status = 'pending'" );
+        if ( ! empty( $wpdb->last_error ) ) {
+            return 0;
+        }
+        if ( function_exists( 'set_transient' ) ) {
+            set_transient( 'mbs_pending_mod_requests_count', $count, 60 );
+        }
+        return $count;
     }
 
     public static function update_request_status( $id, $status, $admin_response = '' ) {
         global $wpdb;
-        return $wpdb->update( self::table(), array(
+        $updated = $wpdb->update( self::table(), array(
             'status'         => $status,
             'admin_response' => sanitize_textarea_field( $admin_response ),
             'resolved_at'    => current_time( 'mysql' ),
             'resolved_by'    => get_current_user_id(),
         ), array( 'id' => $id ) );
+        if ( $updated !== false ) {
+            self::invalidate_pending_count_cache();
+        }
+        return $updated;
     }
 
     // ── Approve ────────────────────────────────────────────────────────────────

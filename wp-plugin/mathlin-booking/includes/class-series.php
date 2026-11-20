@@ -582,14 +582,18 @@ class MBS_Series {
     }
 
     /** Resolve how an occurrence participates in payment chasing. */
-    public static function billing_treatment_for_booking( $booking ) {
+    public static function billing_treatment_for_booking( $booking, $series = false ) {
         if ( ! empty( $booking->scout_use ) ) {
             return 'none';
         }
         if ( empty( $booking->series_id ) ) {
             return 'one_off';
         }
-        $series = self::get( $booking->series_id );
+        // Callers that already loaded the series row pass it (or null when
+        // absent) to avoid a duplicate lookup; `false` means "not loaded".
+        if ( false === $series ) {
+            $series = self::get( $booking->series_id );
+        }
         if ( ! $series ) {
             return 'legacy_per_occurrence';
         }

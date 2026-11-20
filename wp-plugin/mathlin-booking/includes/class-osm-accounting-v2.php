@@ -12,9 +12,25 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 class MBS_OSM_Integration {
     const OSM_DOMAIN = 'https://www.onlinescoutmanager.co.uk';
     const OSM_TOKEN = 'https://www.onlinescoutmanager.co.uk/oauth/token';
+    const RECOVERY_HOOK = 'mbs_osm_recover_stale_claims';
+    const MANUAL_COUNT_TRANSIENT = 'mbs_osm_manual_reconcile_count';
 
     public function init() {
-        add_action( 'init', array( __CLASS__, 'recover_stale_claims' ) );
+        add_action( self::RECOVERY_HOOK, array( __CLASS__, 'recover_stale_claims' ) );
+        add_filter( 'cron_schedules', static function ( $schedules ) {
+            $schedules['mbs_osm_five_minutes'] = array( 'interval' => 300, 'display' => 'Every five minutes (MGF OSM stale claim recovery)' );
+            return $schedules;
+        } );
+        if ( self::get_settings()['enabled'] ) {
+            $event = wp_get_scheduled_event( self::RECOVERY_HOOK );
+            if ( $event && $event->schedule !== 'mbs_osm_five_minutes' ) {
+                wp_clear_scheduled_hook( self::RECOVERY_HOOK );
+                $event = false;
+            }
+            if ( ! $event ) {
+                wp_schedule_event( time() + 60, 'mbs_osm_five_minutes', self::RECOVERY_HOOK );
+            }
+        }
         add_action( 'admin_notices', array( __CLASS__, 'outbox_health_notice' ) );
         add_action( 'wp_ajax_mbs_save_osm_settings', array( $this, 'ajax_save_settings' ) );
         add_action( 'wp_ajax_mbs_test_osm_connection', array( $this, 'ajax_test_connection' ) );
@@ -23,6 +39,17 @@ class MBS_OSM_Integration {
         add_action( 'wp_ajax_mbs_osm_sync_woopayments', array( $this, 'ajax_sync_woopayments' ) );
         add_action( 'wp_ajax_mbs_osm_retry_event', array( $this, 'ajax_retry_event' ) );
         add_action( 'wp_ajax_mbs_osm_resolve_event', array( $this, 'ajax_resolve_event' ) );
+    }
+
+    public static function deactivate() {
+        wp_clear_scheduled_hook( self::RECOVERY_HOOK );
+        self::invalidate_health_cache();
+    }
+
+    public static function invalidate_health_cache() {
+        if ( function_exists( 'delete_transient' ) ) {
+            delete_transient( self::MANUAL_COUNT_TRANSIENT );
+        }
     }
 
     public static function get_settings() {
@@ -415,21 +442,22 @@ class MBS_OSM_Integration {
         if ( $event->status === 'delivered' ) return array( 'id' => (int) $event->id, 'status' => 'already_delivered', 'cashbook_transaction_id' => (int) $event->remote_transaction_id );
         if ( ! in_array( $event->status, array( 'awaiting_bank_match', 'awaiting_bank_import', 'manual_reconciliation', 'sandbox_preview' ), true ) ) return new WP_Error( 'invalid_outbox_state', 'This finance event is not ready for bank matching.' );
         $match = self::discover_event_bank_match( $event, (int) ( $preferred_bank_id ?: $event->bank_transaction_id ) );
-        if ( is_wp_error( $match ) ) { $status = $match->get_error_code() === 'bank_match_not_found' ? 'awaiting_bank_import' : 'manual_reconciliation'; $wpdb->update( $table, array( 'status' => $status, 'last_error' => sanitize_text_field( $match->get_error_message() ), 'updated_at' => current_time( 'mysql' ) ), array( 'id' => (int) $event->id ) ); return $match; }
+        if ( is_wp_error( $match ) ) { $status = $match->get_error_code() === 'bank_match_not_found' ? 'awaiting_bank_import' : 'manual_reconciliation'; $wpdb->update( $table, array( 'status' => $status, 'last_error' => sanitize_text_field( $match->get_error_message() ), 'updated_at' => current_time( 'mysql' ) ), array( 'id' => (int) $event->id ) ); self::invalidate_health_cache(); return $match; }
         $now = current_time( 'mysql' );
         $claimed = $wpdb->query( $wpdb->prepare( "UPDATE {$table} SET status='processing',bank_transaction_id=%d,attempts=attempts+1,claimed_at=%s,lease_expires_at=%s,last_error='',updated_at=%s WHERE id=%d AND status IN ('awaiting_bank_match','awaiting_bank_import','manual_reconciliation','sandbox_preview')", (int) $match['id'], $now, gmdate( 'Y-m-d H:i:s', time() + 300 ), $now, (int) $event->id ) );
         if ( $claimed !== 1 ) return new WP_Error( 'event_already_claimed', 'This finance event is already being reconciled.' );
         $settings = self::get_settings();
-        if ( $settings['sandbox_mode'] ) { $wpdb->update( $table, array( 'status' => 'sandbox_preview', 'lease_expires_at' => null, 'updated_at' => current_time( 'mysql' ) ), array( 'id' => (int) $event->id ) ); return array( 'id' => (int) $event->id, 'status' => 'sandbox_preview', 'bank_transaction_id' => (int) $match['id'] ); }
+        if ( $settings['sandbox_mode'] ) { $wpdb->update( $table, array( 'status' => 'sandbox_preview', 'lease_expires_at' => null, 'updated_at' => current_time( 'mysql' ) ), array( 'id' => (int) $event->id ) ); self::invalidate_health_cache(); return array( 'id' => (int) $event->id, 'status' => 'sandbox_preview', 'bank_transaction_id' => (int) $match['id'] ); }
         $is_refund = $event->event_type === 'refund';
         $description = sanitize_text_field( ( $is_refund ? 'Venue refund ' : 'Venue payment ' ) . $event->invoice_ref );
         $categories = array( array( 'category_id' => (int) $event->category_id, 'item_id' => (int) $event->item_id, 'amount' => $is_refund ? -abs( (int) $event->amount_minor ) : abs( (int) $event->amount_minor ) ) );
         $body = array( 'description' => $description, 'type' => $is_refund ? 'expense' : 'income', 'date' => $match['date'], 'amount' => abs( (int) $event->amount_minor ), 'categories' => wp_json_encode( $categories ), 'attachments_id' => '', 'bank_account_transaction_id' => (int) $match['id'] );
         $result = self::api_call( 'POST', '/v3/finances/accounting/financial_year/cashbook/transactions/section/' . (int) $event->section_id, $body );
-        if ( is_wp_error( $result ) ) { $wpdb->update( $table, array( 'status' => 'manual_reconciliation', 'lease_expires_at' => null, 'last_error' => sanitize_text_field( $result->get_error_message() ), 'updated_at' => current_time( 'mysql' ) ), array( 'id' => (int) $event->id ) ); return $result; }
+        if ( is_wp_error( $result ) ) { $wpdb->update( $table, array( 'status' => 'manual_reconciliation', 'lease_expires_at' => null, 'last_error' => sanitize_text_field( $result->get_error_message() ), 'updated_at' => current_time( 'mysql' ) ), array( 'id' => (int) $event->id ) ); self::invalidate_health_cache(); return $result; }
         $remote = self::remote_id( $result );
-        if ( ! $remote ) { $message = 'OSM accepted the request but returned no transaction ID. Check OSM before retrying.'; $wpdb->update( $table, array( 'status' => 'manual_reconciliation', 'lease_expires_at' => null, 'last_error' => $message, 'updated_at' => current_time( 'mysql' ) ), array( 'id' => (int) $event->id ) ); return new WP_Error( 'osm_write_ambiguous', $message ); }
+        if ( ! $remote ) { $message = 'OSM accepted the request but returned no transaction ID. Check OSM before retrying.'; $wpdb->update( $table, array( 'status' => 'manual_reconciliation', 'lease_expires_at' => null, 'last_error' => $message, 'updated_at' => current_time( 'mysql' ) ), array( 'id' => (int) $event->id ) ); self::invalidate_health_cache(); return new WP_Error( 'osm_write_ambiguous', $message ); }
         $now = current_time( 'mysql' ); $wpdb->update( $table, array( 'status' => 'delivered', 'remote_transaction_id' => $remote, 'delivered_at' => $now, 'lease_expires_at' => null, 'last_error' => '', 'updated_at' => $now ), array( 'id' => (int) $event->id ) );
+        self::invalidate_health_cache();
         MBS_Audit_Log::log( (string) $event->invoice_ref, 'osm_bank_event_reconciled', $description . ' linked to imported bank transaction ' . $match['id'] . ' and cashbook transaction ' . $remote . '.' );
         return array( 'id' => (int) $event->id, 'status' => 'delivered', 'bank_transaction_id' => (int) $match['id'], 'cashbook_transaction_id' => $remote );
     }
@@ -454,18 +482,19 @@ class MBS_OSM_Integration {
         global $wpdb; $classification = self::classify_payout( $payout, $transactions ); if ( is_wp_error( $classification ) ) return $classification;
         $table = $wpdb->prefix . MBS_OSM_PAYOUT_TABLE; $existing = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$table} WHERE payout_ref=%s", $classification['payout']['payout_id'] ) );
         if ( $existing && $existing->status === 'delivered' ) return array( 'payout_id' => $existing->payout_ref, 'status' => 'already_delivered', 'cashbook_transaction_id' => (int) $existing->cashbook_transaction_id );
-        $match = self::discover_bank_match( $classification, (int) $preferred_bank_id ); if ( is_wp_error( $match ) ) { $status = $match->get_error_code() === 'bank_match_not_found' ? 'awaiting_bank_import' : 'manual_reconciliation'; self::save_payout( $classification, $status, $match->get_error_message() ); return $match; }
+        $match = self::discover_bank_match( $classification, (int) $preferred_bank_id ); if ( is_wp_error( $match ) ) { $status = $match->get_error_code() === 'bank_match_not_found' ? 'awaiting_bank_import' : 'manual_reconciliation'; self::save_payout( $classification, $status, $match->get_error_message() ); self::invalidate_health_cache(); return $match; }
         $id = self::save_payout( $classification, 'pending', '', $match['id'] ); if ( is_wp_error( $id ) ) return $id;
         $now = current_time( 'mysql' ); $claimed = $wpdb->query( $wpdb->prepare( "UPDATE {$table} SET status='processing',attempts=attempts+1,claimed_at=%s,lease_expires_at=%s,updated_at=%s WHERE id=%d AND status IN ('pending','awaiting_bank_import','manual_reconciliation','sandbox_preview')", $now, gmdate( 'Y-m-d H:i:s', time() + 300 ), $now, (int) $id ) );
         if ( $claimed !== 1 ) return new WP_Error( 'payout_already_claimed', 'This payout is already being reconciled.' );
         $settings = self::get_settings();
-        if ( $settings['sandbox_mode'] ) { $wpdb->update( $table, array( 'status' => 'sandbox_preview', 'lease_expires_at' => null, 'last_error' => '', 'updated_at' => current_time( 'mysql' ) ), array( 'id' => (int) $id ) ); return array( 'payout_id' => $classification['payout']['payout_id'], 'status' => 'sandbox_preview', 'bank_transaction_id' => $match['id'], 'classification' => $classification ); }
+        if ( $settings['sandbox_mode'] ) { $wpdb->update( $table, array( 'status' => 'sandbox_preview', 'lease_expires_at' => null, 'last_error' => '', 'updated_at' => current_time( 'mysql' ) ), array( 'id' => (int) $id ) ); self::invalidate_health_cache(); return array( 'payout_id' => $classification['payout']['payout_id'], 'status' => 'sandbox_preview', 'bank_transaction_id' => $match['id'], 'classification' => $classification ); }
         $categories = array_map( static function ( $line ) { return array( 'category_id' => (int) $line['category_id'], 'item_id' => (int) $line['item_id'], 'amount' => (int) $line['amount'] ); }, $classification['categories'] );
         $body = array( 'description' => $classification['description'], 'type' => $classification['type'], 'date' => $classification['payout']['date'], 'amount' => (int) $classification['amount'], 'categories' => wp_json_encode( $categories ), 'attachments_id' => '', 'bank_account_transaction_id' => (int) $match['id'] );
         $result = self::api_call( 'POST', '/v3/finances/accounting/financial_year/cashbook/transactions/section/' . (int) $settings['section_id'], $body );
-        if ( is_wp_error( $result ) ) { $data = $result->get_error_data(); $code = is_array( $data ) ? (int) ( $data['response_code'] ?? 0 ) : 0; $wpdb->update( $table, array( 'status' => 'manual_reconciliation', 'lease_expires_at' => null, 'last_error' => sanitize_text_field( $result->get_error_message() ), 'response_code' => $code ?: null, 'updated_at' => current_time( 'mysql' ) ), array( 'id' => (int) $id ) ); return $result; }
-        $remote = self::remote_id( $result ); if ( ! $remote ) { $message = 'OSM accepted the request but returned no transaction ID. Check OSM before retrying.'; $wpdb->update( $table, array( 'status' => 'manual_reconciliation', 'lease_expires_at' => null, 'last_error' => $message, 'updated_at' => current_time( 'mysql' ) ), array( 'id' => (int) $id ) ); return new WP_Error( 'osm_write_ambiguous', $message ); }
+        if ( is_wp_error( $result ) ) { $data = $result->get_error_data(); $code = is_array( $data ) ? (int) ( $data['response_code'] ?? 0 ) : 0; $wpdb->update( $table, array( 'status' => 'manual_reconciliation', 'lease_expires_at' => null, 'last_error' => sanitize_text_field( $result->get_error_message() ), 'response_code' => $code ?: null, 'updated_at' => current_time( 'mysql' ) ), array( 'id' => (int) $id ) ); self::invalidate_health_cache(); return $result; }
+        $remote = self::remote_id( $result ); if ( ! $remote ) { $message = 'OSM accepted the request but returned no transaction ID. Check OSM before retrying.'; $wpdb->update( $table, array( 'status' => 'manual_reconciliation', 'lease_expires_at' => null, 'last_error' => $message, 'updated_at' => current_time( 'mysql' ) ), array( 'id' => (int) $id ) ); self::invalidate_health_cache(); return new WP_Error( 'osm_write_ambiguous', $message ); }
         $now = current_time( 'mysql' ); $wpdb->update( $table, array( 'status' => 'delivered', 'cashbook_transaction_id' => $remote, 'delivered_at' => $now, 'lease_expires_at' => null, 'last_error' => '', 'updated_at' => $now ), array( 'id' => (int) $id ) );
+        self::invalidate_health_cache();
         $orders = array_map( 'intval', $classification['component_order_ids'] );
         if ( $orders ) { $placeholders = implode( ',', array_fill( 0, count( $orders ), '%d' ) ); $query = $wpdb->prepare( "UPDATE " . $wpdb->prefix . MBS_OSM_OUTBOX_TABLE . " SET status='consolidated',payout_id=%s,bank_transaction_id=%d,remote_transaction_id=%d,delivered_at=%s,updated_at=%s WHERE order_id IN ({$placeholders}) AND target_mode='woopayments_payout' AND status<>'consolidated'", array_merge( array( $classification['payout']['payout_id'], (int) $match['id'], $remote, $now, $now ), $orders ) ); $wpdb->query( $query ); }
         MBS_Audit_Log::log( 'OSM-' . $classification['payout']['payout_id'], 'osm_payout_reconciled', 'WooPayments payout ' . $classification['payout']['payout_id'] . ' linked to imported bank transaction ' . $match['id'] . ' and cashbook transaction ' . $remote . '.' );
@@ -508,11 +537,20 @@ class MBS_OSM_Integration {
     }
 
     public static function recover_stale_claims() {
+        if ( ! self::get_settings()['enabled'] ) return;
         global $wpdb;
+        $changed = 0;
         $payouts = $wpdb->prefix . MBS_OSM_PAYOUT_TABLE;
-        if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $payouts ) ) === $payouts ) $wpdb->query( "UPDATE {$payouts} SET status='manual_reconciliation',last_error='The previous worker stopped without a definite result. Check OSM before retrying.',lease_expires_at=NULL,updated_at=UTC_TIMESTAMP() WHERE status='processing' AND lease_expires_at IS NOT NULL AND lease_expires_at<UTC_TIMESTAMP()" );
+        if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $payouts ) ) === $payouts ) {
+            $changed += (int) $wpdb->query( "UPDATE {$payouts} SET status='manual_reconciliation',last_error='The previous worker stopped without a definite result. Check OSM before retrying.',lease_expires_at=NULL,updated_at=UTC_TIMESTAMP() WHERE status='processing' AND lease_expires_at IS NOT NULL AND lease_expires_at<UTC_TIMESTAMP()" );
+        }
         $events = $wpdb->prefix . MBS_OSM_OUTBOX_TABLE;
-        if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $events ) ) === $events ) $wpdb->query( "UPDATE {$events} SET status='manual_reconciliation',last_error='The previous worker stopped without a definite result. Check OSM before retrying.',lease_expires_at=NULL,updated_at=UTC_TIMESTAMP() WHERE target_mode='bank_match' AND status='processing' AND lease_expires_at IS NOT NULL AND lease_expires_at<UTC_TIMESTAMP()" );
+        if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $events ) ) === $events ) {
+            $changed += (int) $wpdb->query( "UPDATE {$events} SET status='manual_reconciliation',last_error='The previous worker stopped without a definite result. Check OSM before retrying.',lease_expires_at=NULL,updated_at=UTC_TIMESTAMP() WHERE target_mode='bank_match' AND status='processing' AND lease_expires_at IS NOT NULL AND lease_expires_at<UTC_TIMESTAMP()" );
+        }
+        if ( $changed > 0 ) {
+            self::invalidate_health_cache();
+        }
     }
 
     public static function get_queue_health() {
@@ -584,14 +622,44 @@ class MBS_OSM_Integration {
         return $report;
     }
 
+    public static function get_manual_reconciliation_count() {
+        if ( function_exists( 'get_transient' ) ) {
+            $cached = get_transient( self::MANUAL_COUNT_TRANSIENT );
+            if ( $cached !== false ) {
+                return (int) $cached;
+            }
+        }
+        global $wpdb;
+        $outbox  = $wpdb->prefix . MBS_OSM_OUTBOX_TABLE;
+        $payouts = $wpdb->prefix . MBS_OSM_PAYOUT_TABLE;
+        $manual  = 0;
+        $prev_suppress = $wpdb->suppress_errors( true );
+        $events_count = $wpdb->get_var( "SELECT COUNT(*) FROM {$outbox} WHERE status='manual_reconciliation'" );
+        if ( empty( $wpdb->last_error ) ) {
+            $manual += (int) $events_count;
+        }
+        $payouts_count = $wpdb->get_var( "SELECT COUNT(*) FROM {$payouts} WHERE status='manual_reconciliation'" );
+        if ( empty( $wpdb->last_error ) ) {
+            $manual += (int) $payouts_count;
+        }
+        $wpdb->suppress_errors( $prev_suppress );
+        if ( function_exists( 'set_transient' ) ) {
+            set_transient( self::MANUAL_COUNT_TRANSIENT, $manual, 300 );
+        }
+        return $manual;
+    }
+
     public static function outbox_health_notice() {
-        if ( ! current_user_can( 'manage_options' ) ) return; $health = self::get_queue_health(); $manual = (int) ( $health['events']['manual_reconciliation'] ?? 0 ) + (int) ( $health['payouts']['manual_reconciliation'] ?? 0 );
+        if ( ! current_user_can( 'manage_options' ) ) return;
+        if ( ! self::get_settings()['enabled'] ) return;
+        $manual = self::get_manual_reconciliation_count();
         if ( $manual ) echo '<div class="notice notice-error"><p><strong>MGF Venue OSM reconciliation required.</strong> ' . esc_html( $manual ) . ' finance event(s) need review. No automatic duplicate entry will be attempted.</p></div>';
     }
 
     public static function retry_outbox( $event_id, $preferred_bank_id = 0 ) {
         if ( ! current_user_can( 'manage_options' ) ) return new WP_Error( 'forbidden', 'Administrator permission is required.' ); global $wpdb; $table = $wpdb->prefix . MBS_OSM_OUTBOX_TABLE; $event = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$table} WHERE id=%d", (int) $event_id ) );
         if ( ! $event || ! in_array( $event->status, array( 'manual_reconciliation', 'awaiting_bank_match', 'awaiting_bank_import', 'sandbox_preview' ), true ) ) return new WP_Error( 'invalid_outbox_state', 'Only reconciliation events can be retried.' ); if ( $event->event_type === 'legacy_refund' ) return new WP_Error( 'legacy_event_manual_only', 'Legacy per-booking events cannot be posted automatically.' );
+        self::invalidate_health_cache();
         if ( $event->target_mode === 'bank_match' ) return self::reconcile_bank_event( (int) $event->id, (int) $preferred_bank_id );
         $status = $event->target_mode === 'woopayments_payout' ? 'awaiting_payout' : 'awaiting_bank_match'; $wpdb->update( $table, array( 'status' => $status, 'last_error' => '', 'updated_at' => current_time( 'mysql' ) ), array( 'id' => (int) $event->id ) ); return array( 'id' => (int) $event->id, 'status' => $status );
     }
@@ -599,7 +667,9 @@ class MBS_OSM_Integration {
     public static function resolve_outbox( $event_id, $note ) {
         if ( ! current_user_can( 'manage_options' ) ) return new WP_Error( 'forbidden', 'Administrator permission is required.' ); global $wpdb; $table = $wpdb->prefix . MBS_OSM_OUTBOX_TABLE; $event = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$table} WHERE id=%d", (int) $event_id ) );
         if ( ! $event || ! in_array( $event->status, array( 'manual_reconciliation', 'awaiting_bank_match' ), true ) ) return new WP_Error( 'invalid_outbox_state', 'This event is not awaiting manual reconciliation.' ); $note = sanitize_text_field( $note ); if ( $note === '' ) return new WP_Error( 'resolution_note_required', 'Record what was checked in OSM.' );
-        $wpdb->update( $table, array( 'status' => 'resolved', 'resolved_at' => current_time( 'mysql' ), 'resolved_by' => get_current_user_id(), 'last_error' => $note, 'updated_at' => current_time( 'mysql' ) ), array( 'id' => (int) $event->id ) ); return true;
+        $wpdb->update( $table, array( 'status' => 'resolved', 'resolved_at' => current_time( 'mysql' ), 'resolved_by' => get_current_user_id(), 'last_error' => $note, 'updated_at' => current_time( 'mysql' ) ), array( 'id' => (int) $event->id ) );
+        self::invalidate_health_cache();
+        return true;
     }
 
     public static function retry_payout( $payout_id ) {
@@ -607,6 +677,7 @@ class MBS_OSM_Integration {
         global $wpdb; $table = $wpdb->prefix . MBS_OSM_PAYOUT_TABLE;
         $payout = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$table} WHERE id=%d", (int) $payout_id ) );
         if ( ! $payout || ! in_array( $payout->status, array( 'awaiting_bank_import', 'manual_reconciliation', 'sandbox_preview' ), true ) ) return new WP_Error( 'invalid_payout_state', 'Only a waiting, review or sandbox payout can be retried.' );
+        self::invalidate_health_cache();
         return self::sync_woopayments( (string) $payout->payout_ref, (int) $payout->bank_transaction_id );
     }
 
@@ -617,6 +688,7 @@ class MBS_OSM_Integration {
         if ( ! $payout || $payout->status !== 'manual_reconciliation' ) return new WP_Error( 'invalid_payout_state', 'This payout is not awaiting manual reconciliation.' );
         $note = sanitize_text_field( $note ); if ( $note === '' ) return new WP_Error( 'resolution_note_required', 'Record what was checked in WooPayments and OSM.' );
         $updated = $wpdb->update( $table, array( 'status' => 'resolved', 'resolved_at' => current_time( 'mysql' ), 'resolved_by' => get_current_user_id(), 'last_error' => $note, 'updated_at' => current_time( 'mysql' ) ), array( 'id' => (int) $payout->id ) );
+        if ( $updated !== false ) self::invalidate_health_cache();
         return $updated === false ? new WP_Error( 'payout_resolution_failed', 'Could not resolve the payout.' ) : true;
     }
 
@@ -635,8 +707,19 @@ class MBS_OSM_Integration {
         update_option( 'mbs_osm_description_template', sanitize_text_field( $_POST['osm_description_template'] ?? 'WooPayments payout {payout_id}' ) ); update_option( 'mbs_osm_match_days', max( 0, min( 7, (int) ( $_POST['osm_match_days'] ?? 3 ) ) ) ); update_option( 'mbs_osm_product_mappings', wp_json_encode( self::decode_mappings( wp_unslash( $_POST['osm_product_mappings'] ?? '[]' ) ) ) );
         update_option( 'mbs_osm_configuration_version', '2', false );
         $candidate = self::get_settings(); $candidate['enabled'] = $requested_enabled;
-        $valid = self::validate_enabled_configuration( $candidate ); if ( is_wp_error( $valid ) ) wp_send_json_error( array( 'message' => $valid->get_error_message() . ' Settings were saved, but the integration remains disabled.', 'saved' => true ), 422 );
+        $valid = self::validate_enabled_configuration( $candidate );
+        if ( is_wp_error( $valid ) ) {
+            wp_clear_scheduled_hook( self::RECOVERY_HOOK );
+            self::invalidate_health_cache();
+            wp_send_json_error( array( 'message' => $valid->get_error_message() . ' Settings were saved, but the integration remains disabled.', 'saved' => true ), 422 );
+        }
         update_option( 'mbs_osm_enabled', $requested_enabled );
+        if ( ! $requested_enabled ) {
+            wp_clear_scheduled_hook( self::RECOVERY_HOOK );
+        } elseif ( ! wp_next_scheduled( self::RECOVERY_HOOK ) ) {
+            wp_schedule_event( time() + 60, 'mbs_osm_five_minutes', self::RECOVERY_HOOK );
+        }
+        self::invalidate_health_cache();
         wp_send_json_success( array( 'saved' => true, 'message' => 'OSM accounting settings saved.' ) );
     }
 

@@ -12,6 +12,7 @@ class MBS_Public {
         add_shortcode( 'mathlin_terms',      array( $this, 'shortcode_terms' ) );
         add_shortcode( 'mathlin_venue_info', array( $this, 'shortcode_venue_info' ) );
         add_action( 'wp_enqueue_scripts', array( $this, 'enqueue_assets' ) );
+        add_action( 'save_post_page',     array( __CLASS__, 'invalidate_shortcode_url_cache' ) );
         add_action( 'wp_ajax_nopriv_mbs_submit_booking', array( $this, 'ajax_submit' ) );
         add_action( 'wp_ajax_mbs_submit_booking',        array( $this, 'ajax_submit' ) );
         add_action( 'wp_ajax_nopriv_mbs_get_calendar',   array( $this, 'ajax_calendar' ) );
@@ -24,48 +25,101 @@ class MBS_Public {
         add_action( 'wp_ajax_mbs_lookup_booking',        array( $this, 'ajax_lookup_booking' ) );
     }
 
+    /**
+     * Resolve and cache the permalink of the published page containing a given shortcode.
+     */
+    public static function shortcode_page_url( $shortcode ) {
+        $shortcode = sanitize_key( (string) $shortcode );
+        if ( $shortcode === '' ) return '';
+        $cache_key = 'mbs_sc_url_' . $shortcode;
+        if ( function_exists( 'get_transient' ) ) {
+            $cached = get_transient( $cache_key );
+            if ( $cached !== false ) {
+                return (string) $cached;
+            }
+        }
+        $url = '';
+        $pages = get_posts( array(
+            'post_type'   => 'page',
+            'post_status' => 'publish',
+            's'           => $shortcode,
+            'numberposts' => 1,
+            'fields'      => 'ids',
+        ) );
+        if ( ! empty( $pages ) ) {
+            $url = (string) get_permalink( $pages[0] );
+        }
+        if ( function_exists( 'set_transient' ) ) {
+            set_transient( $cache_key, $url, HOUR_IN_SECONDS );
+        }
+        return $url;
+    }
+
+    public static function invalidate_shortcode_url_cache() {
+        if ( ! function_exists( 'delete_transient' ) ) return;
+        foreach ( array( 'mathlin_booking', 'mathlin_portal', 'mathlin_status', 'mathlin_terms', 'mathlin_feedback', 'mathlin_manage' ) as $sc ) {
+            delete_transient( 'mbs_sc_url_' . $sc );
+        }
+    }
+
     public function enqueue_assets() {
         global $post;
-        // Only load on pages that use our shortcodes
-        if ( is_a( $post, 'WP_Post' ) && (
-            has_shortcode( $post->post_content, 'mathlin_booking' ) ||
-            has_shortcode( $post->post_content, 'mathlin_calendar' ) ||
-            has_shortcode( $post->post_content, 'mathlin_status' ) ||
-            has_shortcode( $post->post_content, 'mathlin_modify' ) ||
-            has_shortcode( $post->post_content, 'mathlin_portal' ) ||
-            has_shortcode( $post->post_content, 'mathlin_manage' ) ||
-            isset( $_GET['mbs_modify'] )
-        ) ) {
-            wp_enqueue_style(  'mbs-public', MBS_PLUGIN_URL . 'public/public.css', array(), MBS_VERSION );
-            wp_enqueue_script( 'mbs-public', MBS_PLUGIN_URL . 'public/public.js',  array( 'jquery' ), MBS_VERSION, true );
+        if ( ! is_a( $post, 'WP_Post' ) ) return;
+        $content = (string) $post->post_content;
+
+        $has_booking  = has_shortcode( $content, 'mathlin_booking' );
+        $has_calendar = has_shortcode( $content, 'mathlin_calendar' );
+        $has_modify   = has_shortcode( $content, 'mathlin_modify' )
+            || ( isset( $_GET['mbs_modify'] ) && $_GET['mbs_modify'] === '1' && ! empty( $_GET['ref'] ) && ! empty( $_GET['token'] ) );
+        $has_portal   = has_shortcode( $content, 'mathlin_status' )
+            || has_shortcode( $content, 'mathlin_portal' )
+            || has_shortcode( $content, 'mathlin_manage' );
+        $has_info     = has_shortcode( $content, 'mathlin_terms' )
+            || has_shortcode( $content, 'mathlin_venue_info' );
+
+        if ( ! $has_booking && ! $has_calendar && ! $has_modify && ! $has_portal && ! $has_info ) {
+            return;
+        }
+
+        // Styles apply to every MGF Venue shortcode page (including Terms & Venue Info).
+        wp_enqueue_style( 'mbs-public', MBS_PLUGIN_URL . 'public/public.css', array(), MBS_VERSION );
+
+        // Static Terms / Venue Info pages do not need booking JS or DB localization payloads.
+        if ( ! $has_booking && ! $has_calendar && ! $has_modify && ! $has_portal ) {
+            return;
+        }
+
+        wp_enqueue_script( 'mbs-public', MBS_PLUGIN_URL . 'public/public.js', array( 'jquery' ), MBS_VERSION, true );
+
+        $localized = array(
+            'ajax_url'      => admin_url( 'admin-ajax.php' ),
+            'nonce'         => wp_create_nonce( 'mbs_public_nonce' ),
+            'is_logged_in'  => is_user_logged_in(),
+            'portal_url'    => self::shortcode_page_url( 'mathlin_portal' ),
+            'calendar_mode' => $has_booking ? 'booking' : 'readonly',
+            'free_campsite' => class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled(),
+        );
+
+        // Only compute and transmit booking/calendar/pricing data on screens that use it.
+        if ( $has_booking || $has_calendar || $has_modify ) {
             $notice_days = (int) get_option( 'mbs_min_notice_days', 1 );
-
-            // Find portal page URL
-            $portal_url = '';
-            $portal_pages = get_posts( array( 'post_type' => 'page', 'post_status' => 'publish', 's' => 'mathlin_portal', 'numberposts' => 1 ) );
-            if ( ! empty( $portal_pages ) ) $portal_url = get_permalink( $portal_pages[0]->ID );
-
-            wp_localize_script( 'mbs-public', 'NMS', array(
-                'ajax_url'        => admin_url( 'admin-ajax.php' ),
-                'nonce'           => wp_create_nonce( 'mbs_public_nonce' ),
-                'spaces'          => MBS_Bookings::get_spaces(),
-                'kitchen_price'   => MBS_Bookings::get_kitchen_price(),
-                'kitchen_enabled' => (bool) get_option( 'mbs_kitchen_enabled', 1 ),
-                'min_notice_days' => $notice_days,
+            $localized = array_merge( $localized, array(
+                'spaces'             => MBS_Bookings::get_spaces(),
+                'kitchen_price'      => MBS_Bookings::get_kitchen_price(),
+                'kitchen_enabled'    => (bool) get_option( 'mbs_kitchen_enabled', 1 ),
+                'min_notice_days'    => $notice_days,
                 'min_duration_hours' => (float) get_option( 'mbs_min_duration_hours', 0 ),
-                'min_date'        => wp_date( 'Y-m-d', strtotime( "+{$notice_days} days" ) ),
-                'today'           => wp_date( 'Y-m-d' ),
-                'blocked_dates'   => self::get_blocked_dates_for_frontend(),
-                'is_logged_in'    => is_user_logged_in(),
-                'portal_url'      => $portal_url,
+                'min_date'           => wp_date( 'Y-m-d', strtotime( "+{$notice_days} days" ) ),
+                'today'              => wp_date( 'Y-m-d' ),
+                'blocked_dates'      => self::get_blocked_dates_for_frontend(),
                 'is_scout_volunteer' => self::is_scout_volunteer(),
-                'calendar_mode'   => has_shortcode( $post->post_content, 'mathlin_booking' ) ? 'booking' : 'readonly',
-                'pricing_tier'    => MBS_Bookings::get_user_tier(),
-                'pricing_tiers'   => MBS_Bookings::get_pricing_tiers(),
-                'deposit_settings' => MBS_Bookings::get_deposit_settings(),
-                'free_campsite'   => class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled(),
+                'pricing_tier'       => MBS_Bookings::get_user_tier(),
+                'pricing_tiers'      => MBS_Bookings::get_pricing_tiers(),
+                'deposit_settings'   => MBS_Bookings::get_deposit_settings(),
             ) );
         }
+
+        wp_localize_script( 'mbs-public', 'NMS', $localized );
     }
 
     // ── Shortcode: full booking form ───────────────────────────────────────────
@@ -114,10 +168,8 @@ class MBS_Public {
         $booking_notice = get_option( 'mbs_booking_notice', '' );
         $facilities     = get_option( 'mbs_facilities_text', '' );
 
-        // Find the booking page URL
-        $booking_url = '';
-        $bp = get_posts( array( 'post_type' => 'page', 'post_status' => 'publish', 's' => 'mathlin_booking', 'numberposts' => 1 ) );
-        if ( ! empty( $bp ) ) $booking_url = get_permalink( $bp[0]->ID );
+        // Find the booking page URL (transient-cached)
+        $booking_url = self::shortcode_page_url( 'mathlin_booking' );
 
         ob_start();
         ?>

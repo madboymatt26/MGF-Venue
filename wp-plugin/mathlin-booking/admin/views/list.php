@@ -35,8 +35,10 @@
     <div class="nms-filters">
         <form method="get" action="">
             <input type="hidden" name="page" value="mathlin-booking">
-            <input type="search" name="s" value="<?php echo esc_attr( $search ); ?>" placeholder="Search bookings…" class="nms-search-input">
-            <select name="status" onchange="this.form.submit()">
+            <label class="screen-reader-text" for="nms-booking-search">Search bookings</label>
+            <input type="search" id="nms-booking-search" name="s" value="<?php echo esc_attr( $search ); ?>" placeholder="Search bookings…" class="nms-search-input">
+            <label class="screen-reader-text" for="nms-status-filter">Filter by booking status</label>
+            <select id="nms-status-filter" name="status" onchange="this.form.submit()">
                 <option value="">All Statuses</option>
                 <option value="pending"   <?php selected( $status, 'pending' ); ?>>Pending</option>
                 <option value="confirmed" <?php selected( $status, 'confirmed' ); ?>>Confirmed</option>
@@ -81,6 +83,7 @@
 
     <!-- Bulk actions bar -->
     <div class="nms-bulk-bar" style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
+        <label class="screen-reader-text" for="nms-bulk-action">Bulk action</label>
         <select id="nms-bulk-action" style="min-width:160px;">
             <option value="">Bulk Actions</option>
             <option value="confirmed">✓ Confirm Selected</option>
@@ -89,14 +92,14 @@
             <option value="archived">📦 Archive Selected</option>
         </select>
         <button id="nms-bulk-apply" class="button">Apply</button>
-        <span id="nms-bulk-count" class="nms-muted" style="font-size:0.85rem;"></span>
-        <span id="nms-bulk-msg" class="nms-settings-msg" style="margin-left:8px;"></span>
+        <span id="nms-bulk-count" class="nms-muted" style="font-size:0.85rem;" role="status" aria-live="polite"></span>
+        <span id="nms-bulk-msg" class="nms-settings-msg" style="margin-left:8px;" role="status" aria-live="polite"></span>
     </div>
 
     <table class="wp-list-table widefat fixed striped nms-bookings-table">
         <thead>
             <tr>
-                <th style="width:30px;"><input type="checkbox" id="nms-select-all" title="Select all"></th>
+                <th class="nms-bulk-col" style="width:30px;"><label class="screen-reader-text" for="nms-select-all">Select all bookings</label><input type="checkbox" id="nms-select-all" title="Select all"></th>
                 <th>Ref</th>
                 <th>Name / Org</th>
                 <th>Space</th>
@@ -110,8 +113,6 @@
         </thead>
         <tbody>
         <?php
-        $spaces = MBS_Bookings::get_spaces();
-
         // Pre-group series bookings
         $series_shown = array();
         $grouped = array();
@@ -144,25 +145,25 @@
                 $last_date   = $series_bookings[ $series_count - 1 ]->booking_date;
                 ?>
                 <tr id="nms-row-<?php echo esc_attr( $b->ref ); ?>" class="nms-series-row" style="background:#f9f7ff;">
-                    <td><input type="checkbox" class="nms-bulk-check" value="<?php echo esc_attr( $b->ref ); ?>" data-series="<?php echo esc_attr( $b->series_id ); ?>"></td>
-                    <td>
+                    <td class="nms-bulk-cell"><input type="checkbox" class="nms-bulk-check" value="<?php echo esc_attr( $b->ref ); ?>" data-series="<?php echo esc_attr( $b->series_id ); ?>" aria-label="<?php echo esc_attr( 'Select series ' . $b->series_id ); ?>"></td>
+                    <td data-label="Ref">
                         <strong><?php echo esc_html( $b->series_id ); ?></strong>
                         <br><small class="nms-muted"><?php echo $series_count; ?> bookings</small>
                     </td>
-                    <td>
+                    <td data-label="Name">
                         <?php echo esc_html( $b->name ); ?>
                         <?php if ( $b->organisation ) { ?><br><small class="nms-muted"><?php echo esc_html( $b->organisation ); ?></small><?php } ?>
                     </td>
-                    <td><?php echo esc_html( $b->space ); ?></td>
-                    <td>
+                    <td data-label="Space"><?php echo esc_html( $b->space ); ?></td>
+                    <td data-label="Date">
                         <?php echo esc_html( date( 'j M', strtotime( $first_date ) ) ); ?> – <?php echo esc_html( date( 'j M Y', strtotime( $last_date ) ) ); ?>
                         <br><small class="nms-muted"><?php echo $free_campsite ? 'Grouped dates × ' : 'Weekly × '; ?><?php echo $series_count; ?></small>
                     </td>
-                    <td><?php echo $is_daily ? 'All day' : esc_html( $b->start_time . ' – ' . $b->end_time ); ?></td>
-                    <td><?php echo esc_html( $b->attendees ); ?></td>
-                    <?php if ( MBS_Payment_Features::enabled() ) : ?><td><strong>&pound;<?php echo number_format( $series_total, 2 ); ?></strong></td><td>—</td><?php endif; ?>
-                    <td><span class="nms-status nms-status-<?php echo esc_attr( $series_status ); ?>"><?php echo esc_html( MBS_Bookings::status_label( $series_status ) ); ?></span></td>
-                    <td>
+                    <td data-label="Time"><?php echo $is_daily ? 'All day' : esc_html( $b->start_time . ' – ' . $b->end_time ); ?></td>
+                    <td data-label="Guests"><?php echo esc_html( $b->attendees ); ?></td>
+                    <?php if ( MBS_Payment_Features::enabled() ) : ?><td data-label="Amount"><strong>&pound;<?php echo number_format( $series_total, 2 ); ?></strong></td><td data-label="Paid">—</td><?php endif; ?>
+                    <td data-label="Status"><span class="nms-status nms-status-<?php echo esc_attr( $series_status ); ?>"><?php echo esc_html( MBS_Bookings::status_label( $series_status ) ); ?></span></td>
+                    <td data-label="Actions">
                         <div class="nms-action-btns">
                             <button class="button button-small nms-toggle-series" data-series="<?php echo esc_attr( $b->series_id ); ?>">▶ Expand</button>
                             <?php if ( $series_record ) : ?>
@@ -180,7 +181,7 @@
                                 <button class="button button-small nms-btn-series-status" data-series="<?php echo esc_attr( $b->series_id ); ?>" data-status="cancelled" data-scope="future" data-expected-status="<?php echo esc_attr( $series_status ); ?>" data-expected-version="<?php echo esc_attr( $series_record->version ); ?>">Cancel Future</button>
                                 <button class="button button-small nms-btn-series-status" data-series="<?php echo esc_attr( $b->series_id ); ?>" data-status="cancelled" data-scope="all" data-expected-status="<?php echo esc_attr( $series_status ); ?>" data-expected-version="<?php echo esc_attr( $series_record->version ); ?>">Cancel All</button>
                                 <?php if ( $series_status === 'cancelled' ) { ?>
-                                    <button class="button button-small nms-btn-delete-archive-series" data-series="<?php echo esc_attr( $b->series_id ); ?>" style="color:#dc3545;">Delete &amp; Archive</button>
+                                    <button class="button button-small nms-btn-delete-archive-series" data-series="<?php echo esc_attr( $b->series_id ); ?>" style="color:#b91c1c;">Delete &amp; Archive</button>
                                 <?php } ?>
                             <?php } else { ?>
                                 <button class="button button-small nms-btn-series-status" data-series="<?php echo esc_attr( $b->series_id ); ?>" data-status="cancelled">Cancel All</button>
@@ -190,14 +191,15 @@
                 </tr>
                 <?php foreach ( $series_bookings as $sb ) { ?>
                 <tr class="nms-series-child nms-series-<?php echo esc_attr( $b->series_id ); ?>" style="display:none;background:#fdfcff;">
-                    <td style="padding-left:24px;"><small><?php echo esc_html( $sb->ref ); ?></small></td>
-                    <td></td>
-                    <td></td>
-                    <td><?php echo esc_html( wp_date( 'D j M Y', strtotime( $sb->booking_date ) ) . ( ! empty( $sb->booking_date_end ) && $sb->booking_date_end !== $sb->booking_date ? ' – ' . wp_date( 'D j M Y', strtotime( $sb->booking_date_end ) ) : '' ) ); ?></td>
-                    <td><?php echo ! empty( $sb->all_day ) ? 'All day' : esc_html( $sb->start_time . ' – ' . $sb->end_time ); ?></td>
-                    <td></td>
-                    <?php if ( MBS_Payment_Features::enabled() ) : ?><td>&pound;<?php echo number_format( $sb->amount, 2 ); ?></td>
-                    <td>
+                    <td class="nms-bulk-cell"></td>
+                    <td data-label="Ref" style="padding-left:24px;"><small><?php echo esc_html( $sb->ref ); ?></small></td>
+                    <td data-label="Name"></td>
+                    <td data-label="Space"></td>
+                    <td data-label="Date"><?php echo esc_html( wp_date( 'D j M Y', strtotime( $sb->booking_date ) ) . ( ! empty( $sb->booking_date_end ) && $sb->booking_date_end !== $sb->booking_date ? ' – ' . wp_date( 'D j M Y', strtotime( $sb->booking_date_end ) ) : '' ) ); ?></td>
+                    <td data-label="Time"><?php echo ! empty( $sb->all_day ) ? 'All day' : esc_html( $sb->start_time . ' – ' . $sb->end_time ); ?></td>
+                    <td data-label="Guests"></td>
+                    <?php if ( MBS_Payment_Features::enabled() ) : ?><td data-label="Amount">&pound;<?php echo number_format( $sb->amount, 2 ); ?></td>
+                    <td data-label="Paid">
                         <?php
                         $sb_paid = (float) ( $sb->amount_paid ?? 0 );
                         $sb_balance = (float) $sb->amount - $sb_paid;
@@ -206,18 +208,18 @@
                         <?php elseif ( $sb_paid > 0 ) : ?>
                             <span style="color:#065f46;font-size:0.8rem;">&pound;<?php echo number_format( $sb_paid, 2 ); ?></span>
                         <?php else : ?>
-                            <span style="color:#6b7280;">—</span>
+                            <span style="color:#595959;">—</span>
                         <?php endif; ?>
                     </td>
-                    <?php endif; ?><td><span class="nms-status nms-status-<?php echo esc_attr( $sb->status ); ?>"><?php echo esc_html( MBS_Bookings::status_label( $sb->status ) ); ?></span></td>
-                    <td><a href="?page=mathlin-booking&action=view&ref=<?php echo esc_attr( $sb->ref ); ?>" class="button button-small">View occurrence</a></td>
+                    <?php endif; ?><td data-label="Status"><span class="nms-status nms-status-<?php echo esc_attr( $sb->status ); ?>"><?php echo esc_html( MBS_Bookings::status_label( $sb->status ) ); ?></span></td>
+                    <td data-label="Actions"><a href="?page=mathlin-booking&action=view&ref=<?php echo esc_attr( $sb->ref ); ?>" class="button button-small">View occurrence</a></td>
                 </tr>
                 <?php } ?>
             <?php } else {
                 // Regular (non-series) booking row
             ?>
                 <tr id="nms-row-<?php echo esc_attr( $b->ref ); ?>">
-                    <td><input type="checkbox" class="nms-bulk-check" value="<?php echo esc_attr( $b->ref ); ?>"></td>
+                    <td class="nms-bulk-cell"><input type="checkbox" class="nms-bulk-check" value="<?php echo esc_attr( $b->ref ); ?>" aria-label="<?php echo esc_attr( 'Select booking ' . $b->ref ); ?>"></td>
                     <td data-label="Ref"><strong><?php echo esc_html( $b->ref ); ?></strong></td>
                     <td data-label="Name">
                         <?php echo esc_html( $b->name ); ?>

@@ -109,7 +109,7 @@ jQuery(function($) {
         var $btn = $(this).find('button[type=submit]');
         var $msg = $('#nms-login-msg');
         $btn.prop('disabled', true).text('Signing in…');
-        $msg.html('');
+        $msg.empty();
 
         $.post(NMS.ajax_url, {
             action:   'mbs_hirer_login',
@@ -119,14 +119,14 @@ jQuery(function($) {
         }, function(res) {
             if (res.success) {
                 if (res.data.login_url) { window.location.assign(res.data.login_url); return; }
-                $msg.html('<span class="nms-msg-success">✓ ' + res.data.message + '</span>');
+                $msg.empty().append($('<span class="nms-msg-success">').text('✓ ' + (res.data.message || 'Signed in.')));
                 setTimeout(function() { window.location.reload(); }, 800);
             } else {
-                $msg.html('<span class="nms-msg-error">' + (res.data.message || 'Login failed.') + '</span>');
+                $msg.empty().append($('<span class="nms-msg-error">').text((res.data && res.data.message) || 'Login failed.'));
                 $btn.prop('disabled', false).text('Sign In');
             }
         }).fail(function() {
-            $msg.html('<span class="nms-msg-error">Network error. Please try again.</span>');
+            $msg.empty().append($('<span class="nms-msg-error">').text('Network error. Please try again.'));
             $btn.prop('disabled', false).text('Sign In');
         });
     });
@@ -137,7 +137,7 @@ jQuery(function($) {
         var $btn = $(this).find('button[type=submit]');
         var $msg = $('#nms-register-msg');
         $btn.prop('disabled', true).text('Creating account…');
-        $msg.html('');
+        $msg.empty();
 
         $.post(NMS.ajax_url, {
             action:       'mbs_hirer_register',
@@ -149,14 +149,14 @@ jQuery(function($) {
         }, function(res) {
             if (res.success) {
                 if (res.data.verification_required) { $msg.text(res.data.message); $btn.prop('disabled', false).text('Create Account'); return; }
-                $msg.html('<span class="nms-msg-success">✓ ' + res.data.message + '</span>');
+                $msg.empty().append($('<span class="nms-msg-success">').text('✓ ' + (res.data.message || 'Account created.')));
                 setTimeout(function() { window.location.reload(); }, 800);
             } else {
-                $msg.html('<span class="nms-msg-error">' + (res.data.message || 'Registration failed.') + '</span>');
+                $msg.empty().append($('<span class="nms-msg-error">').text((res.data && res.data.message) || 'Registration failed.'));
                 $btn.prop('disabled', false).text('Create Account');
             }
         }).fail(function() {
-            $msg.html('<span class="nms-msg-error">Network error. Please try again.</span>');
+            $msg.empty().append($('<span class="nms-msg-error">').text('Network error. Please try again.'));
             $btn.prop('disabled', false).text('Create Account');
         });
     });
@@ -168,7 +168,7 @@ jQuery(function($) {
         var $msg = $('#nms-lookup-msg');
         var $res = $('#nms-lookup-result');
         $btn.prop('disabled', true).text('Looking up…');
-        $msg.html('');
+        $msg.empty();
         $res.hide();
 
         $.post(NMS.ajax_url, {
@@ -182,11 +182,12 @@ jQuery(function($) {
                 if (res.data.verification_required) { $msg.text(res.data.message); $res.hide(); return; }
                 var b = res.data;
                 var statusColors = {
-                    pending:   'background:#fff3cd;color:#856404',
-                    confirmed: 'background:#d1fae5;color:#065f46',
-                    paid:      'background:#dbeafe;color:#1e40af',
-                    cancelled: 'background:#fee2e2;color:#991b1b',
-                    archived:  'background:#f3f4f6;color:#6b7280'
+                    pending:      'background:#fff3cd;color:#856404',
+                    confirmed:    'background:#d1fae5;color:#065f46',
+                    deposit_paid: 'background:#fef3c7;color:#92400e',
+                    paid:         'background:#dbeafe;color:#1e40af',
+                    cancelled:    'background:#fee2e2;color:#991b1b',
+                    archived:     'background:#f3f4f6;color:#6b7280'
                 };
                 var sc = statusColors[b.status] || '';
 
@@ -225,11 +226,11 @@ jQuery(function($) {
                 $res.html(html).show();
                 if (window.NMSAdditionalCharges) $res.append(window.NMSAdditionalCharges(res.data.additional_charges));
             } else {
-                $msg.html('<span class="nms-msg-error">' + (res.data.message || 'Booking not found.') + '</span>');
+                $msg.empty().append($('<span class="nms-msg-error">').text((res.data && res.data.message) || 'Booking not found.'));
             }
         }).fail(function() {
             $btn.prop('disabled', false).text('Look Up Booking');
-            $msg.html('<span class="nms-msg-error">Network error. Please try again.</span>');
+            $msg.empty().append($('<span class="nms-msg-error">').text('Network error. Please try again.'));
         });
     });
 

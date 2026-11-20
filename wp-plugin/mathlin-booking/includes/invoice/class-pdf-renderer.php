@@ -130,6 +130,39 @@ class MBS_PDF_Renderer {
         $pdf = self::render( $model );
         if ( is_wp_error( $pdf ) ) return $pdf;
 
+        return self::write_temp_pdf( $pdf );
+    }
+
+    /**
+     * Render a booking's invoice PDF (immutable document or legacy reconstruction)
+     * to a private temporary file outside the web root.
+     * Caller MUST unlink the returned path in a finally block.
+     *
+     * @param int $booking_id Booking primary key.
+     * @return string|WP_Error Temp file path on success.
+     */
+    public static function render_booking_to_temp_file( $booking_id ) {
+        $booking_id = absint( $booking_id );
+        if ( $booking_id < 1 ) {
+            return new WP_Error( 'invalid_booking_id', 'A valid booking ID is required for PDF rendering.' );
+        }
+
+        $model = MBS_Invoice_Document_Builder::build_from_booking( $booking_id, 'issued' );
+        if ( is_wp_error( $model ) ) return $model;
+
+        $pdf = self::render( $model );
+        if ( is_wp_error( $pdf ) ) return $pdf;
+
+        return self::write_temp_pdf( $pdf );
+    }
+
+    /**
+     * Write rendered PDF bytes to a randomly named 0600 file in the private temp dir.
+     *
+     * @param string $pdf Binary PDF data.
+     * @return string|WP_Error Temp file path on success.
+     */
+    private static function write_temp_pdf( $pdf ) {
         $temp_dir = self::get_render_temp_dir();
         if ( ! $temp_dir ) {
             return new WP_Error( 'pdf_temp_dir_unavailable', 'No suitable temporary directory available for PDF rendering.' );

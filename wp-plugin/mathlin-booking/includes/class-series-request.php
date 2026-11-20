@@ -182,6 +182,9 @@ class MBS_Series_Request {
         $updated = $wpdb->update( $wpdb->prefix . 'mathlin_mod_requests', array( 'status' => $status,
             'admin_response' => sanitize_textarea_field( $response ), 'resolved_at' => current_time( 'mysql' ), 'resolved_by' => get_current_user_id() ), array( 'id' => $id, 'status' => 'pending' ) );
         if ( $updated !== 1 ) return new WP_Error( 'resolved', 'Unable to resolve this request; refresh and check its status.' );
+        if ( class_exists( 'MBS_Modification' ) && method_exists( 'MBS_Modification', 'invalidate_pending_count_cache' ) ) {
+            MBS_Modification::invalidate_pending_count_cache();
+        }
         MBS_Audit_Log::log( $data['series_ref'] ?? $request->booking_ref, 'series_request_' . $status, 'Series request #' . $id . ' ' . $status . '; outcome recorded by staff.' );
         $series = MBS_Series::get( $data['series_ref'] ?? '' );
         if ( $series ) self::notify( $request, $series->contact_email, 'Series request ' . $status, $response );

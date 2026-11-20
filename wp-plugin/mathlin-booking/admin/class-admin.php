@@ -49,19 +49,27 @@ class MBS_Admin {
         add_action( 'wp_ajax_mbs_save_custom_fields', array( $this, 'ajax_save_custom_fields' ) );
         add_action( 'wp_ajax_mbs_edit_booking',      array( $this, 'ajax_edit_booking' ) );
         add_action( 'wp_ajax_mbs_set_booking_heating', array( $this, 'ajax_set_booking_heating' ) );
+        add_action( 'admin_footer',                 array( $this, 'render_email_diagnostics_modal' ) );
         add_action( 'wp_ajax_mbs_approve_request',  array( $this, 'ajax_approve_request' ) );
         add_action( 'wp_ajax_mbs_reject_request',   array( $this, 'ajax_reject_request' ) );
         add_action( 'wp_ajax_mbs_bulk_action',       array( $this, 'ajax_bulk_action' ) );
+        add_action( 'wp_ajax_mbs_email_queue_list',    array( $this, 'ajax_email_queue_list' ) );
+        add_action( 'wp_ajax_mbs_email_queue_resend',  array( $this, 'ajax_email_queue_resend' ) );
+        add_action( 'wp_ajax_mbs_email_queue_dismiss', array( $this, 'ajax_email_queue_dismiss' ) );
     }
 
     // ── Menu ───────────────────────────────────────────────────────────────────
     public function add_menu() {
+        if ( ! self::can_manage_bookings() ) {
+            return;
+        }
+
         // Booking management pages — accessible to Booking Managers + Admins
         $booking_cap = 'mbs_manage_bookings';
         // Settings/config pages — admin only
         $admin_cap   = 'manage_options';
 
-        // Pending booking count for notification badges
+        // Pending booking count for notification badges (60s transient cache)
         $pending_bookings = MBS_Bookings::get_pending_count();
         $bookings_label = 'All Bookings';
         if ( $pending_bookings > 0 ) {
@@ -177,6 +185,7 @@ class MBS_Admin {
             'settings_hash' => MBS_Settings_Guard::fingerprint(),
             'email_settings_hash' => MBS_Settings_Guard::fingerprint( true ),
             'free_campsite' => class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled(),
+            'can_dismiss_email_failures' => self::can_delete_bookings(),
         ) );
         // Enqueue media library for logo upload
         if ( strpos( $hook, 'mathlin-emails' ) !== false ) {
@@ -590,6 +599,7 @@ class MBS_Admin {
 
         $result = MBS_Access_Details::resend( $booking );
         if ( is_wp_error( $result ) ) wp_send_json_error( $result->get_error_message(), 409 );
+        MBS_Email_Queue::wake();
 
         wp_send_json_success( array( 'ref' => $ref ) );
     }
@@ -613,6 +623,7 @@ class MBS_Admin {
         $result = MBS_Feedback::resend( $booking );
         if ( is_wp_error( $result ) ) wp_send_json_error( $result->get_error_message() );
         if ( ! $result ) wp_send_json_error( 'The feedback request could not be queued.' );
+        MBS_Email_Queue::wake();
 
         wp_send_json_success( array( 'ref' => $ref, 'queued' => true ) );
     }
@@ -1387,42 +1398,114 @@ class MBS_Admin {
      */
     public function ajax_delete_archive_series() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
-        if ( ! self::can_manage_bookings() ) wp_send_json_error( 'Permission denied.', 403 );
+        if ( ! self::can_delete_bookings() ) wp_send_json_error( 'Administrator access required.', 403 );
 
-        $series_ref = sanitize_text_field( $_POST['series_ref'] ?? '' );
+        $series_ref = sanitize_text_field( wp_unslash( $_POST['series_ref'] ?? '' ) );
         if ( ! $series_ref ) wp_send_json_error( 'Series reference is required.', 400 );
 
-        $series = MBS_Series::get( $series_ref );
-        if ( ! $series ) wp_send_json_error( 'Series not found.', 404 );
-        if ( $series->status !== 'cancelled' ) wp_send_json_error( 'Only cancelled series can be deleted and archived.', 400 );
+        $runner = static function () use ( $series_ref ) {
+            global $wpdb;
+            $table        = $wpdb->prefix . MBS_TABLE;
+            $series_table = $wpdb->prefix . MBS_SERIES_TABLE;
+            $invoice_tbl  = $wpdb->prefix . MBS_INVOICE_TABLE;
+            $item_tbl     = $wpdb->prefix . MBS_INVOICE_ITEM_TABLE;
+            $alloc_tbl    = $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE;
+            $today        = wp_date( 'Y-m-d' );
 
-        global $wpdb;
-        $table = $wpdb->prefix . MBS_TABLE;
-        $series_table = $wpdb->prefix . MBS_SERIES_TABLE;
-        $today = current_time( 'Y-m-d' );
+            if ( $wpdb->query( 'START TRANSACTION' ) === false ) {
+                return new WP_Error( 'transaction_failed', 'Could not start deletion transaction.', array( 'status' => 500 ) );
+            }
 
-        // Archive past bookings (set status to 'archived')
-        $archived = (int) $wpdb->query( $wpdb->prepare(
-            "UPDATE {$table} SET status = 'archived', updated_at = NOW() WHERE series_id = %s AND booking_date < %s",
-            $series_ref, $today
-        ) );
+            try {
+                $series = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$series_table} WHERE series_ref = %s FOR UPDATE", $series_ref ) );
+                if ( ! $series ) {
+                    $wpdb->query( 'ROLLBACK' );
+                    return new WP_Error( 'series_not_found', 'Series not found.', array( 'status' => 404 ) );
+                }
+                if ( $series->status !== 'cancelled' ) {
+                    $wpdb->query( 'ROLLBACK' );
+                    return new WP_Error( 'series_not_cancelled', 'Only cancelled series can be deleted and archived.', array( 'status' => 400 ) );
+                }
 
-        // Delete future bookings
-        $deleted = (int) $wpdb->query( $wpdb->prepare(
-            "DELETE FROM {$table} WHERE series_id = %s AND booking_date >= %s",
-            $series_ref, $today
-        ) );
+                // Block hard deletion if the series or any occurrence has financial/invoice/allocation history.
+                $has_series_invoice = (bool) $wpdb->get_var( $wpdb->prepare(
+                    "SELECT 1 FROM {$invoice_tbl} WHERE series_ref = %s LIMIT 1",
+                    $series_ref
+                ) );
+                $has_occurrence_history = (bool) $wpdb->get_var( $wpdb->prepare(
+                    "SELECT 1 FROM {$table} b
+                     WHERE b.series_id = %s AND (
+                         EXISTS (SELECT 1 FROM {$item_tbl} ii WHERE ii.booking_ref = b.ref)
+                         OR EXISTS (SELECT 1 FROM {$alloc_tbl} a WHERE a.booking_ref = b.ref)
+                         OR b.amount_paid > 0
+                         OR b.current_invoice_document_id IS NOT NULL
+                     )
+                     LIMIT 1",
+                    $series_ref
+                ) );
+                if ( ! empty( $wpdb->last_error ) || $has_series_invoice || $has_occurrence_history ) {
+                    $wpdb->query( 'ROLLBACK' );
+                    return new WP_Error(
+                        'series_has_financial_history',
+                        'This series has invoice, payment, or billing allocation history and cannot be permanently deleted. Keep it cancelled or archived instead.',
+                        array( 'status' => 409 )
+                    );
+                }
 
-        // Delete the series record
-        $wpdb->delete( $series_table, array( 'series_ref' => $series_ref ) );
+                // Archive past bookings (set status to 'archived')
+                $archived = $wpdb->query( $wpdb->prepare(
+                    "UPDATE {$table} SET status = 'archived', updated_at = %s WHERE series_id = %s AND booking_date < %s",
+                    current_time( 'mysql' ), $series_ref, $today
+                ) );
+                if ( $archived === false ) {
+                    throw new RuntimeException( 'Could not archive past series occurrences.' );
+                }
 
-        MBS_Audit_Log::log( $series_ref, 'series_deleted', "Delete & Archive: archived {$archived} past booking(s), deleted {$deleted} future booking(s), removed series record." );
+                // Delete future bookings
+                $deleted = $wpdb->query( $wpdb->prepare(
+                    "DELETE FROM {$table} WHERE series_id = %s AND booking_date >= %s",
+                    $series_ref, $today
+                ) );
+                if ( $deleted === false ) {
+                    throw new RuntimeException( 'Could not delete future series occurrences.' );
+                }
 
-        wp_send_json_success( array(
-            'series_ref' => $series_ref,
-            'archived'   => $archived,
-            'deleted'    => $deleted,
-        ) );
+                // Delete the series record
+                $series_deleted = $wpdb->delete( $series_table, array( 'series_ref' => $series_ref ), array( '%s' ) );
+                if ( $series_deleted === false ) {
+                    throw new RuntimeException( 'Could not delete the series record.' );
+                }
+
+                $logged = MBS_Audit_Log::log( $series_ref, 'series_deleted', "Delete & Archive: archived " . (int) $archived . " past booking(s), deleted " . (int) $deleted . " future booking(s), removed series record." );
+                if ( ! $logged ) {
+                    throw new RuntimeException( 'Could not record audit log for series deletion.' );
+                }
+
+                if ( $wpdb->query( 'COMMIT' ) === false ) {
+                    throw new RuntimeException( 'Could not commit series deletion.' );
+                }
+
+                MBS_Bookings::invalidate_pending_count_cache();
+
+                return array(
+                    'series_ref' => $series_ref,
+                    'archived'   => (int) $archived,
+                    'deleted'    => (int) $deleted,
+                );
+            } catch ( \Throwable $e ) {
+                $wpdb->query( 'ROLLBACK' );
+                return new WP_Error( 'series_delete_failed', $e->getMessage(), array( 'status' => 500 ) );
+            }
+        };
+
+        $result = class_exists( 'MBS_Space_Selection' ) ? MBS_Space_Selection::locked( $runner ) : $runner();
+        if ( is_wp_error( $result ) ) {
+            $data = $result->get_error_data();
+            $status = is_array( $data ) && ! empty( $data['status'] ) ? (int) $data['status'] : 400;
+            wp_send_json_error( $result->get_error_message(), $status );
+        }
+
+        wp_send_json_success( $result );
     }
 
     public function ajax_configure_series_billing() {
@@ -2077,6 +2160,75 @@ class MBS_Admin {
             'skipped'   => $skipped,
             'total'     => count( $refs ),
         ) );
+    }
+
+    /**
+     * Render the shared Email Delivery Diagnostics modal in admin_footer on all mathlin-* pages.
+     */
+    public function render_email_diagnostics_modal() {
+        if ( ! self::can_manage_bookings() ) return;
+        $page = isset( $_GET['page'] ) ? sanitize_key( (string) $_GET['page'] ) : '';
+        if ( strpos( $page, 'mathlin-' ) !== 0 ) return;
+        $partial = MBS_PLUGIN_DIR . 'admin/views/partials/email-diagnostics-modal.php';
+        if ( file_exists( $partial ) ) {
+            include $partial;
+        }
+    }
+
+    /**
+     * AJAX: Inspect email queue rows (never returns raw email HTML body).
+     */
+    public function ajax_email_queue_list() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_manage_bookings() ) {
+            wp_send_json_error( array( 'message' => 'Booking manager or administrator permission is required.' ), 403 );
+        }
+        $result = MBS_Email_Queue::query_diagnostics( array(
+            'status'           => sanitize_key( $_REQUEST['status'] ?? '' ),
+            'failure_category' => sanitize_key( $_REQUEST['failure_category'] ?? '' ),
+            'reference_type'   => sanitize_key( $_REQUEST['reference_type'] ?? '' ),
+            'reference_id'     => absint( $_REQUEST['reference_id'] ?? 0 ),
+            'booking_ref'      => sanitize_text_field( $_REQUEST['booking_ref'] ?? '' ),
+            'limit'            => absint( $_REQUEST['limit'] ?? 50 ),
+            'offset'           => absint( $_REQUEST['offset'] ?? 0 ),
+        ) );
+        wp_send_json_success( $result );
+    }
+
+    /**
+     * AJAX: Clone and immediately resend a failed/pending queue row (Booking Manager or Admin).
+     */
+    public function ajax_email_queue_resend() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_manage_bookings() ) {
+            wp_send_json_error( array( 'message' => 'Booking manager or administrator permission is required.' ), 403 );
+        }
+        $id     = absint( $_POST['id'] ?? 0 );
+        $result = MBS_Email_Queue::resend_row( $id, get_current_user_id() );
+        if ( is_wp_error( $result ) ) {
+            $data   = $result->get_error_data();
+            $status = is_array( $data ) && ! empty( $data['status'] ) ? (int) $data['status'] : 400;
+            wp_send_json_error( array( 'code' => $result->get_error_code(), 'message' => $result->get_error_message() ), $status );
+        }
+        wp_send_json_success( $result );
+    }
+
+    /**
+     * AJAX: Dismiss / acknowledge a failed queue row (Administrators with manage_options only).
+     */
+    public function ajax_email_queue_dismiss() {
+        check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
+        if ( ! self::can_delete_bookings() ) {
+            wp_send_json_error( array( 'message' => 'Administrator permission is required to dismiss email failures.' ), 403 );
+        }
+        $id     = absint( $_POST['id'] ?? 0 );
+        $result = MBS_Email_Queue::dismiss_row( $id, get_current_user_id() );
+        if ( is_wp_error( $result ) ) {
+            $data   = $result->get_error_data();
+            $status = is_array( $data ) && ! empty( $data['status'] ) ? (int) $data['status'] : 400;
+            wp_send_json_error( array( 'code' => $result->get_error_code(), 'message' => $result->get_error_message() ), $status );
+        }
+        wp_send_json_success( $result );
     }
 }
 

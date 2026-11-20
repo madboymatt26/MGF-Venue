@@ -198,13 +198,6 @@ class MBS_Email_Templates {
     }
 
     /**
-     * Reset a template to its default.
-     */
-    public static function reset_template( $type ) {
-        delete_option( 'mbs_email_template_' . $type );
-    }
-
-    /**
      * Replace placeholders in a template string.
      *
      * @param string       $text     Template text with {placeholders}
