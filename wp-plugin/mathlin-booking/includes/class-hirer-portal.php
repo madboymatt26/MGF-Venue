@@ -130,6 +130,124 @@ class MBS_Hirer_Portal {
     }
 
     /**
+     * Batch-preload transactions, items, issued documents/credit notes, payment
+     * reservations, and credit assignments for the Hirer Portal dashboard.
+     *
+     * @param array $invoices        Invoice rows.
+     * @param array $oneoff_bookings One-off booking rows.
+     * @return array
+     */
+    public static function preload_dashboard_data( $invoices, $oneoff_bookings ) {
+        global $wpdb;
+        $data = array(
+            'transactions'   => array(),
+            'items'          => array(),
+            'invoice_docs'   => array(),
+            'credit_docs'    => array(),
+            'reservations'   => array(),
+            'credit_links'   => array(),
+        );
+
+        $invoice_ids  = array();
+        $invoice_refs = array();
+        foreach ( (array) $invoices as $inv ) {
+            if ( ! empty( $inv->id ) ) $invoice_ids[] = (int) $inv->id;
+            if ( ! empty( $inv->invoice_ref ) ) $invoice_refs[] = (string) $inv->invoice_ref;
+        }
+        $invoice_ids  = array_values( array_unique( $invoice_ids ) );
+        $invoice_refs = array_values( array_unique( $invoice_refs ) );
+
+        if ( ! empty( $invoice_ids ) ) {
+            $id_ph = implode( ',', array_fill( 0, count( $invoice_ids ), '%d' ) );
+
+            $tx_rows = $wpdb->get_results( $wpdb->prepare(
+                'SELECT invoice_id, transaction_ref, provider, transaction_type, status, amount_minor, currency, occurred_at FROM ' . $wpdb->prefix . MBS_PAYMENT_TRANSACTION_TABLE . " WHERE invoice_id IN ({$id_ph}) ORDER BY occurred_at DESC, id DESC",
+                $invoice_ids
+            ) );
+            foreach ( (array) $tx_rows as $tx ) {
+                $data['transactions'][ (int) $tx->invoice_id ][] = $tx;
+            }
+
+            $item_rows = $wpdb->get_results( $wpdb->prepare(
+                'SELECT * FROM ' . $wpdb->prefix . MBS_INVOICE_ITEM_TABLE . " WHERE invoice_id IN ({$id_ph}) ORDER BY id ASC",
+                $invoice_ids
+            ) );
+            foreach ( (array) $item_rows as $item ) {
+                $data['items'][ (int) $item->invoice_id ][] = $item;
+            }
+
+            $doc_rows = $wpdb->get_results( $wpdb->prepare(
+                'SELECT d.id, d.invoice_id, d.invoice_number, d.document_type, d.revision, i.parent_invoice_id, i.total_minor
+                 FROM ' . $wpdb->prefix . MBS_INVOICE_DOCUMENTS_TABLE . ' d
+                 INNER JOIN ' . $wpdb->prefix . MBS_INVOICE_TABLE . " i ON i.id = d.invoice_id
+                 WHERE (i.id IN ({$id_ph}) OR i.parent_invoice_id IN ({$id_ph})) AND d.status = 'issued'
+                 ORDER BY d.revision DESC, d.id DESC",
+                array_merge( $invoice_ids, $invoice_ids )
+            ) );
+            foreach ( (array) $doc_rows as $doc ) {
+                $inv_id = (int) $doc->invoice_id;
+                if ( $doc->document_type === 'invoice' && ! isset( $data['invoice_docs'][ $inv_id ] ) ) {
+                    $data['invoice_docs'][ $inv_id ] = (int) $doc->id;
+                } elseif ( $doc->document_type === 'credit_note' ) {
+                    $owner_id = ! empty( $doc->parent_invoice_id ) ? (int) $doc->parent_invoice_id : $inv_id;
+                    $data['credit_docs'][ $owner_id ][] = array(
+                        'id'        => (int) $doc->id,
+                        'reference' => (string) $doc->invoice_number,
+                        'type'      => 'credit_note',
+                    );
+                }
+            }
+        }
+
+        if ( ! empty( $invoice_refs ) && defined( 'MBS_PAYMENT_RESERVATION_TABLE' ) ) {
+            $ref_ph = implode( ',', array_fill( 0, count( $invoice_refs ), '%s' ) );
+            $res_rows = $wpdb->get_results( $wpdb->prepare(
+                'SELECT invoice_ref, status FROM ' . $wpdb->prefix . MBS_PAYMENT_RESERVATION_TABLE . " WHERE invoice_ref IN ({$ref_ph}) ORDER BY id DESC",
+                $invoice_refs
+            ) );
+            foreach ( (array) $res_rows as $res ) {
+                if ( ! isset( $data['reservations'][ $res->invoice_ref ] ) ) {
+                    $data['reservations'][ $res->invoice_ref ] = (string) $res->status;
+                }
+            }
+        }
+
+        if ( ! empty( $oneoff_bookings ) && class_exists( 'MBS_Credit_Accounts' ) && MBS_Credit_Accounts::supported() ) {
+            $booking_refs = array();
+            $series_ids   = array();
+            foreach ( $oneoff_bookings as $b ) {
+                if ( ! empty( $b->series_id ) ) $series_ids[] = (string) $b->series_id;
+                elseif ( ! empty( $b->ref ) ) $booking_refs[] = (string) $b->ref;
+            }
+            $booking_refs = array_values( array_unique( $booking_refs ) );
+            $series_ids   = array_values( array_unique( $series_ids ) );
+            $assign_table = MBS_Credit_Accounts::table( true );
+            if ( ! empty( $booking_refs ) ) {
+                $b_ph = implode( ',', array_fill( 0, count( $booking_refs ), '%s' ) );
+                $b_rows = $wpdb->get_results( $wpdb->prepare(
+                    "SELECT * FROM {$assign_table} WHERE scope_kind = 'booking' AND scope_ref IN ({$b_ph})",
+                    $booking_refs
+                ) );
+                foreach ( (array) $b_rows as $row ) {
+                    $data['credit_links'][ 'booking:' . $row->scope_ref ] = $row;
+                }
+            }
+            if ( ! empty( $series_ids ) ) {
+                $s_ph = implode( ',', array_fill( 0, count( $series_ids ), '%s' ) );
+                $s_rows = $wpdb->get_results( $wpdb->prepare(
+                    "SELECT * FROM {$assign_table} WHERE scope_kind = 'series' AND scope_ref IN ({$s_ph})",
+                    $series_ids
+                ) );
+                foreach ( (array) $s_rows as $row ) {
+                    $data['credit_links'][ 'series:' . $row->scope_ref ] = $row;
+                }
+            }
+        }
+
+        return $data;
+    }
+
+    /**
      * Get hirer stats for their dashboard.
      */
     public static function get_hirer_stats( $email ) {

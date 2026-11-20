@@ -118,9 +118,9 @@ class MBS_Additional_Charges {
         global $wpdb;
         if ( ! $booking || strcasecmp( $booking->email, $email ) !== 0 ) return array();
         $refs = array( $booking->ref ); if ( ! empty( $booking->series_id ) ) $refs[] = $booking->series_id;
-        $clauses = array(); $params = array( $email );
-        foreach ( $refs as $ref ) { $clauses[] = 'ci.pricing_snapshot_json LIKE %s'; $params[] = '%"related_ref":' . $wpdb->esc_like( wp_json_encode( $ref ) ) . '%'; }
-        $rows = $wpdb->get_results( $wpdb->prepare( 'SELECT i.* FROM ' . $wpdb->prefix . MBS_INVOICE_TABLE . ' i WHERE i.contact_email=%s AND i.billing_mode=\'additional_charge\' AND i.document_type=\'invoice\' AND i.status NOT IN (\'draft\',\'void\') AND EXISTS (SELECT 1 FROM ' . $wpdb->prefix . MBS_INVOICE_ITEM_TABLE . ' ci WHERE ci.invoice_id=i.id AND (' . implode( ' OR ', $clauses ) . ')) ORDER BY i.id DESC LIMIT 50', $params ) );
+        $placeholders = implode( ',', array_fill( 0, count( $refs ), '%s' ) );
+        $params = array_merge( array( $email ), $refs );
+        $rows = $wpdb->get_results( $wpdb->prepare( 'SELECT i.* FROM ' . $wpdb->prefix . MBS_INVOICE_TABLE . ' i WHERE i.contact_email=%s AND i.billing_mode=\'additional_charge\' AND i.document_type=\'invoice\' AND i.status NOT IN (\'draft\',\'void\') AND EXISTS (SELECT 1 FROM ' . $wpdb->prefix . MBS_INVOICE_ITEM_TABLE . ' ci WHERE ci.invoice_id=i.id AND ci.related_ref IN (' . $placeholders . ')) ORDER BY i.id DESC LIMIT 50', $params ) );
         $result = array();
         foreach ( $rows as $invoice ) {
             $items = MBS_Billing_Ledger::get_items( $invoice->id );
@@ -242,6 +242,7 @@ class MBS_Additional_Charges {
         }
         $items = MBS_Billing_Ledger::get_items( $invoice->id );
         $updated = $wpdb->update( $wpdb->prefix . MBS_INVOICE_ITEM_TABLE, array(
+            'related_ref' => $meta['related_ref'],
             'description' => $clean['description'],
             'service_date' => $clean['service_date'], 'unit_amount_minor' => $clean['amount_minor'],
             'quantity_milli' => 1000, 'line_total_minor' => $clean['amount_minor'], 'pricing_snapshot_json' => wp_json_encode( $meta ),
@@ -438,13 +439,162 @@ class MBS_Additional_Charges {
         $table=$wpdb->prefix.MBS_INVOICE_TABLE; $items=$wpdb->prefix.MBS_INVOICE_ITEM_TABLE;
         $where=array("i.billing_mode='additional_charge'","i.document_type='invoice'");$args=array();
         $where[]=self::archive_filter_sql($archive_view);
-        if($related){$where[]="EXISTS (SELECT 1 FROM {$items} ci WHERE ci.invoice_id=i.id AND ci.pricing_snapshot_json LIKE %s)";$args[]='%"related_ref":'.$wpdb->esc_like(wp_json_encode($related)).'%';}
-        if($search!==''){$where[]='(i.invoice_ref LIKE %s OR i.contact_name LIKE %s OR i.contact_email LIKE %s OR EXISTS (SELECT 1 FROM '.$items.' si WHERE si.invoice_id=i.id AND (si.description LIKE %s OR si.pricing_snapshot_json LIKE %s)))';$like='%'.$wpdb->esc_like($search).'%';for($n=0;$n<5;$n++)$args[]=$like;}
+        if($related){$where[]="EXISTS (SELECT 1 FROM {$items} ci WHERE ci.invoice_id=i.id AND ci.related_ref=%s)";$args[]=$related;}
+        if($search!==''){$where[]='(i.invoice_ref LIKE %s OR i.contact_name LIKE %s OR i.contact_email LIKE %s OR EXISTS (SELECT 1 FROM '.$items.' si WHERE si.invoice_id=i.id AND (si.description LIKE %s OR si.related_ref LIKE %s)))';$like='%'.$wpdb->esc_like($search).'%';for($n=0;$n<5;$n++)$args[]=$like;}
         if($status==='overdue'){$where[]="i.status IN ('issued','part_paid','overdue') AND i.total_minor>i.paid_minor+i.credited_minor AND i.due_at<%s";$args[]=current_time('mysql');}
         elseif($status==='payment_review')$where[]="EXISTS (SELECT 1 FROM ".$wpdb->prefix.MBS_PAYMENT_RESERVATION_TABLE." pr WHERE pr.invoice_ref=i.invoice_ref AND pr.status IN ('bound','reconciliation_required'))";
         elseif(in_array($status,array('draft','issued','part_paid','paid','credited','void'),true)){$where[]='i.status=%s';$args[]=$status;}
         $args[]=$limit+1;$args[]=($page-1)*$limit;
         return $wpdb->get_results($wpdb->prepare("SELECT i.* FROM {$table} i WHERE ".implode(' AND ',$where).' ORDER BY i.id DESC LIMIT %d OFFSET %d',$args));
+    }
+
+    /**
+     * Batch-preload items, metadata, related booking/series context, latest email
+     * queue status, archive flags, and reservations for a page of additional charges.
+     *
+     * @param array $rows List of invoice row objects.
+     * @return array Preloaded maps keyed by invoice ID / ref.
+     */
+    public static function preload_list_context( $rows ) {
+        $ctx = array(
+            'items'        => array(),
+            'meta'         => array(),
+            'related'      => array(),
+            'delivery'     => array(),
+            'archived'     => array(),
+            'reservations' => array(),
+        );
+        if ( empty( $rows ) || ! is_array( $rows ) ) return $ctx;
+
+        global $wpdb;
+        $invoice_ids  = array();
+        $invoice_refs = array();
+        foreach ( $rows as $invoice ) {
+            if ( ! empty( $invoice->id ) ) $invoice_ids[] = (int) $invoice->id;
+            if ( ! empty( $invoice->invoice_ref ) ) $invoice_refs[] = (string) $invoice->invoice_ref;
+        }
+        $invoice_ids  = array_values( array_unique( $invoice_ids ) );
+        $invoice_refs = array_values( array_unique( $invoice_refs ) );
+        if ( empty( $invoice_ids ) ) return $ctx;
+
+        $id_placeholders = implode( ',', array_fill( 0, count( $invoice_ids ), '%d' ) );
+
+        // 1. Batch-load invoice items (replaces 2× N get_items() calls).
+        $item_rows = $wpdb->get_results( $wpdb->prepare(
+            'SELECT * FROM ' . $wpdb->prefix . MBS_INVOICE_ITEM_TABLE . " WHERE invoice_id IN ({$id_placeholders}) ORDER BY id ASC",
+            $invoice_ids
+        ) );
+        foreach ( (array) $item_rows as $item ) {
+            if ( ! is_object( $item ) || ! isset( $item->invoice_id ) ) continue;
+            $ctx['items'][ (int) $item->invoice_id ][] = $item;
+        }
+
+        $related_refs = array();
+        foreach ( $ctx['items'] as $inv_id => $items ) {
+            if ( count( $items ) === 1 && empty( $items[0]->booking_ref ) ) {
+                $decoded = json_decode( (string) ( $items[0]->pricing_snapshot_json ?? '' ), true );
+                if ( is_array( $decoded ) ) {
+                    $ctx['meta'][ $inv_id ] = $decoded;
+                    if ( ! empty( $decoded['related_ref'] ) ) {
+                        $related_refs[] = (string) $decoded['related_ref'];
+                    }
+                }
+            }
+        }
+        $related_refs = array_values( array_unique( $related_refs ) );
+
+        // 2. Batch-load related bookings & series contexts.
+        if ( ! empty( $related_refs ) && defined( 'MBS_TABLE' ) && defined( 'MBS_SERIES_TABLE' ) ) {
+            $ref_placeholders = implode( ',', array_fill( 0, count( $related_refs ), '%s' ) );
+            $bookings = $wpdb->get_results( $wpdb->prepare(
+                'SELECT ref, name, purpose, booking_date, space FROM ' . $wpdb->prefix . MBS_TABLE . " WHERE ref IN ({$ref_placeholders})",
+                $related_refs
+            ) );
+            foreach ( (array) $bookings as $b ) {
+                if ( ! is_object( $b ) || ! isset( $b->ref ) ) continue;
+                $ctx['related'][ $b->ref ] = array(
+                    'url'     => add_query_arg( array( 'page' => 'mathlin-booking', 'action' => 'view', 'ref' => $b->ref ), admin_url( 'admin.php' ) ),
+                    'label'   => $b->ref,
+                    'summary' => trim( ( $b->purpose ?? $b->name ) . ' · ' . ( $b->booking_date ?? '' ) . ' · ' . ( $b->space ?? '' ), ' ·' ),
+                );
+            }
+            $missing_refs = array_values( array_diff( $related_refs, array_keys( $ctx['related'] ) ) );
+            if ( ! empty( $missing_refs ) ) {
+                $series_placeholders = implode( ',', array_fill( 0, count( $missing_refs ), '%s' ) );
+                $series_rows = $wpdb->get_results( $wpdb->prepare(
+                    'SELECT series_ref, scout_use, purpose, contact_name, space FROM ' . $wpdb->prefix . MBS_SERIES_TABLE . " WHERE series_ref IN ({$series_placeholders})",
+                    $missing_refs
+                ) );
+                foreach ( (array) $series_rows as $s ) {
+                    if ( ! is_object( $s ) || ! isset( $s->series_ref ) ) continue;
+                    $ctx['related'][ $s->series_ref ] = array(
+                        'url'     => add_query_arg( array( 'page' => empty( $s->scout_use ) ? 'mathlin-series' : 'mathlin-scout-nights', 'ref' => $s->series_ref ), admin_url( 'admin.php' ) ),
+                        'label'   => $s->series_ref,
+                        'summary' => trim( ( $s->purpose ?? $s->contact_name ) . ' · Recurring series · ' . ( $s->space ?? '' ), ' ·' ),
+                    );
+                }
+            }
+            foreach ( $related_refs as $ref ) {
+                if ( ! isset( $ctx['related'][ $ref ] ) ) {
+                    $ctx['related'][ $ref ] = array(
+                        'url'     => '',
+                        'label'   => $ref,
+                        'summary' => 'Original booking unavailable; invoice retained.',
+                    );
+                }
+            }
+        }
+
+        // 3. Batch-load latest email queue status per invoice (replaces N full scans).
+        $queue_rows = $wpdb->get_results( $wpdb->prepare(
+            'SELECT q.id, q.reference_id, q.status, q.attempts, q.last_error, q.created_at, q.accepted_at
+             FROM ' . $wpdb->prefix . 'mathlin_email_queue q
+             INNER JOIN (
+                 SELECT reference_id, MAX(id) AS max_id
+                 FROM ' . $wpdb->prefix . "mathlin_email_queue
+                 WHERE reference_type = 'invoice' AND reference_id IN ({$id_placeholders})
+                 GROUP BY reference_id
+             ) latest ON latest.max_id = q.id",
+            $invoice_ids
+        ), ARRAY_A );
+        foreach ( (array) $queue_rows as $qrow ) {
+            if ( is_array( $qrow ) && isset( $qrow['reference_id'] ) ) {
+                $ctx['delivery'][ (int) $qrow['reference_id'] ] = $qrow;
+            }
+        }
+
+        // 4. Batch-load archive flags from wp_options.
+        $opt_names = array();
+        foreach ( $invoice_ids as $inv_id ) {
+            $opt_names[] = 'mbs_charge_archived_' . $inv_id;
+        }
+        $opt_placeholders = implode( ',', array_fill( 0, count( $opt_names ), '%s' ) );
+        $opt_rows = $wpdb->get_results( $wpdb->prepare(
+            "SELECT option_name, option_value FROM {$wpdb->options} WHERE option_name IN ({$opt_placeholders})",
+            $opt_names
+        ) );
+        foreach ( (array) $opt_rows as $opt ) {
+            if ( is_object( $opt ) && isset( $opt->option_name ) && strpos( (string) $opt->option_name, 'mbs_charge_archived_' ) === 0 ) {
+                $inv_id = (int) substr( (string) $opt->option_name, strlen( 'mbs_charge_archived_' ) );
+                $ctx['archived'][ $inv_id ] = ( (string) ( $opt->option_value ?? '0' ) === '1' );
+            }
+        }
+
+        // 5. Batch-load active/held payment reservations.
+        if ( ! empty( $invoice_refs ) && defined( 'MBS_PAYMENT_RESERVATION_TABLE' ) ) {
+            $res_placeholders = implode( ',', array_fill( 0, count( $invoice_refs ), '%s' ) );
+            $res_rows = $wpdb->get_results( $wpdb->prepare(
+                'SELECT invoice_ref, status FROM ' . $wpdb->prefix . MBS_PAYMENT_RESERVATION_TABLE . " WHERE invoice_ref IN ({$res_placeholders}) ORDER BY id DESC",
+                $invoice_refs
+            ) );
+            foreach ( (array) $res_rows as $res ) {
+                if ( is_object( $res ) && isset( $res->invoice_ref, $res->status ) && ! isset( $ctx['reservations'][ $res->invoice_ref ] ) ) {
+                    $ctx['reservations'][ $res->invoice_ref ] = (string) $res->status;
+                }
+            }
+        }
+
+        return $ctx;
     }
 
     public static function status_label( $invoice ) {
@@ -457,13 +607,18 @@ class MBS_Additional_Charges {
         if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'additional_charges' ) ) return;
         if(!current_user_can('mbs_manage_bookings'))return;
         $rows=self::list_rows($ref,'','',1,10,'all');
-        echo '<section class="nms-card mbs-related-charges"><div class="nms-card-header"><h2>Additional charges</h2></div><div class="mbs-charge-card-body"><p class="nms-muted">Separate from the original hire invoice and access arrangements.</p><p><a class="button button-primary" href="'.esc_url(self::admin_url(array('view'=>'create','related_ref'=>$ref))).'">Add additional charge</a> <a class="button" href="'.esc_url(self::admin_url(array('related_ref'=>$ref))).'">View all linked charges</a></p>';
-        if(!$rows)echo '<p>No additional charges for this booking.</p>';
-        else{echo '<div class="mbs-series-table-wrap"><table class="widefat striped"><thead><tr><th>Invoice</th><th>Description</th><th>Amount</th><th>Balance</th><th>Status</th></tr></thead><tbody>';
+        $count=count($rows);
+        $actions='<p class="nms-muted">Separate from the original hire invoice and access arrangements.</p><p class="mbs-panel-actions"><a class="button button-primary" href="'.esc_url(self::admin_url(array('view'=>'create','related_ref'=>$ref))).'">Add additional charge</a> <a class="button" href="'.esc_url(self::admin_url(array('related_ref'=>$ref))).'">View all linked charges</a></p>';
+        if(!$rows){
+            echo '<details class="nms-card mbs-disclosure mbs-related-charges"><summary class="nms-card-header"><h2>Additional charges</h2><span class="mbs-card-badge">None</span></summary><div class="mbs-card-body">'.$actions.'<p>No additional charges for this booking.</p></div></details>';
+            return;
+        }
+        echo '<section class="nms-card mbs-related-charges"><div class="nms-card-header"><h2>Additional charges</h2><span class="mbs-card-badge">'.(int)$count.($count>=10?'+':'').'</span></div><div class="mbs-card-body">'.$actions;
+        echo '<div class="mbs-table-scroll mbs-series-table-wrap"><table class="widefat striped"><thead><tr><th scope="col">Invoice</th><th scope="col">Description</th><th scope="col">Amount</th><th scope="col">Balance</th><th scope="col">Status</th></tr></thead><tbody>';
             foreach(array_slice($rows,0,10) as $invoice){$items=MBS_Billing_Ledger::get_items($invoice->id);$amount=$invoice->status==='draft'&&$items?(int)$items[0]->line_total_minor:(int)$invoice->total_minor;
                 echo '<tr><td><a href="'.esc_url(self::admin_url(array('invoice_ref'=>$invoice->invoice_ref))).'">'.esc_html($invoice->invoice_ref).'</a></td><td>'.esc_html($items?$items[0]->description:'Incomplete draft').'</td><td>'.esc_html(MBS_Money::format($amount)).'</td><td>'.esc_html($invoice->status==='draft'?'—':MBS_Money::format(MBS_Billing_Ledger::balance_minor($invoice))).'</td><td>'.esc_html(self::status_label($invoice)).'</td></tr>';
             }echo '</tbody></table></div>';
-        }echo '</div></section>';
+        echo '</div></section>';
     }
 
     private static function form_start( $invoice = null, $class = '' ) {
@@ -563,6 +718,7 @@ class MBS_Additional_Charges {
                 self::form_start( $invoice ); echo '<p><label><input type="checkbox" name="enabled" value="1" ' . checked( self::reminders_enabled( $invoice ), true, false ) . '>Enable one automatic overdue reminder</label> (already sent: ' . (int) $invoice->reminder_count . '). Changing this setting does not reset the one-reminder limit.</p><button class="button" name="operation" value="set_reminders">Save reminder preference</button></form>';
             }
             echo '<details><summary>Staff history and association</summary><p>Related: ' . esc_html( $meta['related_ref'] ?? '' ) . '</p><p>Internal notes: ' . esc_html( $meta['notes'] ?? '' ) . '</p>';
+            echo '<p><button type="button" class="button button-small mbs-open-email-diagnostics" data-tab="transport" data-reference-type="invoice" data-reference-id="' . (int) $invoice->id . '" data-context-label="' . esc_attr( 'Charge ' . $invoice->invoice_ref ) . '">Inspect email delivery &amp; resend</button></p>';
             foreach ( MBS_Hirer_Portal::invoice_transactions( $invoice->id ) as $tx ) echo '<p>' . esc_html( $tx->occurred_at . ' — ' . $tx->transaction_type . ' ' . MBS_Money::format( (int) $tx->amount_minor ) ) . '</p>';
             foreach ( self::delivery_history( $invoice ) as $delivery ) echo '<p>Delivery: ' . esc_html( $delivery['status'] . ' — attempts ' . $delivery['attempts'] . ' — queued ' . $delivery['created_at'] . ' — accepted ' . $delivery['accepted_at'] . ' ' . $delivery['last_error'] ) . '</p>';
             $audit = $wpdb->get_results( $wpdb->prepare( 'SELECT action,details,user_name,created_at FROM ' . $wpdb->prefix . 'mathlin_audit_log WHERE ref=%s ORDER BY id DESC LIMIT 50', $invoice->invoice_ref ) );

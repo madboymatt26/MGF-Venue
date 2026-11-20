@@ -52,6 +52,7 @@ $expired = array_filter( $blocked, function( $b ) use ( $today ) { return $b->da
             <?php if ( empty( $active ) ) : ?>
                 <p class="nms-muted">No active blocked dates.</p>
             <?php else : ?>
+                <div class="mbs-table-scroll">
                 <table class="wp-list-table widefat fixed striped">
                     <thead>
                         <tr>
@@ -86,6 +87,7 @@ $expired = array_filter( $blocked, function( $b ) use ( $today ) { return $b->da
                         <?php endforeach; ?>
                     </tbody>
                 </table>
+                </div>
             <?php endif; ?>
         </div>
     </div>
@@ -99,6 +101,7 @@ $expired = array_filter( $blocked, function( $b ) use ( $today ) { return $b->da
         <div style="padding:1.5rem;">
             <p class="nms-muted" style="margin-bottom:1rem;">These blocks have passed and are no longer active. You can clean them up to keep the list tidy.</p>
             <button id="nms-clear-expired" class="button" style="margin-bottom:1rem;">🗑 Remove All Expired</button>
+            <div class="mbs-table-scroll">
             <table class="wp-list-table widefat fixed striped">
                 <thead>
                     <tr>
@@ -123,6 +126,7 @@ $expired = array_filter( $blocked, function( $b ) use ( $today ) { return $b->da
                     <?php endforeach; ?>
                 </tbody>
             </table>
+            </div>
         </div>
     </div>
     <?php endif; ?>

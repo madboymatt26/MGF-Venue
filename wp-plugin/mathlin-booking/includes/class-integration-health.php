@@ -111,9 +111,24 @@ class MBS_Integration_Health {
         echo '<div class="wrap"><h1>MGF Venue — Integration health</h1><p>This is a read-only snapshot. Review needed does not mean sync is paused. Mail transport acceptance does not prove inbox delivery.</p><table class="widefat striped" style="max-width:1000px"><tbody>';
         foreach ( $state['payment_policy_warnings'] as $warning ) echo '<tr><th>Payment policy review</th><td>' . esc_html( $warning ) . '</td></tr>';
         foreach ( $state['jobs'] as $hook => $job ) if ( $job['needs_attention'] ) echo '<tr><th>Scheduled job needs attention</th><td>' . esc_html( $hook . ': overdue or still running. Inspect hosting logs before retrying.' ) . '</td></tr>';
-        $rows=array('Installed plugin'=>$state['plugin_version'],'Database schema'=>$state['database_schema_current']?'Ready':'Needs administrator review','Booking profile'=>$state['campsite']?'Free campsite':'Standard venue','Payments'=>$state['payment_features']['payments']['enabled']?'Enabled':'Disabled','Email queue'=>sprintf('%d pending; %d failed; %d accepted by transport',$state['email_queue']['pending']??0,$state['email_queue']['failed']??0,$state['email_queue']['sent']??0),'Google connection'=>$state['google']['connected']?($state['google']['enabled']?'Connected — sync enabled':'Connected — sync paused'):'Not connected','Google last completed comparison'=>$state['google']['last_success']?:'Not yet run','Google result'=>$state['google']['last_result'],'Host cron'=>$state['cron_disabled']?'WordPress-triggered cron disabled; verify the host scheduler':'WordPress-triggered cron enabled; verify host scheduling if precise timing is required');
-        if(empty($state['email_queue']['available']))$rows['Email queue']='Unknown — the outbox could not be read. Check database and hosting diagnostics.';
+        $rows=array('Installed plugin'=>$state['plugin_version'],'Database schema'=>$state['database_schema_current']?'Ready':'Needs administrator review','Booking profile'=>$state['campsite']?'Free campsite':'Standard venue','Payments'=>$state['payment_features']['payments']['enabled']?'Enabled':'Disabled','Google connection'=>$state['google']['connected']?($state['google']['enabled']?'Connected — sync enabled':'Connected — sync paused'):'Not connected','Google last completed comparison'=>$state['google']['last_success']?:'Not yet run','Google result'=>$state['google']['last_result'],'Host cron'=>$state['cron_disabled']?'WordPress-triggered cron disabled; verify the host scheduler':'WordPress-triggered cron enabled; verify host scheduling if precise timing is required');
         foreach($rows as$label=>$value)echo '<tr><th style="width:250px">'.esc_html($label).'</th><td>'.esc_html($value).'</td></tr>';
+        echo '<tr><th style="width:250px">Email queue</th><td>';
+        if ( empty( $state['email_queue']['available'] ) ) {
+            echo '<span role="alert">Unknown — the outbox could not be read. Check database and hosting diagnostics.</span>';
+        } else {
+            $eq_pending   = (int) ( $state['email_queue']['pending'] ?? 0 );
+            $eq_transport = (int) ( $state['email_queue']['transport_failed'] ?? ( $state['email_queue']['failed'] ?? 0 ) );
+            $eq_obsolete  = (int) ( $state['email_queue']['obsolete_failed'] ?? 0 );
+            $eq_sent      = (int) ( $state['email_queue']['sent'] ?? 0 );
+            echo '<span class="mbs-email-badge-group">';
+            echo '<button type="button" class="mbs-email-badge ' . ( $eq_transport > 0 ? 'mbs-email-badge--failed' : 'mbs-email-badge--neutral' ) . ' mbs-open-email-diagnostics" data-tab="transport">' . $eq_transport . ' transport failed</button> ';
+            echo '<button type="button" class="mbs-email-badge mbs-email-badge--neutral mbs-open-email-diagnostics" data-tab="obsolete">' . $eq_obsolete . ' stale/ineligible</button> ';
+            echo '<button type="button" class="mbs-email-badge ' . ( $eq_pending > 0 ? 'mbs-email-badge--pending' : 'mbs-email-badge--neutral' ) . ' mbs-open-email-diagnostics" data-tab="pending">' . $eq_pending . ' pending</button> ';
+            echo '<button type="button" class="mbs-email-badge mbs-email-badge--sent mbs-open-email-diagnostics" data-tab="sent">' . $eq_sent . ' accepted by transport</button>';
+            echo '</span>';
+        }
+        echo '</td></tr>';
         echo '</tbody></table><p><a class="button" href="'.esc_url(admin_url('admin.php?page=mathlin-google-calendar')).'">Review calendar links</a> <a class="button" href="'.esc_url(admin_url('admin.php?page=mathlin-emails')).'">Review email templates</a></p><details><summary>Technical diagnostic details</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">'.esc_html(wp_json_encode($state,JSON_PRETTY_PRINT)).'</pre></details>';
         $lock = get_option('mbs_gcal_lock',array());
         if ( $lock && ($lock['engine']??'')!=='connection-v1' ) {

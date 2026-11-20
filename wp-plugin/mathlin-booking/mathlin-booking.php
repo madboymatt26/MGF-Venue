@@ -12,7 +12,7 @@
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 define( 'MBS_VERSION',    '3.47.2' );
-define( 'MBS_DB_VERSION', '3.46.0-schema-15' );
+define( 'MBS_DB_VERSION', '3.48.0-schema-16' );
 define( 'MBS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MBS_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'MBS_TABLE',      'mathlin_bookings' );
@@ -48,12 +48,16 @@ require_once MBS_PLUGIN_DIR . 'includes/class-booking-validation.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-settings-guard.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-submission-guard.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-payment-features.php';
-require_once MBS_PLUGIN_DIR . 'includes/class-campsite-migration.php';
-require_once MBS_PLUGIN_DIR . 'includes/class-campsite-consolidation.php';
-require_once MBS_PLUGIN_DIR . 'includes/class-reviewed-park-consolidation.php';
-require_once MBS_PLUGIN_DIR . 'includes/class-campsite-multiday.php';
-require_once MBS_PLUGIN_DIR . 'includes/class-legacy-read-only.php';
-MBS_Legacy_Read_Only::init();
+$mbs_enable_legacy_migration = ( defined( 'MBS_ENABLE_LEGACY_MIGRATION' ) && MBS_ENABLE_LEGACY_MIGRATION )
+    || ( defined( 'WP_CLI' ) && WP_CLI );
+if ( $mbs_enable_legacy_migration ) {
+    require_once MBS_PLUGIN_DIR . 'includes/class-campsite-migration.php';
+    require_once MBS_PLUGIN_DIR . 'includes/class-campsite-consolidation.php';
+    require_once MBS_PLUGIN_DIR . 'includes/class-reviewed-park-consolidation.php';
+    require_once MBS_PLUGIN_DIR . 'includes/class-campsite-multiday.php';
+    require_once MBS_PLUGIN_DIR . 'includes/class-legacy-read-only.php';
+    MBS_Legacy_Read_Only::init();
+}
 require_once MBS_PLUGIN_DIR . 'includes/class-email.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-invoice.php';
 require_once MBS_PLUGIN_DIR . 'includes/class-rest-api.php';
@@ -120,6 +124,7 @@ register_deactivation_hook( __FILE__, array( 'MBS_Email_Queue', 'deactivate' ) )
 register_deactivation_hook( __FILE__, array( 'MBS_HomeAssistant', 'deactivate' ) );
 register_deactivation_hook( __FILE__, array( 'MBS_Hirer_Portal', 'deactivate' ) );
 register_deactivation_hook( __FILE__, array( 'MBS_Google_Calendar', 'deactivate' ) );
+register_deactivation_hook( __FILE__, array( 'MBS_OSM_Integration', 'deactivate' ) );
 
 // ── GDPR Privacy Hooks ─────────────────────────────────────────────────────────
 add_filter( 'wp_privacy_personal_data_erasers', 'mbs_register_privacy_eraser' );
@@ -141,6 +146,23 @@ function mbs_register_privacy_exporter( $exporters ) {
     return $exporters;
 }
 
+/**
+ * Lightweight redirect stub for migrated Stowmarket legacy URLs when the
+ * full one-off migration runner is not loaded.
+ */
+function mbs_legacy_campsite_redirect() {
+    if ( ! get_option( 'mbs_campsite_cutover', false ) || is_admin() || is_preview() ) return;
+    $path = untrailingslashit( (string) wp_parse_url( $_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH ) );
+    $target = 0;
+    if ( is_page( array( 80, 1370 ) ) ) $target = 1394;
+    if ( in_array( $path, array( '/volunteers/haughley-park/bookings', '/volunteers/haughley-park/edit' ), true ) ) $target = 1396;
+    if ( $target ) {
+        nocache_headers();
+        wp_safe_redirect( get_permalink( $target ), 302 );
+        exit;
+    }
+}
+
 // ── Boot ───────────────────────────────────────────────────────────────────────
 add_action( 'plugins_loaded', 'mbs_init' );
 
@@ -149,6 +171,11 @@ function mbs_init() {
     if ( get_option( 'mbs_db_version' ) !== MBS_DB_VERSION ) {
         $migration = MBS_Database::create_tables();
         if ( is_wp_error( $migration ) ) error_log( '[MGF Venue] Database migration failed: ' . $migration->get_error_message() );
+    }
+    // One-time safe cleanup of legacy static HTML invoices in wp-content/uploads/mbs-invoices/.
+    if ( ! get_option( 'mbs_legacy_html_invoices_cleaned', false ) ) {
+        MBS_Email::cleanup_legacy_invoice_files();
+        update_option( 'mbs_legacy_html_invoices_cleaned', 1, true );
     }
     $migration_state = get_option( 'mbs_migration_state', array() );
     if ( is_array( $migration_state ) && ( $migration_state['status'] ?? '' ) === 'failed' ) add_action( 'admin_notices', array( 'MBS_Database', 'migration_health_notice' ) );
@@ -199,11 +226,15 @@ function mbs_init() {
     ( new MBS_Additional_Charges() )->init();
     ( new MBS_Extras_Catalogue() )->init();
     $public->init();
-    ( new MBS_Campsite_Migration() )->init();
     ( new MBS_Payment_Features() )->init();
-    ( new MBS_Campsite_Consolidation() )->init();
-    ( new MBS_Reviewed_Park_Consolidation() )->init();
-    ( new MBS_Campsite_Multiday() )->init();
+    if ( ( defined( 'MBS_ENABLE_LEGACY_MIGRATION' ) && MBS_ENABLE_LEGACY_MIGRATION ) || ( defined( 'WP_CLI' ) && WP_CLI ) ) {
+        ( new MBS_Campsite_Migration() )->init();
+        ( new MBS_Campsite_Consolidation() )->init();
+        ( new MBS_Reviewed_Park_Consolidation() )->init();
+        ( new MBS_Campsite_Multiday() )->init();
+    } else {
+        add_action( 'template_redirect', 'mbs_legacy_campsite_redirect' );
+    }
     $api->init();
     $updater->init();
     $reminders->init();

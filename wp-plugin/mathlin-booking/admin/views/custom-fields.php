@@ -8,6 +8,7 @@ $fields = MBS_Custom_Fields::get_fields();
     <div class="nms-card">
         <div class="nms-card-header"><h2>📝 Custom Form Fields</h2></div>
         <div style="padding:1.5rem;">
+            <div class="mbs-table-scroll">
             <table class="wp-list-table widefat" id="mbs-cf-table">
                 <thead>
                     <tr>
@@ -37,6 +38,7 @@ $fields = MBS_Custom_Fields::get_fields();
                     <?php endforeach; ?>
                 </tbody>
             </table>
+            </div>
 
             <p style="margin-top:12px;">
                 <button type="button" class="button" id="mbs-cf-add">+ Add Field</button>

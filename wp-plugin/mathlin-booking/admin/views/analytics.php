@@ -600,7 +600,8 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
         <!-- Space breakdown -->
         <div class="nms-card">
             <div class="nms-card-header"><h2>Space Breakdown (<?php echo esc_html( $fy_label ); ?>)</h2></div>
-            <div style="padding:1rem 1.5rem;">
+            <div class="mbs-card-body">
+                <div class="mbs-table-scroll">
                 <table class="wp-list-table widefat fixed striped" style="font-size:0.85rem;">
                     <thead><tr><th>Space</th><th>Bookings</th><th>Revenue</th></tr></thead>
                     <tbody>
@@ -616,25 +617,29 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
                     <?php endif; ?>
                     </tbody>
                 </table>
+                </div>
             </div>
         </div>
 
         <!-- Email queue status -->
         <div class="nms-card">
             <div class="nms-card-header"><h2>📧 Email Queue</h2></div>
-            <div style="padding:1rem 1.5rem;">
+            <div class="mbs-card-body">
+                <div class="mbs-table-scroll">
                 <table class="wp-list-table widefat fixed striped" style="font-size:0.85rem;">
                     <tbody>
                         <?php if(empty($email_stats['available'])): ?><tr><td colspan="2" role="alert">Outbox unavailable: delivery state is unknown.</td></tr><?php else: ?>
-                        <tr><td>Pending (queued or paused for policy/timing)</td><td><strong><?php echo (int)$email_stats['pending']; ?></strong></td></tr>
-                        <tr><td>Transport accepted (not proof of inbox delivery)</td><td><strong><?php echo (int)$email_stats['sent']; ?></strong></td></tr>
-                        <tr><td>Failed or no longer eligible</td><td><strong style="color:#e74c3c;"><?php echo (int)$email_stats['failed']; ?></strong></td></tr>
+                        <tr><td>Pending (queued or paused for policy/timing)</td><td><button type="button" class="mbs-email-badge <?php echo (int)$email_stats['pending'] > 0 ? 'mbs-email-badge--pending' : 'mbs-email-badge--neutral'; ?> mbs-open-email-diagnostics" data-tab="pending"><?php echo (int)$email_stats['pending']; ?> pending</button></td></tr>
+                        <tr><td>Transport accepted (not proof of inbox delivery)</td><td><button type="button" class="mbs-email-badge mbs-email-badge--sent mbs-open-email-diagnostics" data-tab="sent"><?php echo (int)$email_stats['sent']; ?> accepted</button></td></tr>
+                        <tr><td>Transport failures (SMTP / delivery errors)</td><td><button type="button" class="mbs-email-badge <?php echo (int)($email_stats['transport_failed'] ?? $email_stats['failed']) > 0 ? 'mbs-email-badge--failed' : 'mbs-email-badge--neutral'; ?> mbs-open-email-diagnostics" data-tab="transport"><?php echo (int)($email_stats['transport_failed'] ?? $email_stats['failed']); ?> failed — Inspect &amp; resend</button></td></tr>
+                        <tr><td>Stale / ineligible (superseded before send)</td><td><button type="button" class="mbs-email-badge mbs-email-badge--neutral mbs-open-email-diagnostics" data-tab="obsolete"><?php echo (int)($email_stats['obsolete_failed'] ?? 0); ?> stale</button></td></tr>
                         <tr><td>Oldest pending</td><td><?php echo esc_html($email_stats['oldest_pending_at']??'None'); ?></td></tr>
                         <tr><td>Next due</td><td><?php echo esc_html($email_stats['next_due_at']??'None'); ?></td></tr>
                         <tr><td>Expired worker leases</td><td><?php echo (int)$email_stats['expired_leases']; ?></td></tr>
                         <?php endif; ?>
                     </tbody>
                 </table>
+                </div>
                 <p class="nms-muted" style="margin-top:8px;font-size:0.8rem;">The queue is scheduled every five minutes, subject to host cron execution. Transport failures stop after five attempts; policy pauses do not consume attempts. Sent means the mail transport accepted the message, not confirmed inbox delivery. Old sent/failed rows are removed after 30 days.</p>
             </div>
         </div>
@@ -646,7 +651,8 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
         <!-- Top hirers -->
         <div class="nms-card">
             <div class="nms-card-header"><h2>🏆 Top Hirers by Booked Value (<?php echo esc_html( $fy_label ); ?>)</h2></div>
-            <div style="padding:1rem 1.5rem;">
+            <div class="mbs-card-body">
+                <div class="mbs-table-scroll">
                 <table class="wp-list-table widefat fixed striped" style="font-size:0.85rem;">
                     <thead><tr><th>Hirer</th><th>Bookings</th><th>Revenue</th></tr></thead>
                     <tbody>
@@ -662,23 +668,26 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
                     <?php endif; ?>
                     </tbody>
                 </table>
+                </div>
             </div>
         </div>
 
         <!-- Conversion & cancellations -->
         <div class="nms-card">
             <div class="nms-card-header"><h2>🔄 Conversion &amp; Cancellations (<?php echo esc_html( $fy_label ); ?>)</h2></div>
-            <div style="padding:1rem 1.5rem;">
+            <div class="mbs-card-body">
+                <div class="mbs-table-scroll">
                 <table class="wp-list-table widefat fixed striped" style="font-size:0.85rem;">
                     <tbody>
                         <tr><td>Pending (awaiting decision)</td><td><strong><?php echo $pending_fy; ?></strong></td></tr>
                         <tr><td>Confirmed / paid</td><td><strong><?php echo $total_fy; ?></strong></td></tr>
                         <tr><td>Cancelled</td><td><strong><?php echo $cancelled_fy; ?></strong></td></tr>
                         <tr><td>Cancellation rate</td><td><strong><?php echo esc_html( $cancel_rate ); ?>%</strong></td></tr>
-                        <tr><td>Revenue lost to cancellations</td><td><strong style="color:#e74c3c;">&pound;<?php echo number_format( $revenue_lost, 2 ); ?></strong></td></tr>
+                        <tr><td>Revenue lost to cancellations</td><td><strong style="color:#b91c1c;">&pound;<?php echo number_format( $revenue_lost, 2 ); ?></strong></td></tr>
                         <tr><td>Public vs private events</td><td><strong><?php echo $public_count; ?></strong> public / <strong><?php echo $private_count; ?></strong> private</td></tr>
                     </tbody>
                 </table>
+                </div>
             </div>
         </div>
     </div>
@@ -692,10 +701,11 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
     ?>
     <div class="nms-card" style="margin-top:1.5rem;">
         <div class="nms-card-header"><h2>📈 Occupancy / Utilisation (<?php echo esc_html( $fy_label ); ?>)</h2></div>
-        <div style="padding:1rem 1.5rem;">
+        <div class="mbs-card-body">
             <?php if ( $occupancy_error ) : ?><p role="alert"><?php echo esc_html( $occupancy_error ); ?></p><?php else : ?>
             <p class="nms-muted">Approved booking-session occupancy for the complete selected period, including internal Scout use. Reporting hours: <?php echo (int) $occupancy['opening_hour']; ?>:00–<?php echo (int) $occupancy['closing_hour']; ?>:00. Parent and selected areas are expanded; overlapping hours are counted once. Blocked-date closures reduce available hours. Optional setup/clear-down time is shown separately, not billed. Existing bookings overlapping a closure are flagged. Scheduled utilisation, not measured attendance.</p>
             <?php if ( $occupancy['invalid_refs'] ) : ?><p role="alert">Excluded invalid bookings: <?php echo esc_html( implode( ', ', $occupancy['invalid_refs'] ) ); ?></p><?php endif; endif; ?>
+            <div class="mbs-table-scroll">
             <table class="wp-list-table widefat fixed striped" style="font-size:0.85rem;">
                 <thead><tr><th>Space</th><th>Hours Booked</th><th>Buffer Hours</th><th>Hours Available</th><th>Utilisation</th></tr></thead>
                 <tbody>
@@ -717,6 +727,7 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
                 <?php endforeach; ?>
                 </tbody>
             </table>
+            </div>
         </div>
     </div>
 

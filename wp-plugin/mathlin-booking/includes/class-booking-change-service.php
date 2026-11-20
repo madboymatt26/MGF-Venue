@@ -46,6 +46,8 @@ class MBS_Booking_Change_Service {
                 if (is_wp_error($queued)) throw new RuntimeException($queued->get_error_message());
             }
             if ($wpdb->query('COMMIT') === false) throw new RuntimeException('Could not commit the booking change.');
+            if (is_array($update) && array_key_exists('status', $update) && class_exists('MBS_Bookings') && method_exists('MBS_Bookings', 'invalidate_pending_count_cache')) MBS_Bookings::invalidate_pending_count_cache();
+            if ($request && class_exists('MBS_Modification') && method_exists('MBS_Modification', 'invalidate_pending_count_cache')) MBS_Modification::invalidate_pending_count_cache();
             if(!empty($options['notify']))MBS_Email_Queue::wake();
             return array('booking'=>$fresh, 'document_id'=>$document_id);
         } catch (Throwable $e) {

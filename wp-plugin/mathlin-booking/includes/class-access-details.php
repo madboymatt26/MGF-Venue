@@ -268,10 +268,6 @@ class MBS_Access_Details {
         return array( 'subject' => $subject, 'body' => $body, 'headers' => $headers );
     }
 
-    public static function send_to_booker( $booking ) {
-        return self::queue( $booking );
-    }
-
     /**
      * Send admin notification that a booking is happening soon.
      */

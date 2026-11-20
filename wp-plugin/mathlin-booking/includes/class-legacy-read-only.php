@@ -25,6 +25,7 @@ class MBS_Legacy_Read_Only {
     }
     public static function enabled() { return self::$enabled; }
     public static function is_legacy_write( $sql, $prefix ) {
+        if ( stripos( (string) $sql, 'booking' ) === false ) return false;
         // Strip SQL string values so audit text mentioning a table is not mistaken
         // for a mutation of that table. Preserve quoted identifiers (backticks).
         $sql = preg_replace( "~'(?:''|\\\\.|[^'\\\\])*'~s", "''", $sql );
@@ -37,7 +38,8 @@ class MBS_Legacy_Read_Only {
         // for the legacy mutation without terminating the surrounding WordPress
         // request: activation/deactivation and background schema checks may run
         // on unrelated admin pages, not just inside the legacy booking screen.
-        if ( self::$enabled && self::is_legacy_write( $sql, self::$prefix ) ) return '';
+        if ( ! self::$enabled || stripos( (string) $sql, 'booking' ) === false ) return $sql;
+        if ( self::is_legacy_write( $sql, self::$prefix ) ) return '';
         return $sql;
     }
     public static function deny() {

@@ -21,13 +21,19 @@ class MBS_Terms_Acceptance {
         $snapshot['source'] = 'hirer_request';
         return $snapshot;
     }
-    public static function render( $booking ) {
+    /** Stored acceptance evidence for a booking, or null when none was recorded. */
+    public static function evidence( $booking ) {
         $meta = json_decode( (string) ( $booking->custom_fields ?? '{}' ), true ) ?: array();
         $evidence = $meta['_mbs_terms_acceptance'] ?? null;
-        echo '<div class="nms-detail-item nms-detail-full"><label>Hire terms acceptance</label>';
-        if ( ! is_array( $evidence ) ) { echo '<p>No versioned hirer acceptance was recorded for this booking. Imported and staff-entered bookings are not retrospectively marked accepted.</p></div>'; return; }
-        echo '<p>Accepted ' . esc_html( $evidence['accepted_at'] ) . '; version ' . esc_html( $evidence['hash'] ) . '</p><details><summary>View the terms snapshot</summary><div class="nms-terms-content">' . wp_kses_post( $evidence['terms_html'] ) . '</div>';
-        if ( $evidence['page_content'] ) echo '<h4>Linked terms page source</h4><pre style="white-space:pre-wrap">' . esc_html( $evidence['page_content'] ) . '</pre>';
+        return is_array( $evidence ) ? $evidence : null;
+    }
+    /** Card-body content for the unified "Hire terms & acceptance" admin card. */
+    public static function render( $booking ) {
+        $evidence = self::evidence( $booking );
+        echo '<div class="mbs-terms-acceptance">';
+        if ( ! $evidence ) { echo '<p>No versioned hirer acceptance was recorded for this booking. Imported and staff-entered bookings are not retrospectively marked accepted.</p></div>'; return; }
+        echo '<p>Accepted ' . esc_html( $evidence['accepted_at'] ?? '' ) . '; version <code class="mbs-terms-hash">' . esc_html( $evidence['hash'] ?? '' ) . '</code></p><details class="mbs-inline-disclosure"><summary>View the terms snapshot</summary><div class="nms-terms-content">' . wp_kses_post( $evidence['terms_html'] ?? '' ) . '</div>';
+        if ( ! empty( $evidence['page_content'] ) ) echo '<h3 class="mbs-terms-source-heading">Linked terms page source</h3><pre class="mbs-terms-source">' . esc_html( $evidence['page_content'] ) . '</pre>';
         echo '</details></div>';
     }
 }

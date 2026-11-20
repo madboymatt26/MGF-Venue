@@ -21,7 +21,7 @@ class MBS_Attention {
         if(class_exists('MBS_Credit_Accounts'))$items=array_merge($items,MBS_Credit_Accounts::attention($limit));
         $mail=MBS_Email_Queue::get_stats();
         if(isset($mail['available'])&&!$mail['available'])$issues[]='Email outbox could not be read; delivery state is unknown.';
-        if(!empty($mail['failed']))$items[]=array('kind'=>'email','ref'=>'Outbox','since'=>null,'finding'=>(int)$mail['failed'].' emails failed or became ineligible/stale','action'=>'Review delivery and current booking state before retrying; do not resend obsolete messages','url'=>admin_url('admin.php?page=mathlin-health'));
+        if(!empty($mail['failed']))$items[]=array('kind'=>'email','ref'=>'Outbox','since'=>null,'finding'=>(int)$mail['failed'].' emails failed or became ineligible/stale','action'=>'Review delivery and current booking state before retrying; do not resend obsolete messages','url'=>admin_url('admin.php?page=mathlin-health&open_email_queue=failed'));
         foreach(MBS_Integration_Health::job_status()as$hook=>$state)if($state['needs_attention'])$items[]=array('kind'=>'scheduler','ref'=>$hook,'since'=>$state['started_at']??null,'finding'=>'Scheduled job is overdue or has not finished','action'=>'Inspect scheduler and hosting logs','url'=>admin_url('admin.php?page=mathlin-health'));
         $google=MBS_Google_Calendar::status();
         if($google['connected']&&preg_match('/(\d+) (?:need|needs) review/',$google['last_result'],$match)&&(int)$match[1]>0)$items[]=array('kind'=>'calendar','ref'=>'Protected calendar references','since'=>$google['last_success'],'finding'=>$match[1].' references need a decision; this does not mean sync is paused','action'=>'Compare original references, spaces and dates; preserve estate events','url'=>admin_url('admin.php?page=mathlin-google-calendar&sync_view=review'));
@@ -39,7 +39,10 @@ class MBS_Attention {
         echo '<details class="nms-card mbs-disclosure mbs-attention" open><summary class="nms-card-header"><h2>Needs attention</h2></summary><div class="mbs-card-body"><p>Read-only summary, up to five items per category. Opening a link does not approve, send or change anything.</p>';
         foreach($result['partial_failures']as$issue)echo '<p role="alert">'.esc_html($issue).'</p>';
         echo '<div class="mbs-table-scroll" role="region" aria-label="Outstanding booking actions" tabindex="0"><table class="widefat striped mbs-panel-table"><thead><tr><th scope="col">Reference</th><th scope="col">Finding</th><th scope="col">Next action</th></tr></thead><tbody>';
-        foreach($result['items']as$item)echo '<tr><td>'.esc_html($item['ref']).'</td><td>'.esc_html($item['finding']).'</td><td><a href="'.esc_url($item['url']).'">'.esc_html($item['action']).'</a></td></tr>';
+        foreach($result['items']as$item){
+            $link_attr = $item['kind'] === 'email' ? ' class="mbs-open-email-diagnostics" data-tab="transport"' : '';
+            echo '<tr><td>'.esc_html($item['ref']).'</td><td>'.esc_html($item['finding']).'</td><td><a href="'.esc_url($item['url']).'"'.$link_attr.'>'.esc_html($item['action']).'</a></td></tr>';
+        }
         echo '</tbody></table></div></div></details>';
     }
 }

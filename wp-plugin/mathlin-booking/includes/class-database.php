@@ -61,10 +61,13 @@ class MBS_Database {
             PRIMARY KEY (id),
             KEY idx_date   (booking_date),
             KEY idx_status (status),
-            KEY idx_ref    (ref),
             KEY idx_series (series_id),
             KEY idx_email  (email),
-            KEY idx_chase  (status, created_at, chase_count)
+            KEY idx_chase  (status, created_at, chase_count),
+            KEY idx_status_scout_date (status, scout_use, booking_date),
+            KEY idx_date_end (booking_date_end, booking_date),
+            KEY idx_series_date (series_id, booking_date),
+            KEY idx_user_id (user_id)
         ) {$charset};";
 
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -184,7 +187,9 @@ class MBS_Database {
             KEY idx_invoice_series (series_ref),
             KEY idx_invoice_status_due (status, due_at),
             KEY idx_invoice_period (period_start, period_end),
-            KEY idx_invoice_parent (parent_invoice_id)
+            KEY idx_invoice_parent (parent_invoice_id),
+            KEY idx_invoice_email (contact_email),
+            KEY idx_invoice_issued (document_type, status, issued_at)
         ) {$charset};";
         dbDelta( $invoice_sql );
 
@@ -195,6 +200,7 @@ class MBS_Database {
             invoice_id            BIGINT(20) UNSIGNED NOT NULL,
             item_type             VARCHAR(20) NOT NULL DEFAULT 'hire',
             booking_ref           VARCHAR(20) DEFAULT NULL,
+            related_ref           VARCHAR(30) DEFAULT NULL,
             service_date          DATE        DEFAULT NULL,
             description           VARCHAR(255) NOT NULL,
             quantity_milli        BIGINT(20)  NOT NULL DEFAULT 1000,
@@ -206,6 +212,7 @@ class MBS_Database {
             UNIQUE KEY item_ref (item_ref),
             KEY idx_item_invoice (invoice_id),
             KEY idx_item_booking (booking_ref),
+            KEY idx_item_related_ref (related_ref),
             KEY idx_item_service_date (service_date)
         ) {$charset};";
         dbDelta( $item_sql );
@@ -333,7 +340,8 @@ class MBS_Database {
             KEY idx_osm_payout (payout_id, status),
             KEY idx_osm_order (order_id),
             KEY idx_osm_booking (booking_ref),
-            KEY idx_osm_refund (refund_id)
+            KEY idx_osm_refund (refund_id),
+            KEY idx_lease (status, lease_expires_at)
         ) ENGINE=InnoDB {$charset};";
         dbDelta( $osm_outbox_sql );
 
@@ -368,7 +376,8 @@ class MBS_Database {
             UNIQUE KEY payout_ref (payout_ref),
             UNIQUE KEY bank_transaction_owner (bank_transaction_id),
             KEY idx_payout_status (status, payout_date),
-            KEY idx_payout_cashbook (cashbook_transaction_id)
+            KEY idx_payout_cashbook (cashbook_transaction_id),
+            KEY idx_lease (status, lease_expires_at)
         ) ENGINE=InnoDB {$charset};";
         dbDelta( $osm_payout_sql );
 
@@ -461,7 +470,8 @@ class MBS_Database {
             PRIMARY KEY (id),
             KEY idx_ref    (ref),
             KEY idx_action (action),
-            KEY idx_date   (created_at)
+            KEY idx_date   (created_at),
+            KEY idx_ref_created (ref, created_at)
         ) {$charset};";
         dbDelta( $sql3 );
 
@@ -485,6 +495,13 @@ class MBS_Database {
             worker_id       VARCHAR(50)  DEFAULT NULL,
             accepted_at     DATETIME     DEFAULT NULL,
             last_error      TEXT         DEFAULT '',
+            failure_category VARCHAR(30) DEFAULT NULL,
+            last_error_code VARCHAR(80)  DEFAULT NULL,
+            last_error_details TEXT      DEFAULT '',
+            last_attempt_at DATETIME     DEFAULT NULL,
+            failed_at       DATETIME     DEFAULT NULL,
+            resent_from_id  BIGINT(20) UNSIGNED DEFAULT NULL,
+            resent_by       BIGINT(20) UNSIGNED DEFAULT NULL,
             message_type    VARCHAR(50)  DEFAULT NULL,
             reference_type  VARCHAR(50)  DEFAULT NULL,
             reference_id    BIGINT(20) UNSIGNED DEFAULT NULL,
@@ -492,7 +509,10 @@ class MBS_Database {
             PRIMARY KEY (id),
             UNIQUE KEY message_key (message_key),
             KEY idx_status (status, next_retry),
-            KEY idx_queue_processing (status, next_retry)
+            KEY idx_queue_reference (reference_type, reference_id, id),
+            KEY idx_queue_failed (status, failure_category, failed_at),
+            KEY idx_queue_lease (status, lease_expires_at),
+            KEY idx_queue_status_created (status, created_at)
         ) {$charset};";
         dbDelta( $sql4 );
 
@@ -511,7 +531,9 @@ class MBS_Database {
             created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (id),
             KEY idx_ref    (booking_ref),
-            KEY idx_status (status)
+            KEY idx_status (status),
+            KEY idx_ref_status (booking_ref, status),
+            KEY idx_status_created (status, created_at)
         ) {$charset};";
         dbDelta( $sql5 );
 
@@ -683,103 +705,6 @@ class MBS_Database {
         unset( $index );
         ksort( $indexes );
         return $indexes;
-    }
-
-    private static function verify_schema_legacy() {
-        global $wpdb;
-        $requirements = array(
-            $wpdb->prefix . 'mathlin_payment_expiry' => array( 'columns' => array( 'id','booking_ref','version','state','policy_json','review_json','created_at','updated_at' ), 'indexes' => array( 'PRIMARY','booking_ref','state' ) ),
-            $wpdb->prefix . MBS_TABLE => array(
-                'columns' => array( 'id','ref','status','name','organisation','email','phone','address','space','kitchen','booking_date','booking_date_end','all_day','scout_use','pricing_tier','start_time','end_time','attendees','purpose','notes','amount','deposit_paid','amount_paid','invoice_number','ha_notified','reminder_sent','access_sent','feedback_sent','chase_count','last_chased','series_id','legacy_billing_excluded','admin_notes','custom_fields','modification_token','is_public','user_id','created_at','updated_at' ),
-                'indexes' => array( 'PRIMARY','idx_date','idx_status','idx_ref','idx_series','idx_email','idx_chase' ),
-            ),
-            $wpdb->prefix . MBS_SERIES_TABLE => array(
-                'columns' => array( 'id','series_ref','status','version','contact_name','contact_organisation','contact_email','contact_phone','contact_address','space','kitchen','all_day','scout_use','pricing_tier','start_time','end_time','attendees','purpose','notes','start_date','repeat_until','recurrence_rule','schedule_json','price_per_booking','estimated_total','requested_count','accepted_count','conflict_count','blocked_count','error_count','exceptions_json','billing_mode','billing_treatment','deposit_policy','payment_method','automatic_reminders','invoice_lead_days','payment_terms_days','billing_schedule_json','terms_hash','terms_accepted_at','confirmation_sent_at','metadata_incomplete','adopted_at','adopted_by','adoption_state','adoption_version','created_at','updated_at' ),
-                'indexes' => array( 'PRIMARY','series_ref','idx_series_status','idx_series_email','idx_series_dates','idx_series_billing' ),
-            ),
-            $wpdb->prefix . MBS_INVOICE_TABLE => array(
-                'columns' => array( 'id','invoice_ref','document_type','parent_invoice_id','series_ref','status','version','contact_name','contact_organisation','contact_email','contact_address','billing_mode','period_start','period_end','currency','subtotal_minor','tax_minor','total_minor','paid_minor','credited_minor','idempotency_key','idempotency_request_hash','payment_token_hash','payment_token_created_at','issued_at','issued_email_sent_at','due_at','voided_at','void_reason','reminder_count','last_reminded_at','created_at','updated_at' ),
-                'indexes' => array( 'PRIMARY','invoice_ref','invoice_idempotency','idx_invoice_series','idx_invoice_status_due','idx_invoice_period','idx_invoice_parent' ),
-            ),
-            $wpdb->prefix . MBS_INVOICE_ITEM_TABLE => array(
-                'columns' => array( 'id','item_ref','invoice_id','item_type','booking_ref','service_date','description','quantity_milli','unit_amount_minor','line_total_minor','pricing_snapshot_json','created_at' ),
-                'indexes' => array( 'PRIMARY','item_ref','idx_item_invoice','idx_item_booking','idx_item_service_date' ),
-            ),
-            $wpdb->prefix . MBS_PAYMENT_TRANSACTION_TABLE => array(
-                'columns' => array( 'id','transaction_ref','invoice_id','provider','provider_transaction_id','transaction_type','status','amount_minor','parent_transaction_id','refunded_minor','currency','idempotency_key','idempotency_request_hash','metadata_json','occurred_at','receipt_sent_at','created_at','updated_at' ),
-                'indexes' => array( 'PRIMARY','transaction_ref','transaction_idempotency','provider_transaction','idx_transaction_invoice','idx_transaction_occurred','idx_transaction_parent' ),
-            ),
-            $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE => array(
-                'columns' => array( 'id','invoice_id','booking_ref','active_booking_ref','allocated_minor','refunded_minor','status','released_at','created_at','updated_at' ),
-                'indexes' => array( 'PRIMARY','active_booking','idx_allocation_invoice','idx_allocation_booking' ),
-            ),
-            $wpdb->prefix . MBS_PAYMENT_RESERVATION_TABLE => array(
-	                'columns' => array( 'id','reservation_ref','invoice_id','invoice_ref','order_id','amount_minor','status','version','balance_version','expires_at','last_error','created_at','updated_at' ),
-                'indexes' => array( 'PRIMARY','reservation_ref','invoice_owner','order_owner','idx_reservation_status' ),
-            ),
-            $wpdb->prefix . 'mathlin_blocked_dates' => array( 'columns' => array( 'id','date_from','date_to','space','reason','created_at' ), 'indexes' => array( 'PRIMARY','idx_dates' ) ),
-            $wpdb->prefix . 'mathlin_audit_log' => array( 'columns' => array( 'id','ref','action','details','user_id','user_name','ip_address','created_at' ), 'indexes' => array( 'PRIMARY','idx_ref','idx_action','idx_date' ) ),
-            $wpdb->prefix . 'mathlin_email_queue' => array( 'columns' => array( 'id','to_email','subject','body','headers','attachments','attempts','status','next_retry','created_at' ), 'indexes' => array( 'PRIMARY','idx_status' ) ),
-            $wpdb->prefix . 'mathlin_mod_requests' => array( 'columns' => array( 'id','booking_ref','request_type','status','requested_data','notes','admin_response','resolved_at','resolved_by','created_at' ), 'indexes' => array( 'PRIMARY','idx_ref','idx_status' ) ),
-        );
-	        $missing = array();
-	        $index_semantics = array(
-	            $wpdb->prefix.MBS_TABLE => array('PRIMARY'=>array(true,array('id')),'idx_date'=>array(false,array('booking_date')),'idx_status'=>array(false,array('status')),'idx_ref'=>array(false,array('ref')),'idx_series'=>array(false,array('series_id')),'idx_email'=>array(false,array('email')),'idx_chase'=>array(false,array('status','created_at','chase_count'))),
-	            $wpdb->prefix.MBS_SERIES_TABLE => array('PRIMARY'=>array(true,array('id')),'series_ref'=>array(true,array('series_ref')),'idx_series_status'=>array(false,array('status')),'idx_series_email'=>array(false,array('contact_email')),'idx_series_dates'=>array(false,array('start_date','repeat_until')),'idx_series_billing'=>array(false,array('billing_treatment','billing_mode'))),
-	            $wpdb->prefix.MBS_INVOICE_TABLE => array('PRIMARY'=>array(true,array('id')),'invoice_ref'=>array(true,array('invoice_ref')),'invoice_idempotency'=>array(true,array('idempotency_key')),'idx_invoice_series'=>array(false,array('series_ref')),'idx_invoice_status_due'=>array(false,array('status','due_at')),'idx_invoice_period'=>array(false,array('period_start','period_end')),'idx_invoice_parent'=>array(false,array('parent_invoice_id'))),
-	            $wpdb->prefix.MBS_INVOICE_ITEM_TABLE => array('PRIMARY'=>array(true,array('id')),'item_ref'=>array(true,array('item_ref')),'idx_item_invoice'=>array(false,array('invoice_id')),'idx_item_booking'=>array(false,array('booking_ref')),'idx_item_service_date'=>array(false,array('service_date'))),
-	            $wpdb->prefix.MBS_PAYMENT_TRANSACTION_TABLE => array('PRIMARY'=>array(true,array('id')),'transaction_ref'=>array(true,array('transaction_ref')),'transaction_idempotency'=>array(true,array('idempotency_key')),'provider_transaction'=>array(true,array('provider','provider_transaction_id')),'idx_transaction_invoice'=>array(false,array('invoice_id','status')),'idx_transaction_occurred'=>array(false,array('occurred_at')),'idx_transaction_parent'=>array(false,array('parent_transaction_id'))),
-	            $wpdb->prefix.MBS_BILLING_ALLOCATION_TABLE => array('PRIMARY'=>array(true,array('id')),'active_booking'=>array(true,array('active_booking_ref')),'idx_allocation_invoice'=>array(false,array('invoice_id','status')),'idx_allocation_booking'=>array(false,array('booking_ref'))),
-	            $wpdb->prefix.MBS_PAYMENT_RESERVATION_TABLE => array('PRIMARY'=>array(true,array('id')),'reservation_ref'=>array(true,array('reservation_ref')),'invoice_owner'=>array(true,array('invoice_id')),'order_owner'=>array(true,array('order_id')),'idx_reservation_status'=>array(false,array('status','expires_at'))),
-	            $wpdb->prefix.'mathlin_blocked_dates' => array('PRIMARY'=>array(true,array('id')),'idx_dates'=>array(false,array('date_from','date_to'))),
-	            $wpdb->prefix.'mathlin_audit_log' => array('PRIMARY'=>array(true,array('id')),'idx_ref'=>array(false,array('ref')),'idx_action'=>array(false,array('action')),'idx_date'=>array(false,array('created_at'))),
-	            $wpdb->prefix.'mathlin_email_queue' => array('PRIMARY'=>array(true,array('id')),'idx_status'=>array(false,array('status','next_retry'))),
-	            $wpdb->prefix.'mathlin_mod_requests' => array('PRIMARY'=>array(true,array('id')),'idx_ref'=>array(false,array('booking_ref')),'idx_status'=>array(false,array('status'))),
-	        );
-	        $column_semantics = array(
-	            $wpdb->prefix.MBS_TABLE => array('id'=>array('bigint(20) unsigned','NO',null,'auto_increment'),'legacy_billing_excluded'=>array('tinyint(1)','NO','0','')),
-	            $wpdb->prefix.MBS_SERIES_TABLE => array('id'=>array('bigint(20) unsigned','NO',null,'auto_increment'),'version'=>array('bigint(20) unsigned','NO','1','')),
-	            $wpdb->prefix.MBS_INVOICE_TABLE => array('id'=>array('bigint(20) unsigned','NO',null,'auto_increment'),'version'=>array('bigint(20) unsigned','NO','1',''),'total_minor'=>array('bigint(20)','NO','0',''),'paid_minor'=>array('bigint(20)','NO','0',''),'credited_minor'=>array('bigint(20)','NO','0','')),
-	            $wpdb->prefix.MBS_INVOICE_ITEM_TABLE => array('id'=>array('bigint(20) unsigned','NO',null,'auto_increment'),'invoice_id'=>array('bigint(20) unsigned','NO',null,''),'line_total_minor'=>array('bigint(20)','NO','0','')),
-	            $wpdb->prefix.MBS_PAYMENT_TRANSACTION_TABLE => array('id'=>array('bigint(20) unsigned','NO',null,'auto_increment'),'invoice_id'=>array('bigint(20) unsigned','NO',null,''),'amount_minor'=>array('bigint(20) unsigned','NO',null,''),'refunded_minor'=>array('bigint(20) unsigned','NO','0','')),
-	            $wpdb->prefix.MBS_BILLING_ALLOCATION_TABLE => array('id'=>array('bigint(20) unsigned','NO',null,'auto_increment'),'invoice_id'=>array('bigint(20) unsigned','NO',null,''),'allocated_minor'=>array('bigint(20)','NO','0',''),'refunded_minor'=>array('bigint(20) unsigned','NO','0','')),
-	            $wpdb->prefix.MBS_PAYMENT_RESERVATION_TABLE => array('id'=>array('bigint(20) unsigned','NO',null,'auto_increment'),'invoice_id'=>array('bigint(20) unsigned','NO',null,''),'order_id'=>array('bigint(20) unsigned','YES',null,''),'amount_minor'=>array('bigint(20) unsigned','NO',null,''),'version'=>array('bigint(20) unsigned','NO','1',''),'balance_version'=>array('bigint(20) unsigned','NO','0','')),
-	        );
-	        foreach ( $requirements as $table => $required ) {
-            if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) ) !== $table ) { $missing[] = 'table ' . $table; continue; }
-            $columns = $wpdb->get_col( "SHOW COLUMNS FROM `{$table}`", 0 );
-            foreach ( $required['columns'] as $column ) if ( ! in_array( $column, $columns, true ) ) $missing[] = $table . '.' . $column;
-	            $full_columns = $wpdb->get_results( "SHOW FULL COLUMNS FROM `{$table}`" );
-	            $columns_by_name = array();
-	            foreach((array)$full_columns as $column)if(isset($column->Field))$columns_by_name[$column->Field]=$column;
-	            if(isset($columns_by_name['id'])){
-	                $id=$columns_by_name['id'];
-	                if(strtolower((string)$id->Type)!=='bigint(20) unsigned'||(string)$id->Null!=='NO'||strtolower((string)$id->Extra)!=='auto_increment')$missing[]=$table.'.id definition';
-	            }
-	            if(!empty($wpdb->collate)){
-	                $table_status=$wpdb->get_row($wpdb->prepare('SHOW TABLE STATUS LIKE %s',$table));
-	                if($table_status&&strtolower((string)$table_status->Collation)!==strtolower((string)$wpdb->collate))$missing[]=$table.' collation';
-	            }
-	            foreach(($column_semantics[$table]??array()) as $name=>$expected){
-	                if(!isset($columns_by_name[$name]))continue;
-	                $actual=$columns_by_name[$name];
-	                $actual_default=$actual->Default===null?null:(string)$actual->Default;
-	                if(strtolower((string)$actual->Type)!==$expected[0]||(string)$actual->Null!==$expected[1]||$actual_default!==$expected[2]||strtolower((string)$actual->Extra)!==$expected[3])$missing[]=$table.'.'.$name.' definition';
-	            }
-	            $index_rows = $wpdb->get_results( "SHOW INDEX FROM `{$table}`" );
-	            $indexes = array_values( array_unique( array_map( static function ( $row ) { return (string) $row->Key_name; }, (array) $index_rows ) ) );
-	            foreach ( $required['indexes'] as $index ) if ( ! in_array( $index, $indexes, true ) ) $missing[] = $table . ' index ' . $index;
-	            $semantic_index_rows=$index_rows&&isset($index_rows[0]->Non_unique)&&isset($index_rows[0]->Column_name);
-	            foreach(($index_semantics[$table]??array()) as $name=>$expected){
-	                if(!$semantic_index_rows)continue;
-	                $rows=array_values(array_filter((array)$index_rows,static function($row)use($name){return(string)$row->Key_name===$name;}));
-	                usort($rows,static function($a,$b){return(int)$a->Seq_in_index<=>(int)$b->Seq_in_index;});
-	                $unique=$rows&&((int)$rows[0]->Non_unique===0);
-	                $index_columns=array_map(static function($row){return(string)$row->Column_name;},$rows);
-	                if(!$rows||$unique!==$expected[0]||$index_columns!==$expected[1])$missing[]=$table.' index '.$name.' definition';
-	            }
-	        }
-        return $missing ? new WP_Error( 'migration_verification_failed', 'Database migration is incomplete: ' . implode( ', ', $missing ) ) : true;
     }
 
     public static function migration_health_notice() {
@@ -1105,14 +1030,93 @@ class MBS_Database {
             if ( is_wp_error( $result ) ) return $result;
             $result = self::migration_query( "ALTER TABLE {$queue_table_name} ADD COLUMN reference_id BIGINT(20) UNSIGNED DEFAULT NULL AFTER reference_type", 'queue reference_id addition' );
             if ( is_wp_error( $result ) ) return $result;
-            $indexes = $wpdb->get_results( "SHOW INDEX FROM {$queue_table_name} WHERE Key_name = 'message_key'" );
+            $indexes = $wpdb->get_results( "SHOW INDEX FROM {$queue_table_name} WHERE Key_name='message_key'" );
             if ( empty( $indexes ) ) {
                 $result = self::migration_query( "ALTER TABLE {$queue_table_name} ADD UNIQUE KEY message_key (message_key)", 'queue message_key index' );
                 if ( is_wp_error( $result ) ) return $result;
             }
-            $indexes = $wpdb->get_results( "SHOW INDEX FROM {$queue_table_name} WHERE Key_name = 'idx_queue_processing'" );
-            if ( empty( $indexes ) ) {
-                $result = self::migration_query( "ALTER TABLE {$queue_table_name} ADD KEY idx_queue_processing (status, next_retry)", 'queue processing index' );
+        }
+
+        // v3.48.0-schema-16: Drop exact duplicate indexes if present on upgraded installs.
+        $dup_indexes = array(
+            array( $table, 'idx_ref', 'drop duplicate bookings idx_ref' ),
+            array( $queue_table_name, 'idx_queue_processing', 'drop duplicate queue idx_queue_processing' ),
+        );
+        foreach ( $dup_indexes as $dup ) {
+            $existing_idx = $wpdb->get_results( "SHOW INDEX FROM {$dup[0]} WHERE Key_name='{$dup[1]}'" );
+            if ( ! empty( $existing_idx ) ) {
+                $result = self::migration_query( "ALTER TABLE {$dup[0]} DROP INDEX {$dup[1]}", $dup[2] );
+                if ( is_wp_error( $result ) ) return $result;
+            }
+        }
+
+        // v3.48.0-schema-16: Email queue diagnostic & retry columns.
+        $queue_diag_cols = array(
+            'failure_category'   => "VARCHAR(30) DEFAULT NULL AFTER last_error",
+            'last_error_code'    => "VARCHAR(80) DEFAULT NULL AFTER failure_category",
+            'last_error_details' => "TEXT DEFAULT '' AFTER last_error_code",
+            'last_attempt_at'    => "DATETIME DEFAULT NULL AFTER last_error_details",
+            'failed_at'          => "DATETIME DEFAULT NULL AFTER last_attempt_at",
+            'resent_from_id'     => "BIGINT(20) UNSIGNED DEFAULT NULL AFTER failed_at",
+            'resent_by'          => "BIGINT(20) UNSIGNED DEFAULT NULL AFTER resent_from_id",
+        );
+        foreach ( $queue_diag_cols as $col_name => $col_def ) {
+            $col = $wpdb->get_results( "SHOW COLUMNS FROM {$queue_table_name} LIKE '{$col_name}'" );
+            if ( empty( $col ) ) {
+                $result = self::migration_query( "ALTER TABLE {$queue_table_name} ADD COLUMN {$col_name} {$col_def}", "queue {$col_name} addition" );
+                if ( is_wp_error( $result ) ) return $result;
+            }
+        }
+
+        // v3.48.0-schema-16: Indexed related_ref column on mathlin_invoice_items + backfill from pricing_snapshot_json.
+        $item_table_name = $wpdb->prefix . MBS_INVOICE_ITEM_TABLE;
+        $col = $wpdb->get_results( "SHOW COLUMNS FROM {$item_table_name} LIKE 'related_ref'" );
+        if ( empty( $col ) ) {
+            $result = self::migration_query( "ALTER TABLE {$item_table_name} ADD COLUMN related_ref VARCHAR(30) DEFAULT NULL AFTER booking_ref", 'invoice_items related_ref addition' );
+            if ( is_wp_error( $result ) ) return $result;
+        }
+        $unbackfilled_items = $wpdb->get_results( "SELECT id, pricing_snapshot_json FROM {$item_table_name} WHERE related_ref IS NULL AND pricing_snapshot_json LIKE '%\"related_ref\"%'" );
+        if ( is_array( $unbackfilled_items ) ) {
+            foreach ( $unbackfilled_items as $item_row ) {
+                if ( ! isset( $item_row->id, $item_row->pricing_snapshot_json ) ) continue;
+                $decoded = json_decode( (string) $item_row->pricing_snapshot_json, true );
+                if ( is_array( $decoded ) && ! empty( $decoded['related_ref'] ) ) {
+                    $ref_val = sanitize_text_field( (string) $decoded['related_ref'] );
+                    if ( $ref_val !== '' ) {
+                        $wpdb->update( $item_table_name, array( 'related_ref' => substr( $ref_val, 0, 30 ) ), array( 'id' => (int) $item_row->id ) );
+                    }
+                }
+            }
+        }
+
+        // v3.48.0-schema-16: Hot-path indexes across bookings, invoices, items, audit, queue, mod_requests, and OSM tables.
+        $invoice_table_name    = $wpdb->prefix . MBS_INVOICE_TABLE;
+        $audit_table_name      = $wpdb->prefix . 'mathlin_audit_log';
+        $mod_table_name        = $wpdb->prefix . 'mathlin_mod_requests';
+        $osm_outbox_table_name = $wpdb->prefix . MBS_OSM_OUTBOX_TABLE;
+        $osm_payout_table_name = $wpdb->prefix . MBS_OSM_PAYOUT_TABLE;
+        $new_indexes = array(
+            array( $table, 'idx_status_scout_date', '(status, scout_use, booking_date)' ),
+            array( $table, 'idx_date_end', '(booking_date_end, booking_date)' ),
+            array( $table, 'idx_series_date', '(series_id, booking_date)' ),
+            array( $table, 'idx_user_id', '(user_id)' ),
+            array( $invoice_table_name, 'idx_invoice_email', '(contact_email)' ),
+            array( $invoice_table_name, 'idx_invoice_issued', '(document_type, status, issued_at)' ),
+            array( $item_table_name, 'idx_item_related_ref', '(related_ref)' ),
+            array( $audit_table_name, 'idx_ref_created', '(ref, created_at)' ),
+            array( $queue_table_name, 'idx_queue_reference', '(reference_type, reference_id, id)' ),
+            array( $queue_table_name, 'idx_queue_failed', '(status, failure_category, failed_at)' ),
+            array( $queue_table_name, 'idx_queue_lease', '(status, lease_expires_at)' ),
+            array( $queue_table_name, 'idx_queue_status_created', '(status, created_at)' ),
+            array( $mod_table_name, 'idx_ref_status', '(booking_ref, status)' ),
+            array( $mod_table_name, 'idx_status_created', '(status, created_at)' ),
+            array( $osm_outbox_table_name, 'idx_lease', '(status, lease_expires_at)' ),
+            array( $osm_payout_table_name, 'idx_lease', '(status, lease_expires_at)' ),
+        );
+        foreach ( $new_indexes as $idx ) {
+            $existing_idx = $wpdb->get_results( "SHOW INDEX FROM {$idx[0]} WHERE Key_name='{$idx[1]}'" );
+            if ( empty( $existing_idx ) ) {
+                $result = self::migration_query( "ALTER TABLE {$idx[0]} ADD KEY {$idx[1]} {$idx[2]}", "index {$idx[1]} on {$idx[0]}" );
                 if ( is_wp_error( $result ) ) return $result;
             }
         }

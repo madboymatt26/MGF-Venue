@@ -74,8 +74,8 @@ class MBS_Dashboard_Widget {
         <?php endif;
         if ( $email_stats['failed'] > 0 ) : ?>
         <div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:0.85rem;color:#991b1b;">
-            ⚠️ <strong><?php echo $email_stats['failed']; ?> email(s) failed or became ineligible.</strong> Review delivery before retrying.
-            <a href="<?php echo admin_url( 'admin.php?page=mathlin-analytics' ); ?>" style="color:#991b1b;">View details →</a>
+            ⚠️ <strong><?php echo (int) $email_stats['failed']; ?> email(s) failed or became ineligible.</strong> Review delivery before retrying.
+            <a href="<?php echo esc_url( admin_url( 'admin.php?page=mathlin-health&open_email_queue=failed' ) ); ?>" style="color:#991b1b;">Inspect errors &amp; resend →</a>
         </div>
         <?php endif; ?>
         <?php if ( $email_stats['pending'] > 0 ) : ?>

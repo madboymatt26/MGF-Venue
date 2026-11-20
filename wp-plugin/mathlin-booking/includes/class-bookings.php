@@ -159,15 +159,6 @@ class MBS_Bookings {
     }
 
     /**
-     * Whether a tier is allowed to receive access codes before full payment.
-     * Used for trusted B2B tiers (councils, commercial PO customers).
-     */
-    public static function tier_bypasses_access_gate( $tier = 'standard' ) {
-        $tiers = self::get_pricing_tiers();
-        return ! empty( $tiers[ $tier ]['bypass_access_gate'] );
-    }
-
-    /**
      * Whether a tier is configured for offline invoicing (BACS / Purchase Order).
      * Offline tiers do not receive WooCommerce "Pay Now" links and are exempt
      * from aggressive payment-chasing.
@@ -463,10 +454,91 @@ class MBS_Bookings {
         global $wpdb;
         $table = $wpdb->prefix . MBS_TABLE;
         do {
-            $ref    = 'MBS-' . strtoupper( substr( base_convert( uniqid(), 16, 36 ), -6 ) );
+            try {
+                $suffix = strtoupper( bin2hex( random_bytes( 4 ) ) );
+            } catch ( \Exception $e ) {
+                $suffix = strtoupper( wp_generate_password( 8, false, false ) );
+            }
+            $ref    = 'MBS-' . $suffix;
             $exists = $wpdb->get_var( $wpdb->prepare( "SELECT id FROM {$table} WHERE ref = %s", $ref ) );
         } while ( $exists );
         return $ref;
+    }
+
+    /**
+     * Ensure a booking has a persisted per-booking secret (modification_token).
+     */
+    public static function ensure_modification_token( $booking ) {
+        if ( ! $booking || empty( $booking->ref ) ) return '';
+        if ( ! empty( $booking->modification_token ) ) return (string) $booking->modification_token;
+        try {
+            $token = bin2hex( random_bytes( 24 ) );
+        } catch ( \Exception $e ) {
+            $token = wp_generate_password( 32, false );
+        }
+        global $wpdb;
+        if ( isset( $wpdb ) ) {
+            $wpdb->update(
+                $wpdb->prefix . MBS_TABLE,
+                array( 'modification_token' => $token ),
+                array( 'ref' => $booking->ref )
+            );
+        }
+        $booking->modification_token = $token;
+        return $token;
+    }
+
+    /**
+     * Derive a purpose-scoped HMAC token bound to a booking's secret and reference.
+     *
+     * @param object $booking     Booking row.
+     * @param string $purpose     One of 'pay', 'modify', 'feedback', 'invoice'.
+     * @param int    $ttl_seconds Optional expiry in seconds (0 = revocable via secret rotation).
+     * @return string
+     */
+    public static function scoped_token( $booking, $purpose, $ttl_seconds = 0 ) {
+        if ( ! $booking || empty( $booking->ref ) ) return '';
+        $purpose = sanitize_key( (string) $purpose );
+        if ( ! in_array( $purpose, array( 'pay', 'modify', 'feedback', 'invoice' ), true ) ) return '';
+        $secret = self::ensure_modification_token( $booking );
+        if ( $secret === '' ) return '';
+        $exp = $ttl_seconds > 0 ? ( time() + (int) $ttl_seconds ) : 0;
+        $salt = function_exists( 'wp_salt' ) ? wp_salt( 'auth' ) : 'mbs_scoped_token';
+        $sig = hash_hmac( 'sha256', 'mbs_v1|' . $purpose . '|' . $booking->ref . '|' . $exp, $secret . '|' . $salt );
+        return 'v1.' . $exp . '.' . $sig;
+    }
+
+    /**
+     * Verify a purpose-scoped HMAC token, with backward-compatible fallback for
+     * legacy raw modification_token links already sent to hirers.
+     *
+     * @param object $booking Booking row.
+     * @param string $purpose Expected purpose ('pay', 'modify', 'feedback', 'invoice').
+     * @param string $token   Token presented by caller.
+     * @return bool
+     */
+    public static function verify_scoped_token( $booking, $purpose, $token ) {
+        if ( ! $booking || empty( $booking->ref ) || empty( $booking->modification_token ) ) return false;
+        if ( ! is_string( $token ) || $token === '' ) return false;
+        $purpose = sanitize_key( (string) $purpose );
+        if ( ! in_array( $purpose, array( 'pay', 'modify', 'feedback', 'invoice' ), true ) ) return false;
+
+        if ( strpos( $token, 'v1.' ) === 0 ) {
+            $parts = explode( '.', $token );
+            if ( count( $parts ) !== 3 || ! ctype_digit( $parts[1] ) || ! preg_match( '/^[a-f0-9]{64}$/', $parts[2] ) ) {
+                return false;
+            }
+            $exp = (int) $parts[1];
+            if ( $exp > 0 && time() > $exp ) {
+                return false;
+            }
+            $salt = function_exists( 'wp_salt' ) ? wp_salt( 'auth' ) : 'mbs_scoped_token';
+            $expected = hash_hmac( 'sha256', 'mbs_v1|' . $purpose . '|' . $booking->ref . '|' . $exp, $booking->modification_token . '|' . $salt );
+            return hash_equals( $expected, $parts[2] );
+        }
+
+        // Backward-compatible fallback for legacy links carrying the raw modification_token.
+        return hash_equals( (string) $booking->modification_token, $token );
     }
 
     /**
@@ -684,6 +756,8 @@ class MBS_Bookings {
         }
 
         if ( $manage_transaction && $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'transaction_commit_failed', 'Could not commit booking creation.' ); }
+
+        self::invalidate_pending_count_cache();
 
         // Audit log
         MBS_Audit_Log::log( $ref, 'created', 'Booking created by ' . sanitize_text_field( $data['name'] ) . ' for ' . sanitize_text_field( $data['space'] ) . ' on ' . sanitize_text_field( $data['booking_date'] ), 0 );
@@ -949,6 +1023,10 @@ class MBS_Bookings {
             }
         }
 
+        if ( $result !== false ) {
+            self::invalidate_pending_count_cache();
+        }
+
         return $result;
     }
 
@@ -979,6 +1057,7 @@ class MBS_Bookings {
             }
             if ( $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); return false; }
         }
+        self::invalidate_pending_count_cache();
         return $deleted;
     }
 
@@ -1360,6 +1439,18 @@ class MBS_Bookings {
         $table = $wpdb->prefix . MBS_TABLE;
         return $wpdb->get_results( $wpdb->prepare(
             "SELECT * FROM {$table} WHERE series_id = %s ORDER BY booking_date ASC",
+            $series_id
+        ) );
+    }
+
+    /**
+     * Count bookings in a series without loading every row.
+     */
+    public static function count_series( $series_id ) {
+        global $wpdb;
+        $table = $wpdb->prefix . MBS_TABLE;
+        return (int) $wpdb->get_var( $wpdb->prepare(
+            "SELECT COUNT(*) FROM {$table} WHERE series_id = %s",
             $series_id
         ) );
     }
@@ -1891,6 +1982,7 @@ class MBS_Bookings {
             . ( $future_only ? ' (future only, from ' . $today . ')' : ' (entire series, past and future)' )
         ) ) return false;
 
+        self::invalidate_pending_count_cache();
         return (int) $result;
     }
 
@@ -1918,19 +2010,42 @@ class MBS_Bookings {
         $table = $wpdb->prefix . MBS_TABLE;
         $days_after = (int) get_option( 'mbs_auto_archive_days', 7 );
         $threshold  = wp_date( 'Y-m-d', strtotime( "-{$days_after} days" ) );
-        return $wpdb->query( $wpdb->prepare(
+        $updated = $wpdb->query( $wpdb->prepare(
             "UPDATE {$table} SET status = 'archived' WHERE COALESCE(NULLIF(booking_date_end, ''), booking_date) < %s AND status IN ('confirmed', 'deposit_paid', 'cancelled')",
             $threshold
         ) );
+        if ( $updated ) {
+            self::invalidate_pending_count_cache();
+        }
+        return $updated;
     }
 
     /**
-     * Count bookings with 'pending' status.
+     * Invalidate the cached pending bookings count.
+     */
+    public static function invalidate_pending_count_cache() {
+        if ( function_exists( 'delete_transient' ) ) {
+            delete_transient( 'mbs_pending_bookings_count' );
+        }
+    }
+
+    /**
+     * Count bookings with 'pending' status (60-second transient cache).
      */
     public static function get_pending_count() {
+        if ( function_exists( 'get_transient' ) ) {
+            $cached = get_transient( 'mbs_pending_bookings_count' );
+            if ( $cached !== false ) {
+                return (int) $cached;
+            }
+        }
         global $wpdb;
         $table = $wpdb->prefix . MBS_TABLE;
-        return (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status = 'pending'" );
+        $count = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status = 'pending'" );
+        if ( function_exists( 'set_transient' ) ) {
+            set_transient( 'mbs_pending_bookings_count', $count, 60 );
+        }
+        return $count;
     }
 
     /**

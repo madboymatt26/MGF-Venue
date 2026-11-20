@@ -60,11 +60,12 @@ jQuery(function($) {
                 if (res.data.verification_required) { $res.text(res.data.message).show(); return; }
                 var b = res.data;
                 var statusColors = {
-                    pending:   'background:#fff3cd;color:#856404',
-                    confirmed: 'background:#d1fae5;color:#065f46',
-                    paid:      'background:#dbeafe;color:#1e40af',
-                    cancelled: 'background:#fee2e2;color:#991b1b',
-                    archived:  'background:#f3f4f6;color:#6b7280'
+                    pending:      'background:#fff3cd;color:#856404',
+                    confirmed:    'background:#d1fae5;color:#065f46',
+                    deposit_paid: 'background:#fef3c7;color:#92400e',
+                    paid:         'background:#dbeafe;color:#1e40af',
+                    cancelled:    'background:#fee2e2;color:#991b1b',
+                    archived:     'background:#f3f4f6;color:#6b7280'
                 };
                 var statusStyle = statusColors[b.status] || '';
 
@@ -82,21 +83,21 @@ jQuery(function($) {
                 html += row('Invoice', b.invoice_number);
                 html += '</table>';
 
-                if (b.payment_url && b.status === 'confirmed') {
+                if (b.payment_url && safeUrl(b.payment_url) && b.status === 'confirmed') {
                     html += '<div style="margin-top:1rem;text-align:center;">';
-                    html += '<a href="' + b.payment_url + '" class="nms-btn nms-btn-primary nms-btn-lg">💳 Pay Now</a>';
+                    html += '<a href="' + escAttr(safeUrl(b.payment_url)) + '" class="nms-btn nms-btn-primary nms-btn-lg">💳 Pay Now</a>';
                     html += '</div>';
                 }
 
-                if (b.ical_url) {
+                if (b.ical_url && safeUrl(b.ical_url)) {
                     html += '<div style="margin-top:0.75rem;text-align:center;">';
-                    html += '<a href="' + b.ical_url + '" class="nms-btn nms-btn-sm" style="background:#f5f0ff;color:#7413DC;border-color:#e0d0f0;">📅 Add to Calendar</a>';
+                    html += '<a href="' + escAttr(safeUrl(b.ical_url)) + '" class="nms-btn nms-btn-sm" style="background:#f5f0ff;color:#7413DC;border-color:#e0d0f0;">📅 Add to Calendar</a>';
                     html += '</div>';
                 }
 
-                if (b.modify_url && b.status !== 'cancelled' && b.status !== 'archived') {
+                if (b.modify_url && safeUrl(b.modify_url) && b.status !== 'cancelled' && b.status !== 'archived') {
                     html += '<div style="margin-top:0.75rem;text-align:center;">';
-                    html += '<a href="' + b.modify_url + '" style="color:#7413DC;font-size:0.85rem;">Need to change something? Request a modification</a>';
+                    html += '<a href="' + escAttr(safeUrl(b.modify_url)) + '" style="color:#7413DC;font-size:0.85rem;">Need to change something? Request a modification</a>';
                     html += '</div>';
                 }
 
@@ -104,20 +105,29 @@ jQuery(function($) {
                 $res.html(html).show();
                 if (window.NMSAdditionalCharges) $res.append(window.NMSAdditionalCharges(res.data.additional_charges));
             } else {
-                $res.html('<div class="nms-alert nms-alert-error">' + (res.data.message || 'Booking not found.') + '</div>').show();
+                $res.empty().append($('<div class="nms-alert nms-alert-error">').text((res.data && res.data.message) || 'Booking not found.')).show();
             }
         }).fail(function() {
             $btn.prop('disabled', false).text('Look Up');
-            $res.html('<div class="nms-alert nms-alert-error">A network error occurred. Please try again.</div>').show();
+            $res.empty().append($('<div class="nms-alert nms-alert-error">').text('A network error occurred. Please try again.')).show();
         });
     });
 
     function row(label, value) {
-        return '<tr><td style="padding:6px 0;font-weight:600;color:#6b7280;width:35%;">' + label + '</td><td style="padding:6px 0;">' + escHtml(value || '—') + '</td></tr>';
+        return '<tr><td style="padding:6px 0;font-weight:600;color:#6b7280;width:35%;">' + escHtml(label) + '</td><td style="padding:6px 0;">' + escHtml(value || '—') + '</td></tr>';
     }
 
     function escHtml(str) {
         return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    function escAttr(str) {
+        return escHtml(str).replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+    }
+
+    function safeUrl(url) {
+        var u = String(url || '').trim();
+        return (/^https?:\/\//i.test(u) || u.charAt(0) === '/') ? u : '';
     }
 });
 </script>

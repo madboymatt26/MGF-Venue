@@ -9,7 +9,8 @@
     <div class="nms-filters">
         <form method="get" action="">
             <input type="hidden" name="page" value="mathlin-archived">
-            <input type="search" name="s" value="<?php echo esc_attr( $search ); ?>" placeholder="Search archived bookings…" class="nms-search-input">
+            <label class="screen-reader-text" for="nms-archived-search">Search archived bookings</label>
+            <input type="search" id="nms-archived-search" name="s" value="<?php echo esc_attr( $search ); ?>" placeholder="Search archived bookings…" class="nms-search-input">
             <button type="submit" class="button">Search</button>
             <?php if ( $search ) : ?>
                 <a href="?page=mathlin-archived" class="button">Clear</a>
@@ -38,25 +39,24 @@
         </thead>
         <tbody>
         <?php foreach ( $bookings as $b ) :
-            $spaces   = MBS_Bookings::get_spaces();
-            $is_daily = isset( $spaces[ $b->space ] ) && $spaces[ $b->space ]['unit'] === 'day';
+            $is_daily = ! empty( $b->all_day );
             $archive_series = ! empty( $b->series_id ) ? MBS_Series::get( $b->series_id ) : null;
-            $archive_series_billing = $archive_series && in_array( MBS_Series::billing_treatment_for_booking( $b ), array( 'manual_consolidated', 'invoice_managed', 'none' ), true );
+            $archive_series_billing = $archive_series && in_array( MBS_Series::billing_treatment_for_booking( $b, $archive_series ), array( 'manual_consolidated', 'invoice_managed', 'none' ), true );
         ?>
             <tr>
-                <td><strong><?php echo esc_html( $b->ref ); ?></strong></td>
-                <td>
+                <td data-label="Ref"><strong><?php echo esc_html( $b->ref ); ?></strong></td>
+                <td data-label="Name">
                     <?php echo esc_html( $b->name ); ?>
                     <?php if ( $b->organisation ) : ?>
                         <br><small class="nms-muted"><?php echo esc_html( $b->organisation ); ?></small>
                     <?php endif; ?>
                 </td>
-                <td><?php echo esc_html( $b->space ); ?></td>
-                <td><?php echo esc_html( date( 'D j M Y', strtotime( $b->booking_date ) ) ); ?></td>
-                <td><?php echo $is_daily ? 'All day' : esc_html( $b->start_time . ' – ' . $b->end_time ); ?></td>
-                <td><?php echo esc_html( $b->attendees ); ?></td>
-                <td><strong>&pound;<?php echo number_format( $b->amount, 2 ); ?></strong></td>
-                <td>
+                <td data-label="Space"><?php echo esc_html( $b->space ); ?></td>
+                <td data-label="Date"><?php echo esc_html( date( 'D j M Y', strtotime( $b->booking_date ) ) ); ?></td>
+                <td data-label="Time"><?php echo $is_daily ? 'All day' : esc_html( $b->start_time . ' – ' . $b->end_time ); ?></td>
+                <td data-label="Guests"><?php echo esc_html( $b->attendees ); ?></td>
+                <td data-label="Amount"><strong>&pound;<?php echo number_format( $b->amount, 2 ); ?></strong></td>
+                <td data-label="Actions">
                     <div class="nms-action-btns">
                         <a href="?page=mathlin-booking&action=view&ref=<?php echo esc_attr( $b->ref ); ?>" class="button button-small">View</a>
                         <?php if ( $archive_series_billing ) : ?>

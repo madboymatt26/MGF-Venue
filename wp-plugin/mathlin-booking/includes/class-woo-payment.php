@@ -34,6 +34,7 @@ class MBS_Woo_Payment {
         add_action( 'woocommerce_order_status_cancelled',  array( 'MBS_Invoice_Reservation', 'release_order' ) );
         add_action( 'mbs_release_invoice_reservation',      array( 'MBS_Invoice_Reservation', 'release_expired' ), 10, 2 );
         add_action( 'woocommerce_after_checkout_validation', array( $this, 'validate_invoice_checkout' ), 10, 2 );
+        add_filter( 'woocommerce_coupon_is_valid_for_product', array( __CLASS__, 'exclude_payment_product_from_coupons' ), 10, 4 );
         add_action( 'woocommerce_checkout_order_created', array( __CLASS__, 'bind_and_lock_invoice_order' ) );
         add_action( 'woocommerce_before_order_object_save', array( __CLASS__, 'guard_locked_invoice_order' ) );
         add_action( 'woocommerce_before_order_item_object_save', array( __CLASS__, 'guard_locked_invoice_item' ) );
@@ -41,6 +42,25 @@ class MBS_Woo_Payment {
 
         // REST endpoint for generating payment links
         add_action( 'rest_api_init', array( $this, 'register_routes' ) );
+    }
+
+    /**
+     * Exclude the hidden venue payment product from all WooCommerce coupons.
+     */
+    public static function exclude_payment_product_from_coupons( $valid, $product, $coupon = null, $values = array() ) {
+        if ( is_array( $values ) && ( ! empty( $values['mbs_booking_ref'] ) || ! empty( $values['mbs_invoice_ref'] ) ) ) {
+            return false;
+        }
+        if ( is_object( $product ) ) {
+            $payment_product_id = (int) get_option( 'mbs_woo_product_id', 0 );
+            if ( $payment_product_id > 0 && method_exists( $product, 'get_id' ) && (int) $product->get_id() === $payment_product_id ) {
+                return false;
+            }
+            if ( method_exists( $product, 'get_slug' ) && (string) $product->get_slug() === self::PRODUCT_SLUG ) {
+                return false;
+            }
+        }
+        return $valid;
     }
 
     /**
@@ -92,6 +112,60 @@ class MBS_Woo_Payment {
     }
 
     /**
+     * Compute expected minor-unit payment amount and type for a legacy per-booking checkout.
+     *
+     * @param object $booking
+     * @return array|WP_Error { total_minor, paid_minor, remaining_minor, expected_minor, payment_type, deposit_minor }
+     */
+    private static function expected_booking_payment( $booking ) {
+        if ( ! $booking ) {
+            return new WP_Error( 'booking_not_found', 'Booking not found.' );
+        }
+        $total_minor = MBS_Money::from_decimal_string( number_format( (float) $booking->amount, 2, '.', '' ) );
+        $paid_minor  = MBS_Money::from_decimal_string( number_format( (float) ( $booking->amount_paid ?? 0 ), 2, '.', '' ) );
+        if ( is_wp_error( $total_minor ) || is_wp_error( $paid_minor ) ) {
+            return new WP_Error( 'invalid_booking_amount', 'Booking amount could not be validated.' );
+        }
+        $remaining_minor = $total_minor - $paid_minor;
+        if ( $remaining_minor < 1 ) {
+            return new WP_Error( 'booking_settled', 'This booking has no outstanding balance.' );
+        }
+
+        $deposit_settings = MBS_Bookings::get_deposit_settings();
+        $deposit_eligible = $paid_minor === 0
+            && $deposit_settings['enabled']
+            && ! MBS_Bookings::requires_full_payment( $booking->booking_date )
+            && ! ( class_exists( 'MBS_Credit_Accounts' ) && MBS_Credit_Accounts::for_booking( $booking ) );
+        $deposit_minor = null;
+        if ( $deposit_eligible ) {
+            $dep = MBS_Money::from_decimal_string( number_format( MBS_Bookings::calculate_deposit( (float) $booking->amount ), 2, '.', '' ) );
+            if ( ! is_wp_error( $dep ) && $dep >= 1 && $dep < $total_minor ) {
+                $deposit_minor = $dep;
+            }
+        }
+
+        if ( $paid_minor > 0 ) {
+            $expected_minor = $remaining_minor;
+            $payment_type   = 'balance';
+        } elseif ( $deposit_minor !== null ) {
+            $expected_minor = $deposit_minor;
+            $payment_type   = 'deposit';
+        } else {
+            $expected_minor = $total_minor;
+            $payment_type   = 'full';
+        }
+
+        return array(
+            'total_minor'     => $total_minor,
+            'paid_minor'      => $paid_minor,
+            'remaining_minor' => $remaining_minor,
+            'expected_minor'  => $expected_minor,
+            'payment_type'    => $payment_type,
+            'deposit_minor'   => $deposit_minor,
+        );
+    }
+
+    /**
      * Generate a payment URL for a booking.
      * Adds the product to cart with the booking amount and ref, then returns checkout URL.
      *
@@ -118,19 +192,9 @@ class MBS_Woo_Payment {
         $product_id = self::get_payment_product_id();
         if ( ! $product_id ) return '';
 
-        // Use the modification_token as a session-independent secret
-        // This allows payment links to work from any device/browser
-        $token = $booking->modification_token;
-        if ( empty( $token ) ) {
-            // Generate one if missing (pre-v2.0 bookings)
-            $token = wp_generate_password( 32, false );
-            global $wpdb;
-            $wpdb->update(
-                $wpdb->prefix . MBS_TABLE,
-                array( 'modification_token' => $token ),
-                array( 'ref' => $booking->ref )
-            );
-        }
+        // Derive a purpose-scoped HMAC token bound to this booking's secret.
+        $token = MBS_Bookings::scoped_token( $booking, 'pay' );
+        if ( $token === '' ) return '';
 
         $url = add_query_arg( array(
             'mbs_pay'  => '1',
@@ -142,7 +206,8 @@ class MBS_Woo_Payment {
     }
 
     /**
-     * Handle the payment URL — add product to cart and redirect to checkout.
+     * Handle the payment URL — render a read-only confirmation form on GET and
+     * only mutate WooCommerce cart on a nonce-validated POST.
      * Hooked into template_redirect.
      */
     public static function handle_payment_redirect() {
@@ -154,70 +219,114 @@ class MBS_Woo_Payment {
         if ( ! isset( $_GET['mbs_pay'] ) || $_GET['mbs_pay'] !== '1' ) return;
         if ( ! self::is_available() ) return;
 
-        $ref   = sanitize_text_field( $_GET['ref'] ?? '' );
-        $token = sanitize_text_field( $_GET['token'] ?? '' );
+        $method = strtoupper( $_SERVER['REQUEST_METHOD'] ?? 'GET' );
+        $input  = $method === 'POST' ? $_POST : $_GET;
+        $ref    = sanitize_text_field( wp_unslash( $input['ref'] ?? '' ) );
+        $token  = sanitize_text_field( wp_unslash( $input['token'] ?? '' ) );
 
         if ( ! $ref || ! $token ) {
             wp_die( 'Invalid payment link. Please contact us for assistance.' );
         }
 
-        // Verify booking exists and token matches
+        // Verify booking exists and scoped (or legacy) token matches
         $booking = MBS_Bookings::get( $ref );
         if ( ! $booking ) {
             wp_die( 'Booking not found. Please contact us for assistance.' );
         }
 
-        if ( empty( $booking->modification_token ) || ! hash_equals( $booking->modification_token, $token ) ) {
+        if ( ! MBS_Bookings::verify_scoped_token( $booking, 'pay', $token ) ) {
             wp_die( 'Invalid payment link. Please contact us for assistance.' );
         }
 
-        // Allow payment if there's a balance due (regardless of status)
-        $balance = (float) $booking->amount - (float) ( $booking->amount_paid ?? 0 );
-        if ( $balance <= 0.01 || in_array( $booking->status, array( 'cancelled', 'archived' ) ) ) {
+        if ( MBS_Bookings::booking_is_offline( $booking ) ) {
+            wp_die( 'This booking is configured for offline / BACS payment.' );
+        }
+
+        // Allow payment if there's a balance due (non-cancelled/archived status)
+        if ( in_array( $booking->status, array( 'cancelled', 'archived' ), true ) ) {
             wp_die( 'This booking is not available for payment. It may have already been paid or cancelled.' );
         }
 
-        // Determine payment amount based on deposit settings
-        if ( class_exists( 'MBS_Payment_Expiry' ) && ! MBS_Payment_Expiry::checkout_allowed( $ref ) ) wp_die( 'The payment deadline has passed or this booking requires manual review. Please contact the booking coordinator.' );
-        $deposit_settings = MBS_Bookings::get_deposit_settings();
-        $total_amount     = floatval( $booking->amount );
-        $amount_paid      = floatval( $booking->amount_paid ?? 0 );
-
-        if ( $amount_paid > 0 ) {
-            // Pay whatever is still owed
-            $amount = $total_amount - $amount_paid;
-        } elseif ( $deposit_settings['enabled'] && ! MBS_Bookings::requires_full_payment( $booking->booking_date ) && ! ( class_exists( 'MBS_Credit_Accounts' ) && MBS_Credit_Accounts::for_booking( $booking ) ) ) {
-            // Pay deposit only
-            $amount = MBS_Bookings::calculate_deposit( $total_amount );
-        } else {
-            // Full payment required
-            $amount = $total_amount;
+        if ( class_exists( 'MBS_Payment_Expiry' ) && ! MBS_Payment_Expiry::checkout_allowed( $ref ) ) {
+            wp_die( 'The payment deadline has passed or this booking requires manual review. Please contact the booking coordinator.' );
         }
 
-        $amount = max( 0.01, round( $amount, 2 ) );
+        $calc = self::expected_booking_payment( $booking );
+        if ( is_wp_error( $calc ) ) {
+            wp_die( 'This booking is not available for payment. It may have already been paid or cancelled.' );
+        }
+
+        $amount_minor = (int) $calc['expected_minor'];
+        $payment_type = $calc['payment_type'];
+        self::require_booking_checkout_intent( $booking, $token, $method, $amount_minor, $payment_type );
+
+        if ( ! WC()->session || ! WC()->cart ) {
+            wp_die( 'Checkout could not be started. Please enable cookies and open your payment link again.', '', array( 'response' => 503 ) );
+        }
+
+        $decimal = MBS_Money::decimal( $amount_minor );
+        if ( is_wp_error( $decimal ) ) {
+            wp_die( 'The booking payment amount could not be prepared for checkout.' );
+        }
 
         // Clear cart and add our product
         WC()->cart->empty_cart();
 
         $product_id = self::get_payment_product_id();
+        if ( ! $product_id ) {
+            wp_die( 'Checkout could not be prepared. Please contact us for assistance.', '', array( 'response' => 503 ) );
+        }
 
         // Set the price dynamically via filter
-        add_filter( 'woocommerce_product_get_price', function( $price, $product ) use ( $amount, $product_id ) {
-            if ( $product->get_id() == $product_id ) return $amount;
+        add_filter( 'woocommerce_product_get_price', function( $price, $product ) use ( $decimal, $product_id ) {
+            if ( $product->get_id() == $product_id ) return $decimal;
             return $price;
         }, 10, 2 );
 
         $cart_item_data = array(
-            'mbs_booking_ref'    => $ref,
-            'mbs_booking_amount' => $amount,
-            'mbs_payment_type'   => ( $amount_paid > 0 ) ? 'balance' : ( ( $amount < $total_amount ) ? 'deposit' : 'full' ),
+            'mbs_booking_ref'          => $ref,
+            'mbs_booking_amount'       => (float) $decimal,
+            'mbs_booking_amount_minor' => $amount_minor,
+            'mbs_payment_type'         => $payment_type,
         );
 
-        WC()->cart->add_to_cart( $product_id, 1, 0, array(), $cart_item_data );
+        $added = WC()->cart->add_to_cart( $product_id, 1, 0, array(), $cart_item_data );
+        if ( ! $added ) {
+            wp_die( 'Checkout could not be prepared. Please open your payment link and try again.', '', array( 'response' => 503 ) );
+        }
 
-        // Redirect to checkout
-        wp_redirect( wc_get_checkout_url() );
+        // Redirect to checkout using wp_safe_redirect() + 303 See Other
+        wp_safe_redirect( wc_get_checkout_url(), 303 );
         exit;
+    }
+
+    /** Booking payment links are read-only until the payer submits the confirmation form. */
+    private static function require_booking_checkout_intent( $booking, $token, $method, $amount_minor, $payment_type ) {
+        nocache_headers();
+        if ( ! headers_sent() ) {
+            header( 'Referrer-Policy: no-referrer' );
+            header( 'X-Robots-Tag: noindex, nofollow, noarchive' );
+        }
+        if ( $method === 'HEAD' ) wp_die( '', '', array( 'response' => 200 ) );
+        if ( ! in_array( $method, array( 'GET', 'POST' ), true ) ) {
+            if ( ! headers_sent() ) header( 'Allow: GET, HEAD, POST' );
+            wp_die( 'This payment link supports GET, HEAD and POST only.', '', array( 'response' => 405 ) );
+        }
+        $action = 'mbs_booking_checkout:' . $booking->ref . ':' . (int) $amount_minor;
+        if ( $method === 'POST' ) {
+            $nonce = sanitize_text_field( wp_unslash( $_POST['_mbs_booking_nonce'] ?? '' ) );
+            if ( ( $_POST['mbs_booking_confirm'] ?? '' ) !== '1' || ! wp_verify_nonce( $nonce, $action ) ) {
+                wp_die( 'Your payment confirmation expired or the balance changed. Please reopen the original payment link and confirm again.', '', array( 'response' => 403 ) );
+            }
+            return;
+        }
+        $payment_label = $payment_type === 'deposit'
+            ? 'Deposit payment'
+            : ( $payment_type === 'balance' ? 'Remaining balance' : 'Full booking payment' );
+        ob_start();
+        include MBS_PLUGIN_DIR . 'public/views/booking-payment-confirm.php';
+        $html = ob_get_clean();
+        wp_die( $html, 'Confirm booking payment', array( 'response' => 200 ) );
     }
 
     /** Invoice links are read-only until the payer submits the confirmation form. */
@@ -372,6 +481,12 @@ class MBS_Woo_Payment {
     public static function save_order_meta( $item, $cart_item_key, $values, $order ) {
         if ( isset( $values['mbs_booking_ref'] ) ) {
             $item->add_meta_data( '_mbs_booking_ref', $values['mbs_booking_ref'], true );
+            if ( isset( $values['mbs_booking_amount_minor'] ) ) {
+                $item->add_meta_data( '_mbs_booking_amount_minor', (int) $values['mbs_booking_amount_minor'], true );
+            }
+            if ( isset( $values['mbs_payment_type'] ) ) {
+                $item->add_meta_data( '_mbs_payment_type', sanitize_key( (string) $values['mbs_payment_type'] ), true );
+            }
             if ( class_exists( 'MBS_Payment_Expiry' ) && MBS_Payment_Expiry::enabled() && MBS_Payment_Expiry::get( $values['mbs_booking_ref'] ) ) $order->update_meta_data( '_mbs_booking_ref', $values['mbs_booking_ref'] );
         }
         if ( isset( $values['mbs_invoice_ref'] ) ) {
@@ -400,23 +515,49 @@ class MBS_Woo_Payment {
         self::lock_invoice_order( $order );
     }
 
-    /** Reject stale, mismatched or second-session invoice carts before order creation. */
+    /** Reject stale, mismatched or adjusted invoice/booking carts before order creation. */
     public function validate_invoice_checkout( $data, $errors ) {
         if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'online' ) && function_exists( 'WC' ) && WC()->cart ) {
             foreach ( WC()->cart->get_cart() as $item ) if ( ! empty( $item['mbs_invoice_ref'] ) || ! empty( $item['mbs_booking_ref'] ) ) $errors->add( 'venue_payments_disabled', 'Venue payments have been disabled. Please contact the booking coordinator.' );
         }
         if ( ! WC()->cart ) return;
         $invoice_items = 0;
+        $booking_items = 0;
+        $cart_count = count( WC()->cart->get_cart() );
+        $has_coupons_or_fees = ! empty( WC()->cart->get_applied_coupons() ) || ! empty( WC()->cart->get_fees() );
+        $cart_total = MBS_Money::from_decimal_string( (string) WC()->cart->get_total( 'edit' ) );
+        $currency = function_exists( 'get_woocommerce_currency' ) ? strtoupper( (string) get_woocommerce_currency() ) : '';
+
         foreach ( WC()->cart->get_cart() as $cart_item ) {
-            if ( ! empty( $cart_item['mbs_booking_ref'] ) && class_exists( 'MBS_Payment_Expiry' ) && ! MBS_Payment_Expiry::checkout_allowed( $cart_item['mbs_booking_ref'] ) ) $errors->add( 'booking_payment_deadline', 'This hire has reached its payment deadline or requires manual review. Please contact the booking coordinator.' );
+            if ( ! empty( $cart_item['mbs_booking_ref'] ) ) {
+                $booking_items++;
+                $booking_ref = sanitize_text_field( (string) $cart_item['mbs_booking_ref'] );
+                if ( class_exists( 'MBS_Payment_Expiry' ) && ! MBS_Payment_Expiry::checkout_allowed( $booking_ref ) ) {
+                    $errors->add( 'booking_payment_deadline', 'This hire has reached its payment deadline or requires manual review. Please contact the booking coordinator.' );
+                }
+                $booking = MBS_Bookings::get( $booking_ref );
+                $calc = $booking ? self::expected_booking_payment( $booking ) : new WP_Error( 'booking_not_found', 'Booking not found.' );
+                $claimed_minor = isset( $cart_item['mbs_booking_amount_minor'] ) ? (int) $cart_item['mbs_booking_amount_minor'] : 0;
+                $invalid_booking_cart = ! $booking
+                    || in_array( $booking->status, array( 'cancelled', 'archived' ), true )
+                    || MBS_Bookings::booking_is_offline( $booking )
+                    || is_wp_error( $calc )
+                    || is_wp_error( $cart_total )
+                    || $cart_count !== 1
+                    || $has_coupons_or_fees
+                    || $currency !== 'GBP'
+                    || (int) $cart_total !== (int) $calc['expected_minor']
+                    || ( $claimed_minor > 0 && $claimed_minor !== (int) $calc['expected_minor'] );
+                if ( $invalid_booking_cart ) {
+                    $errors->add( 'mbs_booking_cart_invalid', 'Booking checkout must contain exactly one unadjusted GBP booking payment with no coupons or extra items. Please open your payment link again.' );
+                }
+            }
             if ( empty( $cart_item['mbs_invoice_ref'] ) ) continue;
             $invoice_items++;
             $invoice = MBS_Billing_Ledger::get_invoice( $cart_item['mbs_invoice_ref'] );
             $balance = $invoice ? MBS_Billing_Ledger::balance_minor( $invoice ) : 0;
             $reserved = (int) ( $cart_item['mbs_invoice_amount_minor'] ?? 0 );
-            $cart_total = MBS_Money::from_decimal_string( (string) WC()->cart->get_total( 'edit' ) );
-            $currency = function_exists( 'get_woocommerce_currency' ) ? strtoupper( (string) get_woocommerce_currency() ) : '';
-            $has_adjustments = count( WC()->cart->get_cart() ) !== 1 || ! empty( WC()->cart->get_applied_coupons() ) || ! empty( WC()->cart->get_fees() );
+            $has_adjustments = $cart_count !== 1 || $has_coupons_or_fees;
             if ( ! MBS_Invoice_Payment::is_payable( $invoice )
                 || $reserved !== $balance
                 || is_wp_error( $cart_total )
@@ -431,6 +572,65 @@ class MBS_Woo_Payment {
         if ( $invoice_items > 0 && $invoice_items !== 1 ) {
             $errors->add( 'mbs_invoice_cart_invalid', 'Invoice checkout must contain exactly one unadjusted invoice payment.' );
         }
+        if ( $booking_items > 0 && ( $booking_items !== 1 || $invoice_items > 0 ) ) {
+            $errors->add( 'mbs_booking_cart_invalid', 'Booking checkout must contain exactly one unadjusted booking payment.' );
+        }
+    }
+
+    /**
+     * Validate a captured WooCommerce order for a legacy per-booking checkout.
+     *
+     * @return array|WP_Error { actual_minor, calc, is_deposit } on success.
+     */
+    private static function validate_captured_booking_order( $order, $item, $booking ) {
+        $calc = self::expected_booking_payment( $booking );
+        if ( is_wp_error( $calc ) ) {
+            return $calc;
+        }
+        if ( MBS_Bookings::booking_is_offline( $booking ) ) {
+            return new WP_Error( 'booking_offline', 'Offline/BACS booking cannot be settled via automated card capture.' );
+        }
+        $actual_minor  = MBS_Money::from_decimal_string( (string) $order->get_total() );
+        $line_total    = MBS_Money::from_decimal_string( (string) $item->get_total() );
+        $line_subtotal = MBS_Money::from_decimal_string( (string) $item->get_subtotal() );
+        if ( is_wp_error( $actual_minor ) || is_wp_error( $line_total ) || is_wp_error( $line_subtotal ) || $actual_minor < 1 ) {
+            return new WP_Error( 'booking_order_amount_invalid', 'Captured order amount could not be validated.' );
+        }
+        $booking_item_count = 0;
+        foreach ( $order->get_items() as $candidate ) {
+            if ( $candidate->get_meta( '_mbs_booking_ref' ) ) $booking_item_count++;
+        }
+        if ( count( $order->get_items() ) !== 1 || $booking_item_count !== 1 ) {
+            return new WP_Error( 'booking_order_mixed_cart', 'Order contains multiple or mixed items and requires manual reconciliation.' );
+        }
+        if ( count( $order->get_items( 'coupon' ) ) !== 0 || count( $order->get_fees() ) !== 0 ) {
+            return new WP_Error( 'booking_order_adjusted', 'Order contains coupons or extra fees and requires manual reconciliation.' );
+        }
+        if ( strtoupper( (string) $order->get_currency() ) !== 'GBP' ) {
+            return new WP_Error( 'booking_order_currency_mismatch', 'Order currency is not GBP and requires manual reconciliation.' );
+        }
+        if ( (int) $actual_minor !== (int) $line_total || (int) $line_total !== (int) $line_subtotal ) {
+            return new WP_Error( 'booking_order_line_mismatch', 'Order total does not match the booking line subtotal and requires manual reconciliation.' );
+        }
+
+        $is_deposit = $calc['deposit_minor'] !== null && (int) $actual_minor === (int) $calc['deposit_minor'] && $booking->status === 'confirmed';
+        $is_full_or_balance = (int) $actual_minor === (int) $calc['remaining_minor'];
+        if ( ! $is_deposit && ! $is_full_or_balance ) {
+            return new WP_Error(
+                'booking_order_amount_mismatch',
+                sprintf(
+                    'Captured amount (%s) does not match expected booking payment (%s) and requires manual reconciliation.',
+                    MBS_Money::format( $actual_minor ),
+                    MBS_Money::format( $calc['expected_minor'] )
+                )
+            );
+        }
+
+        return array(
+            'actual_minor' => (int) $actual_minor,
+            'calc'         => $calc,
+            'is_deposit'   => $is_deposit,
+        );
     }
 
     private static function validate_captured_invoice_order( $order, $item, $invoice, $reservation_ref, $claimed_minor ) {
@@ -667,17 +867,25 @@ class MBS_Woo_Payment {
 
             // Process payment if there's a balance due (any non-cancelled/archived status)
             $current_balance = (float) $booking->amount - (float) ( $booking->amount_paid ?? 0 );
-            if ( $current_balance > 0.01 && ! in_array( $booking->status, array( 'cancelled', 'archived' ) ) ) {
-                $deposit_settings = MBS_Bookings::get_deposit_settings();
-                $order_total      = (float) $order->get_total();
-                $booking_total    = (float) $booking->amount;
-                $deposit_already  = (float) ( $booking->deposit_paid ?? 0 );
+            if ( $current_balance > 0.01 && ! in_array( $booking->status, array( 'cancelled', 'archived' ), true ) ) {
+                $verified = self::validate_captured_booking_order( $order, $item, $booking );
+                if ( is_wp_error( $verified ) ) {
+                    $order->update_meta_data( '_mbs_booking_ref', $ref );
+                    $order->update_meta_data( '_mbs_booking_reconciliation_required', 'yes' );
+                    $order->update_meta_data( '_mbs_booking_reconciliation_error', $verified->get_error_message() );
+                    $order->add_order_note( 'MGF Venue payment integrity check failed: ' . $verified->get_error_message() );
+                    MBS_Audit_Log::log( $ref, 'payment_reconciliation_required', 'WooCommerce Order #' . $order_id . ' blocked from auto-marking paid: ' . $verified->get_error_message(), 0 );
+                    continue;
+                }
 
-                // Determine if this is a deposit payment or full/balance payment
-                if ( $booking->status === 'confirmed' && $deposit_settings['enabled']
-                     && (float) ( $booking->amount_paid ?? 0 ) == 0
-                     && ! MBS_Bookings::requires_full_payment( $booking->booking_date )
-                     && $order_total < $booking_total * 0.9 ) {
+                $actual_minor    = (int) $verified['actual_minor'];
+                $calc            = $verified['calc'];
+                $order_total     = (float) MBS_Money::decimal( $actual_minor );
+                $booking_total   = (float) MBS_Money::decimal( (int) $calc['total_minor'] );
+                $deposit_already = (float) ( $booking->deposit_paid ?? 0 );
+
+                // Determine if this is a deposit payment or full/balance payment using exact minor units
+                if ( ! empty( $verified['is_deposit'] ) ) {
                     // This is a deposit payment
                     MBS_Bookings::update_status( $ref, 'deposit_paid' );
                     global $wpdb;
@@ -692,14 +900,14 @@ class MBS_Woo_Payment {
                         MBS_Email::notify_deposit_received( $updated_booking, $order_total );
                     }
                 } else {
-                    // Full payment or balance payment
+                    // Full payment or balance payment (verified minor total equals remaining balance)
                     MBS_Bookings::update_status( $ref, 'paid' );
-                    $amount_paid_so_far = (float) ( $booking->amount_paid ?? 0 );
+                    $new_paid_decimal = (float) MBS_Money::decimal( (int) $calc['paid_minor'] + $actual_minor );
                     global $wpdb;
                     $table = $wpdb->prefix . MBS_TABLE;
                     $wpdb->update( $table, array(
-                        'deposit_paid' => $deposit_already + $order_total,
-                        'amount_paid'  => $amount_paid_so_far + $order_total,
+                        'deposit_paid' => round( $deposit_already + $order_total, 2 ),
+                        'amount_paid'  => $new_paid_decimal,
                     ), array( 'ref' => $ref ) );
                     MBS_Audit_Log::log( $ref, 'paid', 'Payment received via WooCommerce Order #' . $order_id . '. Status updated to Paid.', 0 );
                     MBS_Email::notify_paid( $booking );

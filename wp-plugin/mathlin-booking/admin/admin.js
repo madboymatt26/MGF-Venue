@@ -796,7 +796,7 @@ jQuery(function ($) {
                 $('.mbs-term-dates-row').toggle(s.billing_mode === 'termly');
                 $('#mbs-term-list').empty();
 
-                $('#mbs-approval-modal').show();
+                $(document).trigger('mbs:open-approval-modal', [$btn]);
             }).fail(function() {
                 $btn.prop('disabled', false);
                 alert('Request failed. Please try again.');
@@ -1168,16 +1168,69 @@ jQuery(function ($) {
             $form.find('[type="submit"]').prop('disabled', false);
             $('.mbs-term-dates-row').toggle(s.billing_mode === 'termly');
             $('#mbs-term-list').empty();
-            $('#mbs-approval-modal').show();
+            openApprovalModal($btn);
         }).fail(function() {
             $btn.prop('disabled', false);
             alert('Request failed. Please try again.');
         });
     });
 
-    // Close modal
-    $(document).on('click', '#mbs-cancel-approval', function() {
-        $('#mbs-approval-modal').hide();
+    var $approvalOpener = null;
+    function getApprovalFocusable($modal) {
+        return $modal.find('a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])').filter(':visible');
+    }
+    function openApprovalModal($opener) {
+        var $modal = $('#mbs-approval-modal');
+        if (!$modal.length) return;
+        $approvalOpener = $opener && $opener.length ? $opener : $(document.activeElement);
+        $modal.prop('hidden', false).css('display', 'flex');
+        var $close = $modal.find('.mbs-approval-modal__close');
+        if ($close.length) $close.first().focus();
+        else {
+            var $first = getApprovalFocusable($modal).first();
+            if ($first.length) $first.focus();
+        }
+    }
+    function closeApprovalModal() {
+        var $modal = $('#mbs-approval-modal');
+        if (!$modal.length) return;
+        $modal.hide().prop('hidden', true);
+        if ($approvalOpener && $approvalOpener.length) {
+            $approvalOpener.focus();
+            $approvalOpener = null;
+        }
+    }
+    $(document).on('mbs:open-approval-modal', function(_e, $opener) {
+        openApprovalModal($opener);
+    });
+
+    // Close modal via cancel button, X button, or backdrop
+    $(document).on('click', '#mbs-cancel-approval, .mbs-approval-modal__close, .mbs-approval-modal__backdrop', function() {
+        closeApprovalModal();
+    });
+
+    // Escape close and Tab focus trap for approval modal
+    $(document).on('keydown', function(e) {
+        var $modal = $('#mbs-approval-modal');
+        if (!$modal.length || !$modal.is(':visible')) return;
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            closeApprovalModal();
+            return;
+        }
+        if (e.key === 'Tab') {
+            var $focusable = getApprovalFocusable($modal);
+            if (!$focusable.length) return;
+            var first = $focusable[0];
+            var last = $focusable[$focusable.length - 1];
+            if (e.shiftKey && (document.activeElement === first || !$modal[0].contains(document.activeElement))) {
+                e.preventDefault();
+                last.focus();
+            } else if (!e.shiftKey && (document.activeElement === last || !$modal[0].contains(document.activeElement))) {
+                e.preventDefault();
+                first.focus();
+            }
+        }
     });
 
     // Show/hide term dates based on billing mode
@@ -1527,13 +1580,26 @@ jQuery(function ($) {
                 $('#mbs-billing-preview-section').html('<strong>Billing preview:</strong> No periods calculated.');
                 return;
             }
-            var html = '<strong>Billing preview:</strong><table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:13px;">';
-            html += '<tr style="background:#e0d0f0;"><th style="padding:6px;">Period</th><th>Issue</th><th>Due</th><th>Sessions</th><th>Total</th></tr>';
-            res.data.periods.forEach(function(p) {
-                html += '<tr><td style="padding:4px 6px;">' + p.period + '</td><td>' + p.issue_date + '</td><td>' + p.due_date + '</td><td>' + p.sessions + '</td><td>' + p.total + '</td></tr>';
+            var $container = $('#mbs-billing-preview-section').empty();
+            $container.append($('<strong>').text('Billing preview:'));
+            var $table = $('<table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:13px;">');
+            var $theadRow = $('<tr style="background:#e0d0f0;">');
+            ['Period', 'Issue', 'Due', 'Sessions', 'Total'].forEach(function(col, idx) {
+                var $th = $('<th>').text(col);
+                if (idx === 0) $th.css('padding', '6px');
+                $theadRow.append($th);
             });
-            html += '</table>';
-            $('#mbs-billing-preview-section').html(html);
+            $table.append($theadRow);
+            res.data.periods.forEach(function(p) {
+                var $tr = $('<tr>');
+                $tr.append($('<td style="padding:4px 6px;">').text(p.period != null ? String(p.period) : ''));
+                $tr.append($('<td>').text(p.issue_date != null ? String(p.issue_date) : ''));
+                $tr.append($('<td>').text(p.due_date != null ? String(p.due_date) : ''));
+                $tr.append($('<td>').text(p.sessions != null ? String(p.sessions) : ''));
+                $tr.append($('<td>').text(p.total != null ? String(p.total) : ''));
+                $table.append($tr);
+            });
+            $container.append($table);
         });
     }
 
@@ -1546,5 +1612,527 @@ jQuery(function ($) {
     // Initial load when modal opens (from any button that shows the modal)
     $(document).on('click', '.nms-btn-review-approve, .nms-btn-series-status[data-status="confirmed"]', function() {
         setTimeout(refreshBillingPreview, 400);
+    });
+})(jQuery);
+
+// ── Email Delivery Diagnostics Modal ────────────────────────────────────────
+(function($) {
+    'use strict';
+
+    var $modal = null;
+    var $opener = null;
+    var loadGen = 0;
+    var state = {
+        tab: 'transport',
+        referenceType: '',
+        referenceId: 0,
+        contextLabel: ''
+    };
+
+    function getModal() {
+        if (!$modal) $modal = $('#mbs-email-diagnostics-modal');
+        return $modal;
+    }
+
+    function safeAdminUrl(url) {
+        if (typeof url !== 'string' || !url) return '';
+        if (url.indexOf('https://') === 0 || url.indexOf('http://') === 0 || url.indexOf('/') === 0 || url.indexOf('admin.php') === 0) {
+            return url;
+        }
+        return '';
+    }
+
+    function updateTabCounts(stats) {
+        var modal = getModal();
+        if (!stats || !modal.length) return;
+        modal.find('.mbs-email-tab__count').each(function() {
+            var key = $(this).data('count-key');
+            if (stats[key] !== undefined && stats[key] !== null) {
+                $(this).text(String(stats[key]));
+            }
+        });
+    }
+
+    function setActiveTab(tab) {
+        state.tab = tab || 'transport';
+        var modal = getModal();
+        modal.find('.mbs-email-tab').each(function() {
+            var isAct = $(this).data('tab') === state.tab;
+            $(this).toggleClass('is-active', isAct).attr('aria-selected', isAct ? 'true' : 'false');
+        });
+    }
+
+    function updateContextBar() {
+        var modal = getModal();
+        var $ctx = modal.find('#mbs-email-modal-context');
+        if (state.referenceType && state.referenceId > 0) {
+            $ctx.find('.mbs-email-modal__context-label').text('Filtered to: ' + (state.contextLabel || (state.referenceType + ' #' + state.referenceId)));
+            $ctx.show();
+        } else {
+            $ctx.hide();
+        }
+    }
+
+    function renderItems(items) {
+        var modal = getModal();
+        var $body = modal.find('#mbs-email-modal-body').empty();
+        if (!items || !items.length) {
+            $body.append($('<p class="nms-muted">').text('No email queue entries match this filter.'));
+            return;
+        }
+
+        var canDismiss = !!(typeof MBS_Admin !== 'undefined' && MBS_Admin.can_dismiss_email_failures);
+
+        items.forEach(function(item) {
+            var cardClass = 'mbs-email-card mbs-email-card--' + (item.status === 'failed' ? 'failed' : (item.status === 'sent' ? 'sent' : 'pending'));
+            var $card = $('<div>', { 'class': cardClass, 'data-email-id': item.id });
+
+            var $top = $('<div class="mbs-email-card__top">');
+            var $left = $('<div>');
+            $left.append($('<strong>').text(item.subject || '(No subject)'));
+            $left.append($('<div style="font-size:12px;color:#4b5563;margin-top:2px;">').text('To: ' + (item.to_email || '—')));
+            var $badges = $('<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">');
+            $badges.append($('<span class="mbs-email-badge mbs-email-badge--neutral" style="cursor:default;">').text(item.message_type_label || 'Email'));
+            var statusMod = item.status === 'failed' ? 'mbs-email-badge--failed' : (item.status === 'sent' ? 'mbs-email-badge--sent' : 'mbs-email-badge--pending');
+            $badges.append($('<span class="mbs-email-badge ' + statusMod + '" style="cursor:default;">').text(item.status + ' (' + item.attempts + '/' + item.max_attempts + ')'));
+            $top.append($left, $badges);
+            $card.append($top);
+
+            var $meta = $('<div class="mbs-email-card__meta">');
+            $meta.append($('<span>').text('ID #' + item.id));
+            if (item.reference_label) {
+                var href = safeAdminUrl(item.reference_url);
+                if (href) {
+                    var $refWrap = $('<span>').text('Linked: ');
+                    $refWrap.append($('<a>', { href: href }).text(item.reference_label));
+                    $meta.append($refWrap);
+                } else {
+                    $meta.append($('<span>').text('Linked: ' + item.reference_label));
+                }
+            }
+            if (item.created_at) $meta.append($('<span>').text('Queued: ' + item.created_at));
+            if (item.last_attempt_at) $meta.append($('<span>').text('Last attempt: ' + item.last_attempt_at));
+            if (item.failed_at) $meta.append($('<span>').text('Failed: ' + item.failed_at));
+            if (item.accepted_at) $meta.append($('<span>').text('Accepted: ' + item.accepted_at));
+            if (item.status === 'pending' && item.next_retry) $meta.append($('<span>').text('Next retry: ' + item.next_retry));
+            if (item.resent_from_id) $meta.append($('<span>').text('Resent from #' + item.resent_from_id));
+            $card.append($meta);
+
+            if (item.last_error || item.last_error_code) {
+                var errLines = [];
+                if (item.last_error_code) errLines.push('Code: ' + item.last_error_code + (item.failure_category ? ' (' + item.failure_category + ')' : ''));
+                if (item.last_error) errLines.push(item.last_error);
+                if (item.last_error_details && typeof item.last_error_details === 'object') {
+                    try { errLines.push('Details: ' + JSON.stringify(item.last_error_details)); } catch (e) {}
+                }
+                var errText = errLines.join('\n');
+                var $errBox = $('<div class="mbs-email-card__error">').text(errText);
+                $card.append($errBox);
+            }
+
+            var $actions = $('<div class="mbs-email-card__actions">');
+            if (item.can_resend && item.status !== 'sent') {
+                $actions.append($('<button type="button" class="button button-primary button-small mbs-email-resend-btn">').attr('data-id', item.id).text('Resend Now'));
+            } else if (item.resend_block_reason) {
+                $actions.append($('<span class="nms-muted" style="font-size:12px;">').text(item.resend_block_reason));
+            }
+            if (item.last_error || item.last_error_code) {
+                var copyPayload = 'Email #' + item.id + ' (' + (item.message_type_label || '') + ') to ' + (item.to_email || '') + '\nCode: ' + (item.last_error_code || item.failure_category || '') + '\nError: ' + (item.last_error || '');
+                $actions.append($('<button type="button" class="button button-small mbs-email-copy-btn">').attr('data-copy', copyPayload).text('Copy Error'));
+            }
+            if (canDismiss && item.status === 'failed' && item.failure_category !== 'dismissed') {
+                $actions.append($('<button type="button" class="button button-small mbs-email-dismiss-btn">').attr('data-id', item.id).text('Dismiss'));
+            }
+            $actions.append($('<span class="mbs-email-card__feedback" role="status" aria-live="polite">'));
+            $card.append($actions);
+            $body.append($card);
+        });
+    }
+
+    function loadDiagnostics() {
+        var modal = getModal();
+        if (!modal.length || typeof MBS_Admin === 'undefined') return;
+        var gen = ++loadGen;
+        var $body = modal.find('#mbs-email-modal-body');
+        $body.attr('aria-busy', 'true').empty().append($('<p class="mbs-modal__loading">').text('Loading email queue diagnostics\u2026'));
+        modal.find('#mbs-email-modal-status').text('');
+
+        var params = {
+            action: 'mbs_email_queue_list',
+            nonce: MBS_Admin.nonce,
+            limit: 50
+        };
+        if (state.tab === 'transport') {
+            params.status = 'failed';
+            params.failure_category = 'transport';
+        } else if (state.tab === 'obsolete') {
+            params.status = 'failed';
+            params.failure_category = 'obsolete';
+        } else if (state.tab === 'pending') {
+            params.status = 'pending';
+        } else if (state.tab === 'sent') {
+            params.status = 'sent';
+        }
+        if (state.referenceType && state.referenceId > 0) {
+            params.reference_type = state.referenceType;
+            params.reference_id = state.referenceId;
+        }
+
+        $.ajax({
+            url: MBS_Admin.ajax_url,
+            method: 'POST',
+            data: params,
+            success: function(res) {
+                if (gen !== loadGen || !modal.is(':visible')) return;
+                $body.attr('aria-busy', 'false');
+                if (res && res.success && res.data) {
+                    updateTabCounts(res.data.stats);
+                    renderItems(res.data.items || []);
+                    modal.find('#mbs-email-modal-status').text('Showing ' + (res.data.items ? res.data.items.length : 0) + ' of ' + (res.data.total || 0) + ' matching row(s).');
+                } else {
+                    $body.empty().append($('<p style="color:#991b1b;">').text((res && res.data && res.data.message) || 'Could not load email diagnostics.'));
+                }
+            },
+            error: function() {
+                if (gen !== loadGen || !modal.is(':visible')) return;
+                $body.attr('aria-busy', 'false').empty().append($('<p style="color:#991b1b;">').text('Network error loading email diagnostics.'));
+            }
+        });
+    }
+
+    function openDiagnosticsModal(opts, triggerEl) {
+        var modal = getModal();
+        if (!modal.length) return;
+        $opener = triggerEl || null;
+        state.referenceType = (opts && opts.referenceType) || '';
+        state.referenceId = parseInt((opts && opts.referenceId) || 0, 10) || 0;
+        state.contextLabel = (opts && opts.contextLabel) || '';
+        setActiveTab((opts && opts.tab) || 'transport');
+        updateContextBar();
+        modal.show();
+        modal.find('.mbs-email-modal__close').first().focus();
+        loadDiagnostics();
+    }
+
+    function closeDiagnosticsModal() {
+        var modal = getModal();
+        if (!modal.length || !modal.is(':visible')) return;
+        loadGen++;
+        modal.hide();
+        if ($opener && $opener.length && $opener.is(':visible')) {
+            $opener.focus();
+        }
+        $opener = null;
+    }
+
+    $(document).on('click', '.mbs-open-email-diagnostics', function(e) {
+        var modal = getModal();
+        if (!modal.length) return; // Allow normal link navigation if modal is not rendered on this page
+        e.preventDefault();
+        openDiagnosticsModal({
+            tab: $(this).data('tab') || 'transport',
+            referenceType: $(this).data('reference-type') || '',
+            referenceId: $(this).data('reference-id') || 0,
+            contextLabel: $(this).data('context-label') || ''
+        }, $(this));
+    });
+
+    $(document).on('click', '.mbs-email-modal__close, .mbs-email-modal__backdrop', closeDiagnosticsModal);
+
+    $(document).on('click', '#mbs-email-diagnostics-modal .mbs-email-tab', function() {
+        setActiveTab($(this).data('tab'));
+        loadDiagnostics();
+    });
+
+    $(document).on('click', '#mbs-email-diagnostics-modal .mbs-email-modal__clear-context', function() {
+        state.referenceType = '';
+        state.referenceId = 0;
+        state.contextLabel = '';
+        updateContextBar();
+        loadDiagnostics();
+    });
+
+    $(document).on('click', '#mbs-email-diagnostics-modal .mbs-email-modal__refresh', loadDiagnostics);
+
+    $(document).on('click', '#mbs-email-diagnostics-modal .mbs-email-copy-btn', function() {
+        var text = $(this).attr('data-copy') || '';
+        var $btn = $(this);
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(function() {
+                $btn.text('Copied');
+                setTimeout(function() { $btn.text('Copy Error'); }, 1500);
+            });
+        }
+    });
+
+    $(document).on('click', '#mbs-email-diagnostics-modal .mbs-email-resend-btn', function() {
+        var $btn = $(this);
+        var id = $btn.data('id');
+        var $fb = $btn.closest('.mbs-email-card__actions').find('.mbs-email-card__feedback');
+        $btn.prop('disabled', true).text('Sending\u2026');
+        $fb.text('');
+        $.post(MBS_Admin.ajax_url, {
+            action: 'mbs_email_queue_resend',
+            nonce: MBS_Admin.nonce,
+            id: id
+        }, function(res) {
+            if (res && res.success && res.data) {
+                updateTabCounts(res.data.stats);
+                var row = res.data.row;
+                if (row && row.status === 'sent') {
+                    $fb.css('color', '#065f46').text('Accepted by mail transport (queue #' + row.id + ').');
+                    $btn.text('Resent');
+                } else {
+                    var errMsg = (row && row.last_error) ? row.last_error : 'Queued for retry.';
+                    $fb.css('color', '#991b1b').text('Retry attempt #' + (row ? row.id : '') + ': ' + errMsg);
+                    $btn.prop('disabled', false).text('Resend Now');
+                }
+            } else {
+                var msg = (res && res.data && res.data.message) ? res.data.message : 'Resend failed.';
+                $fb.css('color', '#991b1b').text(msg);
+                $btn.prop('disabled', false).text('Resend Now');
+            }
+        }).fail(function(xhr) {
+            var msg = (xhr.responseJSON && xhr.responseJSON.data && xhr.responseJSON.data.message) || 'Network error while resending.';
+            $fb.css('color', '#991b1b').text(msg);
+            $btn.prop('disabled', false).text('Resend Now');
+        });
+    });
+
+    $(document).on('click', '#mbs-email-diagnostics-modal .mbs-email-dismiss-btn', function() {
+        var $btn = $(this);
+        var id = $btn.data('id');
+        var $card = $btn.closest('.mbs-email-card');
+        var $fb = $btn.closest('.mbs-email-card__actions').find('.mbs-email-card__feedback');
+        $btn.prop('disabled', true).text('Dismissing\u2026');
+        $.post(MBS_Admin.ajax_url, {
+            action: 'mbs_email_queue_dismiss',
+            nonce: MBS_Admin.nonce,
+            id: id
+        }, function(res) {
+            if (res && res.success && res.data) {
+                updateTabCounts(res.data.stats);
+                $card.slideUp(150, function() { $card.remove(); });
+            } else {
+                $fb.css('color', '#991b1b').text((res && res.data && res.data.message) || 'Could not dismiss.');
+                $btn.prop('disabled', false).text('Dismiss');
+            }
+        }).fail(function(xhr) {
+            var msg = (xhr.responseJSON && xhr.responseJSON.data && xhr.responseJSON.data.message) || 'Network error.';
+            $fb.css('color', '#991b1b').text(msg);
+            $btn.prop('disabled', false).text('Dismiss');
+        });
+    });
+
+    $(document).on('keydown', function(e) {
+        var modal = getModal();
+        if (!modal.length || !modal.is(':visible')) return;
+        if (e.key === 'Escape') { e.preventDefault(); closeDiagnosticsModal(); return; }
+        if (e.key !== 'Tab') return;
+        var controls = modal.find('a[href], button, input, select, textarea, [tabindex]').filter(':visible').filter(function() { return !this.disabled && this.getAttribute('tabindex') !== '-1'; });
+        var first = controls.first()[0], last = controls.last()[0];
+        if (!first) { e.preventDefault(); return; }
+        if (e.shiftKey && (document.activeElement === first || !modal[0].contains(document.activeElement))) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && (document.activeElement === last || !modal[0].contains(document.activeElement))) { e.preventDefault(); first.focus(); }
+    });
+
+    // Auto-open when linked from Dashboard Widget / Needs Attention (?open_email_queue=failed)
+    $(function() {
+        var modal = getModal();
+        if (!modal.length || typeof URLSearchParams === 'undefined') return;
+        var params = new URLSearchParams(window.location.search);
+        var auto = params.get('open_email_queue');
+        if (auto) {
+            var tabMap = { failed: 'transport', transport: 'transport', obsolete: 'obsolete', pending: 'pending', sent: 'sent' };
+            openDiagnosticsModal({ tab: tabMap[auto] || 'transport' }, null);
+        }
+    });
+})(jQuery);
+
+// ── Single Booking Page: Edit Mode, Live Cost & Home Assistant Heating ─────
+(function($) {
+    'use strict';
+
+    $(function() {
+        var $heatingForm = $('#mbs-booking-heating');
+        if ($heatingForm.length) {
+            $heatingForm.on('submit', function(e) {
+                e.preventDefault();
+                var form = this;
+                var button = form.querySelector('button[type="submit"]') || form.querySelector('button');
+                var result = document.getElementById('mbs-heating-result');
+                var choice = document.getElementById('mbs-heating-choice');
+                var data = new FormData(form);
+                data.set('heating_required', choice && choice.checked ? '1' : '0');
+                if (button) button.disabled = true;
+                fetch(form.getAttribute('action'), { method: 'POST', body: data, credentials: 'same-origin' })
+                    .then(function(response) { return response.json(); })
+                    .then(function(json) {
+                        if (!json.success) {
+                            throw new Error(typeof json.data === 'string' ? json.data : 'Could not save. Reload before retrying.');
+                        }
+                        if (result) result.textContent = json.data.message || 'Saved.';
+                        window.location.reload();
+                    })
+                    .catch(function(error) {
+                        if (result) result.textContent = error.message || 'Could not save. Reload before retrying.';
+                        if (button) button.disabled = false;
+                    });
+            });
+        }
+
+        var $editMode = $('#nms-edit-mode');
+        if (!$editMode.length) return;
+
+        var config = {};
+        try {
+            config = JSON.parse($editMode.attr('data-single-edit-config') || '{}') || {};
+        } catch (_err) {
+            config = {};
+        }
+        var spacesData = config.spaces || {};
+        var kitchenPrice = parseFloat(config.kitchen_price || 0);
+        var pricingTier = config.pricing_tier || 'standard';
+        var tierMultiplier = parseFloat(config.tier_multiplier || 1);
+        var originalAmount = parseFloat(config.original_amount || 0);
+
+        $('#nms-toggle-edit').on('click', function() {
+            $('#nms-view-mode').hide();
+            $editMode.show();
+            $(this).hide();
+            recalcEditCost();
+            var firstInput = document.getElementById('nms-edit-name');
+            if (firstInput) firstInput.focus();
+        });
+        $('#nms-cancel-edit').on('click', function() {
+            $('#nms-view-mode').show();
+            $editMode.hide();
+            $('#nms-toggle-edit').show().focus();
+        });
+
+        $('#nms-edit-custom-price').on('change', function() {
+            var isCustom = $(this).is(':checked');
+            $('#nms-custom-price-row').toggle(isCustom);
+            $('#nms-edit-calc-row').css('opacity', isCustom ? 0.4 : 1);
+            updateCostDiff();
+        });
+        $('#nms-edit-custom-amount').on('input', updateCostDiff);
+
+        function updateCostDiff() {
+            var isCustom = $('#nms-edit-custom-price').is(':checked');
+            var finalAmount = isCustom
+                ? (parseFloat($('#nms-edit-custom-amount').val()) || 0)
+                : (parseFloat($('#nms-edit-new-amount').text().replace('£', '')) || 0);
+            var diff = finalAmount - originalAmount;
+            var $diffEl = $('#nms-edit-cost-diff');
+            if (Math.abs(diff) > 0.01) {
+                $diffEl.show();
+                if (diff > 0) {
+                    $diffEl.removeClass('mbs-cost-diff--down').addClass('mbs-cost-diff--up')
+                        .text('Price increased by £' + diff.toFixed(2));
+                } else {
+                    $diffEl.removeClass('mbs-cost-diff--up').addClass('mbs-cost-diff--down')
+                        .text('Price decreased by £' + Math.abs(diff).toFixed(2));
+                }
+            } else {
+                $diffEl.hide().removeClass('mbs-cost-diff--up mbs-cost-diff--down');
+            }
+        }
+
+        $('#nms-edit-space, #nms-edit-start, #nms-edit-end, #nms-edit-kitchen, #nms-edit-allday, #nms-edit-scout, #nms-edit-date, #nms-edit-date-end').on('change', recalcEditCost);
+
+        function recalcEditCost() {
+            var space = $('#nms-edit-space').val();
+            var start = $('#nms-edit-start').val();
+            var end = $('#nms-edit-end').val();
+            var kitchen = $('#nms-edit-kitchen').val() === '1';
+            var allDay = $('#nms-edit-allday').val() === '1';
+            var scout = $('#nms-edit-scout').val() === '1';
+            var info = spacesData[space];
+
+            var dateFrom = $('#nms-edit-date').val();
+            var dateTo = $('#nms-edit-date-end').val() || dateFrom;
+            var numDays = 1;
+            if (dateFrom && dateTo) {
+                var dayDiff = (new Date(dateTo + 'T00:00:00') - new Date(dateFrom + 'T00:00:00')) / 86400000;
+                numDays = Math.max(1, Math.round(dayDiff) + 1);
+            }
+
+            var cost = 0;
+            if (scout) {
+                cost = 0;
+            } else if (info) {
+                var tierHourlyKey = 'rate_hourly_' + pricingTier;
+                var tierDailyKey = 'rate_daily_' + pricingTier;
+                var rateHourly = parseFloat(info[tierHourlyKey] || 0);
+                var rateDaily = parseFloat(info[tierDailyKey] || 0);
+                if (rateHourly <= 0) rateHourly = parseFloat(info.rate_hourly || 0) * tierMultiplier;
+                if (rateDaily <= 0) rateDaily = parseFloat(info.rate_daily || info.rate || 0) * tierMultiplier;
+                if (allDay) {
+                    cost = rateDaily * numDays;
+                } else if (start && end) {
+                    var sh = parseInt(start.split(':')[0], 10) * 60 + parseInt(start.split(':')[1], 10);
+                    var eh = parseInt(end.split(':')[0], 10) * 60 + parseInt(end.split(':')[1], 10);
+                    var mins = eh - sh;
+                    if (mins <= 0) mins += 1440;
+                    var hrs = Math.ceil(Math.max(0, mins / 60));
+                    var effectiveDays = numDays;
+                    if (mins !== (eh - sh) && numDays === 2) effectiveDays = 1;
+                    cost = hrs * rateHourly * effectiveDays;
+                }
+                if (kitchen) cost += kitchenPrice;
+            }
+
+            if (allDay) {
+                $('#nms-edit-start, #nms-edit-end').css('opacity', '0.4').prop('disabled', true);
+            } else {
+                $('#nms-edit-start, #nms-edit-end').css('opacity', '1').prop('disabled', false);
+            }
+
+            $('#nms-edit-new-amount').text('£' + cost.toFixed(2));
+            updateCostDiff();
+        }
+
+        $('#nms-save-edit').on('click', function() {
+            var $btn = $(this);
+            var $msg = $('#nms-edit-msg');
+            $btn.prop('disabled', true).text('Saving…');
+
+            $.post(MBS_Admin.ajax_url, {
+                action: 'mbs_edit_booking',
+                nonce: MBS_Admin.nonce,
+                ref: $btn.data('ref'),
+                name: $('#nms-edit-name').val(),
+                organisation: $('#nms-edit-org').val(),
+                email: $('#nms-edit-email').val(),
+                phone: $('#nms-edit-phone').val(),
+                space: $('#nms-edit-space').val(),
+                booking_date: $('#nms-edit-date').val(),
+                booking_date_end: $('#nms-edit-date-end').val(),
+                start_time: $('#nms-edit-start').val(),
+                end_time: $('#nms-edit-end').val(),
+                attendees: $('#nms-edit-attendees').val(),
+                all_day: $('#nms-edit-allday').val(),
+                kitchen: $('#nms-edit-kitchen').val(),
+                scout_use: $('#nms-edit-scout').val(),
+                purpose: $('#nms-edit-purpose').val(),
+                notes: $('#nms-edit-notes').val(),
+                address: $('#nms-edit-address').val(),
+                notify: $('#nms-edit-notify').is(':checked') ? 1 : 0,
+                custom_price: $('#nms-edit-custom-price').is(':checked') ? 1 : 0,
+                custom_amount: $('#nms-edit-custom-amount').val()
+            }, function(res) {
+                $btn.prop('disabled', false).text('Save Changes');
+                if (res.success) {
+                    $msg.text('Booking updated').removeClass('error').addClass('success');
+                    setTimeout(function() { location.reload(); }, 1000);
+                } else {
+                    $msg.text(res.data || 'Error saving').removeClass('success').addClass('error');
+                }
+            }).fail(function() {
+                $btn.prop('disabled', false).text('Save Changes');
+                $msg.text('Network error saving changes.').removeClass('success').addClass('error');
+            });
+        });
     });
 })(jQuery);

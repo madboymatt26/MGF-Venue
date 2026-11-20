@@ -129,19 +129,25 @@ class MBS_Billing_Ledger {
         }
 
         $item_ref = self::generate_reference( 'ITEM', $item_table, 'item_ref' );
-        $inserted = $wpdb->insert( $item_table, array(
+        $snapshot = is_array( $item['pricing_snapshot'] ?? null ) ? $item['pricing_snapshot'] : array();
+        $related_ref = ! empty( $item['related_ref'] )
+            ? sanitize_text_field( $item['related_ref'] )
+            : ( ! empty( $snapshot['related_ref'] ) ? sanitize_text_field( $snapshot['related_ref'] ) : null );
+        $item_row = array(
             'item_ref'              => $item_ref,
             'invoice_id'            => (int) $invoice->id,
             'item_type'             => sanitize_key( $item['item_type'] ?? 'hire' ),
             'booking_ref'           => $booking_ref,
+            'related_ref'           => $related_ref,
             'service_date'          => ! empty( $item['service_date'] ) ? sanitize_text_field( $item['service_date'] ) : null,
             'description'           => sanitize_text_field( $item['description'] ?? '' ),
             'quantity_milli'        => $quantity_milli,
             'unit_amount_minor'     => $unit_minor,
             'line_total_minor'      => $line_total,
-            'pricing_snapshot_json' => wp_json_encode( $item['pricing_snapshot'] ?? array() ),
+            'pricing_snapshot_json' => wp_json_encode( $snapshot ),
             'created_at'            => current_time( 'mysql' ),
-        ) );
+        );
+        $inserted = $wpdb->insert( $item_table, $item_row );
         if ( $inserted === false ) return self::transaction_error( 'invoice_item_create_failed', 'Could not create the invoice item.' , $manage_transaction );
 
         if ( $booking_ref && ! $allocation ) {

@@ -56,6 +56,7 @@ $route_labels = array( 'woopayments_payout' => 'WooPayments payout', 'bank_match
     <h2>Queue health</h2>
     <div class="mbs-osm-statuses"><?php foreach ( $health['payouts'] as $status => $count ) : ?><span class="mbs-osm-pill"><strong><?php echo esc_html( MBS_OSM_Integration::status_label( $status ) ); ?>:</strong> <?php echo (int) $count; ?></span><?php endforeach; ?><?php if ( ! $health['payouts'] ) : ?><span class="mbs-osm-pill">No payouts recorded</span><?php endif; ?></div>
     <h3>Recent payouts</h3>
+    <div class="mbs-table-scroll">
     <table class="widefat striped"><thead><tr><th>Payout</th><th>Date</th><th>Amount</th><th>OSM bank / cashbook</th><th>Status</th><th>Message</th></tr></thead><tbody>
     <?php if ( ! $health['recent_payouts'] ) : ?><tr><td colspan="6">No payouts have been processed.</td></tr><?php endif; ?>
     <?php foreach ( $health['recent_payouts'] as $row ) :
@@ -77,11 +78,14 @@ $route_labels = array( 'woopayments_payout' => 'WooPayments payout', 'bank_match
         </div></details></td></tr>
     <?php endforeach; ?>
     </tbody></table>
+    </div>
     <h3>Recent MGF finance events</h3>
+    <div class="mbs-table-scroll">
     <table class="widefat striped"><thead><tr><th>Event</th><th>Invoice / order</th><th>Amount</th><th>Route</th><th>Status</th><th>Message</th></tr></thead><tbody>
     <?php if ( ! $health['recent_events'] ) : ?><tr><td colspan="6">No finance events have been queued.</td></tr><?php endif; ?>
     <?php foreach ( $health['recent_events'] as $row ) : ?><tr><td><?php echo esc_html( $row['event_ref'] ); ?></td><td><?php echo esc_html( $row['invoice_ref'] . ' / #' . $row['order_id'] ); ?></td><td><?php echo esc_html( MBS_Money::format( (int) $row['amount_minor'] ) ); ?></td><td><?php echo esc_html( $route_labels[$row['target_mode']] ?? $row['target_mode'] ); ?></td><td><strong><?php echo esc_html( MBS_OSM_Integration::status_label( $row['status'] ) ); ?></strong><?php if ( $row['target_mode'] === 'bank_match' && in_array( $row['status'], array( 'awaiting_bank_match', 'awaiting_bank_import', 'manual_reconciliation', 'sandbox_preview' ), true ) ) : ?><br><button class="button button-small mbs-osm-retry" data-entity="event" data-route="bank_match" data-id="<?php echo (int) $row['id']; ?>">Match bank line</button><?php endif; ?><?php if ( in_array( $row['status'], array( 'awaiting_bank_match', 'manual_reconciliation' ), true ) ) : ?> <button class="button button-small mbs-osm-resolve" data-entity="event" data-id="<?php echo (int) $row['id']; ?>">Resolve</button><?php endif; ?></td><td><?php echo esc_html( $row['last_error'] ); ?></td></tr><?php endforeach; ?>
     </tbody></table>
+    </div>
 </div>
 <script>
 jQuery(function($){

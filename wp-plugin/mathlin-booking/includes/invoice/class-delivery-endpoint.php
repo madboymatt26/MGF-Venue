@@ -31,10 +31,11 @@ class MBS_Invoice_Delivery_Endpoint {
         }
 
         $document_id = absint( $_REQUEST['document_id'] ?? 0 );
+        $booking_ref = sanitize_text_field( wp_unslash( $_REQUEST['booking_ref'] ?? '' ) );
         $format = sanitize_key( $_REQUEST['format'] ?? 'html' );
         $mode = sanitize_key( $_REQUEST['mode'] ?? 'issued' );
 
-        if ( ! $document_id || ! in_array( $format, array( 'html', 'pdf' ), true ) ) {
+        if ( ( ! $document_id && ! $booking_ref ) || ! in_array( $format, array( 'html', 'pdf' ), true ) ) {
             wp_send_json_error( 'Invalid request parameters.', 400 );
         }
 
@@ -44,23 +45,49 @@ class MBS_Invoice_Delivery_Endpoint {
 
         // Authorisation
         $user_id = get_current_user_id();
-        $authorised = self::check_authorisation( $document_id, $user_id );
+        if ( $document_id ) {
+            $authorised = self::check_authorisation( $document_id, $user_id );
+            if ( is_wp_error( $authorised ) ) {
+                self::log_access( $user_id, "doc:{$document_id}", $format, 'denied' );
+                wp_send_json_error( $authorised->get_error_message(), 403 );
+            }
+
+            // Build and render
+            $view_model = MBS_Invoice_Document_Builder::build_from_document( $document_id, $mode );
+            if ( is_wp_error( $view_model ) ) {
+                self::log_access( $user_id, "doc:{$document_id}", $format, 'error' );
+                wp_send_json_error( $view_model->get_error_message(), 500 );
+            }
+
+            self::log_access( $user_id, "doc:{$document_id}", $format, 'success' );
+
+            if ( $format === 'pdf' ) {
+                self::serve_pdf( $view_model, $document_id );
+            } else {
+                self::serve_html( $view_model );
+            }
+            return;
+        }
+
+        // Legacy booking fallback (no immutable current_invoice_document_id)
+        $booking = MBS_Bookings::get( $booking_ref );
+        if ( ! $booking ) {
+            self::log_access( $user_id, "booking:{$booking_ref}", $format, 'not_found' );
+            wp_send_json_error( 'Booking not found.', 404 );
+        }
+        $authorised = self::check_booking_authorisation( $booking, $user_id );
         if ( is_wp_error( $authorised ) ) {
-            self::log_access( $user_id, "doc:{$document_id}", $format, 'denied' );
+            self::log_access( $user_id, "booking:{$booking->ref}", $format, 'denied' );
             wp_send_json_error( $authorised->get_error_message(), 403 );
         }
-
-        // Build and render
-        $view_model = MBS_Invoice_Document_Builder::build_from_document( $document_id, $mode );
+        $view_model = MBS_Invoice_Document_Builder::build_from_booking( (int) $booking->id, $mode );
         if ( is_wp_error( $view_model ) ) {
-            self::log_access( $user_id, "doc:{$document_id}", $format, 'error' );
+            self::log_access( $user_id, "booking:{$booking->ref}", $format, 'error' );
             wp_send_json_error( $view_model->get_error_message(), 500 );
         }
-
-        self::log_access( $user_id, "doc:{$document_id}", $format, 'success' );
-
+        self::log_access( $user_id, "booking:{$booking->ref}", $format, 'success' );
         if ( $format === 'pdf' ) {
-            self::serve_pdf( $view_model, $document_id );
+            self::serve_pdf( $view_model, 0 );
         } else {
             self::serve_html( $view_model );
         }
@@ -70,11 +97,16 @@ class MBS_Invoice_Delivery_Endpoint {
      * Handle unauthenticated (guest) document requests via signed token.
      */
     public function handle_guest_request() {
-        $token = sanitize_text_field( $_REQUEST['token'] ?? '' );
+        $token = sanitize_text_field( wp_unslash( $_REQUEST['token'] ?? '' ) );
         $document_id = absint( $_REQUEST['document_id'] ?? 0 );
+        $booking_ref = sanitize_text_field( wp_unslash( $_REQUEST['booking_ref'] ?? '' ) );
         $format = sanitize_key( $_REQUEST['format'] ?? 'pdf' );
 
-        if ( ! $token || ! $document_id ) {
+        if ( ! in_array( $format, array( 'html', 'pdf' ), true ) ) {
+            $format = 'pdf';
+        }
+
+        if ( ! $token || ( ! $document_id && ! $booking_ref ) ) {
             wp_die( 'Invalid download link.', 'Access Denied', array( 'response' => 400 ) );
         }
 
@@ -82,10 +114,47 @@ class MBS_Invoice_Delivery_Endpoint {
         $rate_key = 'mbs_guest_dl_' . md5( $_SERVER['REMOTE_ADDR'] ?? '' );
         $attempts = (int) get_transient( $rate_key );
         if ( $attempts > 20 ) {
-            self::log_access( 0, "doc:{$document_id}", $format, 'rate_limited' );
+            self::log_access( 0, $document_id ? "doc:{$document_id}" : "booking:{$booking_ref}", $format, 'rate_limited' );
             wp_die( 'Too many requests. Please try again later.', 'Rate Limited', array( 'response' => 429 ) );
         }
         set_transient( $rate_key, $attempts + 1, 300 ); // 20 requests per 5 minutes
+
+        if ( ! $document_id && $booking_ref ) {
+            $booking = MBS_Bookings::get( $booking_ref );
+            if ( ! $booking || ! MBS_Bookings::verify_scoped_token( $booking, 'invoice', $token ) ) {
+                self::log_access( 0, "booking:{$booking_ref}", $format, 'denied_token' );
+                wp_die( 'This download link has expired or is invalid.', 'Access Denied', array( 'response' => 403 ) );
+            }
+            $view_model = MBS_Invoice_Document_Builder::build_from_booking( (int) $booking->id, 'issued' );
+            if ( is_wp_error( $view_model ) ) {
+                wp_die( 'Document could not be generated.', 'Error', array( 'response' => 500 ) );
+            }
+            $output = ( $format === 'pdf' ) ? MBS_PDF_Renderer::render( $view_model ) : MBS_HTML_Renderer::render( $view_model );
+            if ( is_wp_error( $output ) ) {
+                wp_die( 'Document rendering failed.', 'Error', array( 'response' => 500 ) );
+            }
+            self::log_access( 0, "booking:{$booking->ref}", $format, 'success_guest_legacy' );
+            if ( ! headers_sent() ) {
+                header( 'Referrer-Policy: no-referrer' );
+                header( 'X-Robots-Tag: noindex, nofollow, noarchive' );
+            }
+            if ( $format === 'pdf' ) {
+                $invoice_number = $view_model->snapshot->invoice_number ?? $booking->ref;
+                $filename = sanitize_file_name( 'invoice-' . $invoice_number . '.pdf' );
+                header( 'Content-Type: application/pdf' );
+                header( 'Content-Disposition: attachment; filename="' . $filename . '"' );
+                header( 'Content-Length: ' . strlen( $output ) );
+                header( 'Cache-Control: private, no-cache, no-store' );
+                header( 'X-Content-Type-Options: nosniff' );
+                echo $output;
+                exit;
+            }
+            header( 'Content-Type: text/html; charset=UTF-8' );
+            header( 'Cache-Control: private, no-cache, no-store, must-revalidate' );
+            header( 'X-Content-Type-Options: nosniff' );
+            echo $output;
+            exit;
+        }
 
         // Validate token EXISTS and is eligible (but do NOT consume yet)
         $token_valid = self::validate_guest_token_eligibility( $token, $document_id );
@@ -242,6 +311,43 @@ class MBS_Invoice_Delivery_Endpoint {
         return new WP_Error( 'not_authorised', 'You do not have permission to access this document.' );
     }
 
+    /**
+     * Authorise access to an on-the-fly rendered legacy booking invoice (no immutable document_id).
+     *
+     * @param object $booking
+     * @param int    $user_id
+     * @return true|WP_Error
+     */
+    private static function check_booking_authorisation( $booking, $user_id ) {
+        if ( current_user_can( 'mbs_manage_bookings' ) || current_user_can( 'manage_options' ) ) {
+            return true;
+        }
+        if ( ! MBS_Hirer_Identity::verified() || ! MBS_Campsite_Policy::can_book() ) {
+            return new WP_Error( 'email_unverified', 'Verify your account email before accessing private documents.' );
+        }
+        if ( ! $user_id ) {
+            return new WP_Error( 'not_authorised', 'You must be logged in to access this document.' );
+        }
+        if ( ! MBS_Hirer_Identity::owns_email( $booking->email ) ) {
+            return new WP_Error( 'not_authorised', 'The verified account email must match the booking contact.' );
+        }
+        if ( (int) $booking->user_id === $user_id ) {
+            return true;
+        }
+        if ( ! empty( $booking->user_id ) ) {
+            return new WP_Error( 'not_authorised', 'You do not have permission to access this document.' );
+        }
+        $user = get_userdata( $user_id );
+        if ( $user && strtolower( $user->user_email ) === strtolower( $booking->email ) ) {
+            $audit_ok = MBS_Audit_Log::log( $booking->ref, 'invoice_access_email_fallback', "User {$user_id} authorised by email match (legacy booking without user_id)." );
+            if ( ! $audit_ok ) {
+                return new WP_Error( 'audit_failed', 'Access denied: could not record the email-fallback authorisation audit.' );
+            }
+            return true;
+        }
+        return new WP_Error( 'not_authorised', 'You do not have permission to access this document.' );
+    }
+
     // ── Guest Token ────────────────────────────────────────────────────────────
 
     /**
@@ -311,6 +417,23 @@ class MBS_Invoice_Delivery_Endpoint {
     }
 
     /**
+     * Build a nonce-protected on-the-fly PDF URL for a legacy booking without current_invoice_document_id.
+     */
+    public static function authenticated_booking_pdf_url( $booking_ref, $format = 'pdf' ) {
+        $booking_ref = sanitize_text_field( (string) $booking_ref );
+        if ( $booking_ref === '' ) return '';
+        $format = in_array( $format, array( 'html', 'pdf' ), true ) ? $format : 'pdf';
+
+        return add_query_arg( array(
+            'action'      => 'mbs_invoice_document',
+            'booking_ref' => $booking_ref,
+            'format'      => $format,
+            'mode'        => 'issued',
+            'nonce'       => wp_create_nonce( 'mbs_invoice_document_nonce' ),
+        ), admin_url( 'admin-ajax.php' ) );
+    }
+
+    /**
      * Create a short-lived, document-scoped guest PDF URL.
      *
      * @return string|WP_Error
@@ -328,24 +451,29 @@ class MBS_Invoice_Delivery_Endpoint {
     }
 
     /**
+     * Create a purpose-scoped, time-bounded guest download URL for a legacy booking
+     * that lacks an immutable document row (rendered on-the-fly via Dompdf/HTML).
+     */
+    public static function guest_booking_pdf_url( $booking, $format = 'pdf', $ttl_seconds = 259200 ) {
+        if ( ! $booking || empty( $booking->ref ) ) return '';
+        $token = MBS_Bookings::scoped_token( $booking, 'invoice', $ttl_seconds );
+        if ( $token === '' ) return '';
+        $format = in_array( $format, array( 'html', 'pdf' ), true ) ? $format : 'pdf';
+
+        return add_query_arg( array(
+            'action'      => 'mbs_invoice_document',
+            'token'       => $token,
+            'booking_ref' => $booking->ref,
+            'format'      => $format,
+        ), admin_url( 'admin-ajax.php' ) );
+    }
+
+    /**
      * Validate a guest download token.
      */
     // (validate_guest_token replaced by validate_guest_token_eligibility + consume_guest_token)
 
     // ── Serve Documents ────────────────────────────────────────────────────────
-
-    /**
-     * Refund a token use when document generation fails after validation.
-     */
-    private static function refund_token_use( $raw_token, $document_id ) {
-        global $wpdb;
-        $table = $wpdb->prefix . MBS_DOWNLOAD_TOKENS_TABLE;
-        $token_hash = hash( 'sha256', $raw_token );
-        $wpdb->query( $wpdb->prepare(
-            "UPDATE {$table} SET use_count = GREATEST(0, use_count - 1) WHERE token_hash = %s AND document_id = %d",
-            $token_hash, (int) $document_id
-        ) );
-    }
 
     /**
      * Check token eligibility WITHOUT consuming a use.

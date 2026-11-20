@@ -10,15 +10,36 @@ $stats   = MBS_Hirer_Portal::get_hirer_stats( $email );
 $bookings = MBS_Hirer_Portal::get_bookings_for_email( $email );
 $series   = MBS_Hirer_Portal::get_series_for_email( $email );
 $invoices = MBS_Hirer_Portal::get_invoices_for_email( $email );
-$spaces  = MBS_Bookings::get_spaces();
 $free_campsite = MBS_Payment_Features::free_hire();
+$today_ymd = wp_date( 'Y-m-d' );
+$today_ts  = strtotime( 'today' );
 $series_refs = array();
-foreach ( $series as $series_row ) $series_refs[ $series_row->series_ref ] = true;
-$legacy_bookings = array_values( array_filter( $bookings, static function ( $booking ) use ( $series_refs ) {
-    return empty( $booking->series_id ) || ! isset( $series_refs[ $booking->series_id ] );
-} ) );
+$series_by_ref = array();
+foreach ( $series as $series_row ) {
+    $series_refs[ $series_row->series_ref ] = true;
+    $series_by_ref[ $series_row->series_ref ] = $series_row;
+}
+$bookings_by_series = array();
+$legacy_bookings = array();
+foreach ( $bookings as $booking ) {
+    if ( ! empty( $booking->series_id ) && isset( $series_refs[ $booking->series_id ] ) ) {
+        $bookings_by_series[ $booking->series_id ][] = $booking;
+    } else {
+        $legacy_bookings[] = $booking;
+    }
+}
+foreach ( $bookings_by_series as $sref => $s_bookings ) {
+    usort( $s_bookings, static function ( $a, $b ) {
+        return strcmp( (string) $a->booking_date, (string) $b->booking_date );
+    } );
+    $bookings_by_series[ $sref ] = $s_bookings;
+}
 $invoices_by_series = array();
 foreach ( $invoices as $invoice ) $invoices_by_series[ $invoice->series_ref ][] = $invoice;
+$preloaded = MBS_Hirer_Portal::preload_dashboard_data( $invoices, $legacy_bookings );
+$booking_page_url = class_exists( 'MBS_Public' ) ? MBS_Public::shortcode_page_url( 'mathlin_booking' ) : '';
+$status_page_url  = ( class_exists( 'MBS_Public' ) ? MBS_Public::shortcode_page_url( 'mathlin_status' ) : '' ) ?: home_url();
+$deposit_settings = MBS_Bookings::get_deposit_settings();
 ?>
 
 <div class="nms-wrap">
@@ -28,11 +49,8 @@ foreach ( $invoices as $invoice ) $invoices_by_series[ $invoice->series_ref ][] 
             <p class="nms-muted"><?php echo esc_html( $email ); ?></p>
         </div>
         <div style="display:flex;gap:0.5rem;">
-            <?php
-                $bp = get_posts( array( 'post_type' => 'page', 'post_status' => 'publish', 's' => 'mathlin_booking', 'numberposts' => 1 ) );
-                if ( $bp ) :
-            ?>
-            <a href="<?php echo esc_url( get_permalink( $bp[0]->ID ) ); ?>" class="nms-btn nms-btn-primary">+ New Booking</a>
+            <?php if ( $booking_page_url ) : ?>
+            <a href="<?php echo esc_url( $booking_page_url ); ?>" class="nms-btn nms-btn-primary">+ New Booking</a>
             <?php endif; ?>
             <a href="<?php echo esc_url( wp_logout_url( get_permalink() ) ); ?>" class="nms-btn nms-btn-sm" style="background:#f3f4f6;color:#6b7280;border-color:#e5e7eb;">Log Out</a>
         </div>
@@ -63,11 +81,11 @@ foreach ( $invoices as $invoice ) $invoices_by_series[ $invoice->series_ref ][] 
         <h3>Your Recurring Bookings</h3>
         <p class="nms-muted"><?php echo $free_campsite ? 'Your grouped dates are shown together. There is no hire charge. Changes and cancellations are reviewed by the bookings manager.' : 'Each series is grouped here. Billing and payment are handled per invoice, not per date.'; ?></p>
         <?php foreach ( $series as $s ) :
-            $occurrences = MBS_Series::occurrences( $s->series_ref, false );
+            $occurrences = $bookings_by_series[ $s->series_ref ] ?? array();
             $series_invoices = $invoices_by_series[ $s->series_ref ] ?? array();
             $next_occurrence = null;
             foreach ( $occurrences as $occurrence ) {
-                if ( $occurrence->booking_date >= wp_date( 'Y-m-d' ) && ! in_array( $occurrence->status, array( 'cancelled', 'archived' ), true ) ) { $next_occurrence = $occurrence; break; }
+                if ( $occurrence->booking_date >= $today_ymd && ! in_array( $occurrence->status, array( 'cancelled', 'archived' ), true ) ) { $next_occurrence = $occurrence; break; }
             }
             $outstanding = 0;
             $next_invoice = null;
@@ -110,22 +128,32 @@ foreach ( $invoices as $invoice ) $invoices_by_series[ $invoice->series_ref ][] 
     <div class="nms-form-section" style="margin-bottom:1.5rem;">
         <h3>Invoices &amp; Payments</h3>
         <?php foreach ( $invoices as $invoice ) :
+            $inv_id = (int) $invoice->id;
             $balance = MBS_Billing_Ledger::balance_minor( $invoice );
-            $invoice_series = isset( $series_refs[ $invoice->series_ref ] ) ? MBS_Series::get( $invoice->series_ref ) : null;
+            $invoice_series = ( ! empty( $invoice->series_ref ) && isset( $series_by_ref[ $invoice->series_ref ] ) ) ? $series_by_ref[ $invoice->series_ref ] : null;
             $pay_url = $balance > 0 ? MBS_Invoice_Payment::generate_payment_url( $invoice ) : '';
-            $transactions = MBS_Hirer_Portal::invoice_transactions( $invoice->id );
-            $charge_meta = MBS_Additional_Charges::metadata( $invoice );
-            $charge_state = $charge_meta ? MBS_Additional_Charges::payment_state( $invoice ) : array( 'status' => 'none' );
-            $charge_held = in_array( $charge_state['status'], array( 'bound','reconciliation_required' ), true );
+            $transactions = $preloaded['transactions'][ $inv_id ] ?? array();
+            $charge_items = $preloaded['items'][ $inv_id ] ?? array();
+            $charge_meta = array();
+            if ( MBS_Additional_Charges::is_charge( $invoice ) && count( $charge_items ) === 1 && empty( $charge_items[0]->booking_ref ) ) {
+                $decoded_meta = json_decode( (string) ( $charge_items[0]->pricing_snapshot_json ?? '' ), true );
+                if ( is_array( $decoded_meta ) ) $charge_meta = $decoded_meta;
+            }
+            $res_status = $preloaded['reservations'][ $invoice->invoice_ref ] ?? 'none';
+            $charge_held = $charge_meta && in_array( $res_status, array( 'bound', 'reconciliation_required' ), true );
             if ( $charge_held ) $pay_url = '';
-            $invoice_document_id = MBS_Invoice_Document_Service::get_current_ledger_document_id( $invoice->id );
+            $invoice_document_id = $preloaded['invoice_docs'][ $inv_id ] ?? 0;
             $invoice_pdf_url = $invoice_document_id ? MBS_Invoice_Delivery_Endpoint::authenticated_pdf_url( $invoice_document_id ) : '';
+            $credit_docs = $preloaded['credit_docs'][ $inv_id ] ?? array();
         ?>
         <div style="border-top:1px solid #e5e7eb;padding:1rem 0;display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
             <div><strong><?php echo esc_html( $invoice->invoice_ref ); ?></strong> · <?php echo esc_html( ucfirst( str_replace( '_', ' ', $invoice->status ) ) ); ?><br><span class="nms-muted"><?php echo esc_html( wp_date( 'j M Y', strtotime( $invoice->period_start ) ) . '–' . wp_date( 'j M Y', strtotime( $invoice->period_end ) ) ); ?> · Total <?php echo esc_html( MBS_Money::format( (int) $invoice->total_minor, $invoice->currency ) ); ?> · Paid <?php echo esc_html( MBS_Money::format( (int) $invoice->paid_minor, $invoice->currency ) ); ?></span>
                 <?php if ( $charge_meta ) : ?><p>Additional charge, separate from hire payment: <?php echo esc_html( $charge_meta['category'] . ' / ' . $charge_meta['related_ref'] ); ?>. Due <?php echo esc_html( substr( $invoice->due_at, 0, 10 ) ); ?>.</p><?php endif; ?>
-                <?php if ( $charge_meta ) : $charge_items = MBS_Billing_Ledger::get_items( $invoice->id ); ?><p><?php echo esc_html( $charge_items ? $charge_items[0]->description : '' ); ?></p>
-                    <?php foreach ( MBS_Additional_Charges::documents( $invoice ) as $charge_document ) : if ( $charge_document['type'] !== 'credit_note' ) continue; ?><p><a href="<?php echo esc_url( $charge_document['pdf_url'] ); ?>">Download credit note <?php echo esc_html( $charge_document['reference'] ); ?></a></p><?php endforeach; ?>
+                <?php if ( $charge_meta ) : ?><p><?php echo esc_html( $charge_items ? $charge_items[0]->description : '' ); ?></p>
+                    <?php foreach ( $credit_docs as $charge_document ) :
+                        $credit_pdf_url = MBS_Invoice_Delivery_Endpoint::authenticated_pdf_url( (int) $charge_document['id'] );
+                        if ( ! $credit_pdf_url ) continue;
+                    ?><p><a href="<?php echo esc_url( $credit_pdf_url ); ?>">Download credit note <?php echo esc_html( $charge_document['reference'] ); ?></a></p><?php endforeach; ?>
                 <?php endif; ?>
                 <?php if ( $charge_held ) : ?><p>Your payment is being checked. Please do not pay again while we review it.</p><?php endif; ?>
                 <?php if ( $transactions ) : ?><details><summary>Payment history</summary><ul><?php foreach ( $transactions as $transaction ) : ?><li><?php echo esc_html( wp_date( 'j M Y', strtotime( $transaction->occurred_at ) ) . ' · ' . ucfirst( $transaction->transaction_type ) . ' ' . MBS_Money::format( (int) $transaction->amount_minor, $transaction->currency ) ); ?></li><?php endforeach; ?></ul></details><?php endif; ?>
@@ -161,26 +189,26 @@ foreach ( $invoices as $invoice ) $invoices_by_series[ $invoice->series_ref ][] 
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ( $legacy_bookings as $b ) :
+                        <?php
+                        $status_styles = array(
+                            'pending'      => 'background:#fff3cd;color:#856404',
+                            'confirmed'    => 'background:#d1fae5;color:#065f46',
+                            'deposit_paid' => 'background:#fef3c7;color:#92400e',
+                            'paid'         => 'background:#dbeafe;color:#1e40af',
+                            'cancelled'    => 'background:#fee2e2;color:#991b1b',
+                        );
+                        foreach ( $legacy_bookings as $b ) :
                             $is_daily = ! empty( $b->all_day );
                             $time_str = $is_daily ? 'All day' : ( substr( $b->start_time, 0, 5 ) . '–' . substr( $b->end_time, 0, 5 ) );
-                            $is_past  = strtotime( $b->booking_date ) < strtotime( 'today' );
-
-                            $status_styles = array(
-                                'pending'      => 'background:#fff3cd;color:#856404',
-                                'confirmed'    => 'background:#d1fae5;color:#065f46',
-                                'deposit_paid' => 'background:#fef3c7;color:#92400e',
-                                'paid'         => 'background:#dbeafe;color:#1e40af',
-                                'cancelled'    => 'background:#fee2e2;color:#991b1b',
-                            );
+                            $is_past  = strtotime( $b->booking_date ) < $today_ts;
                             $badge_style = $status_styles[ $b->status ] ?? 'background:#f3f4f6;color:#6b7280';
 
                             // Determine payment context for display
-                            $deposit_settings = MBS_Bookings::get_deposit_settings();
                             $total_amount     = (float) $b->amount;
                             $amount_paid_val  = (float) ( $b->amount_paid ?? 0 );
                             $deposit_amount   = MBS_Bookings::calculate_deposit( $total_amount );
-                            $credit_assignment = class_exists( 'MBS_Credit_Accounts' ) ? MBS_Credit_Accounts::for_booking( $b ) : null;
+                            $credit_key       = ! empty( $b->series_id ) ? ( 'series:' . $b->series_id ) : ( 'booking:' . $b->ref );
+                            $credit_assignment = $preloaded['credit_links'][ $credit_key ] ?? null;
                             $is_deposit_mode  = $deposit_settings['enabled'] && $total_amount > 0 && ! $credit_assignment;
                         ?>
                         <tr style="border-bottom:1px solid #f0f0f0;<?php echo $is_past ? 'opacity:0.6;' : ''; ?>">
@@ -228,11 +256,12 @@ foreach ( $invoices as $invoice ) $invoices_by_series[ $invoice->series_ref ][] 
                                     <?php endif; ?>
                                     <a href="<?php echo esc_url( MBS_Hirer_Identity::calendar_url( $b ) ); ?>" class="nms-btn nms-btn-sm" style="background:#f5f0ff;color:#7413DC;border-color:#e0d0f0;font-size:0.7rem;" aria-label="Download booking calendar entry">📅</a>
                                     <?php
-                                    $mod_url = MBS_Modification::get_modification_url( $b );
-                                    if ( $mod_url && ! in_array( $b->status, array( 'cancelled' ) ) && ! $is_past ) :
+                                    if ( ! in_array( $b->status, array( 'cancelled', 'archived' ), true ) && ! $is_past ) :
+                                        $mod_url = MBS_Modification::get_modification_url( $b, $status_page_url );
+                                        if ( $mod_url ) :
                                     ?>
                                         <a href="<?php echo esc_url( $mod_url ); ?>" class="nms-btn nms-btn-sm" style="font-size:0.7rem;">Change</a>
-                                    <?php endif; ?>
+                                    <?php endif; endif; ?>
                                 </div>
                             </td>
                         </tr>

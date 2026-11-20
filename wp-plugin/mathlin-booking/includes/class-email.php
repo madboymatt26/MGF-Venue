@@ -108,7 +108,15 @@ class MBS_Email {
 
         $message = self::build_confirmation_message( $booking );
         $attachments = (float) $booking->amount > 0 ? self::generate_invoice_attachment( $booking ) : array();
-        return self::send( $booking->email, $message['subject'], $message['body'], $attachments );
+        try {
+            return self::send( $booking->email, $message['subject'], $message['body'], $attachments );
+        } finally {
+            foreach ( $attachments as $temp_path ) {
+                if ( is_string( $temp_path ) && $temp_path !== '' && is_file( $temp_path ) ) {
+                    @unlink( $temp_path );
+                }
+            }
+        }
     }
 
     /**
@@ -653,38 +661,62 @@ class MBS_Email {
     }
 
     /**
-     * Generate an invoice HTML file and return the path for email attachment.
+     * Generate a temporary PDF invoice file for email attachment.
+     * Callers MUST unlink returned temp paths in a finally block.
      */
     private static function generate_invoice_attachment( $booking ) {
-        $invoice_html = MBS_Invoice::generate_email_invoice( $booking );
-
-        // Create a temporary HTML file
-        $upload_dir = wp_upload_dir();
-        $invoice_dir = $upload_dir['basedir'] . '/mbs-invoices/';
-
-        if ( ! file_exists( $invoice_dir ) ) {
-            wp_mkdir_p( $invoice_dir );
-            // Add an index.php to prevent directory listing
-            file_put_contents( $invoice_dir . 'index.php', '<?php // Silence is golden.' );
+        if ( ! class_exists( 'MBS_PDF_Renderer' ) || ! class_exists( 'MBS_Invoice' ) ) {
+            return array();
         }
-
-        $filename = sanitize_file_name( $booking->invoice_number . '.html' );
-        $filepath = $invoice_dir . $filename;
-
-        file_put_contents( $filepath, $invoice_html );
-
-        return array( $filepath );
+        $invoice_html = MBS_Invoice::generate_email_invoice( $booking );
+        $pdf_binary = MBS_PDF_Renderer::render_pdf( $invoice_html );
+        if ( is_wp_error( $pdf_binary ) || ! is_string( $pdf_binary ) || $pdf_binary === '' ) {
+            return array();
+        }
+        $ref = sanitize_file_name( (string) ( $booking->invoice_number ?: $booking->ref ?: 'invoice' ) );
+        $temp_path = MBS_PDF_Renderer::write_temp_pdf( $pdf_binary, $ref );
+        if ( is_wp_error( $temp_path ) ) {
+            return array();
+        }
+        return array( $temp_path );
     }
 
     /**
-     * Public wrapper for generating invoice attachments.
-     * Used by modification approval emails to attach updated invoices.
+     * One-time safe cleanup: purge legacy static HTML invoice files previously
+     * written into wp-content/uploads/mbs-invoices/.
      *
-     * @param  object $booking  Booking object
-     * @return array            Array of file paths for wp_mail attachments
+     * @return int Number of legacy HTML files removed.
      */
-    public static function generate_invoice_attachment_for( $booking ) {
-        return self::generate_invoice_attachment( $booking );
+    public static function cleanup_legacy_invoice_files() {
+        if ( ! function_exists( 'wp_upload_dir' ) ) return 0;
+        $upload_dir = wp_upload_dir();
+        $base_dir = isset( $upload_dir['basedir'] ) ? rtrim( (string) $upload_dir['basedir'], '/\\' ) : '';
+        if ( $base_dir === '' ) return 0;
+        $invoice_dir = $base_dir . '/mbs-invoices';
+        if ( ! is_dir( $invoice_dir ) ) return 0;
+
+        $real_base = realpath( $base_dir );
+        $real_dir  = realpath( $invoice_dir );
+        if ( ! $real_base || ! $real_dir || strpos( $real_dir, $real_base . DIRECTORY_SEPARATOR ) !== 0 ) {
+            return 0;
+        }
+
+        $removed = 0;
+        $files = glob( $real_dir . DIRECTORY_SEPARATOR . '*.html' );
+        if ( is_array( $files ) ) {
+            foreach ( $files as $file ) {
+                $real_file = realpath( $file );
+                if ( $real_file && is_file( $real_file ) && ! is_link( $file ) && strpos( $real_file, $real_dir . DIRECTORY_SEPARATOR ) === 0 ) {
+                    if ( @unlink( $real_file ) ) {
+                        $removed++;
+                    }
+                }
+            }
+        }
+        if ( $removed > 0 ) {
+            error_log( '[MGF Venue] Purged ' . $removed . ' legacy static HTML invoice file(s) from uploads/mbs-invoices/.' );
+        }
+        return $removed;
     }
 
     private static function booking_table( $b ) {

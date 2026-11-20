@@ -687,34 +687,32 @@ jQuery(function ($) {
         $.post(NMS.ajax_url, data, function (res) {
             $btn.prop('disabled', false).text('Submit Booking Request');
             if (res.success) {
-                var msg = res.data.message;
+                $ok.empty().append($('<p style="margin:0;">').text((res.data && res.data.message) || 'Your booking request has been submitted!'));
 
                 // Show account creation prompt if not logged in
                 if (!NMS.is_logged_in) {
-                    // Check if an account already exists for this email
                     var bookerEmail = (NMS._lastBookingData && NMS._lastBookingData.email) || '';
-
-                    msg += '<div id="nms-create-account-prompt" style="margin-top:16px;padding:16px;background:#f5f0ff;border-radius:8px;border:1px solid #e0d0f0;">';
+                    var $prompt = $('<div id="nms-create-account-prompt" style="margin-top:16px;padding:16px;background:#f5f0ff;border-radius:8px;border:1px solid #e0d0f0;">');
 
                     if (bookerEmail && res.data.account_exists) {
-                        // Account exists — show login prompt
-                        msg += '<p style="margin:0 0 8px;font-weight:700;color:#7413DC;">📋 Track your bookings</p>' +
-                            '<p style="margin:0 0 12px;font-size:0.85rem;color:#6b7280;">You already have an account. Log in to view all your bookings, invoices, and make future bookings faster.</p>' +
-                            '<a href="' + (NMS.portal_url || '#') + '" class="nms-btn nms-btn-primary nms-btn-sm">Log In to My Bookings</a>';
+                        var safePortalUrl = (typeof NMS.portal_url === 'string' && (/^https?:\/\//i.test(NMS.portal_url) || NMS.portal_url.charAt(0) === '/')) ? NMS.portal_url : '#';
+                        $prompt
+                            .append($('<p style="margin:0 0 8px;font-weight:700;color:#7413DC;">').text('📋 Track your bookings'))
+                            .append($('<p style="margin:0 0 12px;font-size:0.85rem;color:#6b7280;">').text('You already have an account. Log in to view all your bookings, invoices, and make future bookings faster.'))
+                            .append($('<a class="nms-btn nms-btn-primary nms-btn-sm">').attr('href', safePortalUrl).text('Log In to My Bookings'));
                     } else {
-                        // No account — show create prompt
-                        msg += '<p style="margin:0 0 8px;font-weight:700;color:#7413DC;">📋 Want to track your bookings?</p>' +
-                            '<p style="margin:0 0 12px;font-size:0.85rem;color:#6b7280;">Create an account to manage your bookings. We will email a verification link; set your password securely afterwards.</p>' +
-                            '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">' +
-                            '<button type="button" id="nms-quick-register" class="nms-btn nms-btn-primary nms-btn-sm" style="white-space:nowrap;">Create Account</button>' +
-                            '</div>' +
-                            '<p id="nms-quick-reg-msg" style="margin:8px 0 0;font-size:0.8rem;"></p>';
+                        $prompt
+                            .append($('<p style="margin:0 0 8px;font-weight:700;color:#7413DC;">').text('📋 Want to track your bookings?'))
+                            .append($('<p style="margin:0 0 12px;font-size:0.85rem;color:#6b7280;">').text('Create an account to manage your bookings. We will email a verification link; set your password securely afterwards.'))
+                            .append($('<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">')
+                                .append($('<button type="button" id="nms-quick-register" class="nms-btn nms-btn-primary nms-btn-sm" style="white-space:nowrap;">').text('Create Account')))
+                            .append($('<p id="nms-quick-reg-msg" style="margin:8px 0 0;font-size:0.8rem;">'));
                     }
 
-                    msg += '</div>';
+                    $ok.append($prompt);
                 }
 
-                $ok.html(msg).show();
+                $ok.show();
                 $form[0].reset();
                 $('#nms-recurring').trigger('change');
                 updateCost();
