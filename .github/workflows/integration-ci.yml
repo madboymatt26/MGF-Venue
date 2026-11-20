@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - main
       - feature/recurring-series-billing
       - feature/invoice-documents
   pull_request:

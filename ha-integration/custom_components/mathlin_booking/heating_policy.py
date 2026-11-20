@@ -23,4 +23,7 @@ def heating_requested(booking: object) -> bool:
         return False
     if "heating_required" in booking:
         return booking["heating_required"] is True
-    return booking.get("scout_use", False) in (False, 0, "0", None)
+    # Legacy compatibility heats only an absent or explicit-False scout flag.
+    # A present but malformed value (None, "0", 0, ...) means the source feed
+    # was ambiguous, so fail closed instead of treating it as permission.
+    return booking.get("scout_use", False) is False

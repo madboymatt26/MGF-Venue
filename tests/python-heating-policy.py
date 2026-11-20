@@ -29,6 +29,13 @@ class HeatingPolicyTests(unittest.TestCase):
     def test_explicit_scout_opt_in(self):
         self.assertTrue(policy.heating_requested({"scout_use": True, "heating_required": True}))
 
+    def test_malformed_scout_flag_fails_closed(self):
+        # A present but ambiguous Scout flag is not permission to heat; only an
+        # absent flag (legacy external feed) or an explicit False keeps heating.
+        for value in (None, 0, "0", "false", "", [], {}):
+            self.assertFalse(policy.heating_requested({"scout_use": value}))
+        self.assertTrue(policy.heating_requested({"scout_use": False}))
+
     def test_explicit_off_and_invalid_values(self):
         for value in (False, None, "true", "false", 1, 0, [], {}):
             self.assertFalse(policy.heating_requested({"heating_required": value}))
