@@ -10,7 +10,7 @@ $pattern_label = static function( $item ) { $schedule = json_decode( (string) $i
     <?php elseif ( ! empty( $ref ) && ! $series ) : ?>
         <div class="notice notice-error"><p>Recurring series not found.</p></div>
     <?php elseif ( ! $series ) : ?>
-        <form method="get" style="display:flex;gap:8px;align-items:center;margin:16px 0;">
+        <form method="get" class="mbs-series-filters">
             <input type="hidden" name="page" value="mathlin-series">
             <input type="search" name="s" value="<?php echo esc_attr( $search ); ?>" placeholder="Reference, customer or email">
             <select name="status">
@@ -21,7 +21,7 @@ $pattern_label = static function( $item ) { $schedule = json_decode( (string) $i
             </select>
             <button class="button">Filter</button>
         </form>
-        <div class="mbs-table-scroll">
+        <div class="mbs-series-table-wrap">
         <table class="widefat striped">
             <thead><tr><th>Series</th><th>Customer</th><th>Schedule</th><th>Dates</th><?php if ( MBS_Payment_Features::enabled() ) : ?><th>Billing</th><?php endif; ?><th>Status</th></tr></thead>
             <tbody>

@@ -744,14 +744,14 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
             <?php if($retained_exports): ?><details><summary>Your retained downloads</summary><ul><?php foreach($retained_exports as$export): ?><li><a href="<?php echo esc_url(MBS_Accounting_Export::download_url($export)); ?>"><?php echo esc_html(strtoupper($export['format']).' — '.$export['created_at']); ?></a> (expires <?php echo esc_html(wp_date('H:i',$export['expires'])); ?>)</li><?php endforeach; ?></ul></details><?php endif; endif; ?>
             <p>Choose a supported CSV layout for review before importing it into another accounting package.</p>
             <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-top:1rem;">
-                <div style="display:flex;gap:0.5rem;align-items:center;">
+                <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
                     <label style="font-size:0.85rem;font-weight:600;">From:</label>
                     <input type="date" id="mbs-acc-from" value="<?php echo esc_attr( $fy_start ); ?>">
                     <label style="font-size:0.85rem;font-weight:600;">To:</label>
                     <input type="date" id="mbs-acc-to" value="<?php echo esc_attr( min( date('Y-m-d'), $fy_end ) ); ?>">
                 </div>
             </div>
-            <div style="display:flex;gap:0.5rem;margin-top:1rem;">
+            <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:1rem;">
                 <a id="mbs-export-xero" href="#" class="button">📊 Xero CSV</a>
                 <a id="mbs-export-sage" href="#" class="button">📊 Sage CSV</a>
                 <a id="mbs-export-qb" href="#" class="button">📊 QuickBooks CSV</a>
