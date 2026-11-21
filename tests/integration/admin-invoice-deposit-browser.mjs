@@ -124,6 +124,8 @@ try{
  const denied=await browser.newContext();const deniedPage=await denied.newPage();
  await deniedPage.goto(base+'/wp-login.php');await deniedPage.locator('#user_login').fill(f.tag+'sub');await deniedPage.locator('#user_pass').fill('integration-only');await deniedPage.locator('#wp-submit').click({noWaitAfter:true});await deniedPage.waitForURL(u=>!u.pathname.includes('wp-login.php'));
  const deniedResponse=await deniedPage.goto(base+'/wp-admin/admin.php?page=mathlin-invoice&ref='+f.invoice_ref);
+ const denialBody=await deniedPage.locator('body').textContent();
+ if(deniedResponse.status()!==403) console.error('Unexpected denial response',deniedResponse.status(),deniedPage.url(),denialBody.slice(0,1200));
  check(deniedResponse.status()===403&&!(await deniedPage.locator('body').textContent()).includes('journey@example.invalid'),'Subscriber route denies invoice/customer data');await denied.close();
  console.log(`PASS ${checks} real desktop/mobile invoice and deposit browser checks`);
 }finally{await browser.close();}

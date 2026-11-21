@@ -94,7 +94,7 @@ class MBS_Admin {
             MBS_PLUGIN_URL . 'assets/mgf-venue-icon.png',
             30
         );
-        add_submenu_page( null, 'Invoice review', 'Invoice review', $booking_cap, 'mathlin-invoice', array( $this, 'render_invoice_review' ) );
+        add_submenu_page( '', 'Invoice review', 'Invoice review', $booking_cap, 'mathlin-invoice', array( $this, 'render_invoice_review' ) );
         add_submenu_page( 'mathlin-booking', 'All Bookings', $bookings_label, $booking_cap, 'mathlin-booking', array( $this, 'render_dashboard' ) );
         add_submenu_page( 'mathlin-booking', 'Recurring Series', 'Recurring Series', $booking_cap, 'mathlin-series', array( $this, 'render_series' ) );
         // Scout Nights: only show if the feature is enabled in Settings
