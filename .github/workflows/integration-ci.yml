@@ -283,3 +283,37 @@ jobs:
       - name: Stop disposable services
         if: always()
         run: docker compose -f tests/integration/docker-compose.yml down -v --remove-orphans
+
+  calendar-subscription:
+    name: Public calendar HTTP and subscription browser
+    runs-on: ubuntu-24.04
+    env:
+      WORDPRESS_IMAGE: wordpress:6.6.2-php8.2-apache
+      WPCLI_IMAGE: wordpress:cli-2.11.0-php8.2
+      MBS_TEST_WOO_VERSION: '9.3.3'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare disposable cache
+        run: mkdir -p tests/integration/.cache/wp-cli && chmod 0777 tests/integration/.cache/wp-cli
+      - name: Start isolated WordPress and MariaDB
+        run: docker compose -f tests/integration/docker-compose.yml up -d db wordpress
+      - name: Install runtime and synthetic calendar fixtures
+        run: |
+          docker compose -f tests/integration/docker-compose.yml run --rm -T cli sh /workspace/tests/integration/setup.sh
+          docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/calendar-subscription.php --allow-root
+      - name: Verify real HTTP, ICS parser and desktop/mobile subscription
+        shell: bash
+        run: |
+          npm install --prefix "$RUNNER_TEMP/mgf-browser" playwright@1.55.1 ical.js@2.2.1
+          node "$RUNNER_TEMP/mgf-browser/node_modules/playwright/cli.js" install --with-deps chromium
+          MGF_BROWSER_MODULE="$RUNNER_TEMP/mgf-browser/node_modules/playwright/index.mjs" MGF_ICAL_MODULE="$RUNNER_TEMP/mgf-browser/node_modules/ical.js/dist/ical.js" node tests/integration/calendar-subscription-browser.mjs
+      - name: Upload calendar evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: calendar-subscription
+          path: browser-artifacts/calendar-*.png
+          if-no-files-found: ignore
+      - name: Stop disposable services
+        if: always()
+        run: docker compose -f tests/integration/docker-compose.yml down -v --remove-orphans
