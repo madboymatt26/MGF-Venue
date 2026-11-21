@@ -57,7 +57,20 @@ class MBS_OSM_Integration {
         $client_secret = defined( 'MBS_OSM_CLIENT_SECRET' ) ? MBS_OSM_CLIENT_SECRET : get_option( 'mbs_osm_client_secret', '' );
         if ( ! defined( 'MBS_OSM_CLIENT_SECRET' ) && is_string( $client_secret ) && $client_secret !== '' && ! self::is_sealed( $client_secret ) && self::seal_available() ) {
             // One-time migration of a legacy plaintext secret to sealed storage.
-            update_option( 'mbs_osm_client_secret', self::seal( $client_secret ), false );
+            // Conditional update: if a concurrent settings save wrote a newer
+            // value since we read it, our write affects 0 rows and we keep
+            // the newer value instead of overwriting it with the stale one.
+            global $wpdb;
+            if ( isset( $wpdb ) && is_object( $wpdb ) && method_exists( $wpdb, 'query' ) ) {
+                $sealed = self::seal( $client_secret );
+                $wpdb->query( $wpdb->prepare( "UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = 'mbs_osm_client_secret' AND option_value = %s", $sealed, $client_secret ) );
+                // Direct $wpdb writes bypass the option API, so clear both the
+                // per-key cache and the autoload bucket the value may live in.
+                wp_cache_delete( 'mbs_osm_client_secret', 'options' );
+                wp_cache_delete( 'alloptions', 'options' );
+            } else {
+                update_option( 'mbs_osm_client_secret', self::seal( $client_secret ), false );
+            }
         }
         $client_secret = defined( 'MBS_OSM_CLIENT_SECRET' ) ? $client_secret : self::read_secret( get_option( 'mbs_osm_client_secret', '' ) );
         $legacy_enabled = (bool) get_option( 'mbs_osm_enabled', false );
@@ -107,7 +120,7 @@ class MBS_OSM_Integration {
     // values; the operator then re-enters the secret / reconnects, exactly as
     // with the Google integration. Without OpenSSL the module keeps the
     // previous plaintext behaviour rather than breaking the site.
-    private static function seal_available() { return function_exists( 'openssl_encrypt' ) && function_exists( 'random_bytes' ); }
+    private static function seal_available() { return (bool) apply_filters( 'mbs_osm_seal_available', function_exists( 'openssl_encrypt' ) && function_exists( 'random_bytes' ) ); }
     private static function seal( $plain ) {
         if ( ! self::seal_available() ) return (string) $plain;
         $iv = random_bytes( 12 ); $tag = '';

@@ -14,11 +14,28 @@ function is_wp_error( $value ) { return $value instanceof WP_Error; }
 function sanitize_key( $value ) { return preg_replace( '/[^a-z0-9_\-]/', '', strtolower( (string) $value ) ); }
 function wp_salt( $scheme = 'auth' ) { return 'test-only-osm-salt-' . $scheme; }
 function wp_json_encode( $value ) { return json_encode( $value ); }
-function apply_filters( $hook, $value ) { return $value; }
+$GLOBALS['__filters'] = array();
+function apply_filters( $hook, $value ) { return isset( $GLOBALS['__filters'][ $hook ] ) ? call_user_func( $GLOBALS['__filters'][ $hook ], $value ) : $value; }
+function add_test_filter( $hook, $cb ) { $GLOBALS['__filters'][ $hook ] = $cb; }
+function wp_cache_delete( $key, $group = '' ) {}
 
 $GLOBALS['__options'] = array();
 function get_option( $key, $default = false ) { return $GLOBALS['__options'][ $key ] ?? $default; }
 function update_option( $key, $value, $autoload = null ) { $GLOBALS['__options'][ $key ] = $value; return true; }
+
+// Minimal $wpdb stub whose conditional UPDATE honours the WHERE option_value clause.
+class Osm_Sec_Test_WPDB {
+    public $options = 'wp_options';
+    public function prepare( $query, ...$args ) { $this->__args = $args; $this->__query = $query; return $query; }
+    public function query( $query ) {
+        $args = $this->__args;
+        if ( ( $GLOBALS['__options']['mbs_osm_client_secret'] ?? null ) === $args[1] ) {
+            $GLOBALS['__options']['mbs_osm_client_secret'] = $args[0];
+            return 1;
+        }
+        return 0;
+    }
+}
 
 require_once dirname( __DIR__ ) . '/wp-plugin/mathlin-booking/includes/class-osm-accounting-v2.php';
 
@@ -72,10 +89,44 @@ $GLOBALS['__options'] = array( 'mbs_osm_client_secret' => $pre );
 osm_sec_assert( MBS_OSM_Integration::get_settings()['client_secret'] === 'already-sealed-secret', 'Pre-sealed secret did not read back.' );
 osm_sec_assert( get_option( 'mbs_osm_client_secret' ) === $pre, 'Pre-sealed secret was rewritten unexpectedly.' );
 
-// 7. A wp-config constant bypasses storage entirely.
+// 8. Migration uses a conditional update: a concurrent newer value is never overwritten by the stale one.
+$GLOBALS['__filters'] = array();
+$GLOBALS['wpdb'] = new Osm_Sec_Test_WPDB();
+$GLOBALS['__options'] = array( 'mbs_osm_client_secret' => 'race-plain-secret' );
+// Simulate a concurrent save landing between this request's read and its migration write.
+$GLOBALS['__concurrent'] = true;
+class Osm_Sec_Race_WPDB extends Osm_Sec_Test_WPDB {
+    public function query( $query ) {
+        if ( ! empty( $GLOBALS['__concurrent'] ) ) { $GLOBALS['__options']['mbs_osm_client_secret'] = 'gcm1:newer-concurrent-value'; $GLOBALS['__concurrent'] = false; }
+        return parent::query( $query );
+    }
+}
+$GLOBALS['wpdb'] = new Osm_Sec_Race_WPDB();
+$settings = MBS_OSM_Integration::get_settings();
+osm_sec_assert( get_option( 'mbs_osm_client_secret' ) === 'gcm1:newer-concurrent-value', 'Migration overwrote a concurrently saved newer secret.' );
+$GLOBALS['wpdb'] = new Osm_Sec_Test_WPDB();
+$GLOBALS['__options'] = array( 'mbs_osm_client_secret' => 'race-plain-secret-2' );
+MBS_OSM_Integration::get_settings();
+osm_sec_assert( strpos( (string) get_option( 'mbs_osm_client_secret' ), 'gcm1:' ) === 0, 'Conditional migration did not seal an unchanged legacy secret.' );
+unset( $GLOBALS['wpdb'] );
+
+// 9. Without OpenSSL: seal is a plaintext passthrough, migration is skipped, and an already-sealed install fails closed without fatal or plaintext.
+add_test_filter( 'mbs_osm_seal_available', function( $v ) { return false; } );
+osm_sec_assert( osm_sec_call( 'seal', 'no-openssl-secret' ) === 'no-openssl-secret', 'Without OpenSSL seal must pass plaintext through (previous behaviour).' );
+osm_sec_assert( osm_sec_call( 'unseal', 'gcm1:whatever' ) === '', 'Without OpenSSL unseal must fail closed.' );
+$GLOBALS['__options'] = array( 'mbs_osm_client_secret' => 'unmigrated-plain' );
+$settings = MBS_OSM_Integration::get_settings();
+osm_sec_assert( get_option( 'mbs_osm_client_secret' ) === 'unmigrated-plain', 'Migration must not run without OpenSSL.' );
+osm_sec_assert( $settings['client_secret'] === 'unmigrated-plain', 'Plaintext secret must remain usable without OpenSSL.' );
+$GLOBALS['__options'] = array( 'mbs_osm_client_secret' => $pre );
+$settings = MBS_OSM_Integration::get_settings();
+osm_sec_assert( $settings['client_secret'] === '', 'Sealed secret on an OpenSSL-less install must read as unconfigured, not garbage.' );
+$GLOBALS['__filters'] = array();
+
+// 7. A wp-config constant bypasses storage entirely. Runs last: constants cannot be undefined.
 define( 'MBS_OSM_CLIENT_SECRET', 'constant-secret' );
 $GLOBALS['__options'] = array( 'mbs_osm_client_secret' => 'stored-secret-that-should-be-ignored' );
 osm_sec_assert( MBS_OSM_Integration::get_settings()['client_secret'] === 'constant-secret', 'wp-config constant did not take precedence.' );
 osm_sec_assert( get_option( 'mbs_osm_client_secret' ) === 'stored-secret-that-should-be-ignored', 'Constant path must not rewrite stored options.' );
 
-echo "OK: 7 OSM secret-storage groups passed (round-trip, legacy fallback, tamper/AAD fail-closed, token payloads, lazy migration, constant precedence).\n";
+echo "OK: 9 OSM secret-storage groups passed (round-trip, legacy fallback, tamper/AAD fail-closed, token payloads, lazy migration, constant precedence, concurrent-save race, no-OpenSSL behaviour).\n";
