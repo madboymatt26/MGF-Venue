@@ -1452,6 +1452,18 @@ class MBS_Admin {
                     );
                 }
 
+                // Keep each past occurrence's earlier status in the audit log so
+                // financial reports can tell archived revenue from cancellations.
+                $logged = $wpdb->query( $wpdb->prepare(
+                    "INSERT INTO {$wpdb->prefix}mathlin_audit_log (ref, action, details, user_id, user_name, ip_address, created_at)
+                     SELECT ref, 'archived', CONCAT('Series deleted; past occurrence archived (was ', status, ')'), %d, 'System', '', %s FROM {$table}
+                     WHERE series_id = %s AND booking_date < %s AND status <> 'archived'",
+                    get_current_user_id(), current_time( 'mysql' ), $series_ref, $today
+                ) );
+                if ( $logged === false ) {
+                    throw new RuntimeException( 'Could not record the status of past series occurrences.' );
+                }
+
                 // Archive past bookings (set status to 'archived')
                 $archived = $wpdb->query( $wpdb->prepare(
                     "UPDATE {$table} SET status = 'archived', updated_at = %s WHERE series_id = %s AND booking_date < %s",

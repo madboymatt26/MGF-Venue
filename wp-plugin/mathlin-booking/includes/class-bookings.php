@@ -2063,9 +2063,15 @@ class MBS_Bookings {
      * from the audit log. An archived booking is:
      *  - superseded: a consolidation source whose replacement carries the revenue. Never counted.
      *  - cancelled: last cancelled or pending when archived, or last cancelled (singly, on payment
-     *    expiry, or by a series bulk cancel covering its date) with no later confirm, paid or reopen. Never counted.
+     *    expiry, or by a series cancellation whose recorded cut-off date covers it) with no later
+     *    confirm, paid, reopen or revenue-status archive. Never counted.
      *  - revenue: confirmed, deposit paid or paid when archived, or last confirmed/paid in the log. Counted.
      *  - unverified: none of the above (no recorded earlier status). Not counted; shown separately.
+     *
+     * A series cancellation only applies to occurrences that existed and were not already archived
+     * when it was logged. "All" and "selected" series cancellations do not record which occurrences
+     * they affected, so they are not inferred here; those archives stay unverified unless their own
+     * history says otherwise.
      *
      * @param string $q Table name or alias the condition applies to.
      */
@@ -2074,17 +2080,29 @@ class MBS_Bookings {
         $audit = $wpdb->prefix . 'mathlin_audit_log';
         $q = preg_replace( '/[^A-Za-z0-9_]/', '', (string) $q );
         $superseded = "(INSTR(COALESCE({$q}.custom_fields,''), '_mbs_whole_park_replacement') > 0 OR INSTR(COALESCE({$q}.custom_fields,''), '_mbs_multiday_replacement') > 0)";
-        $restored = "EXISTS (SELECT 1 FROM {$audit} ar WHERE ar.ref = {$q}.ref AND ar.id > %ID% AND ar.action IN ('confirmed','paid','reopened'))";
+        $was_revenue = "(INSTR(%A%.details, '(was confirmed)') > 0 OR INSTR(%A%.details, '(was deposit_paid)') > 0 OR INSTR(%A%.details, '(was paid)') > 0)";
+        // A later confirm/paid/reopen, or a later archive that recorded a revenue status, undoes an earlier cancellation.
+        $restored = "EXISTS (SELECT 1 FROM {$audit} ar WHERE ar.ref = {$q}.ref AND ar.id > %ID%
+                AND (ar.action IN ('confirmed','paid','deposit_paid','reopened') OR (ar.action = 'archived' AND " . str_replace( '%A%', 'ar', $was_revenue ) . ")))";
+        // A series-level cancellation only reached occurrences that existed and were still unarchived at that point.
+        // Ordering uses audit ids, not timestamps: booking rows and audit rows are stamped from different clocks.
+        $series_scope = "{$q}.series_id <> '' AND %S%.ref = {$q}.series_id
+                AND NOT EXISTS (SELECT 1 FROM {$audit} an WHERE an.ref = {$q}.ref AND an.action = 'created' AND an.id > %S%.id)
+                AND NOT EXISTS (SELECT 1 FROM {$audit} aa WHERE aa.ref = {$q}.ref AND aa.action = 'archived' AND aa.id < %S%.id)";
         $cancelled = "(EXISTS (SELECT 1 FROM {$audit} ac WHERE ac.ref = {$q}.ref
                 AND (ac.action IN ('cancelled','unpaid_booking_cancelled')
                      OR (ac.action = 'archived' AND (INSTR(ac.details, '(was cancelled)') > 0 OR INSTR(ac.details, '(was pending)') > 0)))
                 AND NOT " . str_replace( '%ID%', 'ac.id', $restored ) . ")
-            OR EXISTS (SELECT 1 FROM {$audit} sc WHERE sc.ref = {$q}.series_id AND {$q}.series_id <> '' AND sc.action = 'series_bulk_cancel'
+            OR EXISTS (SELECT 1 FROM {$audit} sc WHERE " . str_replace( '%S%', 'sc', $series_scope ) . " AND sc.action = 'series_bulk_cancel'
                 AND LEFT(SUBSTRING_INDEX(sc.details, '(from ', -1), 10) <= {$q}.booking_date
-                AND NOT " . str_replace( '%ID%', 'sc.id', $restored ) . "))";
+                AND NOT " . str_replace( '%ID%', 'sc.id', $restored ) . ")
+            OR EXISTS (SELECT 1 FROM {$audit} sx WHERE " . str_replace( '%S%', 'sx', $series_scope ) . " AND sx.action = 'series_cancelled'
+                AND ( ( INSTR(sx.details, ' from_date occurrence') > 0 AND INSTR(sx.details, 'From ') > 0 AND LEFT(SUBSTRING_INDEX(sx.details, 'From ', -1), 10) <= {$q}.booking_date )
+                   OR ( INSTR(sx.details, ' future occurrence') > 0 AND DATE(sx.created_at) <= {$q}.booking_date ) )
+                AND NOT " . str_replace( '%ID%', 'sx.id', $restored ) . "))";
         $revenue = "EXISTS (SELECT 1 FROM {$audit} ap WHERE ap.ref = {$q}.ref
                 AND (ap.action IN ('confirmed','paid','deposit_paid')
-                     OR (ap.action = 'archived' AND (INSTR(ap.details, '(was confirmed)') > 0 OR INSTR(ap.details, '(was deposit_paid)') > 0 OR INSTR(ap.details, '(was paid)') > 0))))";
+                     OR (ap.action = 'archived' AND " . str_replace( '%A%', 'ap', $was_revenue ) . ")))";
         return array( 'superseded' => $superseded, 'cancelled' => $cancelled, 'revenue' => $revenue );
     }
 
