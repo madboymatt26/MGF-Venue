@@ -55,6 +55,11 @@ class MBS_OSM_Integration {
     public static function get_settings() {
         $client_id = defined( 'MBS_OSM_CLIENT_ID' ) ? MBS_OSM_CLIENT_ID : get_option( 'mbs_osm_client_id', '' );
         $client_secret = defined( 'MBS_OSM_CLIENT_SECRET' ) ? MBS_OSM_CLIENT_SECRET : get_option( 'mbs_osm_client_secret', '' );
+        if ( ! defined( 'MBS_OSM_CLIENT_SECRET' ) && is_string( $client_secret ) && $client_secret !== '' && ! self::is_sealed( $client_secret ) && self::seal_available() ) {
+            // One-time migration of a legacy plaintext secret to sealed storage.
+            update_option( 'mbs_osm_client_secret', self::seal( $client_secret ), false );
+        }
+        $client_secret = defined( 'MBS_OSM_CLIENT_SECRET' ) ? $client_secret : self::read_secret( get_option( 'mbs_osm_client_secret', '' ) );
         $legacy_enabled = (bool) get_option( 'mbs_osm_enabled', false );
         $v2_configured = (string) get_option( 'mbs_osm_configuration_version', '' ) === '2';
         $auth_source = sanitize_key( get_option( 'mbs_osm_auth_source', 'mgf_connect' ) );
@@ -88,9 +93,49 @@ class MBS_OSM_Integration {
     }
 
     private static function token_from_value( $value ) {
+        $value = self::maybe_unseal_json( $value );
         if ( is_object( $value ) && ! empty( $value->access_token ) ) return (string) $value->access_token;
         if ( is_array( $value ) && ! empty( $value['access_token'] ) ) return (string) $value['access_token'];
         return '';
+    }
+
+    // ── Secret storage at rest ────────────────────────────────────────────────
+    // Standalone client secret and OAuth tokens are authenticated-encrypted at
+    // rest, matching the Google Calendar module. Sealed values carry a 'gcm1:'
+    // marker so legacy plaintext rows are still readable and are re-sealed the
+    // next time they are written. A WordPress salt change invalidates sealed
+    // values; the operator then re-enters the secret / reconnects, exactly as
+    // with the Google integration. Without OpenSSL the module keeps the
+    // previous plaintext behaviour rather than breaking the site.
+    private static function seal_available() { return function_exists( 'openssl_encrypt' ) && function_exists( 'random_bytes' ); }
+    private static function seal( $plain ) {
+        if ( ! self::seal_available() ) return (string) $plain;
+        $iv = random_bytes( 12 ); $tag = '';
+        $cipher = openssl_encrypt( (string) $plain, 'aes-256-gcm', hash( 'sha256', wp_salt( 'auth' ), true ), OPENSSL_RAW_DATA, $iv, $tag, 'MGF OSM Accounting' );
+        if ( $cipher === false ) return (string) $plain;
+        return 'gcm1:' . base64_encode( $iv . $tag . $cipher );
+    }
+    /** Returns '' for a sealed value that cannot be authenticated (salt change or tamper). */
+    private static function unseal( $sealed ) {
+        $raw = base64_decode( substr( (string) $sealed, 5 ), true );
+        if ( $raw === false || strlen( $raw ) < 29 || ! self::seal_available() ) return '';
+        $plain = openssl_decrypt( substr( $raw, 28 ), 'aes-256-gcm', hash( 'sha256', wp_salt( 'auth' ), true ), OPENSSL_RAW_DATA, substr( $raw, 0, 12 ), substr( $raw, 12, 16 ), 'MGF OSM Accounting' );
+        return $plain === false ? '' : $plain;
+    }
+    private static function is_sealed( $value ) { return is_string( $value ) && strpos( $value, 'gcm1:' ) === 0; }
+    /** Decodes a stored token payload: sealed JSON, or a legacy plaintext/serialized value. */
+    private static function maybe_unseal_json( $value ) {
+        if ( self::is_sealed( $value ) ) {
+            $plain = self::unseal( $value );
+            $decoded = json_decode( $plain, true );
+            return is_array( $decoded ) ? $decoded : '';
+        }
+        return $value;
+    }
+    /** Reads a string secret with legacy-plaintext fallback. */
+    private static function read_secret( $value ) {
+        if ( self::is_sealed( $value ) ) return self::unseal( $value );
+        return is_string( $value ) ? $value : '';
     }
 
     /** Use MGF Connect as the shared OSM OAuth owner when selected. */
@@ -126,7 +171,7 @@ class MBS_OSM_Integration {
             'client_secret' => $settings['client_secret'],
             'scope' => 'section:finance:read section:finance:write',
         );
-        $refresh = (string) get_option( 'mbs_osm_refresh_token', '' );
+        $refresh = self::read_secret( get_option( 'mbs_osm_refresh_token', '' ) );
         if ( $refresh !== '' ) { $body['grant_type'] = 'refresh_token'; $body['refresh_token'] = $refresh; }
         $response = wp_remote_post( self::OSM_TOKEN, array( 'timeout' => 30, 'headers' => array( 'Accept' => 'application/json' ), 'body' => $body ) );
         $parsed = self::parse_http_response( $response );
@@ -135,9 +180,9 @@ class MBS_OSM_Integration {
             $parsed = self::parse_http_response( wp_remote_post( self::OSM_TOKEN, array( 'timeout' => 30, 'headers' => array( 'Accept' => 'application/json' ), 'body' => $body ) ) );
         }
         if ( is_wp_error( $parsed ) || empty( $parsed['access_token'] ) ) return '';
-        update_option( 'mbs_osm_access_token_data', $parsed, false );
+        update_option( 'mbs_osm_access_token_data', self::seal( wp_json_encode( $parsed ) ), false );
         update_option( 'mbs_osm_access_token_expiry', time() + max( 60, (int) ( $parsed['expires_in'] ?? 3600 ) ), false );
-        if ( ! empty( $parsed['refresh_token'] ) ) update_option( 'mbs_osm_refresh_token', (string) $parsed['refresh_token'], false );
+        if ( ! empty( $parsed['refresh_token'] ) ) update_option( 'mbs_osm_refresh_token', self::seal( (string) $parsed['refresh_token'] ), false );
         return (string) $parsed['access_token'];
     }
 
@@ -702,7 +747,7 @@ class MBS_OSM_Integration {
         // outage, because outbox insertion is deliberately transactional.
         update_option( 'mbs_osm_enabled', false ); update_option( 'mbs_osm_sandbox_mode', ! empty( $_POST['osm_sandbox_mode'] ) ); update_option( 'mbs_osm_auth_source', $auth );
         if ( ! defined( 'MBS_OSM_CLIENT_ID' ) && trim( (string) ( $_POST['osm_client_id'] ?? '' ) ) !== '' ) update_option( 'mbs_osm_client_id', sanitize_text_field( $_POST['osm_client_id'] ) );
-        if ( ! defined( 'MBS_OSM_CLIENT_SECRET' ) && trim( (string) ( $_POST['osm_client_secret'] ?? '' ) ) !== '' ) update_option( 'mbs_osm_client_secret', sanitize_text_field( $_POST['osm_client_secret'] ) );
+        if ( ! defined( 'MBS_OSM_CLIENT_SECRET' ) && trim( (string) ( $_POST['osm_client_secret'] ?? '' ) ) !== '' ) update_option( 'mbs_osm_client_secret', self::seal( sanitize_text_field( $_POST['osm_client_secret'] ) ), false );
         $numeric = array( 'osm_section_id' => 'mbs_osm_section_id', 'osm_bank_account_id' => 'mbs_osm_bank_account_id', 'osm_venue_category_id' => 'mbs_osm_venue_category_id', 'osm_venue_item_id' => 'mbs_osm_venue_item_id', 'osm_clothing_category_id' => 'mbs_osm_clothing_category_id', 'osm_clothing_item_id' => 'mbs_osm_clothing_item_id', 'osm_fees_category_id' => 'mbs_osm_fees_category_id', 'osm_fees_item_id' => 'mbs_osm_fees_item_id' ); foreach ( $numeric as $post => $option ) update_option( $option, preg_replace( '/\D+/', '', (string) ( $_POST[$post] ?? '' ) ) );
         update_option( 'mbs_osm_description_template', sanitize_text_field( $_POST['osm_description_template'] ?? 'WooPayments payout {payout_id}' ) ); update_option( 'mbs_osm_match_days', max( 0, min( 7, (int) ( $_POST['osm_match_days'] ?? 3 ) ) ) ); update_option( 'mbs_osm_product_mappings', wp_json_encode( self::decode_mappings( wp_unslash( $_POST['osm_product_mappings'] ?? '[]' ) ) ) );
         update_option( 'mbs_osm_configuration_version', '2', false );
