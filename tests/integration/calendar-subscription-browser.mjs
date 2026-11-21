@@ -36,6 +36,9 @@ try{
   await page.goto(f.page_url);const panel=page.locator('.nms-calendar-subscribe');await panel.waitFor();await page.waitForFunction(()=>document.querySelectorAll('#nms-cal-days .nms-cal-day').length>=28);
   check(!(await page.locator('#nms-cal-month-label').textContent()).includes('Loading'),'Existing public calendar loads alongside subscription');
   check(await panel.getByRole('link',{name:'Subscribe to calendar',exact:true}).getAttribute('href')===f.feed_url.replace(/^https?:/,'webcal:'),'Subscription link targets exact feed without account/token');
+  check(!await panel.locator('details').getAttribute('open'),'Instructions collapsed by default');
+  const calendarBox=await page.locator('.nms-calendar-main').boundingBox();check(calendarBox.y<900-100,'Initial calendar remains readily visible');
+  await page.screenshot({path:`browser-artifacts/calendar-default-${width}.png`,fullPage:true});
   await panel.locator('summary').click();await panel.getByRole('button',{name:'Copy subscription URL'}).click();await panel.getByRole('status').filter({hasText:'copied'}).waitFor();
   check(await page.evaluate(()=>navigator.clipboard.readText())===f.feed_url,'Actual clipboard receives feed URL');
   check((await panel.textContent()).includes('computer browser')&&(await panel.textContent()).includes('will not receive updates'),'Client limitations and snapshot warning visible');

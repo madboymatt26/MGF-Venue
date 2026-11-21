@@ -448,7 +448,7 @@
 }
 
 .nms-calendar-subscribe { padding: 1.2rem; margin: 1.2rem 0 1.8rem; border: 1px solid #ddd1ed; border-radius: 8px; background: #faf7ff; }
-.nms-calendar-subscribe h3 { margin: 0 0 .6rem; color: #45216d; }
+.nms-calendar-subscribe > p { margin: 0 0 .7rem; }
 .nms-calendar-subscribe summary { cursor: pointer; font-weight: 600; }
 .nms-calendar-subscribe label { display: block; margin: 1rem 0 .6rem; }
 .nms-calendar-subscribe input { display: block; box-sizing: border-box; width: 100%; min-width: 0; margin-top: .4rem; padding: .6rem; }

@@ -11,10 +11,9 @@ $is_readonly = ! empty( $GLOBALS['mbs_calendar_mode'] ) && $GLOBALS['mbs_calenda
         $subscribe_url = preg_replace( '#^https?://#i', 'webcal://', $feed_url );
     ?>
     <section class="nms-calendar-subscribe" aria-label="Subscribe to this calendar">
-        <h3>Keep What's On in your calendar</h3>
-        <p>See public event names and reserved times for private bookings. This is a read-only subscription, with no sign-in needed.</p>
         <p><a class="nms-btn nms-btn-primary" href="<?php echo esc_url( $subscribe_url, array( 'webcal' ) ); ?>">Subscribe to calendar</a></p>
         <details><summary>Google, Outlook or another calendar?</summary>
+            <p>See public event names and reserved times for private bookings. This is a read-only subscription, with no sign-in needed.</p>
             <label>Subscription URL <input class="nms-subscription-url" type="url" readonly value="<?php echo esc_url( $feed_url ); ?>" aria-label="Calendar subscription URL"></label>
             <button type="button" class="nms-copy-calendar nms-btn nms-btn-secondary">Copy subscription URL</button>
             <span class="nms-copy-calendar-status" role="status"></span>
