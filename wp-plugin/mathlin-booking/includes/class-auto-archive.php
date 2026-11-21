@@ -35,6 +35,17 @@ class MBS_Auto_Archive {
         // 1. In the past (before today)
         // 2. Older than the configured threshold
         // Note: Use NULLIF to handle empty string booking_date_end values
+        // Keep each booking's earlier status in the audit log so financial
+        // reports can tell archived revenue from archived cancellations.
+        $wpdb->query( $wpdb->prepare(
+            "INSERT INTO {$wpdb->prefix}mathlin_audit_log (ref, action, details, user_id, user_name, ip_address, created_at)
+             SELECT ref, 'archived', CONCAT('Auto-archived (was ', status, ')'), 0, 'System', '', %s FROM {$table}
+             WHERE COALESCE(NULLIF(booking_date_end, ''), booking_date) < %s
+             AND COALESCE(NULLIF(booking_date_end, ''), booking_date) < %s
+             AND status IN ('confirmed', 'deposit_paid', 'cancelled', 'paid')
+             AND (status IN ('cancelled','paid') OR amount <= COALESCE(amount_paid,0))",
+            current_time( 'mysql' ), $today, $threshold
+        ) );
         $count = $wpdb->query( $wpdb->prepare(
             "UPDATE {$table}
              SET status = 'archived'

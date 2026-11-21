@@ -989,7 +989,7 @@ class MBS_Bookings {
 
         if ( $result !== false ) {
             // Audit log
-            MBS_Audit_Log::log( $ref, $status === 'pending' ? 'reopened' : $status, 'Status changed to ' . $status );
+            MBS_Audit_Log::log( $ref, $status === 'pending' ? 'reopened' : $status, 'Status changed to ' . $status . ( $status === 'archived' ? ' (was ' . $current->status . ')' : '' ) );
         }
 
         if ( $result !== false && $status === 'confirmed' ) {
@@ -2010,6 +2010,14 @@ class MBS_Bookings {
         $table = $wpdb->prefix . MBS_TABLE;
         $days_after = (int) get_option( 'mbs_auto_archive_days', 7 );
         $threshold  = wp_date( 'Y-m-d', strtotime( "-{$days_after} days" ) );
+        // Keep each booking's earlier status in the audit log so financial
+        // reports can tell archived revenue from archived cancellations.
+        $wpdb->query( $wpdb->prepare(
+            "INSERT INTO {$wpdb->prefix}mathlin_audit_log (ref, action, details, user_id, user_name, ip_address, created_at)
+             SELECT ref, 'archived', CONCAT('Archived past booking (was ', status, ')'), %d, 'System', '', %s FROM {$table}
+             WHERE COALESCE(NULLIF(booking_date_end, ''), booking_date) < %s AND status IN ('confirmed', 'deposit_paid', 'cancelled')",
+            get_current_user_id(), current_time( 'mysql' ), $threshold
+        ) );
         $updated = $wpdb->query( $wpdb->prepare(
             "UPDATE {$table} SET status = 'archived' WHERE COALESCE(NULLIF(booking_date_end, ''), booking_date) < %s AND status IN ('confirmed', 'deposit_paid', 'cancelled')",
             $threshold
@@ -2049,6 +2057,32 @@ class MBS_Bookings {
     }
 
     /**
+     * SQL condition for bookings that count as revenue in financial-year reports.
+     *
+     * Live confirmed/deposit-paid/paid bookings count. An archived booking is
+     * only filed away, so it counts too, unless it is known not to be revenue:
+     * consolidated into a replacement booking (the replacement counts instead),
+     * or cancelled or still pending when archived. Archiving does not keep the
+     * earlier status, so it is read from the audit log: an explicit "(was ...)"
+     * note on the archive entry, or a cancellation entry with no later
+     * confirm, paid or reopen entry.
+     *
+     * @param string $q Table name or alias the condition applies to.
+     */
+    public static function revenue_status_sql( $q ) {
+        global $wpdb;
+        $audit = $wpdb->prefix . 'mathlin_audit_log';
+        $q = preg_replace( '/[^A-Za-z0-9_]/', '', (string) $q );
+        return "({$q}.status IN ('confirmed','deposit_paid','paid') OR ({$q}.status = 'archived'
+            AND INSTR(COALESCE({$q}.custom_fields,''), '_mbs_whole_park_replacement') = 0
+            AND INSTR(COALESCE({$q}.custom_fields,''), '_mbs_multiday_replacement') = 0
+            AND NOT EXISTS (SELECT 1 FROM {$audit} ac WHERE ac.ref = {$q}.ref
+                AND (ac.action IN ('cancelled','unpaid_booking_cancelled')
+                     OR (ac.action = 'archived' AND (INSTR(ac.details, '(was cancelled)') > 0 OR INSTR(ac.details, '(was pending)') > 0)))
+                AND NOT EXISTS (SELECT 1 FROM {$audit} ar WHERE ar.ref = {$q}.ref AND ar.id > ac.id AND ar.action IN ('confirmed','paid','reopened')))))";
+    }
+
+    /**
      * Get stats with financial year support (April to March).
      *
      * @param bool $exclude_scout When true, internal Scout Night bookings
@@ -2078,6 +2112,8 @@ class MBS_Bookings {
             $fy_label = ( $year - 1 ) . '/' . $year;
         }
 
+        $revenue_sql = self::revenue_status_sql( $table );
+
         return array(
             'total'      => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status != 'archived'{$scout_clause}" ),
             'pending'    => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status='pending'{$scout_clause}" ),
@@ -2086,7 +2122,7 @@ class MBS_Bookings {
             'archived'   => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status='archived'{$scout_clause}" ),
             'paid'       => (int)   $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status='paid'{$scout_clause}" ),
             'revenue_fy' => (float) $wpdb->get_var( $wpdb->prepare(
-                "SELECT COALESCE(SUM(amount), 0) FROM {$table} WHERE status IN ('confirmed', 'deposit_paid', 'paid') AND booking_date BETWEEN %s AND %s",
+                "SELECT COALESCE(SUM(amount), 0) FROM {$table} WHERE {$revenue_sql} AND booking_date BETWEEN %s AND %s",
                 $fy_start, $fy_end
             ) ),
             'fy_label'   => $fy_label,
