@@ -21,7 +21,7 @@ $pattern_label = static function( $item ) { $schedule = json_decode( (string) $i
             </select>
             <button class="button">Filter</button>
         </form>
-        <div class="mbs-series-table-wrap">
+        <div class="mbs-series-table-wrap mbs-table-scroll">
         <table class="widefat striped">
             <thead><tr><th>Series</th><th>Customer</th><th>Schedule</th><th>Dates</th><?php if ( MBS_Payment_Features::enabled() ) : ?><th>Billing</th><?php endif; ?><th>Status</th></tr></thead>
             <tbody>
