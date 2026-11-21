@@ -841,6 +841,7 @@ jQuery(function ($) {
 });
 
 // Keep a visible, selectable URL when clipboard access is unavailable or denied.
+jQuery(function () {
 document.addEventListener('click', function (event) {
     var button = event.target.closest('.nms-copy-calendar');
     if (!button) return;
@@ -850,4 +851,5 @@ document.addEventListener('click', function (event) {
     input.focus(); input.select();
     if (!navigator.clipboard || !window.isSecureContext) { status.textContent = 'URL selected. Copy it into your calendar app.'; return; }
     navigator.clipboard.writeText(input.value).then(function () { status.textContent = 'Subscription URL copied.'; }, function () { status.textContent = 'URL selected. Copy it into your calendar app.'; });
+});
 });
