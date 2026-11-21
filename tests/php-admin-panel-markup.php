@@ -33,4 +33,8 @@ panel_assert($xp->query('//details[contains(@class,"mbs-extras-settings")]/div[c
 libxml_clear_errors();libxml_use_internal_errors($prior);
 $charges=false;ob_start();(new MBS_Extras_Catalogue())->render_settings();panel_assert(ob_get_clean()==='','Disabled charges do not render catalogue');
 $can=false;ob_start();MBS_Attention::render();panel_assert(ob_get_clean()==='','Attention permission guard retained');
+$listv=file_get_contents(dirname(__DIR__).'/wp-plugin/mathlin-booking/admin/views/list.php');
+preg_match('/nms-series-row.*?<\/td>/s',$listv,$sm);
+panel_assert(!empty($sm)&&strpos($sm[0],'nms-bulk-check')===false,'Series rows carry no bulk checkbox');
+panel_assert(strpos(file_get_contents(dirname(__DIR__).'/wp-plugin/mathlin-booking/admin/admin.js'),"data('series')")===false||strpos(file_get_contents(dirname(__DIR__).'/wp-plugin/mathlin-booking/admin/admin.js'),'.nms-series-\' + series).find(\'.nms-bulk-check\'')===false,'Bulk apply never expands series');
 echo "ADMIN_PANEL_MARKUP_OK: {$checks} assertions\n";

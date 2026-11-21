@@ -36,14 +36,14 @@ class MBS_Attention {
         if(!current_user_can('mbs_manage_bookings')&&!current_user_can('manage_options'))return;
         $result=self::summary(5);
         if(!$result['items']&&!$result['partial_failures'])return;
-        $items=$result['items'];$total=count($items);$visible=3;
+        $items=$result['items'];$total=count($items);$visible=1;
         $row=function($item){
             $link_attr = $item['kind'] === 'email' ? ' class="mbs-attention__link mbs-open-email-diagnostics" data-tab="transport"' : ' class="mbs-attention__link"';
             return '<li class="mbs-attention__item"><span class="mbs-attention__ref">'.esc_html($item['ref']).'</span><span class="mbs-attention__finding">'.esc_html($item['finding']).'</span><a href="'.esc_url($item['url']).'"'.$link_attr.'>'.esc_html($item['action']).'</a></li>';
         };
         echo '<section class="mbs-attention" aria-labelledby="mbs-attention-title"><div class="mbs-attention__head"><h2 id="mbs-attention-title">Needs attention</h2>';
         if($total)echo '<span class="mbs-attention__count">'.(int)$total.'</span>';
-        echo '<span class="mbs-attention__note">Read-only. Opening a link changes nothing.</span></div>';
+        echo '</div>';
         foreach($result['partial_failures']as$issue)echo '<p class="mbs-attention__issue" role="alert">'.esc_html($issue).'</p>';
         if($total){
             echo '<ul class="mbs-attention__list" aria-label="Outstanding booking actions">';
@@ -55,6 +55,7 @@ class MBS_Attention {
                 echo '</ul></details>';
             }
         }
+        echo '<p class="mbs-attention__note">Read-only. Opening a link changes nothing.</p>';
         echo '</section>';
     }
 }

@@ -596,13 +596,6 @@ jQuery(function ($) {
 
         $('.nms-bulk-check:checked').each(function() {
             var ref = $(this).val();
-            // For series rows, add all bookings in the series
-            var series = $(this).data('series');
-            if (series) {
-                $('.nms-series-' + series).find('.nms-bulk-check').each(function() {
-                    refs.push($(this).val());
-                });
-            }
             refs.push(ref);
         });
 
@@ -727,10 +720,10 @@ jQuery(function ($) {
 
         if (visible) {
             $rows.hide();
-            $btn.text('▶ Expand');
+            $btn.text('Expand');
         } else {
             $rows.show();
-            $btn.text('▼ Collapse');
+            $btn.text('Collapse');
         }
     });
 
