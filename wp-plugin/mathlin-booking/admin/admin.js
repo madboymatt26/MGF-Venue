@@ -561,7 +561,7 @@ jQuery(function ($) {
 
     // Show how many of the selected bookings each action can apply to. The server
     // still decides every transition; this only helps the person choosing.
-    var bulkLabels = { confirmed: 'confirm', paid: 'mark as paid', cancelled: 'cancel', archived: 'archive' };
+    var bulkLabels = { confirmed: 'confirm', deposit_paid: 'mark deposit paid', paid: 'mark as paid', cancelled: 'cancel', archived: 'archive' };
     function bulkEligible(option, statuses) {
         var from = String($(option).data('from') || '').split(',');
         return statuses.filter(function(st) { return from.indexOf(st) !== -1; }).length;
@@ -605,8 +605,9 @@ jQuery(function ($) {
         if (!action) { $msg.text('Please select an action.').css('color', '#dc3232'); return; }
         if (refs.length === 0) { $msg.text('Please select at least one booking.').css('color', '#dc3232'); return; }
 
-        var labels = { confirmed: 'confirm', paid: 'mark as paid', cancelled: 'cancel', archived: 'archive' };
-        if (!confirm('Are you sure you want to ' + (labels[action] || action) + ' ' + refs.length + ' booking(s)?\n\nInvalid transitions will be skipped.')) return;
+        var labels = { confirmed: 'confirm', deposit_paid: 'mark deposit paid', paid: 'mark as paid', cancelled: 'cancel', archived: 'archive' };
+        var warning = action === 'deposit_paid' ? '\n\nOnly record bank-transfer deposits you have actually received. This records the configured deposit for each eligible booking, not its full balance, and emails a deposit receipt. Existing payments, invoice-managed bookings and invalid selections are skipped.' : '\n\nInvalid transitions will be skipped.';
+        if (!confirm('Are you sure you want to ' + (labels[action] || action) + ' ' + refs.length + ' booking(s)?' + warning)) return;
 
         var $btn = $(this);
         $btn.prop('disabled', true).text('Processing…');
@@ -620,8 +621,8 @@ jQuery(function ($) {
             $btn.prop('disabled', false).text('Apply');
             if (res.success) {
                 var d = res.data;
-                $msg.text('✓ ' + d.processed + ' processed, ' + d.skipped + ' skipped').css('color', '#46b450');
-                setTimeout(function() { location.reload(); }, 1500);
+                $msg.text('✓ ' + d.processed + ' processed, ' + d.skipped + ' skipped' + (d.reasons && d.reasons.length ? '. ' + d.reasons.join(' ') + ' Refresh to see the updated bookings.' : '')).css('color', '#22713c');
+                if (!d.reasons || !d.reasons.length) setTimeout(function() { location.reload(); }, 1500);
             } else {
                 $msg.text('✗ ' + (res.data && res.data.message ? res.data.message : 'Error')).css('color', '#dc3232');
             }
@@ -958,13 +959,15 @@ jQuery(function ($) {
     $(document).on('submit', '.nms-manual-invoice-payment', function (event) {
         event.preventDefault();
         var $form = $(this);
+        if ($form.data('submitting')) return;
         var raw = $.trim($form.find('[name="amount"]').val());
         var match = raw.match(/^(\d+)(?:\.(\d{1,2}))?$/);
         if (!match) { alert('Enter a valid positive amount with no more than two decimal places.'); return; }
         var amountMinor = (parseInt(match[1], 10) * 100) + parseInt((match[2] || '').padEnd(2, '0') || '0', 10);
         if (amountMinor < 1) { alert('The payment must be greater than zero.'); return; }
         if (!confirm('Record an offline payment of £' + (amountMinor / 100).toFixed(2) + '?')) return;
-        var key = window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() : ('manual-' + Date.now() + '-' + Math.random().toString(16).slice(2));
+        var key = $form.data('payment-key') || (window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() : ('manual-' + Date.now() + '-' + Math.random().toString(16).slice(2)));
+        $form.data('payment-key', key).data('submitting', true);
         var $button = $form.find('button[type="submit"]');
         $button.prop('disabled', true).text('Recording…');
         $.post(MBS_Admin.ajax_url, {
@@ -975,8 +978,8 @@ jQuery(function ($) {
             note: $form.find('[name="note"]').val()
         }, function (res) {
             if (res.success) window.location.reload();
-            else { alert('Error: ' + (res.data || 'Unknown error')); $button.prop('disabled', false).text('Record payment'); }
-        }).fail(function () { alert('Network error — please try again.'); $button.prop('disabled', false).text('Record payment'); });
+            else { $form.data('submitting', false); alert('Error: ' + (res.data || 'Unknown error')); $button.prop('disabled', false).text('Record payment'); }
+        }).fail(function (xhr) { $form.data('submitting', false); var error = xhr.responseJSON && xhr.responseJSON.data; alert(typeof error === 'string' ? error : 'Unable to confirm payment. Refresh and check payment history before retrying.'); $button.prop('disabled', false).text('Record payment'); });
     });
 
     $(document).on('submit', '.nms-extend-external-series', function (event) {

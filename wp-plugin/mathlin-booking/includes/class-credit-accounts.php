@@ -51,7 +51,7 @@ class MBS_Credit_Accounts {
     public static function init() {
         add_action( 'admin_post_mbs_credit_accounts', array( __CLASS__, 'admin_action' ) );
         add_action( 'admin_menu', static function() {
-            add_submenu_page( null, 'Approved invoice accounts', 'Invoice accounts', 'manage_options', 'mathlin-credit-accounts', array( __CLASS__, 'page' ) );
+            add_submenu_page( '', 'Approved invoice accounts', 'Invoice accounts', 'manage_options', 'mathlin-credit-accounts', array( __CLASS__, 'page' ) );
         } );
     }
     public static function account( $id, $lock = false ) {

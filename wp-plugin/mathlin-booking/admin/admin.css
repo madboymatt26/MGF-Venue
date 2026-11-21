@@ -985,3 +985,39 @@ button.mbs-invoice-card__ref:hover { color: #5a0fb0; }
         margin-bottom: 2px;
     }
 }
+
+/* Invoice-scoped review: short balance summary first, long history paged. */
+.mbs-invoice-review { max-width: 1200px; }
+.mbs-invoice-review h1 span { display: block; font-size: .65em; color: #50575e; overflow-wrap: anywhere; }
+.mbs-review-status strong { margin-left: 8px; color: #9a4100; }
+.mbs-review-balances { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; margin: 18px 0 8px; }
+.mbs-review-balances > div { background: white; padding: 16px; border: 1px solid #dcdcde; border-radius: 6px; }
+.mbs-review-balances span,.mbs-review-balances strong { display: block; }
+.mbs-review-balances strong { font-size: 1.5em; margin-top: 8px; overflow-wrap: anywhere; }
+.mbs-review-balances > div:last-child { border-color: #3858e9; }
+.mbs-review-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; margin-top: 20px; }
+.mbs-review-section { padding: 16px; min-width: 0; margin-bottom: 16px; }
+.mbs-review-section h2 { margin-top: 0; }
+.mbs-review-section dl { margin: 0; }
+.mbs-review-section dt { color: #50575e; margin-top: 10px; }
+.mbs-review-section dd { margin: 2px 0 0; overflow-wrap: anywhere; }
+.mbs-review-section summary { cursor: pointer; font-weight: 600; }
+.mbs-review-section .mbs-payment-form { display: grid; gap: 14px; margin: 14px 0; }
+.mbs-review-section .mbs-payment-form label { display: grid; gap: 4px; }
+.mbs-review-section input { width: 100%; min-width: 0; }
+.mbs-review-table { overflow-x: auto; }
+.mbs-review-table td { overflow-wrap: anywhere; }
+.mbs-review-actions,.mbs-list-tools .nms-filters-right { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.mbs-list-tools { border-top: 1px solid #dcdcde; padding-top: 20px; margin-top: 24px; }
+@media(max-width: 782px) {
+  .mbs-review-balances { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+  .mbs-review-balances > div { padding: 12px; }
+  .mbs-review-grid { grid-template-columns: minmax(0,1fr); gap: 0; }
+  .mbs-review-table table,.mbs-review-table tbody,.mbs-review-table tr,.mbs-review-table td { display: block; width: auto; }
+  .mbs-review-table thead { display: none; }
+  .mbs-review-table tr + tr { border-top: 2px solid #dcdcde; }
+  .mbs-review-table td { padding: 8px 10px; }
+  .mbs-review-table td::before { content: attr(data-label); display: block; font-weight: 600; color: #50575e; margin-bottom: 3px; }
+  .mbs-review-table { overflow: visible; }
+  .mbs-review-actions .button,.mbs-list-tools .button { width: 100%; text-align: center; }
+}

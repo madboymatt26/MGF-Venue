@@ -41,7 +41,7 @@ class MBS_Payment_Expiry {
             $ref = $order->get_meta( '_mbs_booking_ref' );
             return $ref && self::get( $ref ) && ! self::checkout_allowed( $ref ) ? false : $needs;
         }, 10, 2 );
-        add_action( 'admin_menu', static function() { add_submenu_page( null, 'Payment policy and reviews', 'Payment policy', 'manage_options', 'mathlin-payment-expiry', array( __CLASS__, 'settings_page' ) ); } );
+        add_action( 'admin_menu', static function() { add_submenu_page( '', 'Payment policy and reviews', 'Payment policy', 'manage_options', 'mathlin-payment-expiry', array( __CLASS__, 'settings_page' ) ); } );
     }
     /** Called inside the approval transaction, before the invoice is frozen. */
     public static function enroll( $b, $notify_hirer, $ack = false, $manual_reason = '' ) {
