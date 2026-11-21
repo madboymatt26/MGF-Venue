@@ -31,6 +31,9 @@ add_filter('wp_doing_ajax','__return_true');add_filter('wp_die_ajax_handler',sta
 $call=static function($user,$action,$list,$nonce=true){wp_set_current_user($user);$_POST=array('nonce'=>$nonce?wp_create_nonce('mbs_admin_nonce'):'invalid','bulk_action'=>$action,'refs'=>$list);$_REQUEST=$_POST;ob_start();try{(new MBS_Admin())->ajax_bulk_action();}catch(RuntimeException $e){if($e->getMessage()!=='__ajax_done__'){ob_end_clean();throw $e;}}return json_decode(ob_get_clean(),true);};
 $manager=wp_insert_user(array('user_login'=>$tag.'manager','user_pass'=>'integration-only','role'=>'mbs_booking_manager'));
 $sub=wp_insert_user(array('user_login'=>$tag.'sub','user_pass'=>'integration-only','role'=>'subscriber'));
+// Let this synthetic subscriber reach wp-admin past WooCommerce's customer redirect,
+// without granting any booking capability, so HTTP tests exercise the invoice gate.
+(new WP_User($sub))->add_cap('view_admin_dashboard');
 $r=$call($sub,'deposit_paid',array($refs['ONCE']));$assert(empty($r['success']),'Subscriber deposit refused');
 $r=$call($admin,'deposit_paid',array($refs['ONCE']),false);$assert(empty($r['success']),'Invalid nonce refused');
 $r=$call($admin,'deposit_paid',array($refs['ONCE'],$refs['ONCE'],$refs['PARTIAL'],$refs['ZERO'],$refs['CANCEL'],$refs['LEDGER'],'MISSING'));
