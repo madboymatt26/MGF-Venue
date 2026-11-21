@@ -94,6 +94,7 @@ class MBS_Admin {
             MBS_PLUGIN_URL . 'assets/mgf-venue-icon.png',
             30
         );
+        add_submenu_page( null, 'Invoice review', 'Invoice review', $booking_cap, 'mathlin-invoice', array( $this, 'render_invoice_review' ) );
         add_submenu_page( 'mathlin-booking', 'All Bookings', $bookings_label, $booking_cap, 'mathlin-booking', array( $this, 'render_dashboard' ) );
         add_submenu_page( 'mathlin-booking', 'Recurring Series', 'Recurring Series', $booking_cap, 'mathlin-series', array( $this, 'render_series' ) );
         // Scout Nights: only show if the feature is enabled in Settings
@@ -248,6 +249,37 @@ class MBS_Admin {
             return;
         }
         include MBS_PLUGIN_DIR . 'admin/views/invoice.php';
+    }
+
+    /** Read-only invoice-scoped destination. Authorise before looking up any data. */
+    public function render_invoice_review() {
+        if ( ! self::can_manage_bookings() ) wp_die( 'You do not have permission to review invoices.', '', array( 'response' => 403 ) );
+        if ( ! MBS_Payment_Features::enabled( 'reports' ) ) wp_die( 'Invoice reporting is disabled.', '', array( 'response' => 403 ) );
+        global $wpdb;
+        $ref = sanitize_text_field( wp_unslash( $_GET['ref'] ?? '' ) );
+        $invoice = $ref ? MBS_Billing_Ledger::get_invoice( $ref ) : null;
+        if ( ! $invoice || $invoice->document_type !== 'invoice' ) {
+            echo '<div class="wrap mbs-admin"><h1>Invoice review</h1><p>' . esc_html( $ref ? 'Invoice not found. Check the reference or return to Bookings.' : 'Open an invoice from Needs attention to review its balance and history.' ) . '</p><a class="button" href="' . esc_url( admin_url( 'admin.php?page=mathlin-booking' ) ) . '">Back to Bookings</a></div>';
+            return;
+        }
+        // Indexed, invoice-scoped reads. Each long section pages independently.
+        $items_page = max( 1, absint( $_GET['items_page'] ?? 1 ) );
+        $payments_page = max( 1, absint( $_GET['payments_page'] ?? 1 ) );
+        $items = $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM ' . $wpdb->prefix . MBS_INVOICE_ITEM_TABLE . ' WHERE invoice_id=%d ORDER BY id ASC LIMIT 51 OFFSET %d', $invoice->id, ( $items_page - 1 ) * 50 ) );
+        $items_error = (bool) $wpdb->last_error;
+        $transactions = $wpdb->get_results( $wpdb->prepare( 'SELECT transaction_ref,transaction_type,status,provider,amount_minor,currency,occurred_at,created_at,metadata_json FROM ' . $wpdb->prefix . MBS_PAYMENT_TRANSACTION_TABLE . ' WHERE invoice_id=%d ORDER BY id DESC LIMIT 51 OFFSET %d', $invoice->id, ( $payments_page - 1 ) * 50 ) );
+        $transactions_error = (bool) $wpdb->last_error;
+        $audit_page = max( 1, absint( $_GET['audit_page'] ?? 1 ) );
+        $audit = $wpdb->get_results( $wpdb->prepare( 'SELECT action,details,user_name,created_at FROM ' . $wpdb->prefix . 'mathlin_audit_log WHERE ref=%s ORDER BY id DESC LIMIT 51 OFFSET %d', $invoice->invoice_ref, ( $audit_page - 1 ) * 50 ) );
+        $audit_error = (bool) $wpdb->last_error;
+        $document_id = $wpdb->get_var( $wpdb->prepare( 'SELECT id FROM ' . $wpdb->prefix . MBS_INVOICE_DOCUMENTS_TABLE . " WHERE invoice_id=%d AND status='issued' ORDER BY revision DESC LIMIT 1", $invoice->id ) );
+        $claim = MBS_Invoice_Reservation::get( $invoice->invoice_ref );
+        $claim_error = (bool) $wpdb->last_error;
+        $balance = MBS_Billing_Ledger::balance_minor( $invoice );
+        $overdue = $balance > 0 && ! empty( $invoice->due_at ) && $invoice->due_at < current_time( 'mysql' );
+        $checkout_pending = $claim && in_array( $claim->status, array( 'active', 'bound', 'reconciliation_required' ), true );
+        $can_record = ! $transactions_error && ! $claim_error && ! $checkout_pending && MBS_Payment_Features::enabled( 'manual' ) && $balance > 0 && in_array( $invoice->status, array( 'issued', 'part_paid', 'overdue' ), true ) && $invoice->currency === 'GBP';
+        include MBS_PLUGIN_DIR . 'admin/views/invoice-review.php';
     }
 
     public function render_calendar() {
@@ -454,28 +486,38 @@ class MBS_Admin {
         if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
 
         $ref = strtoupper( sanitize_text_field( $_POST['ref'] ?? '' ) );
-        $booking = MBS_Bookings::get( $ref );
-        if ( ! $booking ) wp_send_json_error( 'Booking not found.' );
-        if ( self::invoice_manages_occurrence( $booking ) ) wp_send_json_error( 'Recurring consolidated series do not use per-occurrence deposits.', 409 );
-        if ( $booking->status !== 'confirmed' ) wp_send_json_error( 'Booking must be in Confirmed status to mark deposit paid.' );
+        $result = self::record_configured_deposit( $ref );
+        if ( is_wp_error( $result ) ) wp_send_json_error( $result->get_error_message(), 409 );
+        wp_send_json_success( $result );
+    }
 
-        $deposit_amount = MBS_Bookings::calculate_deposit( (float) $booking->amount );
-
-        MBS_Bookings::update_status( $ref, 'deposit_paid' );
-
-        global $wpdb;
-        $table = $wpdb->prefix . MBS_TABLE;
-        $wpdb->update( $table, array( 'deposit_paid' => $deposit_amount, 'amount_paid' => $deposit_amount ), array( 'ref' => $ref ) );
-
-        // Send deposit received confirmation email to booker
-        $updated_booking = MBS_Bookings::get( $ref );
-        if ( $updated_booking ) {
-            MBS_Email::notify_deposit_received( $updated_booking, $deposit_amount );
-        }
-
-        MBS_Audit_Log::log( $ref, 'deposit_paid', 'Admin marked deposit of £' . number_format( $deposit_amount, 2 ) . ' as received (bank transfer). Balance of £' . number_format( (float) $booking->amount - $deposit_amount, 2 ) . ' outstanding.' );
-
-        wp_send_json_success( array( 'ref' => $ref, 'status' => 'deposit_paid', 'deposit' => $deposit_amount ) );
+    /** Only a new configured deposit, never a guessed partial payment or ledger override. */
+    private static function record_configured_deposit( $ref ) {
+        if ( ! MBS_Payment_Features::enabled( 'manual' ) ) return new WP_Error( 'manual_disabled', 'Manual payments are disabled.' );
+        return MBS_Space_Selection::locked( static function() use ( $ref ) {
+            global $wpdb;
+            $booking = MBS_Bookings::get( $ref );
+            if ( ! $booking ) return new WP_Error( 'missing', 'Booking not found.' );
+            if ( $booking->status !== 'confirmed' ) return new WP_Error( 'status', 'Only confirmed bookings without a recorded deposit are eligible.' );
+            if ( self::invoice_manages_occurrence( $booking ) || MBS_Bookings::has_financial_history( $ref ) ) return new WP_Error( 'ledger', 'Review the invoice or series payments instead of recording a per-booking deposit.' );
+            $settings = MBS_Bookings::get_deposit_settings();
+            if ( ! $settings['enabled'] || $settings['percentage'] <= 0 || $settings['percentage'] >= 100 ) return new WP_Error( 'configuration', 'Enable a deposit percentage between 0 and 100 before recording deposits.' );
+            $total = MBS_Money::from_decimal_string( (string) $booking->amount );
+            $paid = MBS_Money::from_decimal_string( (string) ( $booking->amount_paid ?? '0' ) );
+            $prior = MBS_Money::from_decimal_string( (string) ( $booking->deposit_paid ?? '0' ) );
+            if ( is_wp_error( $total ) || is_wp_error( $paid ) || is_wp_error( $prior ) || $total <= 0 || $paid !== 0 || $prior !== 0 ) return new WP_Error( 'existing_money', 'Existing or invalid payment amounts need individual review. No amount was overwritten.' );
+            $minor = (int) round( $total * $settings['percentage'] / 100 );
+            if ( $minor <= 0 || $minor >= $total ) return new WP_Error( 'deposit_amount', 'The configured deposit must be positive and less than the full booking total.' );
+            $amount = MBS_Money::decimal( $minor );
+            // One compare-and-set prevents concurrent/repeated submissions overwriting money.
+            if ( $wpdb->query( 'START TRANSACTION' ) === false ) return new WP_Error( 'database', 'Could not start recording the deposit.' );
+            $changed = $wpdb->query( $wpdb->prepare( 'UPDATE ' . $wpdb->prefix . MBS_TABLE . " SET status='deposit_paid',deposit_paid=%s,amount_paid=%s WHERE ref=%s AND status='confirmed' AND amount=%s AND COALESCE(amount_paid,0)=0 AND COALESCE(deposit_paid,0)=0", $amount, $amount, $ref, $booking->amount ) );
+            if ( $changed !== 1 ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'changed', 'The booking changed or could not be saved. Refresh and review its payments before retrying.' ); }
+            $logged = MBS_Audit_Log::log( $ref, 'deposit_paid', 'Admin recorded configured bank-transfer deposit ' . MBS_Money::format( $minor ) . '; balance ' . MBS_Money::format( $total - $minor ) . '.' );
+            if ( ! $logged || $wpdb->query( 'COMMIT' ) === false ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'database', 'Deposit and audit could not be committed. Refresh and review before retrying.' ); }
+            MBS_Email::notify_deposit_received( MBS_Bookings::get( $ref ), (float) $amount );
+            return array( 'ref' => $ref, 'status' => 'deposit_paid', 'deposit' => (float) $amount );
+        } );
     }
 
     /**
@@ -2122,7 +2164,8 @@ class MBS_Admin {
             wp_send_json_error( 'Please select bookings and an action.' );
         }
 
-        $allowed = array( 'confirmed', 'paid', 'cancelled', 'archived' );
+        if ( count( $refs ) > 100 ) wp_send_json_error( 'Select no more than 100 bookings at once.' );
+        $allowed = array( 'confirmed', 'deposit_paid', 'paid', 'cancelled', 'archived' );
         if ( ! in_array( $action, $allowed ) ) {
             wp_send_json_error( 'Invalid action.' );
         }
@@ -2135,13 +2178,21 @@ class MBS_Admin {
             'archived'  => array( 'confirmed', 'paid', 'cancelled' ),
         );
 
+        $refs = array_values( array_unique( array_map( static function( $ref ) { return is_scalar( $ref ) ? strtoupper( sanitize_text_field( $ref ) ) : ''; }, array_slice( $refs, 0, 100 ) ) ) );
         $processed = 0;
         $skipped   = 0;
+        $reasons = array();
 
         foreach ( $refs as $ref ) {
             $ref     = strtoupper( sanitize_text_field( $ref ) );
             $booking = MBS_Bookings::get( $ref );
             if ( ! $booking ) { $skipped++; continue; }
+
+            if ( $action === 'deposit_paid' ) {
+                $result = self::record_configured_deposit( $ref );
+                if ( is_wp_error( $result ) ) { $skipped++; $reasons[] = $ref . ': ' . $result->get_error_message(); } else { $processed++; }
+                continue;
+            }
 
             // Check valid transition
             if ( ! in_array( $booking->status, $valid_transitions[ $action ] ) ) {
@@ -2171,6 +2222,7 @@ class MBS_Admin {
             'processed' => $processed,
             'skipped'   => $skipped,
             'total'     => count( $refs ),
+            'reasons'   => $reasons,
         ) );
     }
 
