@@ -20,20 +20,20 @@ class MBS_Campsite_Policy {
     }
 
     public static function access_error() {
-        return new WP_Error( 'campsite_access_denied', 'Please sign in with an approved campsite booking account. Contact the booking coordinator if you need access.' );
+        return new WP_Error( 'campsite_access_denied', 'Please sign in with an approved campsite booking account. Contact the booking coordinator if you need access.', array( 'status' => 403 ) );
     }
 
     public static function validate( $data, $trusted_admin = false ) {
         if ( ! self::enabled() ) return true;
-        if ( ! $trusted_admin && ! get_option( 'mbs_campsite_booking_open', true ) ) return new WP_Error( 'campsite_staging', 'The replacement booking form is being prepared. Please use the existing booking page.' );
+        if ( ! $trusted_admin && ! get_option( 'mbs_campsite_booking_open', true ) ) return new WP_Error( 'campsite_staging', 'The replacement booking form is being prepared. Please use the existing booking page.', array( 'status' => 403 ) );
         if ( ! $trusted_admin && ! self::can_book() ) return self::access_error();
         // Approval is still required; free use is not permission to confirm a booking.
-        if ( ! empty( $data['kitchen'] ) ) return new WP_Error( 'campsite_kitchen', 'Kitchen hire is not available in free campsite mode.' );
-        if ( isset( $data['custom_amount'] ) && (float) $data['custom_amount'] !== 0.0 ) return new WP_Error( 'campsite_amount', 'Free campsite bookings cannot include a hire charge.' );
+        if ( ! empty( $data['kitchen'] ) ) return new WP_Error( 'campsite_kitchen', 'Kitchen hire is not available in free campsite mode.', array( 'status' => 400 ) );
+        if ( isset( $data['custom_amount'] ) && (float) $data['custom_amount'] !== 0.0 ) return new WP_Error( 'campsite_amount', 'Free campsite bookings cannot include a hire charge.', array( 'status' => 400 ) );
         if ( isset( $data['attendees'] ) ) {
             $space = class_exists( 'MBS_Space_Selection' ) ? MBS_Space_Selection::info( $data['space'] ?? '' ) : ( MBS_Bookings::get_spaces()[ $data['space'] ?? '' ] ?? array() );
-            if ( ! $space ) return new WP_Error( 'campsite_space', 'Choose a valid area selection.' );
-            if ( (int) $data['attendees'] < 1 || ( ! empty( $space['capacity'] ) && (int) $data['attendees'] > (int) $space['capacity'] ) ) return new WP_Error( 'campsite_capacity', 'Enter a positive attendance within the selected area capacity.' );
+            if ( ! $space ) return new WP_Error( 'campsite_space', 'Choose a valid area selection.', array( 'status' => 400 ) );
+            if ( (int) $data['attendees'] < 1 || ( ! empty( $space['capacity'] ) && (int) $data['attendees'] > (int) $space['capacity'] ) ) return new WP_Error( 'campsite_capacity', 'Enter a positive attendance within the selected area capacity.', array( 'status' => 400 ) );
         }
         return true;
     }
@@ -60,32 +60,32 @@ class MBS_Campsite_Policy {
         $from = $data['booking_date'] ?? '';
         $to = ! empty( $data['booking_date_end'] ) ? $data['booking_date_end'] : $from;
         $span = $data['booking_span'] ?? 'daily';
-        if ( ! in_array( $span, array( 'daily', 'continuous' ), true ) || ! self::valid_date( $from ) || ! self::valid_date( $to ) || $to < $from ) return new WP_Error( 'campsite_dates', 'Select valid arrival and departure dates.' );
+        if ( ! in_array( $span, array( 'daily', 'continuous' ), true ) || ! self::valid_date( $from ) || ! self::valid_date( $to ) || $to < $from ) return new WP_Error( 'campsite_dates', 'Select valid arrival and departure dates.', array( 'status' => 400 ) );
         $start_date = new DateTimeImmutable( $from );
         $last_date = new DateTimeImmutable( $to );
-        if ( $start_date->diff( $last_date )->days > 366 ) return new WP_Error( 'campsite_dates', 'Request no more than one year in a single booking.' );
+        if ( $start_date->diff( $last_date )->days > 366 ) return new WP_Error( 'campsite_dates', 'Request no more than one year in a single booking.', array( 'status' => 400 ) );
         $exception = $trusted_admin && ! empty( $data['campsite_exception'] );
         if ( ! $exception ) {
             $earliest = ( new DateTimeImmutable( wp_date( 'Y-m-d' ) ) )->modify( '+' . max( 0, (int) get_option( 'mbs_min_notice_days', 14 ) ) . ' days' );
-            if ( $start_date < $earliest ) return new WP_Error( 'campsite_notice', 'Campsite bookings require the configured advance notice. Contact the booking coordinator for an agreed exception.' );
+            if ( $start_date < $earliest ) return new WP_Error( 'campsite_notice', 'Campsite bookings require the configured advance notice. Contact the booking coordinator for an agreed exception.', array( 'status' => 400 ) );
         }
         $all_day = ! empty( $data['all_day'] );
         $start = substr( (string) ( $data['start_time'] ?? '' ), 0, 5 );
         $end = substr( (string) ( $data['end_time'] ?? '' ), 0, 5 );
         if ( ! $all_day ) {
-            if ( ! preg_match( '/^(?:[01]\d|2[0-3]):[0-5]\d$/D', $start ) || ! preg_match( '/^(?:[01]\d|2[0-3]):[0-5]\d$/D', $end ) ) return new WP_Error( 'campsite_times', 'Select valid arrival and departure times.' );
-            if ( ( $span === 'daily' || $from === $to ) && $end <= $start ) return new WP_Error( 'campsite_times', 'Departure must be after arrival. For an overnight stay choose a later departure date and Continuous stay.' );
+            if ( ! preg_match( '/^(?:[01]\d|2[0-3]):[0-5]\d$/D', $start ) || ! preg_match( '/^(?:[01]\d|2[0-3]):[0-5]\d$/D', $end ) ) return new WP_Error( 'campsite_times', 'Select valid arrival and departure times.', array( 'status' => 400 ) );
+            if ( ( $span === 'daily' || $from === $to ) && $end <= $start ) return new WP_Error( 'campsite_times', 'Departure must be after arrival. For an overnight stay choose a later departure date and Continuous stay.', array( 'status' => 400 ) );
             if ( $span === 'daily' && ! $exception ) {
                 $match = false;
                 foreach ( self::slots() as $slot ) if ( $slot['start'] === $start && $slot['end'] === $end ) $match = true;
-                if ( ! $match ) return new WP_Error( 'campsite_slot', 'Choose one of the configured day-session time slots, or contact the booking coordinator.' );
+                if ( ! $match ) return new WP_Error( 'campsite_slot', 'Choose one of the configured day-session time slots, or contact the booking coordinator.', array( 'status' => 400 ) );
             }
         }
         if ( ! $exception ) {
             for ( $day = $start_date; $day <= $last_date; $day = $day->modify( '+1 day' ) ) {
                 // A continuous camp only arrives once; do not treat each following morning as a new arrival.
                 if ( $span === 'continuous' && $day > $start_date ) break;
-                if ( (int) $day->format( 'N' ) <= 5 && ( $all_day || $start < '17:00' ) ) return new WP_Error( 'campsite_weekday', 'Weekday arrival is from 17:00. Earlier access requires an agreed exception through the booking coordinator.' );
+                if ( (int) $day->format( 'N' ) <= 5 && ( $all_day || $start < '17:00' ) ) return new WP_Error( 'campsite_weekday', 'Weekday arrival is from 17:00. Earlier access requires an agreed exception through the booking coordinator.', array( 'status' => 400 ) );
             }
         }
         return true;
@@ -132,7 +132,7 @@ class MBS_Campsite_Policy {
         $proposed['campsite_exception'] = $exception;
         if ( class_exists( 'MBS_Space_Selection' ) && ( $proposed['space'] !== $booking->space || (string) ( $proposed['attendees'] ?? '' ) !== (string) ( $booking->attendees ?? '' ) ) ) {
             $info = MBS_Space_Selection::info( $proposed['space'] );
-            if ( ! $info || (int) $proposed['attendees'] < 1 || ( ! empty( $info['capacity'] ) && (int) $proposed['attendees'] > $info['capacity'] ) ) return new WP_Error( 'campsite_capacity', 'Enter attendance within the selected area capacity.' );
+            if ( ! $info || (int) $proposed['attendees'] < 1 || ( ! empty( $info['capacity'] ) && (int) $proposed['attendees'] > $info['capacity'] ) ) return new WP_Error( 'campsite_capacity', 'Enter attendance within the selected area capacity.', array( 'status' => 400 ) );
         }
         $changed = false;
         foreach ( array( 'space', 'booking_date', 'booking_date_end', 'start_time', 'end_time', 'all_day' ) as $key ) if ( (string) ( $proposed[$key] ?? '' ) !== (string) ( $booking->$key ?? '' ) ) $changed = true;
@@ -142,7 +142,7 @@ class MBS_Campsite_Policy {
         $last = new DateTimeImmutable( $proposed['booking_date_end'] ?: $proposed['booking_date'] );
         for ( $day = new DateTimeImmutable( $proposed['booking_date'] ); $day <= $last; $day = $day->modify( '+1 day' ) ) {
             $date = $day->format( 'Y-m-d' ); $interval = self::request_interval( $proposed, $date );
-            if ( MBS_Blocked_Dates::is_blocked( $date, $proposed['space'] ) || MBS_Bookings::check_conflicts( $proposed['space'], $date, $interval[0], $interval[1], ! empty( $proposed['all_day'] ), $booking->ref ) ) return new WP_Error( 'campsite_amendment_conflict', 'The proposed booking conflicts or is blocked on ' . $date . '. Nothing was changed.' );
+            if ( MBS_Blocked_Dates::is_blocked( $date, $proposed['space'] ) || MBS_Bookings::check_conflicts( $proposed['space'], $date, $interval[0], $interval[1], ! empty( $proposed['all_day'] ), $booking->ref ) ) return new WP_Error( 'campsite_amendment_conflict', 'The proposed booking conflicts or is blocked on ' . $date . '. Nothing was changed.', array( 'status' => 409 ) );
         }
         return true;
     }
@@ -210,23 +210,23 @@ class MBS_Campsite_Policy {
             $slots = array();
             foreach ( preg_split( '/\r?\n/', trim( (string) $data['campsite_slots'] ) ) as $line ) {
                 $parts = array_map( 'trim', explode( '|', $line, 3 ) );
-                if ( count( $parts ) !== 3 || ! preg_match( '/^(?:[01]\d|2[0-3]):[0-5]\d$/D', $parts[0] ) || ! preg_match( '/^(?:[01]\d|2[0-3]):[0-5]\d$/D', $parts[1] ) || $parts[1] <= $parts[0] || ! $parts[2] ) return new WP_Error( 'campsite_slots', 'Enter day-session slots as start|end|label, one per line.' );
+                if ( count( $parts ) !== 3 || ! preg_match( '/^(?:[01]\d|2[0-3]):[0-5]\d$/D', $parts[0] ) || ! preg_match( '/^(?:[01]\d|2[0-3]):[0-5]\d$/D', $parts[1] ) || $parts[1] <= $parts[0] || ! $parts[2] ) return new WP_Error( 'campsite_slots', 'Enter day-session slots as start|end|label, one per line.', array( 'status' => 400 ) );
                 $slots[] = array( 'start' => $parts[0], 'end' => $parts[1], 'label' => sanitize_text_field( $parts[2] ) );
             }
-            if ( ! $slots || count( $slots ) > 30 ) return new WP_Error( 'campsite_slots', 'Configure between 1 and 30 day-session slots.' );
+            if ( ! $slots || count( $slots ) > 30 ) return new WP_Error( 'campsite_slots', 'Configure between 1 and 30 day-session slots.', array( 'status' => 400 ) );
         }
         if ( array_key_exists( 'campsite_roles', $data ) ) {
             $submitted = is_array( $data['campsite_roles'] ) ? $data['campsite_roles'] : explode( ',', (string) $data['campsite_roles'] );
             $roles = array_values( array_unique( array_filter( array_map( 'sanitize_key', array_map( 'trim', $submitted ) ) ) ) );
             $known = wp_roles()->roles;
             foreach ( $roles as $role ) {
-                if ( ! isset( $known[ $role ] ) ) return new WP_Error( 'campsite_role', 'Unknown campsite booking role: ' . $role );
+                if ( ! isset( $known[ $role ] ) ) return new WP_Error( 'campsite_role', 'Unknown campsite booking role: ' . $role, array( 'status' => 400 ) );
             }
         }
         if ( $enabled && get_option( 'mbs_kitchen_enabled', 1 ) && ! isset( $data['kitchen_enabled'] ) ) {
-            return new WP_Error( 'campsite_kitchen_enabled', 'Disable the kitchen add-on before enabling free campsite mode.' );
+            return new WP_Error( 'campsite_kitchen_enabled', 'Disable the kitchen add-on before enabling free campsite mode.', array( 'status' => 409 ) );
         }
-        if ( $enabled && ! empty( $data['kitchen_enabled'] ) ) return new WP_Error( 'campsite_kitchen_enabled', 'Disable the kitchen add-on before enabling free campsite mode.' );
+        if ( $enabled && ! empty( $data['kitchen_enabled'] ) ) return new WP_Error( 'campsite_kitchen_enabled', 'Disable the kitchen add-on before enabling free campsite mode.', array( 'status' => 409 ) );
         update_option( 'mbs_campsite_mode', $enabled ? 1 : 0 );
         if ( array_key_exists( 'multi_space_enabled', $data ) ) update_option( 'mbs_multi_space_enabled', ! empty( $data['multi_space_enabled'] ) ? 1 : 0 );
         update_option( 'mbs_campsite_roles', $roles );
