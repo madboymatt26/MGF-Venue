@@ -553,16 +553,41 @@ jQuery(function ($) {
     });
 
     // ── Bulk actions ───────────────────────────────────────────────────────────
-    $('#nms-select-all').on('change', function() {
+    $('#nms-select-all, #nms-select-all-bar').on('change', function() {
         $('.nms-bulk-check').prop('checked', $(this).is(':checked'));
         updateBulkCount();
     });
     $(document).on('change', '.nms-bulk-check', updateBulkCount);
 
-    function updateBulkCount() {
-        var count = $('.nms-bulk-check:checked').length;
-        $('#nms-bulk-count').text(count > 0 ? count + ' selected' : '');
+    // Show how many of the selected bookings each action can apply to. The server
+    // still decides every transition; this only helps the person choosing.
+    var bulkLabels = { confirmed: 'confirm', paid: 'mark as paid', cancelled: 'cancel', archived: 'archive' };
+    function bulkEligible(option, statuses) {
+        var from = String($(option).data('from') || '').split(',');
+        return statuses.filter(function(st) { return from.indexOf(st) !== -1; }).length;
     }
+    function updateBulkCount() {
+        var $checked = $('.nms-bulk-check:checked');
+        var statuses = $checked.map(function() { return String($(this).data('status') || ''); }).get();
+        var total = $('.nms-bulk-check').length;
+        var count = $checked.length;
+        $('#nms-select-all, #nms-select-all-bar').prop('checked', count > 0 && count === total)
+            .prop('indeterminate', count > 0 && count < total);
+        $('.nms-bulk-bar').toggleClass('has-selection', count > 0);
+        var text = '';
+        if (count > 0) {
+            text = count + ' selected';
+            var action = $('#nms-bulk-action').val();
+            if (action) text += ' \u00b7 ' + bulkEligible($('#nms-bulk-action option:selected'), statuses) + ' can ' + bulkLabels[action];
+        }
+        $('#nms-bulk-count').text(text);
+        $('#nms-bulk-action option[data-from]').each(function() {
+            var n = bulkEligible(this, statuses);
+            $(this).prop('disabled', count > 0 && n === 0);
+        });
+        if ($('#nms-bulk-action option:selected').prop('disabled')) $('#nms-bulk-action').val('');
+    }
+    $('#nms-bulk-action').on('change', updateBulkCount);
 
     $('#nms-bulk-apply').on('click', function() {
         var action = $('#nms-bulk-action').val();

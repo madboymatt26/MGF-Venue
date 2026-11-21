@@ -80,8 +80,9 @@ p3_assert( strpos( $css, '.nms-admin' ) === false, 'Dead .nms-admin selector rem
 p3_assert( strpos( $css, '.mbs-admin {' ) !== false, '.mbs-admin wrapper selector present' );
 p3_assert( strpos( $css, '#2ecc71' ) === false, 'Low-contrast #2ecc71 removed from admin.css' );
 p3_assert( strpos( $css, 'color: #999' ) === false, 'Low-contrast #999 removed from admin.css' );
-p3_assert( strpos( $css, '.nms-bulk-bar' ) !== false, 'Mobile CSS hides .nms-bulk-bar' );
-p3_assert( strpos( $css, 'td.nms-bulk-cell' ) !== false, 'Mobile CSS hides checkbox column td.nms-bulk-cell' );
+p3_assert( strpos( $css, '.nms-bulk-bar' ) !== false, 'Bulk bar styled for mobile' );
+p3_assert( strpos( $css, '.nms-bulk-row { display: none !important; }' ) === false, 'Mobile CSS no longer hides the bulk bar' );
+p3_assert( strpos( $css, 'td.nms-bulk-cell' ) !== false, 'Mobile CSS positions the checkbox cell td.nms-bulk-cell in each card' );
 p3_assert( strpos( $css, '.mbs-booking-hero' ) !== false && strpos( $css, '.mbs-single-grid' ) !== false, 'Single booking redesign CSS present' );
 
 // 5. Mobile table scroll wrappers & labels

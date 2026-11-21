@@ -713,7 +713,24 @@ button.mbs-invoice-card__ref:hover { color: #5a0fb0; }
 .mbs-admin .mbs-inline-disclosure { margin-top:16px; padding:12px; background:#f9f7ff; border:1px solid var(--border); border-radius:6px; }
 .mbs-admin .mbs-inline-disclosure > summary { cursor:pointer; color:var(--scout-purple); font-weight:600; }
 .mbs-admin .mbs-extras-settings input.regular-text { box-sizing:border-box; max-width:100%; }
-.mbs-admin .mbs-attention .mbs-panel-table { min-width:560px; }
+.mbs-admin .mbs-attention { margin:0 0 1rem; padding:10px 14px; background:#fff; border:1px solid var(--border); border-left:4px solid #d97706; border-radius:8px; }
+.mbs-admin .mbs-attention__head { display:flex; flex-wrap:wrap; align-items:center; gap:4px 10px; }
+.mbs-admin .mbs-attention__head h2 { margin:0; padding:0; font-size:14px; line-height:1.4; }
+.mbs-admin .mbs-attention__count { min-width:22px; padding:1px 8px; border-radius:999px; background:#fef3c7; color:#92400e; font-size:12px; font-weight:700; text-align:center; }
+.mbs-admin .mbs-attention__note { margin-left:auto; color:var(--text-muted); font-size:12px; }
+.mbs-admin .mbs-attention__issue { margin:6px 0 0; color:#b91c1c; }
+.mbs-admin .mbs-attention__list { margin:6px 0 0; padding:0; list-style:none; }
+.mbs-admin .mbs-attention__item { display:grid; grid-template-columns:minmax(5rem,10rem) minmax(0,1fr) auto; gap:4px 12px; align-items:baseline; padding:7px 0; border-top:1px solid #f0edf7; font-size:13px; }
+.mbs-admin .mbs-attention__ref { font-weight:600; overflow-wrap:anywhere; }
+.mbs-admin .mbs-attention__finding { overflow-wrap:anywhere; }
+.mbs-admin .mbs-attention__link { font-weight:600; text-decoration:none; white-space:normal; }
+.mbs-admin .mbs-attention__link:hover, .mbs-admin .mbs-attention__link:focus { text-decoration:underline; }
+.mbs-admin .mbs-attention__more > summary { margin-top:4px; padding:6px 0; cursor:pointer; color:var(--scout-purple); font-weight:600; font-size:13px; }
+.nms-bulk-bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px; }
+.nms-bulk-bar .nms-bulk-selectall { display:none; align-items:center; gap:6px; font-weight:600; }
+.nms-bulk-bar .nms-bulk-select { min-width:160px; }
+.nms-bulk-bar .nms-bulk-count { font-size:0.85rem; }
+.nms-bulk-bar.has-selection { box-shadow:0 -2px 8px rgba(0,0,0,.08); }
 .mbs-admin .mbs-extras-settings .mbs-panel-table { min-width:580px; }
 .mbs-admin .mbs-buffer-table input { box-sizing:border-box; width:90px; max-width:100%; }
 .mbs-admin .mbs-operational-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin:16px 0; }
@@ -793,12 +810,25 @@ button.mbs-invoice-card__ref:hover { color: #5a0fb0; }
     .mbs-audit-row { flex-direction: column; gap: 4px; }
     .mbs-audit-row__meta { text-align: left; }
 
-    /* Hide bulk controls and checkbox column on mobile */
-    .nms-bookings-table th.nms-bulk-col,
-    .nms-bookings-table td.nms-bulk-cell,
-    .nms-bookings-table .nms-bulk-check { display: none; }
-    .nms-bulk-bar,
-    .nms-bulk-row { display: none !important; }
+    /* Bulk controls stay available on mobile: the checkbox sits in each card's
+       corner and the action bar stays under the admin bar while scrolling. */
+    .nms-bookings-table th.nms-bulk-col { display: none; }
+    .nms-bookings-table tr { position: relative; }
+    .mbs-admin .nms-bookings-table.wp-list-table tr td.nms-bulk-cell.nms-bulk-cell { position: absolute; z-index: 2; top: 10px; right: 10px; width: auto; padding: 0; }
+    .nms-bookings-table td.nms-bulk-cell:empty { display: none; }
+    .nms-bookings-table td.nms-bulk-cell::before { display: none; }
+    .nms-bookings-table .nms-bulk-check { width: 24px; height: 24px; margin: 0; }
+    .nms-bookings-table td[data-label="Ref"] { padding-right: 40px; }
+    .nms-bulk-bar { display: flex; flex-wrap: wrap; position: sticky; top: 46px; z-index: 5; margin: 0 -4px 12px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); }
+    .nms-bulk-bar { background: #fff; }
+    .nms-bulk-bar .nms-bulk-selectall { display: flex; flex: 1 1 auto; }
+    .nms-bulk-bar .nms-bulk-select { flex: 1 1 60%; min-width: 0; min-height: 40px; }
+    .nms-bulk-bar #nms-bulk-apply { flex: 1 1 30%; min-height: 40px; }
+    .nms-bulk-bar .nms-bulk-count { flex: 0 1 auto; margin-left: auto; }
+    .mbs-admin .mbs-attention__item { grid-template-columns: minmax(0, 1fr); gap: 2px; padding: 9px 0; }
+    .mbs-admin .mbs-attention__ref { font-size: 12px; color: var(--text-muted); }
+    .mbs-admin .mbs-attention__note { flex: 1 1 100%; margin-left: 0; }
+    .mbs-admin .mbs-attention__link { padding: 4px 0; }
 
     /* Stats: 2 columns on mobile */
     .nms-stats-row {
