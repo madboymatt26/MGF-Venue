@@ -25,6 +25,9 @@
         <div class="nms-stat-card nms-stat-revenue">
             <div class="nms-stat-val">&pound;<?php echo number_format( $stats['revenue_fy'], 2 ); ?></div>
             <div class="nms-stat-label">Revenue FY <?php echo esc_html( $stats['fy_label'] ); ?></div>
+            <?php if ( ! empty( $stats['unverified_count'] ) ) : ?>
+                <div class="nms-stat-note" title="These archived bookings have no recorded earlier status, so they are not counted. Check them on the Archived page.">Excludes &pound;<?php echo esc_html( number_format( $stats['revenue_fy_unverified'], 2 ) ); ?> on <?php echo esc_html( (int) $stats['unverified_count'] ); ?> archived booking<?php echo (int) $stats['unverified_count'] === 1 ? '' : 's'; ?> with no recorded status</div>
+            <?php endif; ?>
         </div>
         <?php endif; ?>
     </div>

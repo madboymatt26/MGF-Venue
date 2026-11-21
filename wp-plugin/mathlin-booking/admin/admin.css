@@ -46,6 +46,7 @@
 }
 .nms-stat-val { font-size: 2rem; font-weight: 800; color: var(--scout-purple); }
 .nms-stat-label { font-size: 0.8rem; color: var(--text-muted); margin-top: 4px; }
+.nms-stat-note { font-size: 0.7rem; color: #92400e; margin-top: 4px; line-height: 1.3; }
 .nms-stat-pending .nms-stat-val   { color: var(--warning); }
 .nms-stat-confirmed .nms-stat-val { color: var(--success); }
 .nms-stat-revenue .nms-stat-val   { color: var(--scout-purple); }

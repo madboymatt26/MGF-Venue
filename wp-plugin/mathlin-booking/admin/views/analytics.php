@@ -151,6 +151,13 @@ $overdue_count = (int) $wpdb->get_var(
 
 // Collection rate (% of billed income actually received) in the selected period.
 $collection_rate = $invoiced_fy > 0 ? round( ( $net_collected_fy / $invoiced_fy ) * 100, 1 ) : 0;
+$unverified_sql_b = MBS_Bookings::unverified_archived_sql( 'b' );
+$unverified_archived = $wpdb->get_row( $wpdb->prepare(
+    "SELECT COALESCE(SUM(b.amount), 0) AS total, COUNT(*) AS n FROM {$table} b
+     WHERE {$unverified_sql_b} AND b.scout_use = 0 AND b.amount > 0 AND b.booking_date BETWEEN %s AND %s
+     AND NOT EXISTS (SELECT 1 FROM {$allocation_table} a WHERE a.booking_ref = b.ref)",
+    $fy_start, $fy_end
+) );
 $legacy_prev_invoiced = (float) $wpdb->get_var( $wpdb->prepare(
     "SELECT COALESCE(SUM(b.amount), 0) FROM {$table} b WHERE {$revenue_sql_b}
      AND b.scout_use = 0 AND b.booking_date BETWEEN %s AND %s
@@ -407,7 +414,7 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
         <button class="button button-primary">Update reports</button>
         <a class="button" href="<?php echo esc_url( admin_url( 'admin.php?page=mathlin-analytics' ) ); ?>">Current financial year</a>
     </form>
-    <p class="nms-muted">Reporting period: <?php echo esc_html( $fy_label ); ?>. Legacy values use booking/service date; consolidated invoices use issue date; payments and refunds use transaction date. Outstanding is the current balance across all dates.</p>
+    <p class="nms-muted">Reporting period: <?php echo esc_html( $fy_label ); ?>. Legacy values use booking/service date; consolidated invoices use issue date; payments and refunds use transaction date. Outstanding is the current balance across all dates. Archived bookings count when they were confirmed or paid. Cancelled ones and consolidated duplicates do not.<?php if ( $unverified_archived && (int) $unverified_archived->n > 0 ) : ?> <strong>Not counted: &pound;<?php echo esc_html( number_format( (float) $unverified_archived->total, 2 ) ); ?> on <?php echo esc_html( (int) $unverified_archived->n ); ?> archived booking<?php echo (int) $unverified_archived->n === 1 ? '' : 's'; ?> with no recorded earlier status. Check them on the Archived page.</strong><?php endif; ?></p>
 
     <!-- Summary cards -->
     <div class="nms-stats-row" style="margin-bottom:2rem;">
