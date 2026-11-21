@@ -36,13 +36,26 @@ class MBS_Attention {
         if(!current_user_can('mbs_manage_bookings')&&!current_user_can('manage_options'))return;
         $result=self::summary(5);
         if(!$result['items']&&!$result['partial_failures'])return;
-        echo '<details class="nms-card mbs-disclosure mbs-attention" open><summary class="nms-card-header"><h2>Needs attention</h2></summary><div class="mbs-card-body"><p>Read-only summary, up to five items per category. Opening a link does not approve, send or change anything.</p>';
-        foreach($result['partial_failures']as$issue)echo '<p role="alert">'.esc_html($issue).'</p>';
-        echo '<div class="mbs-table-scroll" role="region" aria-label="Outstanding booking actions" tabindex="0"><table class="widefat striped mbs-panel-table"><thead><tr><th scope="col">Reference</th><th scope="col">Finding</th><th scope="col">Next action</th></tr></thead><tbody>';
-        foreach($result['items']as$item){
-            $link_attr = $item['kind'] === 'email' ? ' class="mbs-open-email-diagnostics" data-tab="transport"' : '';
-            echo '<tr><td>'.esc_html($item['ref']).'</td><td>'.esc_html($item['finding']).'</td><td><a href="'.esc_url($item['url']).'"'.$link_attr.'>'.esc_html($item['action']).'</a></td></tr>';
+        $items=$result['items'];$total=count($items);$visible=1;
+        $row=function($item){
+            $link_attr = $item['kind'] === 'email' ? ' class="mbs-attention__link mbs-open-email-diagnostics" data-tab="transport"' : ' class="mbs-attention__link"';
+            return '<li class="mbs-attention__item"><span class="mbs-attention__ref">'.esc_html($item['ref']).'</span><span class="mbs-attention__finding">'.esc_html($item['finding']).'</span><a href="'.esc_url($item['url']).'"'.$link_attr.'>'.esc_html($item['action']).'</a></li>';
+        };
+        echo '<section class="mbs-attention" aria-labelledby="mbs-attention-title"><div class="mbs-attention__head"><h2 id="mbs-attention-title">Needs attention</h2>';
+        if($total)echo '<span class="mbs-attention__count">'.(int)$total.'</span>';
+        echo '</div>';
+        foreach($result['partial_failures']as$issue)echo '<p class="mbs-attention__issue" role="alert">'.esc_html($issue).'</p>';
+        if($total){
+            echo '<ul class="mbs-attention__list" aria-label="Outstanding booking actions">';
+            foreach(array_slice($items,0,$visible)as$item)echo $row($item);
+            echo '</ul>';
+            if($total>$visible){
+                echo '<details class="mbs-attention__more"><summary>Show '.(int)($total-$visible).' more</summary><ul class="mbs-attention__list" aria-label="More outstanding booking actions">';
+                foreach(array_slice($items,$visible)as$item)echo $row($item);
+                echo '</ul></details>';
+            }
         }
-        echo '</tbody></table></div></div></details>';
+        echo '<p class="mbs-attention__note">Read-only. Opening a link changes nothing.</p>';
+        echo '</section>';
     }
 }

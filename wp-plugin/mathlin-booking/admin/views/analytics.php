@@ -33,41 +33,44 @@ if ( $requested_from && $requested_to && $requested_from <= $requested_to ) {
 $prev_fy_start = wp_date( 'Y-m-d', strtotime( $fy_start . ' -1 year' ) );
 $prev_fy_end = wp_date( 'Y-m-d', strtotime( $fy_end . ' -1 year' ) );
 
+$revenue_sql = MBS_Bookings::revenue_status_sql( $table );
+$revenue_sql_b = MBS_Bookings::revenue_status_sql( 'b' );
+
 // Bookings per month in the selected period — exclude internal Scout bookings
 $monthly = $wpdb->get_results( $wpdb->prepare(
     "SELECT DATE_FORMAT(booking_date, '%Y-%m') as month, COUNT(*) as count, SUM(amount) as revenue
-     FROM {$table} WHERE status IN ('confirmed', 'deposit_paid', 'paid') AND scout_use = 0 AND booking_date BETWEEN %s AND %s
+     FROM {$table} WHERE {$revenue_sql} AND scout_use = 0 AND booking_date BETWEEN %s AND %s
      GROUP BY month ORDER BY month ASC", $fy_start, $fy_end
 ) );
 
 // Bookings by space — exclude internal Scout bookings
 $by_space = $wpdb->get_results(
     "SELECT space, COUNT(*) as count, SUM(amount) as revenue
-     FROM {$table} WHERE status IN ('confirmed', 'deposit_paid', 'paid') AND scout_use = 0 AND booking_date BETWEEN '{$fy_start}' AND '{$fy_end}'
+     FROM {$table} WHERE {$revenue_sql} AND scout_use = 0 AND booking_date BETWEEN '{$fy_start}' AND '{$fy_end}'
      GROUP BY space ORDER BY count DESC"
 );
 
 // Bookings by day of week — exclude internal Scout bookings
 $by_day = $wpdb->get_results(
     "SELECT DAYNAME(booking_date) as day_name, DAYOFWEEK(booking_date) as day_num, COUNT(*) as count
-     FROM {$table} WHERE status IN ('confirmed', 'deposit_paid', 'paid') AND scout_use = 0 AND booking_date BETWEEN '{$fy_start}' AND '{$fy_end}'
+     FROM {$table} WHERE {$revenue_sql} AND scout_use = 0 AND booking_date BETWEEN '{$fy_start}' AND '{$fy_end}'
      GROUP BY day_name, day_num ORDER BY day_num ASC"
 );
 
 // Revenue this FY vs last FY — exclude internal Scout bookings
 $revenue_fy = (float) $wpdb->get_var( $wpdb->prepare(
-    "SELECT COALESCE(SUM(amount), 0) FROM {$table} WHERE status IN ('confirmed', 'deposit_paid', 'paid') AND scout_use = 0 AND booking_date BETWEEN %s AND %s",
+    "SELECT COALESCE(SUM(amount), 0) FROM {$table} WHERE {$revenue_sql} AND scout_use = 0 AND booking_date BETWEEN %s AND %s",
     $fy_start, $fy_end
 ) );
 
 $revenue_prev = (float) $wpdb->get_var( $wpdb->prepare(
-    "SELECT COALESCE(SUM(amount), 0) FROM {$table} WHERE status IN ('confirmed', 'deposit_paid', 'paid') AND scout_use = 0 AND booking_date BETWEEN %s AND %s",
+    "SELECT COALESCE(SUM(amount), 0) FROM {$table} WHERE {$revenue_sql} AND scout_use = 0 AND booking_date BETWEEN %s AND %s",
     $prev_fy_start, $prev_fy_end
 ) );
 
 // Total bookings this FY — exclude internal Scout bookings
 $total_fy = (int) $wpdb->get_var( $wpdb->prepare(
-    "SELECT COUNT(*) FROM {$table} WHERE status IN ('confirmed', 'deposit_paid', 'paid') AND scout_use = 0 AND booking_date BETWEEN %s AND %s",
+    "SELECT COUNT(*) FROM {$table} WHERE {$revenue_sql} AND scout_use = 0 AND booking_date BETWEEN %s AND %s",
     $fy_start, $fy_end
 ) );
 
@@ -88,7 +91,7 @@ $allocation_table = $wpdb->prefix . MBS_BILLING_ALLOCATION_TABLE;
 // use transaction date. Outstanding is a current balance across all dates.
 $legacy_billed = (float) $wpdb->get_var( $wpdb->prepare(
     "SELECT COALESCE(SUM(b.amount), 0) FROM {$table} b
-     WHERE b.status IN ('confirmed','deposit_paid','paid') AND b.scout_use = 0
+     WHERE {$revenue_sql_b} AND b.scout_use = 0
      AND b.booking_date BETWEEN %s AND %s AND NOT EXISTS (SELECT 1 FROM {$allocation_table} a WHERE a.booking_ref = b.ref)",
     $fy_start, $fy_end
 ) );
@@ -148,8 +151,15 @@ $overdue_count = (int) $wpdb->get_var(
 
 // Collection rate (% of billed income actually received) in the selected period.
 $collection_rate = $invoiced_fy > 0 ? round( ( $net_collected_fy / $invoiced_fy ) * 100, 1 ) : 0;
+$unverified_sql_b = MBS_Bookings::unverified_archived_sql( 'b' );
+$unverified_archived = $wpdb->get_row( $wpdb->prepare(
+    "SELECT COALESCE(SUM(b.amount), 0) AS total, COUNT(*) AS n FROM {$table} b
+     WHERE {$unverified_sql_b} AND b.scout_use = 0 AND b.amount > 0 AND b.booking_date BETWEEN %s AND %s
+     AND NOT EXISTS (SELECT 1 FROM {$allocation_table} a WHERE a.booking_ref = b.ref)",
+    $fy_start, $fy_end
+) );
 $legacy_prev_invoiced = (float) $wpdb->get_var( $wpdb->prepare(
-    "SELECT COALESCE(SUM(b.amount), 0) FROM {$table} b WHERE b.status IN ('confirmed','deposit_paid','paid')
+    "SELECT COALESCE(SUM(b.amount), 0) FROM {$table} b WHERE {$revenue_sql_b}
      AND b.scout_use = 0 AND b.booking_date BETWEEN %s AND %s
      AND NOT EXISTS (SELECT 1 FROM {$allocation_table} a WHERE a.booking_ref = b.ref)",
     $prev_fy_start, $prev_fy_end
@@ -404,7 +414,7 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
         <button class="button button-primary">Update reports</button>
         <a class="button" href="<?php echo esc_url( admin_url( 'admin.php?page=mathlin-analytics' ) ); ?>">Current financial year</a>
     </form>
-    <p class="nms-muted">Reporting period: <?php echo esc_html( $fy_label ); ?>. Legacy values use booking/service date; consolidated invoices use issue date; payments and refunds use transaction date. Outstanding is the current balance across all dates.</p>
+    <p class="nms-muted">Reporting period: <?php echo esc_html( $fy_label ); ?>. Legacy values use booking/service date; consolidated invoices use issue date; payments and refunds use transaction date. Outstanding is the current balance across all dates. Archived bookings count when they were confirmed or paid. Cancelled ones and consolidated duplicates do not.<?php if ( $unverified_archived && (int) $unverified_archived->n > 0 ) : ?> <strong>Not counted: &pound;<?php echo esc_html( number_format( (float) $unverified_archived->total, 2 ) ); ?> on <?php echo esc_html( (int) $unverified_archived->n ); ?> archived booking<?php echo (int) $unverified_archived->n === 1 ? '' : 's'; ?> with no recorded earlier status. Check them on the Archived page.</strong><?php endif; ?></p>
 
     <!-- Summary cards -->
     <div class="nms-stats-row" style="margin-bottom:2rem;">
@@ -744,14 +754,14 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
             <?php if($retained_exports): ?><details><summary>Your retained downloads</summary><ul><?php foreach($retained_exports as$export): ?><li><a href="<?php echo esc_url(MBS_Accounting_Export::download_url($export)); ?>"><?php echo esc_html(strtoupper($export['format']).' — '.$export['created_at']); ?></a> (expires <?php echo esc_html(wp_date('H:i',$export['expires'])); ?>)</li><?php endforeach; ?></ul></details><?php endif; endif; ?>
             <p>Choose a supported CSV layout for review before importing it into another accounting package.</p>
             <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-top:1rem;">
-                <div style="display:flex;gap:0.5rem;align-items:center;">
+                <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
                     <label style="font-size:0.85rem;font-weight:600;">From:</label>
                     <input type="date" id="mbs-acc-from" value="<?php echo esc_attr( $fy_start ); ?>">
                     <label style="font-size:0.85rem;font-weight:600;">To:</label>
                     <input type="date" id="mbs-acc-to" value="<?php echo esc_attr( min( date('Y-m-d'), $fy_end ) ); ?>">
                 </div>
             </div>
-            <div style="display:flex;gap:0.5rem;margin-top:1rem;">
+            <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:1rem;">
                 <a id="mbs-export-xero" href="#" class="button">📊 Xero CSV</a>
                 <a id="mbs-export-sage" href="#" class="button">📊 Sage CSV</a>
                 <a id="mbs-export-qb" href="#" class="button">📊 QuickBooks CSV</a>
