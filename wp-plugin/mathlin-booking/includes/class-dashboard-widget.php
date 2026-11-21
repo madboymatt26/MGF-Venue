@@ -107,6 +107,9 @@ class MBS_Dashboard_Widget {
             <div class="mbs-dw-stat">
                 <div class="mbs-dw-stat-val"><?php echo class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'reports' ) ? (int) $stats['total'] : '&pound;' . number_format( $stats['revenue_fy'], 0 ); ?></div>
                 <div class="mbs-dw-stat-label"><?php echo class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'reports' ) ? 'Active Bookings' : 'Revenue FY'; ?></div>
+                <?php if ( ! empty( $stats['unverified_count'] ) && ( ! class_exists( 'MBS_Payment_Features' ) || MBS_Payment_Features::enabled( 'reports' ) ) ) : ?>
+                    <div class="mbs-dw-stat-label" style="color:#92400e;font-size:11px;line-height:1.3;" title="Archived bookings with no recorded earlier status are not counted.">Excl. &pound;<?php echo esc_html( number_format( $stats['revenue_fy_unverified'], 0 ) ); ?> unverified archived</div>
+                <?php endif; ?>
             </div>
         </div>
 

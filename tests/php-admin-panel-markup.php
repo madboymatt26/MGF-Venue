@@ -20,8 +20,9 @@ require __DIR__.'/../wp-plugin/mathlin-booking/includes/class-attention.php';
 require __DIR__.'/../wp-plugin/mathlin-booking/includes/class-extras-catalogue.php';
 $checks=0;function panel_assert($ok,$why){global$checks;$checks++;if(!$ok)throw new RuntimeException($why);}
 ob_start();MBS_Attention::render();$attention=ob_get_clean();
-foreach(array('mbs-disclosure mbs-attention','summary class="nms-card-header"','class="mbs-card-body"','Outstanding booking actions','scope="col"','8 references need a decision','sync_view=review')as$s)panel_assert(strpos($attention,$s)!==false,'Attention markup: '.$s);
+foreach(array('class="mbs-attention"','mbs-attention__list','mbs-attention__link','Outstanding booking actions','Read-only. Opening a link changes nothing.','8 references need a decision','sync_view=review')as$s)panel_assert(strpos($attention,$s)!==false,'Attention markup: '.$s);
 panel_assert(strpos($attention,'style="margin:16px 0;padding:16px"')===false,'No double card padding');
+panel_assert(strpos($attention,'<table')===false,'Attention list is not a wide table that scrolls sideways on phones');
 ob_start();(new MBS_Extras_Catalogue())->render_settings();$extras=ob_get_clean();
 foreach(array('mbs-disclosure mbs-extras-settings','summary class="nms-card-header"','class="mbs-card-body"','aria-label="Reusable extras"','mbs-inline-disclosure','name="operation" value="enable"','name="operation" value="save"','name="revision" value="0"')as$s)panel_assert(strpos($extras,$s)!==false,'Extras markup: '.$s);
 panel_assert(!preg_match('/name="enabled"[^>]+checked/',$extras),'Catalogue stays disabled');
@@ -32,4 +33,8 @@ panel_assert($xp->query('//details[contains(@class,"mbs-extras-settings")]/div[c
 libxml_clear_errors();libxml_use_internal_errors($prior);
 $charges=false;ob_start();(new MBS_Extras_Catalogue())->render_settings();panel_assert(ob_get_clean()==='','Disabled charges do not render catalogue');
 $can=false;ob_start();MBS_Attention::render();panel_assert(ob_get_clean()==='','Attention permission guard retained');
+$listv=file_get_contents(dirname(__DIR__).'/wp-plugin/mathlin-booking/admin/views/list.php');
+preg_match('/nms-series-row.*?<\/td>/s',$listv,$sm);
+panel_assert(!empty($sm)&&strpos($sm[0],'nms-bulk-check')===false,'Series rows carry no bulk checkbox');
+panel_assert(strpos(file_get_contents(dirname(__DIR__).'/wp-plugin/mathlin-booking/admin/admin.js'),"data('series')")===false||strpos(file_get_contents(dirname(__DIR__).'/wp-plugin/mathlin-booking/admin/admin.js'),'.nms-series-\' + series).find(\'.nms-bulk-check\'')===false,'Bulk apply never expands series');
 echo "ADMIN_PANEL_MARKUP_OK: {$checks} assertions\n";

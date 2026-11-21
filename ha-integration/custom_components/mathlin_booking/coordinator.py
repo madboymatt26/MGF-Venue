@@ -138,17 +138,31 @@ class MathlinCoordinator(DataUpdateCoordinator[list[dict[str, Any]]]):
         midnight = datetime.combine(
             tomorrow, datetime.min.time(), tzinfo=dt_util.DEFAULT_TIME_ZONE
         )
+        handle: list[Any] = []
 
         @callback
         def _midnight_callback(_now: datetime) -> None:
+            # Drop the fired timer's own handle so the list does not grow by
+            # one entry per day until the integration unloads.
+            if handle and handle[0] in self._cancel_midnight:
+                self._cancel_midnight.remove(handle[0])
             self.hass.async_create_task(self._midnight_refresh())
 
         cancel = async_track_point_in_time(self.hass, _midnight_callback, midnight)
+        handle.append(cancel)
         self._cancel_midnight.append(cancel)
 
     async def _midnight_refresh(self) -> None:
-        """Refresh at day rollover and schedule the following midnight."""
-        await self.async_refresh()
+        """Refresh at day rollover and schedule the following midnight.
+
+        The reschedule must survive a failed refresh: if async_refresh ever
+        raises, skipping _schedule_next_midnight would silently stop the
+        midnight chain until the integration is reloaded.
+        """
+        try:
+            await self.async_refresh()
+        except Exception:  # noqa: BLE001 - keep the midnight chain alive
+            _LOGGER.exception("Midnight refresh failed; rescheduling")
         self._schedule_next_midnight()
 
     def schedule_booking_timers(self) -> None:

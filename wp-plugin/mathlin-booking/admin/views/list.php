@@ -4,8 +4,6 @@
     <a class="page-title-action" href="<?php echo esc_url( admin_url( 'admin.php?page=mathlin-add-booking' ) ); ?>">Add booking</a>
     <?php if ( MBS_Payment_Features::enabled( 'additional_charges' ) ) : ?><a class="page-title-action" href="<?php echo esc_url(MBS_Additional_Charges::admin_url()); ?>">Additional charges</a><?php endif; ?>
     <hr class="wp-header-end">
-    <?php MBS_Attention::render(); ?>
-
     <!-- Stats -->
     <div class="nms-stats-row">
         <div class="nms-stat-card">
@@ -27,9 +25,14 @@
         <div class="nms-stat-card nms-stat-revenue">
             <div class="nms-stat-val">&pound;<?php echo number_format( $stats['revenue_fy'], 2 ); ?></div>
             <div class="nms-stat-label">Revenue FY <?php echo esc_html( $stats['fy_label'] ); ?></div>
+            <?php if ( ! empty( $stats['unverified_count'] ) ) : ?>
+                <div class="nms-stat-note" title="These archived bookings have no recorded earlier status, so they are not counted. Check them on the Archived page.">Excludes &pound;<?php echo esc_html( number_format( $stats['revenue_fy_unverified'], 2 ) ); ?> on <?php echo esc_html( (int) $stats['unverified_count'] ); ?> archived booking<?php echo (int) $stats['unverified_count'] === 1 ? '' : 's'; ?> with no recorded status</div>
+            <?php endif; ?>
         </div>
         <?php endif; ?>
     </div>
+
+    <?php MBS_Attention::render(); ?>
 
     <!-- Filters -->
     <div class="nms-filters">
@@ -56,10 +59,10 @@
                 ( $status ? '&status=' . urlencode( $status ) : '' ) .
                 ( $search ? '&search=' . urlencode( $search ) : '' )
             ) ); ?>" class="button" title="Download bookings as CSV spreadsheet">
-                📊 Export CSV
+                <span class="dashicons dashicons-media-spreadsheet" aria-hidden="true"></span> Export CSV
             </a>
             <button id="nms-archive-past" class="button" title="Move all past confirmed/cancelled bookings to archive">
-                📦 Archive Past Bookings
+                <span class="dashicons dashicons-archive" aria-hidden="true"></span> Archive Past Bookings
             </button>
             <?php if ( $stats['archived'] > 0 ) : ?>
                 <span class="nms-muted" style="margin-left:8px;">(<?php echo esc_html( $stats['archived'] ); ?> archived)</span>
@@ -81,19 +84,22 @@
         </div>
     <?php else : ?>
 
+    <?php $series_present = (bool) array_filter( (array) $bookings, function ( $row ) { return ! empty( $row->series_id ); } ); ?>
     <!-- Bulk actions bar -->
-    <div class="nms-bulk-bar" style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
+    <div class="nms-bulk-bar" role="group" aria-label="Bulk actions for selected bookings">
+        <label class="nms-bulk-selectall" for="nms-select-all-bar"><input type="checkbox" id="nms-select-all-bar"> Select all on this page</label>
         <label class="screen-reader-text" for="nms-bulk-action">Bulk action</label>
-        <select id="nms-bulk-action" style="min-width:160px;">
-            <option value="">Bulk Actions</option>
-            <option value="confirmed">✓ Confirm Selected</option>
-            <?php if ( MBS_Payment_Features::enabled( 'manual' ) ) : ?><option value="paid">💰 Mark Paid</option><?php endif; ?>
-            <option value="cancelled">✗ Cancel Selected</option>
-            <option value="archived">📦 Archive Selected</option>
+        <select id="nms-bulk-action" class="nms-bulk-select">
+            <option value="">Bulk actions</option>
+            <option value="confirmed" data-from="pending">&#10003; Confirm selected</option>
+            <?php if ( MBS_Payment_Features::enabled( 'manual' ) ) : ?><option value="paid" data-from="confirmed">&pound; Mark paid</option><?php endif; ?>
+            <option value="cancelled" data-from="pending,confirmed">&#10007; Cancel selected</option>
+            <option value="archived" data-from="confirmed,paid,cancelled">Archive selected</option>
         </select>
-        <button id="nms-bulk-apply" class="button">Apply</button>
-        <span id="nms-bulk-count" class="nms-muted" style="font-size:0.85rem;" role="status" aria-live="polite"></span>
-        <span id="nms-bulk-msg" class="nms-settings-msg" style="margin-left:8px;" role="status" aria-live="polite"></span>
+        <button id="nms-bulk-apply" class="button button-primary">Apply</button>
+        <span id="nms-bulk-count" class="nms-bulk-count nms-muted" role="status" aria-live="polite"></span>
+        <?php if ( $series_present ) : ?><span class="nms-muted nms-bulk-seriesnote">Recurring series have no checkbox. Use the buttons on each series row.</span><?php endif; ?>
+        <span id="nms-bulk-msg" class="nms-settings-msg" role="status" aria-live="polite"></span>
     </div>
 
     <table class="wp-list-table widefat fixed striped nms-bookings-table">
@@ -145,7 +151,7 @@
                 $last_date   = $series_bookings[ $series_count - 1 ]->booking_date;
                 ?>
                 <tr id="nms-row-<?php echo esc_attr( $b->ref ); ?>" class="nms-series-row" style="background:#f9f7ff;">
-                    <td class="nms-bulk-cell"><input type="checkbox" class="nms-bulk-check" value="<?php echo esc_attr( $b->ref ); ?>" data-series="<?php echo esc_attr( $b->series_id ); ?>" aria-label="<?php echo esc_attr( 'Select series ' . $b->series_id ); ?>"></td>
+                    <td class="nms-bulk-cell nms-bulk-cell--series" title="Series are managed with their own buttons, not bulk actions"></td>
                     <td data-label="Ref">
                         <strong><?php echo esc_html( $b->series_id ); ?></strong>
                         <br><small class="nms-muted"><?php echo $series_count; ?> bookings</small>
@@ -165,7 +171,7 @@
                     <td data-label="Status"><span class="nms-status nms-status-<?php echo esc_attr( $series_status ); ?>"><?php echo esc_html( MBS_Bookings::status_label( $series_status ) ); ?></span></td>
                     <td data-label="Actions">
                         <div class="nms-action-btns">
-                            <button class="button button-small nms-toggle-series" data-series="<?php echo esc_attr( $b->series_id ); ?>">▶ Expand</button>
+                            <button class="button button-small nms-toggle-series" data-series="<?php echo esc_attr( $b->series_id ); ?>">Expand</button>
                             <?php if ( $series_record ) : ?>
                                 <a href="<?php echo esc_url( admin_url( 'admin.php?page=mathlin-series&ref=' . rawurlencode( $b->series_id ) ) ); ?>" class="button button-small">View series</a>
                             <?php else : ?>
@@ -219,7 +225,7 @@
                 // Regular (non-series) booking row
             ?>
                 <tr id="nms-row-<?php echo esc_attr( $b->ref ); ?>">
-                    <td class="nms-bulk-cell"><input type="checkbox" class="nms-bulk-check" value="<?php echo esc_attr( $b->ref ); ?>" aria-label="<?php echo esc_attr( 'Select booking ' . $b->ref ); ?>"></td>
+                    <td class="nms-bulk-cell"><input type="checkbox" class="nms-bulk-check" value="<?php echo esc_attr( $b->ref ); ?>" data-status="<?php echo esc_attr( $b->status ); ?>" aria-label="<?php echo esc_attr( 'Select booking ' . $b->ref ); ?>"></td>
                     <td data-label="Ref"><strong><?php echo esc_html( $b->ref ); ?></strong></td>
                     <td data-label="Name">
                         <?php echo esc_html( $b->name ); ?>

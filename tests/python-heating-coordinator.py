@@ -105,4 +105,30 @@ class CoordinatorTests(unittest.TestCase):
                      'integration_scope': 'booking_heating'}]):
             with self.assertRaises(sys.modules['heating_patch.coordinator'].UpdateFailed): self.fetch(data)
 
+    def test_midnight_timer_list_does_not_grow_each_day(self):
+        tasks=[]
+        self.coordinator.hass=SimpleNamespace(async_create_task=lambda coro: tasks.append(coro))
+        self.coordinator.schedule_midnight_poll()
+        self.assertEqual(len(self.coordinator._cancel_midnight),1)
+        # Simulate several days of firings; each fired handle must drop out of
+        # the retention list as the following midnight is scheduled.
+        for _ in range(5):
+            fired=scheduled[-1]['callback']
+            self.assertEqual(len(self.coordinator._cancel_midnight),1)
+            fired(scheduled[-1]['at'])
+            self.assertEqual(self.coordinator._cancel_midnight,[])
+            self.coordinator._schedule_next_midnight()
+        self.assertEqual(len(self.coordinator._cancel_midnight),1)
+        self.assertEqual(len(tasks),5)
+        for coro in tasks: coro.close()
+
+    def test_midnight_refresh_failure_still_reschedules(self):
+        import asyncio
+        self.coordinator.schedule_midnight_poll()
+        self.assertEqual(len(scheduled),1)
+        async def failing(): raise RuntimeError('synthetic fetch failure')
+        self.coordinator.async_refresh=failing
+        asyncio.run(self.coordinator._midnight_refresh())
+        self.assertEqual(len(scheduled),2)
+
 if __name__=='__main__': unittest.main()
