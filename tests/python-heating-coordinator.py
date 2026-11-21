@@ -122,4 +122,13 @@ class CoordinatorTests(unittest.TestCase):
         self.assertEqual(len(tasks),5)
         for coro in tasks: coro.close()
 
+    def test_midnight_refresh_failure_still_reschedules(self):
+        import asyncio
+        self.coordinator.schedule_midnight_poll()
+        self.assertEqual(len(scheduled),1)
+        async def failing(): raise RuntimeError('synthetic fetch failure')
+        self.coordinator.async_refresh=failing
+        asyncio.run(self.coordinator._midnight_refresh())
+        self.assertEqual(len(scheduled),2)
+
 if __name__=='__main__': unittest.main()

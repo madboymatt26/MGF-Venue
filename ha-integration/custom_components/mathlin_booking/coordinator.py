@@ -153,8 +153,16 @@ class MathlinCoordinator(DataUpdateCoordinator[list[dict[str, Any]]]):
         self._cancel_midnight.append(cancel)
 
     async def _midnight_refresh(self) -> None:
-        """Refresh at day rollover and schedule the following midnight."""
-        await self.async_refresh()
+        """Refresh at day rollover and schedule the following midnight.
+
+        The reschedule must survive a failed refresh: if async_refresh ever
+        raises, skipping _schedule_next_midnight would silently stop the
+        midnight chain until the integration is reloaded.
+        """
+        try:
+            await self.async_refresh()
+        except Exception:  # noqa: BLE001 - keep the midnight chain alive
+            _LOGGER.exception("Midnight refresh failed; rescheduling")
         self._schedule_next_midnight()
 
     def schedule_booking_timers(self) -> None:
