@@ -111,13 +111,14 @@ try{
   await context.close();
  }
  // Separate PHP processes synchronised before invoking the authenticated endpoint.
+ const processBefore=state();
  const workers=[1,2].map(n=>{
   const code=`global $wpdb;$f=get_option('mbs_journey_fixture');wp_set_current_user(1);$key='journey_barrier_'.$f['tag'];add_option($key.'_${n}',1);$deadline=microtime(true)+30;while((int)$wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM '.$wpdb->options.' WHERE option_name IN (%s,%s)',$key.'_1',$key.'_2'))<2){if(microtime(true)>$deadline)throw new RuntimeException('Barrier timed out');usleep(20000);}$_POST=array('nonce'=>wp_create_nonce('mbs_admin_nonce'),'bulk_action'=>'deposit_paid','refs'=>array($f['refs']['PROCESSRACE']));$_REQUEST=$_POST;add_filter('wp_doing_ajax','__return_true');(new MBS_Admin())->ajax_bulk_action();`;
   const php=code;
   const args=process.env.MGF_LOCAL_WP?['/tmp/lamp/wp.phar','--path='+process.env.MGF_LOCAL_WP,'eval',php]:['compose','-f','tests/integration/docker-compose.yml','run','--rm','-T','cli','wp','eval',php,'--allow-root'];
   return promisify(execFile)(process.env.MGF_LOCAL_WP?'/tmp/lamp/bin/php':'docker',args,{maxBuffer:4e6});
  });
- const processBefore=state();const processResults=await Promise.all(workers);const results=processResults.map(r=>JSON.parse(r.stdout));
+ const processResults=await Promise.all(workers);const results=processResults.map(r=>JSON.parse(r.stdout));
  check(results.reduce((n,r)=>n+(r.data?.processed||0),0)===1,'Separate synchronised PHP workers process one deposit');
  const processAfter=state();check(Number(processAfter.bookings.PROCESSRACE.paid)===25&&processAfter.mail.length===processBefore.mail.length+1,'Separate workers preserve one deposit and one receipt');
  const denied=await browser.newContext();const deniedPage=await denied.newPage();
