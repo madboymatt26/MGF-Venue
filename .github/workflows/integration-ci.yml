@@ -190,6 +190,8 @@ jobs:
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/export-snapshots.php --allow-root
       - name: Verify legacy Scout actions roll back complete batches
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/legacy-series-atomicity.php --allow-root
+      - name: Verify bulk booking endpoint permissions and transitions
+        run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/bulk-action-endpoint.php --allow-root
       - name: Verify request rejection commits with a durable notification
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/request-rejection-atomicity.php --allow-root
       - name: Verify grouped navigation retains original WordPress routes and capabilities
