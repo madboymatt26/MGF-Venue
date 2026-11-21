@@ -1,7 +1,7 @@
 # Mathlin Booking System – Home Assistant Integration
 
 A custom Home Assistant integration with separate general occupancy and heating
-demand. Version 2.1.0 requires WordPress plugin 3.47.1 or later and its
+demand. Version 2.1.1 requires WordPress plugin 3.47.1 or later and its
 authenticated occupancy-today endpoint. Existing general entity identities are
 preserved; nine additional Heating entities are created. Heating events apply
 only to eligible bookings, not to general lighting/kitchen/access control.

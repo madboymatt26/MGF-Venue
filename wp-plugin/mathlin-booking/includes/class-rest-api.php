@@ -24,6 +24,17 @@ class MBS_Rest_API {
     public function init() {
         add_action( 'rest_api_init', array( $this, 'register_routes' ) );
         add_filter( 'rest_pre_dispatch', array( $this, 'campsite_public_permission' ), 10, 3 );
+        add_filter( 'rest_pre_serve_request', array( $this, 'serve_calendar_feed' ), 10, 4 );
+    }
+
+    /** REST normally JSON-encodes strings, even with a text/calendar header. */
+    public function serve_calendar_feed( $served, $response, $request, $server ) {
+        if ( $served || $request->get_route() !== '/mathlin/v1/bookings/ical' || $response->get_status() !== 200 ) return $served;
+        $body = $response->get_data();
+        if ( ! is_string( $body ) || strpos( $body, "BEGIN:VCALENDAR\r\n" ) !== 0 ) return $served;
+        // Permissions and campsite policy already ran. Never intercept errors or other routes.
+        if ( $request->get_method() !== 'HEAD' ) echo $body; // Raw RFC 5545, not HTML or JSON.
+        return true;
     }
 
     public function campsite_public_permission( $result, $server, $request ) {
@@ -1632,7 +1643,7 @@ class MBS_Rest_API {
 
         $response = new WP_REST_Response( $ics );
         $response->header( 'Content-Type', 'text/calendar; charset=utf-8' );
-        $response->header( 'Content-Disposition', 'inline; filename="scout-hall-bookings.ics"' );
+        $response->header( 'Content-Disposition', ( $request->get_param( 'download' ) === '1' ? 'attachment' : 'inline' ) . '; filename="scout-hall-bookings.ics"' );
         return $response;
     }
 
