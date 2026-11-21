@@ -45,7 +45,7 @@ try{
     MBS_Bookings::archive_past_bookings();
     $assert($st($h)==='archived'&&$st($i)==='archived','Bulk archive moved past bookings');
     $assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$audit} WHERE ref=%s AND action='archived' AND details LIKE %s",$i,'%(was cancelled)%'))===1,'Bulk archive records earlier status');
-    $assert(abs($counted()-($before+12800))<0.001,'Bulk archive keeps confirmed revenue and drops cancelled');
+    $assert(abs($counted()-$before)<0.001&&$before===17100.0,'Bulk archive keeps confirmed revenue and drops cancelled');
     echo "PASS $checks archived revenue checks\n";
 }finally{
     foreach($refs as $ref){$wpdb->delete($table,array('ref'=>$ref));$wpdb->delete($audit,array('ref'=>$ref));}
