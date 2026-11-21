@@ -15,7 +15,7 @@ class MBS_Attention {
         if(MBS_Payment_Features::enabled('reports')){
             $invoices=$wpdb->get_results($wpdb->prepare('SELECT invoice_ref,due_at FROM '.$wpdb->prefix.MBS_INVOICE_TABLE." WHERE document_type='invoice' AND status NOT IN ('draft','void') AND due_at IS NOT NULL AND due_at<%s AND total_minor>paid_minor+credited_minor ORDER BY due_at ASC,id ASC LIMIT %d",current_time('mysql'),$limit));
             if(!is_array($invoices)||$wpdb->last_error)$issues[]='Overdue invoices could not be read.';
-            else foreach($invoices as$i)$items[]=array('kind'=>'payment','ref'=>$i->invoice_ref,'since'=>$i->due_at,'finding'=>'Issued invoice overdue under its existing due date','action'=>'Review outstanding balance and reconciliation before chasing','url'=>admin_url('admin.php?page=mathlin-analytics'));
+            else foreach($invoices as$i)$items[]=array('kind'=>'payment','ref'=>$i->invoice_ref,'since'=>$i->due_at,'finding'=>'Issued invoice overdue under its existing due date','action'=>'Review outstanding balance and reconciliation before chasing','url'=>admin_url('admin.php?page=mathlin-invoice&ref='.rawurlencode($i->invoice_ref)));
         }
         if(class_exists('MBS_Payment_Expiry'))$items=array_merge($items,MBS_Payment_Expiry::needs_attention($limit));
         if(class_exists('MBS_Credit_Accounts'))$items=array_merge($items,MBS_Credit_Accounts::attention($limit));

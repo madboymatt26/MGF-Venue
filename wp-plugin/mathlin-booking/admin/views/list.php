@@ -54,20 +54,7 @@
                 <a href="?page=mathlin-booking" class="button">Clear</a>
             <?php endif; ?>
         </form>
-        <div class="nms-filters-right">
-            <a href="<?php echo esc_url( admin_url( 'admin-ajax.php?action=mbs_export_csv&nonce=' . wp_create_nonce( 'mbs_admin_nonce' ) .
-                ( $status ? '&status=' . urlencode( $status ) : '' ) .
-                ( $search ? '&search=' . urlencode( $search ) : '' )
-            ) ); ?>" class="button" title="Download bookings as CSV spreadsheet">
-                <span class="dashicons dashicons-media-spreadsheet" aria-hidden="true"></span> Export CSV
-            </a>
-            <button id="nms-archive-past" class="button" title="Move all past confirmed/cancelled bookings to archive">
-                <span class="dashicons dashicons-archive" aria-hidden="true"></span> Archive Past Bookings
-            </button>
-            <?php if ( $stats['archived'] > 0 ) : ?>
-                <span class="nms-muted" style="margin-left:8px;">(<?php echo esc_html( $stats['archived'] ); ?> archived)</span>
-            <?php endif; ?>
-        </div>
+
     </div>
 
     <nav class="mbs-list-pagination" aria-label="Booking pages">
@@ -92,7 +79,7 @@
         <select id="nms-bulk-action" class="nms-bulk-select">
             <option value="">Bulk actions</option>
             <option value="confirmed" data-from="pending">&#10003; Confirm selected</option>
-            <?php if ( MBS_Payment_Features::enabled( 'manual' ) ) : ?><option value="paid" data-from="confirmed">&pound; Mark paid</option><?php endif; ?>
+            <?php if ( MBS_Payment_Features::enabled( 'manual' ) ) : ?><option value="deposit_paid" data-from="confirmed">Mark deposit paid</option><option value="paid" data-from="confirmed">&pound; Mark paid</option><?php endif; ?>
             <option value="cancelled" data-from="pending,confirmed">&#10007; Cancel selected</option>
             <option value="archived" data-from="confirmed,paid,cancelled">Archive selected</option>
         </select>
@@ -297,5 +284,21 @@
         </tbody>
     </table>
     <?php endif; ?>
+    <section class="mbs-list-tools" aria-label="Export and archive tools">
+        <div class="nms-filters-right">
+            <a href="<?php echo esc_url( admin_url( 'admin-ajax.php?action=mbs_export_csv&nonce=' . wp_create_nonce( 'mbs_admin_nonce' ) .
+                ( $status ? '&status=' . urlencode( $status ) : '' ) .
+                ( $search ? '&search=' . urlencode( $search ) : '' )
+            ) ); ?>" class="button" title="Download bookings as CSV spreadsheet">
+                <span class="dashicons dashicons-media-spreadsheet" aria-hidden="true"></span> Export CSV
+            </a>
+            <button id="nms-archive-past" class="button" title="Move all past confirmed/cancelled bookings to archive">
+                <span class="dashicons dashicons-archive" aria-hidden="true"></span> Archive Past Bookings
+            </button>
+            <?php if ( $stats['archived'] > 0 ) : ?>
+                <span class="nms-muted" style="margin-left:8px;">(<?php echo esc_html( $stats['archived'] ); ?> archived)</span>
+            <?php endif; ?>
+        </div>
+    </section>
 </div>
 <?php include __DIR__ . '/partials/approval-modal.php'; ?>
