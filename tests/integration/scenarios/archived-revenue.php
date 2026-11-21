@@ -58,25 +58,25 @@ try{
     $assert(abs($counted()-$before)<0.001&&$before===116300.0,'Bulk archive keeps confirmed revenue and drops cancelled');
     // Versioned series cancellation from a date excludes covered occurrences that existed then.
     $u0=MBS_Bookings::get_stats();
-    $l=$mk('seriesfrom',12,204800);$wpdb->update($table,array('status'=>'archived','series_id'=>'SER-ARCH-TEST2'),array('ref'=>$l));
+    $l=$mk('seriesfrom',12,1.25);$wpdb->update($table,array('status'=>'archived','series_id'=>'SER-ARCH-TEST2'),array('ref'=>$l));
     MBS_Audit_Log::log('SER-ARCH-TEST2','series_cancelled','Cancelled 1 from_date occurrence(s). From '.$fy_start.' inclusive; earlier sessions retained.');
-    $assert($counted()===116300.0,'From-date series cancellation excludes the covered archived occurrence');
+    $assert(abs($counted()-116300)<0.001,'From-date series cancellation excludes the covered archived occurrence');
     $u1=MBS_Bookings::get_stats();
     $assert(abs((float)$u1['revenue_fy_unverified']-(float)$u0['revenue_fy_unverified'])<0.001,'Covered occurrence is cancelled, not unverified');
     // An occurrence created after a series cancellation is not covered by it.
-    $n=$mk('seriesafter',13,409600);$wpdb->update($table,array('status'=>'archived','series_id'=>'SER-ARCH-TEST2'),array('ref'=>$n));
+    $n=$mk('seriesafter',13,2.5);$wpdb->update($table,array('status'=>'archived','series_id'=>'SER-ARCH-TEST2'),array('ref'=>$n));
     MBS_Audit_Log::log($n,'confirmed','Synthetic later confirmation');
-    $assert($counted()===525900.0,'Occurrence created after a series cancellation still counts');
+    $assert(abs($counted()-116302.5)<0.001,'Occurrence created after a series cancellation still counts');
     // A series bulk cancel does not reach an occurrence that was already archived before it.
-    $o=$mk('archivedfirst',14,819200);$wpdb->update($table,array('series_id'=>'SER-ARCH-TEST3','status'=>'confirmed'),array('ref'=>$o));
+    $o=$mk('archivedfirst',14,5);$wpdb->update($table,array('series_id'=>'SER-ARCH-TEST3','status'=>'confirmed'),array('ref'=>$o));
     $assert((bool)MBS_Bookings::update_status($o,'archived',false),'Archive before series cancel');
     MBS_Audit_Log::log('SER-ARCH-TEST3','series_bulk_cancel','Bulk-cancelled 1 future booking(s) in series (from '.$fy_start.')');
-    $assert($counted()===1345100.0,'Series cancel logged after the archive does not exclude it');
+    $assert(abs($counted()-116307.5)<0.001,'Series cancel logged after the archive does not exclude it');
     // An archive that recorded a revenue status overrides an earlier, unlogged-undone cancellation.
-    $p=$mk('cancelthenarch',15,1638400);MBS_Audit_Log::log($p,'cancelled','Synthetic earlier cancellation');
+    $p=$mk('cancelthenarch',15,10);MBS_Audit_Log::log($p,'cancelled','Synthetic earlier cancellation');
     $wpdb->update($table,array('status'=>'confirmed'),array('ref'=>$p));
     $assert((bool)MBS_Bookings::update_status($p,'archived',false),'Archive while confirmed');
-    $assert($counted()===2983500.0,'Archive recorded as confirmed after an earlier cancellation counts');
+    $assert(abs($counted()-116317.5)<0.001,'Archive recorded as confirmed after an earlier cancellation counts');
     echo "PASS $checks archived revenue checks\n";
 }finally{
     foreach($refs as $ref){$wpdb->delete($table,array('ref'=>$ref));$wpdb->delete($audit,array('ref'=>$ref));}
