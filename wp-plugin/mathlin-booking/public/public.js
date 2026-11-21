@@ -839,3 +839,15 @@ jQuery(function ($) {
             .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
 });
+
+// Keep a visible, selectable URL when clipboard access is unavailable or denied.
+document.addEventListener('click', function (event) {
+    var button = event.target.closest('.nms-copy-calendar');
+    if (!button) return;
+    var panel = button.closest('.nms-calendar-subscribe');
+    var input = panel.querySelector('.nms-subscription-url');
+    var status = panel.querySelector('.nms-copy-calendar-status');
+    input.focus(); input.select();
+    if (!navigator.clipboard || !window.isSecureContext) { status.textContent = 'URL selected. Copy it into your calendar app.'; return; }
+    navigator.clipboard.writeText(input.value).then(function () { status.textContent = 'Subscription URL copied.'; }, function () { status.textContent = 'URL selected. Copy it into your calendar app.'; });
+});
