@@ -778,6 +778,11 @@ button.mbs-invoice-card__ref:hover { color: #5a0fb0; }
 @media (max-width: 782px) {
     .mbs-admin { padding: 0 4px; }
     .mbs-mobile-jump-bar { top: 46px; }
+    /* Tabs render via in_admin_header, outside #wpbody, so they do not share
+       #wpbody's 46px mobile padding and would sit under the fixed admin bar.
+       flow-root keeps the offset margin from collapsing onto the bar itself. */
+    #wpcontent { display: flow-root; }
+    .mbs-section-navigation { margin-top: 56px; }
     .mbs-booking-hero { grid-template-columns: minmax(0, 1fr); padding: 0.9rem 1rem; }
     .mbs-booking-hero__actions .button { width: 100%; text-align: center; }
     .mbs-dl-grid,
