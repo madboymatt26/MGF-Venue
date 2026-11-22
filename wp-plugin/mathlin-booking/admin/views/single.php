@@ -37,7 +37,7 @@ $invoice_pdf_url = $invoice_document_id ? add_query_arg( array(
 
 $amount_paid = (float) ( $booking->amount_paid ?? 0 );
 $balance     = (float) $booking->amount - $amount_paid;
-$show_balance_alert = MBS_Payment_Features::enabled( 'manual' ) && $amount_paid > 0 && abs( $balance ) > 0.01;
+$show_balance_alert = in_array( $booking->status, array( 'confirmed', 'deposit_paid', 'paid' ), true ) && MBS_Payment_Features::enabled( 'manual' ) && $amount_paid > 0 && abs( $balance ) > 0.01;
 
 $access_readiness = MBS_Access_Details::readiness( $booking );
 $booking_mail     = class_exists( 'MBS_Email_Queue' )
@@ -143,11 +143,11 @@ $is_active_oneoff_scout = ! empty( $booking->scout_use )
         <!-- 4A. Main Column -->
         <div class="mbs-single-main">
             <!-- Booking Details Card -->
-            <section id="mbs-section-details" class="nms-card" aria-labelledby="mbs-details-heading">
-                <div class="nms-card-header">
+            <details id="mbs-section-details" class="nms-card mbs-disclosure" open aria-labelledby="mbs-details-heading">
+                <summary class="nms-card-header">
                     <h2 id="mbs-details-heading">Booking Details</h2>
                     <span class="mbs-card-badge"><?php echo esc_html( $booking->ref ); ?></span>
-                </div>
+                </summary>
 
                 <!-- View mode -->
                 <div id="nms-view-mode" class="mbs-card-body">
@@ -404,16 +404,16 @@ $is_active_oneoff_scout = ! empty( $booking->scout_use )
                     </div>
                     <span id="nms-edit-msg" class="nms-settings-msg mbs-inline-status" role="status" aria-live="polite"></span>
                 </div>
-            </section>
+            </details>
 
             <!-- Payment Deadlines & Money Review (expanded when present) -->
             <?php if ( class_exists( 'MBS_Payment_Expiry' ) ) MBS_Payment_Expiry::render_booking( $booking ); ?>
 
             <!-- Admin Notes (Private) -->
-            <section class="nms-card" aria-labelledby="mbs-admin-notes-heading">
-                <div class="nms-card-header">
+            <details class="nms-card mbs-disclosure" open aria-labelledby="mbs-admin-notes-heading">
+                <summary class="nms-card-header">
                     <h2 id="mbs-admin-notes-heading">Admin Notes (Private)</h2>
-                </div>
+                </summary>
                 <div class="mbs-card-body">
                     <label class="screen-reader-text" for="nms-admin-notes">Admin Notes (private)</label>
                     <textarea id="nms-admin-notes" class="mbs-admin-notes-input" rows="3" placeholder="Internal notes — not visible to the booker"><?php echo esc_textarea( $booking->admin_notes ?? '' ); ?></textarea>
@@ -422,7 +422,7 @@ $is_active_oneoff_scout = ! empty( $booking->scout_use )
                         <span id="nms-notes-msg" class="nms-settings-msg" role="status" aria-live="polite"></span>
                     </div>
                 </div>
-            </section>
+            </details>
 
             <!-- Billing & Extras -->
             <div id="mbs-section-billing" class="mbs-billing-section">
@@ -458,8 +458,8 @@ $is_active_oneoff_scout = ! empty( $booking->scout_use )
         <!-- 4B. Operational Sidebar -->
         <aside class="mbs-single-sidebar" aria-label="Booking actions and operational status">
             <!-- Actions Card (Grouped) -->
-            <section id="mbs-section-actions" class="nms-card nms-actions-card" aria-labelledby="mbs-actions-heading">
-                <div class="nms-card-header"><h2 id="mbs-actions-heading">Actions</h2></div>
+            <details id="mbs-section-actions" class="nms-card mbs-disclosure nms-actions-card" open aria-labelledby="mbs-actions-heading">
+                <summary class="nms-card-header"><h2 id="mbs-actions-heading">Actions</h2></summary>
                 <div class="nms-action-list mbs-action-groups">
                     <!-- Workflow -->
                     <div class="mbs-action-group">
@@ -568,16 +568,16 @@ $is_active_oneoff_scout = ! empty( $booking->scout_use )
                     </div>
                     <?php endif; ?>
                 </div>
-            </section>
+            </details>
 
             <!-- Operations Anchor -->
             <div id="mbs-section-operations" class="mbs-operations-stack">
                 <!-- Access Email Readiness (preserving Phase 2 diagnostics triggers) -->
-                <section class="nms-card" aria-labelledby="mbs-access-readiness-heading">
-                    <div class="nms-card-header">
+                <details class="nms-card mbs-disclosure" open aria-labelledby="mbs-access-readiness-heading">
+                    <summary class="nms-card-header">
                         <h2 id="mbs-access-readiness-heading">Access Email Readiness</h2>
                         <span class="mbs-card-badge"><?php echo esc_html( ucfirst( str_replace( '_', ' ', (string) $access_readiness['state'] ) ) ); ?></span>
-                    </div>
+                    </summary>
                     <div class="mbs-card-body">
                         <p><strong><?php echo esc_html( ucfirst( str_replace( '_', ' ', (string) $access_readiness['state'] ) ) ); ?></strong> — <?php echo esc_html( $access_readiness['action'] ); ?></p>
                         <?php if ( ! empty( $access_readiness['due_at'] ) ) : ?>
@@ -612,16 +612,16 @@ $is_active_oneoff_scout = ! empty( $booking->scout_use )
                             </button>
                         </div>
                     </div>
-                </section>
+                </details>
 
                 <!-- Home Assistant Heating (expanded for active one-off Scout bookings) -->
-                <section class="nms-card" aria-labelledby="mbs-heating-heading">
-                    <div class="nms-card-header">
+                <details class="nms-card mbs-disclosure" open aria-labelledby="mbs-heating-heading">
+                    <summary class="nms-card-header">
                         <h2 id="mbs-heating-heading">Home Assistant heating</h2>
                         <?php if ( $is_active_oneoff_scout ) : ?>
                             <span class="mbs-card-badge"><?php echo MBS_HomeAssistant::heating_required( $booking ) ? 'Opted in' : 'Off'; ?></span>
                         <?php endif; ?>
-                    </div>
+                    </summary>
                     <div class="mbs-card-body">
                         <?php if ( $is_active_oneoff_scout ) : ?>
                         <form id="mbs-booking-heating" action="<?php echo esc_url( admin_url( 'admin-ajax.php' ) ); ?>" method="post">
@@ -645,14 +645,14 @@ $is_active_oneoff_scout = ! empty( $booking->scout_use )
                             <p><?php echo empty( $booking->scout_use ) ? 'External hire — existing heating policy applies while approved.' : 'Inactive Scout booking — no heating request.'; ?></p>
                         <?php endif; ?>
                     </div>
-                </section>
+                </details>
 
                 <!-- Unified Hire Terms & Acceptance Card -->
-                <section class="nms-card" aria-labelledby="mbs-terms-heading">
-                    <div class="nms-card-header">
+                <details class="nms-card mbs-disclosure" open aria-labelledby="mbs-terms-heading">
+                    <summary class="nms-card-header">
                         <h2 id="mbs-terms-heading">Hire Terms &amp; Acceptance</h2>
                         <span class="mbs-card-badge"><?php echo $terms_evidence ? 'Accepted' : 'Not recorded'; ?></span>
-                    </div>
+                    </summary>
                     <div class="mbs-card-body">
                         <?php MBS_Terms_Acceptance::render( $booking ); ?>
                         <?php if ( $terms_url ) : ?>
@@ -662,7 +662,7 @@ $is_active_oneoff_scout = ! empty( $booking->scout_use )
                         </p>
                         <?php endif; ?>
                     </div>
-                </section>
+                </details>
 
                 <!-- Google Calendar Linkage -->
                 <?php if ( class_exists( 'MBS_Google_Calendar' ) ) MBS_Google_Calendar::render_booking_card( $booking ); ?>

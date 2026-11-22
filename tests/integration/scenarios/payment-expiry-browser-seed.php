@@ -1,12 +1,16 @@
 <?php
 // Synthetic localhost only; never run against a customer site.
-if (!defined('WP_CLI') || !WP_CLI || wp_get_environment_type() !== 'local' || strpos(home_url(), '127.0.0.1:8879') === false) throw new RuntimeException('Local browser fixture only');
+if (!defined('WP_CLI') || !WP_CLI || ! in_array(strtolower((string)parse_url(home_url(), PHP_URL_HOST)), array('127.0.0.1','localhost','wordpress'), true) || (wp_get_environment_type() !== 'local' && getenv('MBS_DISPOSABLE_BROWSER') !== '1')) throw new RuntimeException('Local browser fixture only');
 global $wpdb;
 wp_set_current_user(1);
 wp_set_password('Synthetic-expiry-browser-2026!',1);
 update_option('timezone_string','Europe/London');
+if ( ! username_exists('expiry_reader') ) wp_create_user('expiry_reader','Synthetic-reader-2026!','expiry_reader@example.invalid');
+wp_set_password('Synthetic-reader-2026!',username_exists('expiry_reader'));
 foreach (array('mbs_payment_expiry_enabled'=>1,'mbs_campsite_mode'=>0,'mbs_payments_enabled'=>1,'mbs_invoices_enabled'=>1,'mbs_deposit_enabled'=>1,'mbs_deposit_percentage'=>25,'mbs_ha_webhook_url'=>'') as $k=>$v) update_option($k,$v);
 $spaces=get_option('mbs_spaces',array()); $spaces['Expiry test hall']=array('rate_hourly'=>15,'rate_daily'=>150,'capacity'=>100,'parent'=>null); update_option('mbs_spaces',$spaces);
+// Re-running the disposable seed replaces booking IDs, so remove their old notification intents too.
+$wpdb->query( "DELETE FROM {$wpdb->prefix}mathlin_email_queue WHERE message_key LIKE 'expiry_%:BROW-%'" );
 foreach(array('BROW-NORMAL'=>40,'BROW-SHORT'=>2,'BROW-PAST'=>0,'BROW-HELD'=>45) as $ref=>$days){
  foreach ((array)MBS_Payment_Expiry::orders($ref) as $old) if (is_object($old) && method_exists($old,'delete')) $old->delete(true);
  $wpdb->delete(MBS_Payment_Expiry::table(),array('booking_ref'=>$ref));

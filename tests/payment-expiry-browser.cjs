@@ -3,13 +3,13 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const assert=require('node:assert/strict');
 const path=require('node:path');
 const base=process.env.MBS_TEST_URL||'http://127.0.0.1:8879';
-assert.equal(new URL(base).hostname,'127.0.0.1');
+assert(['127.0.0.1','localhost'].includes(new URL(base).hostname),'Loopback only');
 assert(process.env.MBS_TEST_PASSWORD,'Synthetic password required');
 (async()=>{
- const browser=await chromium.launch({headless:true,channel:'chrome'});
+ const browser=await chromium.launch({headless:true,channel:process.env.MBS_TEST_BROWSER_CHANNEL||undefined});
  let checks=0; const check=(ok,msg)=>{checks++;assert(ok,msg)};
  try {
-  const page=await browser.newPage({viewport:{width:1280,height:1000}});
+  const page=await browser.newPage({viewport:{width:Number(process.env.MBS_TEST_WIDTH||1280),height:1000}});
   const errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('response',async r=>{if(r.url().includes('admin-ajax.php')&&r.status()>=400)console.log('AJAX',r.status(),await r.text());});
   await page.goto(base+'/wp-login.php');await page.locator('#user_login').fill('admin');await page.locator('#user_pass').fill(process.env.MBS_TEST_PASSWORD);
   await Promise.all([page.waitForURL('**/wp-admin/**'),page.locator('#wp-submit').click()]);
@@ -23,7 +23,7 @@ assert(process.env.MBS_TEST_PASSWORD,'Synthetic password required');
   const reader=await browser.newPage();await reader.goto(base+'/wp-login.php');await reader.locator('#user_login').fill('expiry_reader');await reader.locator('#user_pass').fill(process.env.MBS_TEST_READER_PASSWORD);await Promise.all([reader.waitForEvent('load'),reader.locator('#wp-submit').click()]);await reader.goto(base+'/wp-admin/admin.php?page=mathlin-payment-expiry');check(!(await reader.locator('input[name="enabled"]').count()),'Subscriber cannot configure policy');await reader.close();
   const view=async ref=>{await page.goto(base+'/wp-admin/admin.php?page=mathlin-booking&action=view&ref='+ref);};
   await view('BROW-SHORT');
-  const panel=()=>page.locator('section').filter({hasText:'Payment deadlines and money review'});
+  const panel=()=>page.locator('#mbs-section-payment-review');
   check(await panel().count()===1,'Policy panel visible');
   check((await panel().innerText()).includes('full payment is required'),'Short deadline explained');
   check(await page.locator('#mbs-expiry-short-ack').count()===1,'Explicit short acknowledgement');
@@ -43,6 +43,14 @@ assert(process.env.MBS_TEST_PASSWORD,'Synthetic password required');
   await view('BROW-PAST');check(await page.locator('#mbs-expiry-manual-reason').count()===1,'After-cutoff manual reason required');
   await view('BROW-HELD');
   check((await panel().innerText()).includes('Unresolved: £7.50'),'Held deposit explicit');
+  check(await page.locator('.nms-btn-mark-balance-paid').count()===0,'Cancelled money review has no active balance-payment action');
+  const statusNonce=await page.evaluate(()=>MBS_Admin.nonce);
+  for(const status of ['paid','deposit_paid']){
+   const rejected=await page.request.post(base+'/wp-admin/admin-ajax.php',{form:{action:'mbs_update_status',nonce:statusNonce,ref:'BROW-HELD',status}});
+   check(rejected.status()===409&&!(await rejected.json()).success,'Forged cancelled payment status rejected: '+status);
+  }
+  await view('BROW-HELD');check((await panel().innerText()).includes('Unresolved: £7.50'),'Forged requests leave held funds unchanged');
+  check((await panel().innerText()).includes('booking status: cancelled'),'Forged requests cannot reopen booking');
   check(await panel().getByRole('link',{name:/Review\/refund original order/}).count()===1,'Original native refund link');
   const stale=await panel().locator('form').first().evaluate(f=>Object.fromEntries(new FormData(f)));
   check((await panel().innerText()).includes('does not send money'),'Bank recording is not transfer');
@@ -56,6 +64,8 @@ assert(process.env.MBS_TEST_PASSWORD,'Synthetic password required');
   await retain.locator('[name="amount"]').fill('3.50');await retain.locator('[name="reason"]').fill('Synthetic retention decision only');await Promise.all([page.waitForEvent('load'),retain.getByRole('button').click()]);
   check((await panel().innerText()).includes('Unresolved: £0.00'),'Retention reconciles remainder');
   const close=panel().locator('form').filter({has:page.locator('input[name="operation"][value="resolve"]')});await close.locator('[name="confirmed"]').check();await Promise.all([page.waitForEvent('load'),close.getByRole('button').click()]);
+  check(await panel().getAttribute('open')===null,'Resolved review starts minimised');
+  await panel().locator('>summary').click();
   check((await panel().innerText()).includes('Status: resolved'),'Explicit review closure');
   check((await panel().innerText()).includes('booking status: cancelled'),'Refund never reopens');
   for(const width of [1280,390]){await page.setViewportSize({width,height:1000});await view('BROW-SHORT');check(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'No page overflow '+width);if(process.env.MBS_SCREENSHOT_DIR)await page.screenshot({path:path.join(process.env.MBS_SCREENSHOT_DIR,'expiry-'+width+'.png'),fullPage:true});}

@@ -59,7 +59,7 @@ class MBS_Billing_Engine {
             if ( $assignment ) {
                 $account = MBS_Credit_Accounts::account( $assignment->account_id );
                 $agreement = $account ? json_decode( $account->agreement_json, true ) : null;
-                if ( ! $agreement || $treatment !== 'invoice_managed' || $terms_days !== (int) $agreement['terms_days'] ) return new WP_Error( 'credit_billing_mismatch', 'This series has an explicit invoice agreement. Review/reassign that agreement before changing invoice treatment or payment days.' );
+                if ( ! $agreement || ! MBS_Credit_Accounts::has_invoice_schedule( (object) array( 'billing_treatment' => $treatment, 'billing_mode' => $mode, 'payment_method' => $payment_method ) ) || $terms_days !== (int) $agreement['terms_days'] ) return new WP_Error( 'credit_billing_mismatch', 'This series has an explicit invoice agreement. Review/reassign that agreement before changing invoice treatment, frequency, payment method or payment days.' );
             }
         }
         $schedule = $configuration['billing_schedule'] ?? array();

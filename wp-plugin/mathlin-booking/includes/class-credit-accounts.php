@@ -46,7 +46,7 @@ class MBS_Credit_Accounts {
         return MBS_Payment_Features::enabled( 'payments' ) && ! MBS_Campsite_Policy::enabled();
     }
     public static function enabled() {
-        return self::supported() && (bool) get_option( 'mbs_credit_accounts_enabled', false );
+        return self::supported() && MBS_Payment_Features::enabled( 'invoices' ) && (bool) get_option( 'mbs_credit_accounts_enabled', false );
     }
     public static function init() {
         add_action( 'admin_post_mbs_credit_accounts', array( __CLASS__, 'admin_action' ) );
@@ -93,6 +93,12 @@ class MBS_Credit_Accounts {
             && $today <= $agreement['valid_until'] && $date <= $agreement['valid_until']
             && ( ! $access || ! empty( $agreement['allow_unpaid_access'] ) );
     }
+    /** Credit may change payment timing, never erase the invoice schedule. */
+    public static function has_invoice_schedule( $series ) {
+        return $series->billing_treatment === 'invoice_managed'
+            && in_array( $series->billing_mode, array( 'monthly', 'termly', 'upfront', 'legacy_per_occurrence' ), true )
+            && in_array( $series->payment_method, array( 'online', 'offline_bacs' ), true );
+    }
     public static function context( $b, $access = false, $lock = false ) {
         if ( ! self::enabled() ) return null;
         $link = self::for_booking( $b );
@@ -103,7 +109,7 @@ class MBS_Credit_Accounts {
         if ( ! $account || $account->status !== 'active' || ! self::permits( $agreement, $link, $b->email, $last_date, wp_date( 'Y-m-d' ), $access ) ) return null;
         if ( ! empty( $b->series_id ) ) {
             $series = MBS_Series::get( $b->series_id );
-            if ( ! $series || ! in_array( $series->status, array( 'pending','confirmed' ), true ) || $series->billing_treatment !== 'invoice_managed'
+            if ( ! $series || ! in_array( $series->status, array( 'pending','confirmed' ), true ) || ! self::has_invoice_schedule( $series )
                 || (int) $series->payment_terms_days !== (int) $agreement['terms_days'] || strcasecmp( $series->contact_email, $b->email ) !== 0 ) return null;
         }
         return $agreement;
@@ -218,7 +224,7 @@ class MBS_Credit_Accounts {
             $date = $kind === 'series' ? ( $target->repeat_until ?: $target->start_date ) : ( $target->booking_date_end ?: $target->booking_date );
             $agreement = json_decode( $account->agreement_json, true );
             if ( ! self::permits( $agreement, (object) array( 'contact_email' => $email ), $email, $date, wp_date( 'Y-m-d' ) ) ) return new WP_Error( 'credit_identity', 'This contact/date is not covered by the agreement.' );
-            if ( $kind === 'series' && ( $target->billing_treatment !== 'invoice_managed' || (int) $target->payment_terms_days !== $agreement['terms_days'] ) ) return new WP_Error( 'credit_series_terms', 'Review the invoice-managed series billing schedule first; its invoice days must match this agreement. No existing schedule is rewritten.' );
+            if ( $kind === 'series' && ( ! self::has_invoice_schedule( $target ) || (int) $target->payment_terms_days !== $agreement['terms_days'] ) ) return new WP_Error( 'credit_series_terms', 'Review a payable invoice-managed series billing schedule first; its invoice days must match this agreement. No existing schedule is rewritten.' );
             $existing = self::assignment( $kind, $ref );
             if ( (int) ( $existing->version ?? 0 ) !== (int) ( $input['assignment_version'] ?? 0 ) ) return new WP_Error( 'credit_stale_assignment', 'The credit assignment changed; refresh before deciding.' );
             $reason = sanitize_textarea_field( $input['reason'] ?? '' );
@@ -291,6 +297,7 @@ class MBS_Credit_Accounts {
         echo '<div class="wrap mbs-admin mbs-credit-page"><h1>Approved invoice accounts</h1><p>Credit is separate from pricing, website logins and payment method. No booking is approved, payment recorded or email sent here.</p><section class="nms-card"><div class="mbs-card-body">';
         self::form_start( 'enable' );
         echo '<label><input type="checkbox" name="enabled" value="1" ' . checked( self::enabled(), true, false ) . '> Enable explicitly approved invoice accounts</label><p>Disabling stops new grants and unpaid access. Existing cancellation exemptions are retained for manual review.</p><button class="button">Save feature preference</button></form></div></section>';
+        if ( ! MBS_Payment_Features::enabled( 'invoices' ) ) echo '<p role="status">Invoices and series billing are disabled. Enable them in MGF Venue Settings before offering invoice accounts. Existing cancellation exemptions are retained for staff review.</p>';
         if ( ! self::enabled() ) { echo '</div>'; return; }
         $accounts = $wpdb->get_results( 'SELECT * FROM ' . self::table() . ' ORDER BY id DESC' );
         if ( ! is_array( $accounts ) || $wpdb->last_error ) { echo '<p role="alert">Could not read invoice agreements.</p></div>'; return; }
