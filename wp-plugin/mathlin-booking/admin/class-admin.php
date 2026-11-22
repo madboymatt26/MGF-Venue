@@ -411,7 +411,7 @@ class MBS_Admin {
         }
 
         $result = MBS_Bookings::update_status( $ref, $status, $status === 'confirmed', array( 'return_error' => true, 'short_notice_ack' => ! empty( $_POST['expiry_ack'] ), 'manual_reason' => sanitize_textarea_field( wp_unslash( $_POST['expiry_manual_reason'] ?? '' ) ) ) );
-        if ( is_wp_error( $result ) ) wp_send_json_error( $result->get_error_message() );
+        if ( is_wp_error( $result ) ) wp_send_json_error( $result->get_error_message(), $result->get_error_code() === 'inactive_payment_status' ? 409 : 200 );
         if ( $result === false ) wp_send_json_error( 'This booking cannot be changed because it has financial history.', 409 );
 
         if ( $status === 'confirmed' ) {

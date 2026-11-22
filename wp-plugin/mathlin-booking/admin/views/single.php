@@ -37,7 +37,7 @@ $invoice_pdf_url = $invoice_document_id ? add_query_arg( array(
 
 $amount_paid = (float) ( $booking->amount_paid ?? 0 );
 $balance     = (float) $booking->amount - $amount_paid;
-$show_balance_alert = MBS_Payment_Features::enabled( 'manual' ) && $amount_paid > 0 && abs( $balance ) > 0.01;
+$show_balance_alert = in_array( $booking->status, array( 'confirmed', 'deposit_paid', 'paid' ), true ) && MBS_Payment_Features::enabled( 'manual' ) && $amount_paid > 0 && abs( $balance ) > 0.01;
 
 $access_readiness = MBS_Access_Details::readiness( $booking );
 $booking_mail     = class_exists( 'MBS_Email_Queue' )

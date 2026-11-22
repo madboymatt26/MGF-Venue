@@ -43,6 +43,14 @@ assert(process.env.MBS_TEST_PASSWORD,'Synthetic password required');
   await view('BROW-PAST');check(await page.locator('#mbs-expiry-manual-reason').count()===1,'After-cutoff manual reason required');
   await view('BROW-HELD');
   check((await panel().innerText()).includes('Unresolved: £7.50'),'Held deposit explicit');
+  check(await page.locator('.nms-btn-mark-balance-paid').count()===0,'Cancelled money review has no active balance-payment action');
+  const statusNonce=await page.evaluate(()=>MBS_Admin.nonce);
+  for(const status of ['paid','deposit_paid']){
+   const rejected=await page.request.post(base+'/wp-admin/admin-ajax.php',{form:{action:'mbs_update_status',nonce:statusNonce,ref:'BROW-HELD',status}});
+   check(rejected.status()===409&&!(await rejected.json()).success,'Forged cancelled payment status rejected: '+status);
+  }
+  await view('BROW-HELD');check((await panel().innerText()).includes('Unresolved: £7.50'),'Forged requests leave held funds unchanged');
+  check((await panel().innerText()).includes('booking status: cancelled'),'Forged requests cannot reopen booking');
   check(await panel().getByRole('link',{name:/Review\/refund original order/}).count()===1,'Original native refund link');
   const stale=await panel().locator('form').first().evaluate(f=>Object.fromEntries(new FormData(f)));
   check((await panel().innerText()).includes('does not send money'),'Bank recording is not transfer');

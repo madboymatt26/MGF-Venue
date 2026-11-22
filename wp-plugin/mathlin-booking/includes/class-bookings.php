@@ -906,6 +906,13 @@ class MBS_Bookings {
         $replacement_meta = json_decode( (string) ( $current->custom_fields ?? '' ), true );
         if ( ( ! empty( $replacement_meta['_mbs_whole_park_replacement'] ) || ! empty( $replacement_meta['_mbs_multiday_replacement'] ) ) && $status !== 'archived' ) return false;
 
+        // Recording a payment is not authority to restore a released booking.
+        // The explicit restore route performs its own availability and history checks.
+        if ( in_array( $current->status, array( 'cancelled', 'archived' ), true ) && in_array( $status, array( 'paid', 'deposit_paid' ), true ) ) {
+            $error = new WP_Error( 'inactive_payment_status', 'Cannot record payment by changing a cancelled or archived booking to Paid. Review held money separately; use the explicit restore workflow only if the booking should be restored.', array( 'status' => 409 ) );
+            return ! empty( $approval_options['return_error'] ) ? $error : false;
+        }
+
         // Idempotent: already at the requested status — no-op success.
         if ( $current->status === $status ) return true;
         if ( class_exists( 'MBS_Space_Selection' ) && in_array( $current->status, array( 'cancelled', 'archived' ), true ) && ! in_array( $status, array( 'cancelled', 'archived' ), true ) ) {
