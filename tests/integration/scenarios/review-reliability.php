@@ -48,6 +48,7 @@ try{
     $assert($attention['read_only']===true&&!$attention['partial_failures'],'Attention summary queries real schema without errors');
     $health=MBS_Integration_Health::summary();
     $assert($health['home_assistant']['available']===true,'Durable integration health is readable');
+    update_option('mbs_campsite_mode',0); // The usage-report section enabled campsite mode; HA retry is venue-mode functionality.
     $intent=array('ref'=>$b->ref,'version'=>'review-version','at'=>time(),'next'=>0,'attempts'=>5,'state'=>'failed');
     update_option($key,$intent,false);$before_calls=$calls;
     $assert(is_wp_error(MBS_HomeAssistant::retry_failed($b->ref,'stale-version')),'Stale HA retry rejected');
