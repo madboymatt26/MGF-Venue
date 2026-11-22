@@ -53,6 +53,10 @@ try {
     $check(strpos(MBS_HTML_Renderer::render(MBS_Invoice_Document_View_Model::issued(MBS_Issued_Invoice_Snapshot::from_json($snap_json))),$expected_deadline)!==false,'Rendered invoice prints the saved deadline with its exact time');
     $conf_body=MBS_Email::build_confirmation_message(MBS_Bookings::get($normal))['body'];
     $check(strpos($conf_body,$expected_deadline)!==false&&strpos($conf_body,'Deposit due now')===false,'Confirmation email states the saved deposit deadline');
+    $preview=MBS_Invoice::generate_html(MBS_Bookings::get($normal));
+    $check(strpos($preview,$expected_deadline)!==false&&strpos($preview,'Immediately (deposit)')===false&&strpos($preview,'Deposit due immediately')===false,'Staff invoice preview shows the same saved deadline as the issued invoice');
+    $legacy_preview=MBS_Invoice::generate_email_invoice(MBS_Bookings::get($normal));
+    $check(strpos($legacy_preview,$expected_deadline)!==false&&strpos($legacy_preview,'Deposit due immediately')===false,'Legacy email invoice shows the same saved deadline');
     // Reissue after an agreed extension: the printed deadline follows the extension.
     $p_ext=$p;$p_ext['extension_until']=$p['deposit_due_at']+3600;
     $wpdb->update($policy_table,array('policy_json'=>wp_json_encode($p_ext)),array('booking_ref'=>$normal));
@@ -65,6 +69,7 @@ try {
     $reissued=json_decode($reissue_json,true);
     $check($reissued['payment_schedule']['deposit_due_at']===$p_ext['extension_until'],'Reissued invoice honours the agreed extension');
     $check(strpos(MBS_HTML_Renderer::render(MBS_Invoice_Document_View_Model::issued(MBS_Issued_Invoice_Snapshot::from_json($reissue_json))),MBS_Payment_Expiry_Policy::format_deadline($p_ext['extension_until'],$p['timezone']))!==false,'Rendered reissue prints the extended deadline');
+    $check(strpos(MBS_Invoice::generate_html(MBS_Bookings::get($normal)),MBS_Payment_Expiry_Policy::format_deadline($p_ext['extension_until'],$p['timezone']))!==false,'Preview honours the agreed extension');
     // Authorised exemption: deadlines no longer bind, invoice falls back safely.
     $p_ex=$p_ext;$p_ex['exempt']=true;
     $wpdb->update($policy_table,array('policy_json'=>wp_json_encode($p_ex)),array('booking_ref'=>$normal));
@@ -74,6 +79,7 @@ try {
     $wpdb->query('COMMIT');
     $ex_doc=json_decode($wpdb->get_var($wpdb->prepare("SELECT snapshot_json FROM {$doc_table} WHERE id=%d",(int)$reissue2)),true);
     $check(!is_wp_error($reissue2)&&empty($ex_doc['payment_schedule']['deposit_due_at'])&&$ex_doc['payment_schedule']['deposit_due_date']===wp_date('Y-m-d'),'Exempted hire falls back to ordinary invoice terms');
+    $check(strpos(MBS_Invoice::generate_html(MBS_Bookings::get($normal)),'Deposit due immediately')!==false,'Exempted hire preview falls back to ordinary terms');
     $wpdb->update($policy_table,array('policy_json'=>wp_json_encode($p)),array('booking_ref'=>$normal));
     $short=$seed(2); $result=MBS_Invoice_Document_Service::confirm_and_issue($short,array(),true);
     $check(is_wp_error($result)&&!MBS_Payment_Expiry::get($short),'Short notice requires explicit acknowledgement');
@@ -133,6 +139,7 @@ try {
     $plain_doc=json_decode($wpdb->get_var($wpdb->prepare("SELECT snapshot_json FROM {$doc_table} WHERE id=%d",(int)MBS_Bookings::get($plain)->current_invoice_document_id)),true);
     $check(empty($plain_doc['payment_schedule']['deposit_due_at'])&&$plain_doc['payment_schedule']['deposit_due_date']===wp_date('Y-m-d'),'Suspended policy keeps legacy invoice terms');
     $check(strpos(MBS_Email::build_confirmation_message(MBS_Bookings::get($plain))['body'],'Deposit due now:')!==false,'Suspended policy keeps the existing email wording');
+    $check(strpos(MBS_Invoice::generate_html(MBS_Bookings::get($plain)),'Immediately (deposit)')!==false,'Suspended policy keeps the existing preview wording');
     echo "PAYMENT_EXPIRY_OK: {$checks} assertions; all transport intercepted.\n";
 } finally {
     remove_filter('query',$fail,PHP_INT_MAX); remove_filter('pre_wp_mail',$mail,PHP_INT_MAX); remove_filter('pre_http_request',$http,PHP_INT_MAX); $wpdb->query('ROLLBACK');
