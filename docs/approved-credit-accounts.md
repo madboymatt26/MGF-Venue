@@ -32,3 +32,24 @@ Local acceptance: 85 PHP programs, 23 pure agreement assertions, 52 real SQL ass
 Enable only after reviewing this policy. Create an agreement with authorised contacts, terms, expiry date and the access decision. Bind it before approving the booking; normal staff approval is still required. For an existing issued invoice, its printed deadline remains authoritative; credit assignment changes cancellation/access handling, not that document. For a monthly series, configure and review its normal billing schedule first.
 
 Suspended/expired agreements and overdue invoices appear in Needs attention. Staff reconcile payments, contact the account and decide whether to suspend future credit. They do not silently mark money paid, cancel already-confirmed sessions, revoke a code already delivered, refund, or restore a released slot. Disabling the module stops new grants and unpaid access but does not undo exemptions or erase audit history. Roll back by disabling it and retaining additive tables; review affected upcoming access first.
+
+## Invoice-terms email requests and recurring verification (November 2026)
+
+When explicitly approved invoice accounts and the invoice feature are enabled, eligible unpaid ordinary booking confirmations, booking reminders and payment-deadline/chase emails include **Request invoice terms**. It opens an email draft addressed to the configured booking administrator, with the booking reference in the subject and body. The hirer must send it. Replying to the email is the fallback. No endpoint is called and no request is recorded merely by opening the draft.
+
+The email states that a request does not grant credit, extend a deadline, pause cancellation, approve a booking or release access. Staff still verify the contact and agreement and explicitly assign credit in the existing review screen. Paid/free/Scout bookings and already assigned credit accounts do not get a redundant request. Consolidated series keep invoice-level communication, not per-session credit requests.
+
+Cancelled/archived emails instead offer **Contact us to review this booking**. They say the booking remains inactive and staff must check availability before restoration. This is not a payment/reactivation link. No council booking or historical policy is changed by this implementation.
+
+Series credit requires a real invoice-managed frequency (monthly, termly, upfront, or the supported legacy per-occurrence schedule), an online/BACS payment method, and matching agreement days. Assignment, approval, configuration edits and unpaid-access checks reject a no-invoice/no-payment combination. Switching invoices off stops new credit grants and unpaid access but retains existing assignments and cancellation exemptions for staff review. It does not retrospectively restart a deadline.
+
+The agreement does not replace recurring billing with a new clock: series retain their reviewed advance-invoice schedule and each issued invoice's frozen due date. Suspension prevents unpaid access but does not erase invoices, stop billing for confirmed hire or automatically cancel sessions. Upfront confirmation wording now correctly describes the full-series invoice instead of saying no lump sum is required.
+
+Acceptance added:
+- 213 real SQL journey assertions across monthly/termly/upfront times online/BACS, actual approval, future issue dates, repeated cron, exact amounts, single outbox intents, immutable invoice snapshots, invoice-level reminders, partial/full settlement, request-only rendering and feature/access isolation.
+- 106 browser assertions across 320/390/768/1280px email renders and the real staff credit workflow, including nonce/permission/stale-state rejection and mobile layout.
+- Existing credit SQL/policy suites, broad PHP/source suite and real Woo payment/refund state-machine suite remain required.
+
+Synthetic browser HTML is not a real email-client delivery test. Hosted CI, merge and deployment are separate gates. WordPress cron still depends on its scheduler running; neither queued intent nor successful mail transport proves inbox delivery.
+
+Delayed ordinary and B2B payment chases recheck current booking status, recipient, unpaid balance and billing treatment immediately before transport. Old queued wording is suppressed after a credit assignment or move to consolidated billing; a still-current ordinary retry remains supported. Disabling reminders pauses rather than exhausts those retries.

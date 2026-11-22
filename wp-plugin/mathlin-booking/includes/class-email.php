@@ -248,6 +248,7 @@ class MBS_Email {
             }
         }
 
+        $body .= self::invoice_terms_request_block( $booking );
         $body .= self::ical_button( $booking );
 
         // Add T&C reminder with link
@@ -262,6 +263,34 @@ class MBS_Email {
         $body .= self::footer();
 
         return array( 'subject' => $subject, 'body' => $body );
+    }
+
+    /** A contact draft only. Rendering/clicking never grants credit or changes a deadline. */
+    public static function invoice_terms_request_block( $booking ) {
+        if ( ! class_exists( 'MBS_Credit_Accounts' ) || ! MBS_Credit_Accounts::enabled()
+            || ! empty( $booking->scout_use ) || (float) $booking->amount <= (float) ( $booking->amount_paid ?? 0 )
+            || MBS_Credit_Accounts::for_booking( $booking ) ) return '';
+        // Consolidated series already follow a reviewed invoice schedule. Do not
+        // present a per-occurrence request as a way to change that schedule.
+        if ( ! empty( $booking->series_id ) && ! in_array( MBS_Series::billing_treatment_for_booking( $booking ), array( 'one_off', 'legacy_per_occurrence' ), true ) ) return '';
+        $email = MBS_Bookings::get_admin_email();
+        if ( ! is_email( $email ) ) return '';
+        $inactive = in_array( $booking->status, array( 'cancelled', 'archived' ), true );
+        if ( ! $inactive && ! in_array( $booking->status, array( 'confirmed', 'deposit_paid' ), true ) ) return '';
+        $ref = sanitize_text_field( $booking->ref );
+        $subject = ( $inactive ? 'Inactive booking review - ' : 'Invoice terms request - ' ) . $ref;
+        $draft = $inactive
+            ? 'Please review booking ' . $ref . '. I would like to discuss invoice terms and whether this booking can be restored. I understand it remains inactive unless staff check availability and explicitly approve restoration.'
+            : 'Please review invoice terms for booking ' . $ref . '. I understand this is a request only. Existing payment deadlines and cancellation rules still apply unless staff explicitly approve different terms or an extension.';
+        $url = 'mailto:' . $email . '?subject=' . rawurlencode( $subject ) . '&body=' . rawurlencode( $draft );
+        $label = $inactive ? 'Contact us to review this booking' : 'Request invoice terms';
+        $notice = $inactive
+            ? 'This booking is no longer active. Contact us to discuss invoice terms and a possible restoration. Staff must check availability before restoring it. This request does not restore the booking or authorise access.'
+            : 'Need invoice or account terms? You can ask our booking coordinator to review your request. This does not grant credit or pause cancellation. Your existing payment deadlines still apply unless staff explicitly approve different terms or an extension.';
+        return '<div style="background:#f5f0ff;border:1px solid #e0d0f0;border-radius:6px;padding:16px;margin:20px 0;">'
+            . '<p style="margin:0 0 16px;line-height:1.5;">' . esc_html( $notice ) . '</p>'
+            . '<a href="' . esc_url( $url ) . '" style="display:inline-block;max-width:100%;box-sizing:border-box;background:#7413DC;color:#fff;padding:12px 20px;border-radius:6px;text-decoration:none;font-weight:bold;">' . esc_html( $label ) . '</a>'
+            . '<p style="font-size:13px;line-height:1.5;margin:12px 0 0;">Opens an email draft. Please send it to make your request. You can also reply to this email and quote ' . esc_html( $ref ) . '.</p></div>';
     }
 
     private static function credit_terms_block( $booking ) {
@@ -298,6 +327,7 @@ class MBS_Email {
         $body .= '<h2 style="color:#dc3232;">Booking Cancelled</h2>';
         $body .= nl2br( esc_html( $body_text ) );
         $body .= self::booking_table_obj( $booking );
+        $body .= self::invoice_terms_request_block( $booking );
         $body .= self::footer();
         return array('subject'=>$subject,'body'=>$body,'headers'=>self::email_headers());
     }
@@ -654,6 +684,7 @@ class MBS_Email {
         $body .= '<h2 style="color:#7413DC;">Booking Reminder</h2>';
         $body .= nl2br( esc_html( $body_text ) );
         $body .= self::booking_table_obj( $booking );
+        $body .= self::invoice_terms_request_block( $booking );
         $body .= self::ical_button( $booking );
         $body .= self::footer();
         $org = MBS_Email_Templates::get_org_settings();
@@ -750,6 +781,7 @@ class MBS_Email {
             $url = $admin ? $manage : MBS_Hirer_Identity::manage_url();
             $body .= '<p style="margin:24px 0;"><a href="' . esc_url( $url ) . '" style="display:inline-block;background:#7413DC;color:#fff;padding:12px 20px;border-radius:6px;text-decoration:none;font-weight:bold;">' . ( $admin ? 'Review booking and payment' : 'Sign in to your booking account' ) . '</a></p>';
         }
+        if ( ! $admin ) $body .= self::invoice_terms_request_block( $b );
         $org = MBS_Email_Templates::get_org_settings();
         $body .= '<p style="line-height:1.5;">Kind regards,<br>' . esc_html( $org['name'] ) . '</p>' . self::footer();
         return array( 'subject' => $subject, 'body' => $body, 'headers' => self::email_headers() );

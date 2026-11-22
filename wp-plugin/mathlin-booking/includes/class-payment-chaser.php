@@ -269,6 +269,7 @@ class MBS_Payment_Chaser {
             }
         }
 
+        $body .= MBS_Email::invoice_terms_request_block( $booking );
         $body .= '</div>';
         $body .= '<div style="text-align:center;padding:16px;color:#999;font-size:12px;">' . esc_html( $org['name'] ) . ' &bull; ' . esc_html( $org['address'] ) . ' &bull; Charity No. ' . esc_html( $org['charity_number'] ) . '</div>';
         $body .= '</body></html>';
@@ -366,6 +367,7 @@ class MBS_Payment_Chaser {
         $body .= MBS_Email::offline_payment_block( $booking, $balance_due );
 
         $body .= '<p style="font-size:13px;color:#777;margin-top:16px;">If this invoice has already been settled, please accept our thanks and disregard this reminder. For any queries, just reply to this email.</p>';
+        $body .= MBS_Email::invoice_terms_request_block( $booking );
         $body .= '</div>';
         $body .= '<div style="text-align:center;padding:16px;color:#999;font-size:12px;">' . esc_html( $org['name'] ) . ' &bull; ' . esc_html( $org['address'] ) . ' &bull; Charity No. ' . esc_html( $org['charity_number'] ) . '</div>';
         $body .= '</body></html>';

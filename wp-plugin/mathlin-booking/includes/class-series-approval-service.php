@@ -88,7 +88,7 @@ class MBS_Series_Approval_Service {
         if ( class_exists( 'MBS_Credit_Accounts' ) && MBS_Credit_Accounts::assignment( 'series', $series_ref ) ) {
             $credit_booking = (object) array( 'ref' => '', 'series_id' => $series_ref, 'email' => $series->contact_email, 'booking_date' => $series->repeat_until ?: $series->start_date );
             $credit = MBS_Credit_Accounts::context( $credit_booking, false, true );
-            if ( ! $credit || $billing_config['billing_treatment'] !== 'invoice_managed' || (int) ( $billing_config['payment_terms_days'] ?? 14 ) !== $credit['terms_days'] ) {
+            if ( ! $credit || ! MBS_Credit_Accounts::has_invoice_schedule( (object) $billing_config ) || (int) ( $billing_config['payment_terms_days'] ?? 14 ) !== $credit['terms_days'] ) {
                 $wpdb->query( 'ROLLBACK' );
                 return new WP_Error( 'credit_series_review', 'Review the assigned invoice agreement and matching invoice-managed terms before approving this series.' );
             }
@@ -376,7 +376,9 @@ class MBS_Series_Approval_Service {
         }
 
         if ( $series->billing_treatment === 'invoice_managed' ) {
-            $body .= '<p>We will issue consolidated invoices covering each billing period. No annual lump sum or per-occurrence payment is required at this time.</p>';
+            $body .= $series->billing_mode === 'upfront'
+                ? '<p>We will issue an upfront invoice covering the full series. Please pay by the due date on that invoice; no separate per-occurrence payment is required.</p>'
+                : '<p>We will issue consolidated invoices covering each billing period. Please pay each invoice by its due date; no separate per-occurrence payment is required.</p>';
         }
 
         $body .= '<p>If you have any questions, just reply to this email.</p>';
