@@ -15,6 +15,17 @@ class MBS_Payment_Features {
         return (bool) get_option( 'mbs_payment_feature_' . $feature, true );
     }
     public static function free_hire() { return ! self::enabled() || ( class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ); }
+    /** Billing chrome on an individual booking. Campsite bookings are free, so
+     * the Billing menu/section is noise there; it stays visible for a campsite
+     * booking that still carries money or an issued document (legacy data). */
+    public static function booking_billing_visible( $booking = null ) {
+        if ( ! ( class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() ) ) return true;
+        if ( ! is_object( $booking ) ) return false;
+        return (float) ( $booking->amount ?? 0 ) > 0
+            || (float) ( $booking->amount_paid ?? 0 ) > 0
+            || (float) ( $booking->deposit_paid ?? 0 ) > 0
+            || ! empty( $booking->current_invoice_document_id );
+    }
     public static function error( $feature = 'payments' ) { return new WP_Error( 'payment_feature_disabled', ( self::definitions()[$feature] ?? 'This payment feature' ) . ' is disabled in MGF Venue Settings.', array( 'status' => 409 ) ); }
     public static function state() {
         $state = array();

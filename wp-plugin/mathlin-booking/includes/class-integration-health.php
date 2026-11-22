@@ -136,7 +136,7 @@ class MBS_Integration_Health {
             wp_nonce_field('mbs_health_maintenance');
             echo '<input type="hidden" name="action" value="mbs_health_maintenance"><input type="hidden" name="expected" value="' . esc_attr(hash('sha256',wp_json_encode($lock))) . '"><label><input type="checkbox" name="confirm" value="yes" required> I checked that no legacy worker is running.</label><p><button class="button">Recover checked legacy lock</button></p></form>';
         }
-        $failed_ha = MBS_HomeAssistant::failed_intents();
+        $failed_ha = MBS_HomeAssistant::available() ? MBS_HomeAssistant::failed_intents() : array();
         if ( is_wp_error( $failed_ha ) ) echo '<p role="alert">' . esc_html( $failed_ha->get_error_message() ) . '</p>';
         else foreach ( $failed_ha as $intent ) {
             echo '<h2>Home Assistant delivery needs review: ' . esc_html( $intent['ref'] ) . '</h2><p>Check the endpoint before retrying. This queues the latest booking state for the normal worker; it does not send customer mail.</p><form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
@@ -157,6 +157,7 @@ class MBS_Integration_Health {
         if(($_POST['confirm']??'')!=='yes') wp_die('Explicit confirmation required.');
         $expected=sanitize_text_field(wp_unslash($_POST['expected']??''));
         if(!in_array($_POST['operation']??'',array('','repair_template_quotes','retry_ha'),true))wp_die('Unknown maintenance operation.');
+        if ( ( $_POST['operation'] ?? '' ) === 'retry_ha' && ! MBS_HomeAssistant::available() ) wp_die( 'Home Assistant is disabled while campsite mode is on.' );
         if ( ( $_POST['operation'] ?? '' ) === 'retry_ha' ) $result = MBS_HomeAssistant::retry_failed( sanitize_text_field( wp_unslash( $_POST['ref'] ?? '' ) ), $expected );
         else $result=MBS_Space_Selection::locked(static function()use($expected){return ($_POST['operation']??'')==='repair_template_quotes'?MBS_Email_Templates::repair_template_quotes($expected):MBS_Google_Calendar::recover_legacy_lock($expected);});
         if(is_wp_error($result)) wp_die(esc_html($result->get_error_message()));

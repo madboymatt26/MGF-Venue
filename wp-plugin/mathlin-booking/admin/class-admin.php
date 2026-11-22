@@ -1903,6 +1903,7 @@ class MBS_Admin {
     public function ajax_set_booking_heating() {
         check_ajax_referer( 'mbs_admin_nonce', 'nonce' );
         if ( ! self::can_manage_bookings() ) wp_send_json_error( 'You do not have permission to perform this action.', 403 );
+        if ( ! MBS_HomeAssistant::available() ) wp_send_json_error( 'Home Assistant is disabled while campsite mode is on.', 403 );
         $ref = strtoupper( sanitize_text_field( wp_unslash( $_POST['ref'] ?? '' ) ) );
         $version = sanitize_text_field( wp_unslash( $_POST['expected_version'] ?? '' ) );
         $choice = $_POST['heating_required'] ?? null;

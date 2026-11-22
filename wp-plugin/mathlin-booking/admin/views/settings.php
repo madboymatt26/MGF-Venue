@@ -216,8 +216,8 @@
             </table>
         </div>
 
-        <!-- Home Assistant Settings -->
-        <div class="nms-card">
+        <!-- Home Assistant Settings (venue-mode integration; hidden in campsite mode, stored value preserved) -->
+        <div class="nms-card" <?php if ( ! MBS_HomeAssistant::available() ) echo 'hidden'; ?>>
             <div class="nms-card-header">
                 <h2>🏠 Home Assistant Integration</h2>
             </div>
