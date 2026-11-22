@@ -8,6 +8,11 @@ class MBS_HomeAssistant {
     const HEATING_KEY = '_mbs_heating_required';
     /** Billing classification is not a heating instruction. Scout series are
      * deliberately excluded even if an occurrence contains old opt-in metadata. */
+    /** Building automation is a venue-mode integration. Campsite sites have no
+     * heating requests, so every entry point no-ops while campsite mode is on. */
+    public static function available() {
+        return ! ( class_exists( 'MBS_Campsite_Policy' ) && MBS_Campsite_Policy::enabled() );
+    }
     public static function heating_required( $booking ) {
         if ( empty( $booking->scout_use ) ) return true;
         if ( ! empty( $booking->series_id ) ) return false;
@@ -31,6 +36,10 @@ class MBS_HomeAssistant {
         return self::$storage_checks[$table];
     }
     public function init() {
+        if ( ! self::available() ) {
+            if ( wp_get_scheduled_event( self::HOOK ) ) wp_clear_scheduled_hook( self::HOOK );
+            return;
+        }
         add_action( self::HOOK, array( __CLASS__, 'process' ) );
         add_filter( 'cron_schedules', static function($s){$s['mbs_ha_five_minutes']=array('interval'=>300,'display'=>'MGF Home Assistant retries');return$s;} );
         $event=wp_get_scheduled_event(self::HOOK);
@@ -60,6 +69,7 @@ class MBS_HomeAssistant {
     }
     public static function retry_failed( $ref, $expected ) {
         global $wpdb;
+        if ( ! self::available() ) return new WP_Error( 'ha_campsite_disabled', 'Home Assistant is disabled while campsite mode is on.' );
         if ( ! get_option( 'mbs_ha_webhook_url', '' ) ) return new WP_Error( 'ha_disabled', 'Configure Home Assistant before retrying.' );
         $row = $wpdb->get_row( $wpdb->prepare( "SELECT option_name,option_value FROM {$wpdb->options} WHERE option_name=%s", 'mbs_ha_event_' . hash( 'sha256', $ref ) ) );
         $intent = $row ? maybe_unserialize( $row->option_value ) : null;
@@ -76,6 +86,7 @@ class MBS_HomeAssistant {
      */
     public static function stage_within_transaction( $booking, $previous_status = null, $previous_booking = null ) {
         global $wpdb;
+        if ( ! self::available() ) return true;
         if ( ! get_option('mbs_ha_webhook_url','') ) return true;
         if ( ! self::heating_required($booking) && empty($booking->ha_notified) && !($previous_booking && self::heating_required($previous_booking)) ) return true;
         if($booking->status==='pending'&&!in_array($previous_status,array('confirmed','deposit_paid','paid'),true)&&empty($booking->ha_notified))return true;
@@ -102,6 +113,7 @@ class MBS_HomeAssistant {
         return$out;
     }
     private static function queue( $booking, $event ) {
+        if ( ! self::available() ) return false;
         if ( ! get_option( 'mbs_ha_webhook_url', '' ) || (!self::heating_required($booking) && empty($booking->ha_notified)) ) return false;
         $key = 'mbs_ha_event_' . hash( 'sha256', $booking->ref );
         $intent = array( 'ref' => $booking->ref, 'event' => $event, 'version' => wp_generate_uuid4(), 'at' => time(), 'next' => time(), 'attempts' => 0, 'state' => 'pending' );
@@ -122,6 +134,7 @@ class MBS_HomeAssistant {
             'intervals' => array_map( static function( $i ) { return array( 'start' => $i['start']->format( DATE_RFC3339 ), 'end' => $i['end']->format( DATE_RFC3339 ) ); }, $intervals ) );
     }
     public static function process() {
+        if ( ! self::available() ) return;
         global $wpdb;
         $lock = 'mbs_ha_' . substr( hash( 'sha256', $wpdb->prefix . ( defined( 'DB_NAME' ) ? DB_NAME : '' ) ), 0, 32 );
         if ( (int) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s,0)', $lock ) ) !== 1 ) return;

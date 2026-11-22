@@ -19,6 +19,8 @@ $billing_treatment = MBS_Series::billing_treatment_for_booking( $booking, $serie
 $uses_consolidated_billing = ! empty( $booking->series_id )
     && $series_record
     && in_array( $billing_treatment, array( 'manual_consolidated', 'invoice_managed', 'none' ), true );
+$billing_ui_visible = MBS_Payment_Features::booking_billing_visible( $booking );
+$ha_available       = MBS_HomeAssistant::available();
 $series_admin_url = ! empty( $booking->series_id )
     ? admin_url( 'admin.php?page=mathlin-series&ref=' . rawurlencode( $booking->series_id ) )
     : '';
@@ -139,7 +141,7 @@ if ( $archive_return && strpos( $archive_return, admin_url('admin.php') . '?' ) 
         <a href="#mbs-section-details">Details</a>
         <a href="#mbs-section-actions">Actions</a>
         <a href="#mbs-section-operations">Operations</a>
-        <a href="#mbs-section-billing">Billing</a>
+        <?php if ( $billing_ui_visible ) : ?><a href="#mbs-section-billing">Billing</a><?php endif; ?>
         <?php if ( ! empty( $audit_entries ) ) : ?>
             <a href="#mbs-section-audit">Audit</a>
         <?php endif; ?>
@@ -432,10 +434,12 @@ if ( $archive_return && strpos( $archive_return, admin_url('admin.php') . '?' ) 
             </details>
 
             <!-- Billing & Extras -->
+            <?php if ( $billing_ui_visible ) : ?>
             <div id="mbs-section-billing" class="mbs-billing-section">
                 <?php MBS_Additional_Charges::render_related( $booking->ref ); ?>
                 <?php if ( class_exists( 'MBS_Credit_Accounts' ) ) MBS_Credit_Accounts::render_booking( $booking ); ?>
             </div>
+            <?php endif; ?>
 
             <!-- Audit Log (<details> disclosure) -->
             <?php if ( ! empty( $audit_entries ) ) : ?>
@@ -486,6 +490,7 @@ if ( $archive_return && strpos( $archive_return, admin_url('admin.php') . '?' ) 
                     </div>
 
                     <!-- Billing & PDFs -->
+                    <?php if ( $billing_ui_visible ) : ?>
                     <div class="mbs-action-group">
                         <h3 class="mbs-action-group__title">Billing &amp; Invoices</h3>
                         <?php if ( ( MBS_Payment_Features::enabled( 'manual' ) || MBS_Payment_Features::enabled( 'reminders' ) ) && ( $booking->status === 'confirmed' || $booking->status === 'deposit_paid' ) ) : ?>
@@ -532,6 +537,7 @@ if ( $archive_return && strpos( $archive_return, admin_url('admin.php') . '?' ) 
                             <small class="nms-muted mbs-action-note">This historical booking has no immutable PDF snapshot.</small>
                         <?php endif; ?>
                     </div>
+                    <?php endif; ?>
 
                     <!-- Communications -->
                     <?php
@@ -622,6 +628,7 @@ if ( $archive_return && strpos( $archive_return, admin_url('admin.php') . '?' ) 
                 </details>
 
                 <!-- Home Assistant Heating (expanded for active one-off Scout bookings) -->
+                <?php if ( $ha_available ) : ?>
                 <details class="nms-card mbs-disclosure" open aria-labelledby="mbs-heating-heading">
                     <summary class="nms-card-header">
                         <h2 id="mbs-heating-heading">Home Assistant heating</h2>
@@ -653,6 +660,7 @@ if ( $archive_return && strpos( $archive_return, admin_url('admin.php') . '?' ) 
                         <?php endif; ?>
                     </div>
                 </details>
+                <?php endif; ?>
 
                 <!-- Unified Hire Terms & Acceptance Card -->
                 <details class="nms-card mbs-disclosure" open aria-labelledby="mbs-terms-heading">

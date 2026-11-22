@@ -190,6 +190,22 @@ jobs:
       - name: Verify existing admin change, revision and delivery intents roll back atomically
         if: matrix.php == '8.2'
         run: MGF_BROWSER_MODULE="$RUNNER_TEMP/mgf-browser/node_modules/playwright/index.mjs" node tests/integration/scout-heating-browser.mjs
+      - name: Seed campsite-mode browser fixture
+        if: matrix.php == '8.2'
+        run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/campsite-mode-browser-seed.php --allow-root
+      - name: Verify campsite mode hides venue-only billing and heating on desktop and mobile
+        if: matrix.php == '8.2'
+        run: MGF_BROWSER_MODULE="$RUNNER_TEMP/mgf-browser/node_modules/playwright/index.mjs" node tests/integration/campsite-mode-browser.mjs
+      - name: Restore venue mode after campsite browser acceptance
+        if: always() && matrix.php == '8.2'
+        run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/campsite-mode-browser-cleanup.php --allow-root
+      - name: Upload campsite mode browser screenshots
+        if: always() && matrix.php == '8.2'
+        uses: actions/upload-artifact@v4
+        with:
+          name: campsite-mode-browser
+          path: browser-artifacts/campsite-*.png
+          if-no-files-found: ignore
       - name: Verify existing booking-change atomicity
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/booking-change-atomicity.php --allow-root
       - name: Verify free-series approvals, cancellations and transport flags
