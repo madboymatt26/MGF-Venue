@@ -26,4 +26,8 @@ foreach ( array( array( 'terms_days' => '0' ), array( 'terms_days' => '-14' ), a
 $b = (object) array( 'ref' => 'TEST', 'email' => 'first@example.invalid', 'status' => 'pending', 'amount' => '30.00' );
 $fingerprint = MBS_Credit_Accounts::fingerprint( $b, 'booking' );
 foreach ( array( 'email' => 'second@example.invalid', 'amount' => '31.00', 'status' => 'confirmed', 'current_invoice_document_id' => 1, 'series_id' => 'SERIES' ) as $field => $value ) { $changed = clone $b; $changed->$field = $value; $check( $fingerprint !== MBS_Credit_Accounts::fingerprint( $changed, 'booking' ), 'Financial/identity changes invalidate staff review: ' . $field ); }
-echo "PASS: {$checks} credit agreement policy assertions\n";
+
+
+foreach ( array( 'monthly','termly','upfront','legacy_per_occurrence' ) as $mode ) $check( MBS_Credit_Accounts::has_invoice_schedule( (object) array( 'billing_treatment'=>'invoice_managed','billing_mode'=>$mode,'payment_method'=>'offline_bacs' ) ), 'Supported credit invoice frequency: ' . $mode );
+foreach ( array( array('billing_mode'=>'none'), array('payment_method'=>'none'), array('billing_treatment'=>'none') ) as $bad ) $check( ! MBS_Credit_Accounts::has_invoice_schedule( (object) array_merge( array( 'billing_treatment'=>'invoice_managed','billing_mode'=>'monthly','payment_method'=>'online' ), $bad ) ), 'Credit must retain an actual payable invoice schedule' );
+echo "PASS: {$checks} total credit agreement and schedule assertions\n";
