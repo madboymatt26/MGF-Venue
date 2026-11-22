@@ -338,17 +338,11 @@ class MBS_Additional_Charges {
         }
         $doc = $credit ? (int) $wpdb->get_var( $wpdb->prepare( 'SELECT id FROM ' . $wpdb->prefix . MBS_INVOICE_DOCUMENTS_TABLE . " WHERE invoice_id=%d AND document_type='credit_note' AND status='issued' ORDER BY id DESC LIMIT 1", $credit->id ) ) : MBS_Invoice_Document_Service::get_current_ledger_document_id( $invoice->id );
         $url = $credit ? '' : MBS_Invoice_Payment::generate_payment_url( $invoice );
-        if ( ! $doc || ( ! $credit && ! $url ) ) return self::rollback( new WP_Error( 'charge_delivery_unavailable', 'PDF or online payment is unavailable; nothing sent.' ) );
+        if(!$credit && MBS_Woo_Payment::is_available() && !$url) return self::rollback(new WP_Error('charge_payment_link_failed','The online payment link could not be prepared. Nothing sent; retry this invoice.'));
+        if ( ! $doc ) return self::rollback( new WP_Error( 'charge_delivery_unavailable', 'Invoice PDF is unavailable; nothing sent.' ) );
         $items = MBS_Billing_Ledger::get_items( $invoice->id );
-        $template = MBS_Email_Templates::get_template( $credit ? 'additional_charge_credit' : 'additional_charge_invoice' );
-        $values = array( '{name}' => $invoice->contact_name, '{invoice}' => $ref, '{credit}' => $credit ? $credit->invoice_ref : '', '{description}' => $items[0]->description,
-            '{balance}' => MBS_Money::format( MBS_Billing_Ledger::balance_minor( $invoice ) ), '{credit_amount}' => $credit ? MBS_Money::format( abs( (int) $credit->total_minor ) ) : '',
-            '{due_date}' => substr( $invoice->due_at, 0, 10 ), '{org_name}' => MBS_Email_Templates::get_org_settings()['name'] );
-        $subject = sanitize_text_field( strtr( $template['subject'], $values ) );
-        $body = '<div>' . nl2br( esc_html( strtr( $template['body'], $values ) ) ) . '</div>';
-        // The mandatory factual footer is not editable away with a template.
-        $body .= '<p>Invoice ' . esc_html( $ref ) . '. Balance: ' . esc_html( $values['{balance}'] ) . '. ' . ( $credit ? 'Credit ' . esc_html( $credit->invoice_ref . ': ' . $values['{credit_amount}'] ) . '. A credit note does not itself refund cash.' : 'Due: ' . esc_html( $values['{due_date}'] ) . '. <a href="' . esc_url( $url ) . '">Pay this additional charge</a>' ) . '</p><p>Your original hire invoice and booking remain unchanged.</p>';
-        $headers = array( 'Content-Type: text/html; charset=UTF-8', 'Reply-To: ' . MBS_Bookings::get_admin_email() );
+        $message = self::build_customer_message($invoice,$items[0],$credit,$url);
+        $subject=$message['subject'];$body=$message['body'];$headers=$message['headers'];
         $attachment = array( 'document_id' => $doc, 'format' => 'pdf' );
         if ( ! $credit ) $attachment['charge_balance_minor'] = MBS_Billing_Ledger::balance_minor( $invoice );
         $hash = MBS_Email_Queue::compute_payload_hash( $invoice->contact_email, $subject, $body, $headers, $attachment );
@@ -362,6 +356,53 @@ class MBS_Additional_Charges {
         $message_id = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT id FROM ' . $wpdb->prefix . 'mathlin_email_queue WHERE message_key=%s', $message_key ) );
         if ( $message_id ) MBS_Email_Queue::dispatch_message( $message_id );
         return MBS_Billing_Ledger::get_invoice( $ref );
+    }
+
+    /** Shared by staff review and actual delivery; preview never mints a bearer token. */
+    public static function build_customer_message($invoice,$item,$credit=null,$url='') {
+        $ref = $invoice->invoice_ref;
+        $template = MBS_Email_Templates::get_template( $credit ? 'additional_charge_credit' : 'additional_charge_invoice' );
+        $values = array( '{name}' => $invoice->contact_name, '{invoice}' => $invoice->invoice_ref, '{credit}' => $credit ? $credit->invoice_ref : '', '{description}' => $item->description,
+            '{balance}' => MBS_Money::format( MBS_Billing_Ledger::balance_minor( $invoice ) ), '{credit_amount}' => $credit ? MBS_Money::format( abs( (int) $credit->total_minor ) ) : '',
+            '{due_date}' => wp_date('j F Y',strtotime($invoice->due_at)), '{org_name}' => MBS_Email_Templates::get_org_settings()['name'] );
+        $subject = sanitize_text_field( strtr( $template['subject'], $values ) );
+        $template_body = trim(strtr($template['body'],$values));
+        $greeting='';$signoff='';
+        if(preg_match('/\A(Hi[^\n]*),?\n\n/u',$template_body,$match)) {$greeting=trim($match[1]);$template_body=substr($template_body,strlen($match[0]));}
+        if(preg_match('/\n\n((?:Kind [Rr]egards|Regards|Best wishes)[,\s]*\n.*)\z/us',$template_body,$match)) {$signoff=trim($match[1]);$template_body=substr($template_body,0,-strlen($match[0]));}
+        $body = MBS_Email::header();
+        $body .= '<h2>'.($credit?((int)$invoice->credited_minor >= (int)$invoice->total_minor?'Additional charge cancelled':'Additional charge reduced'):'Additional charge invoice').'</h2>';
+        if($greeting!=='') $body.='<p>'.esc_html($greeting).'</p>';
+        if ( $credit ) {
+            $balance = MBS_Billing_Ledger::balance_minor( $invoice );
+            $full = (int)$invoice->credited_minor >= (int)$invoice->total_minor;
+            if ( $full && (int)$invoice->paid_minor === 0 ) $body .= '<p>This additional charge has been cancelled. There is nothing to pay.</p><p>Your original hire invoice and booking remain unchanged.</p>';
+            elseif ( $balance < 0 ) $body .= '<p>The charge has been credited. A separate cash-refund review is required for ' . esc_html(MBS_Money::format(abs($balance))) . '. This email does not confirm a refund.</p>';
+            else $body .= '<p>The amount owed has been reduced. Remaining balance: ' . esc_html(MBS_Money::format($balance)) . '. A credit note is not a cash refund.</p>';
+        }
+        $body .= '<div style="line-height:1.6">' . wpautop(esc_html($template_body)) . '</div>';
+        // Fixed factual summary stays separate from editable message text.
+        $body .= '<div style="margin:24px 0;padding:20px;background:#f5f1ff;border-radius:6px"><p style="margin:0 0 12px;font-size:13px">Invoice '.esc_html($ref).'</p>';
+        if ($credit) {
+            $body .= '<p style="margin:0"><strong>Amount still to pay: '.esc_html(MBS_Money::format(max(0,MBS_Billing_Ledger::balance_minor($invoice)))).'</strong></p><p>Credit note '.esc_html($credit->invoice_ref).': '.esc_html($values['{credit_amount}']).'</p>';
+        } else {
+            $body .= '<p style="margin:0;font-size:24px;font-weight:bold">'.esc_html($values['{balance}']).' due</p><p style="margin:8px 0 20px">Pay by '.esc_html($values['{due_date}']).'</p>';
+            if ($url) $body .= '<p style="margin:0"><a style="display:inline-block;background:#7413DC;color:#fff;text-decoration:none;padding:12px 18px;border-radius:5px" href="'.esc_url($url).'">Pay this additional charge</a></p>';
+        }
+        $body .= '</div>';
+        if (!$credit || !($full && (int)$invoice->paid_minor===0)) $body .= '<p style="padding-top:16px;border-top:1px solid #ddd"><strong>Separate from your hire</strong><br>Your original hire invoice, booking and access remain unchanged.</p>';
+        if ($credit) $body .= '<p style="font-size:12px;color:#666">'.(($full && (int)$invoice->paid_minor===0)?'For your records: no payment is recorded against this charge and no cash refund has been made.':'A credit note does not itself refund cash.').'</p>';
+        if ( ! $credit && ! $url ) {
+            $bank = MBS_Bookings::get_bank_details();
+            if ( !empty($bank['account_name']) && !empty($bank['sort_code']) && !empty($bank['account_number']) ) {
+                $body .= '<p><strong>Pay by bank transfer</strong><br>Account name: '.esc_html($bank['account_name']).'<br>Sort code: '.esc_html($bank['sort_code']).'<br>Account number: '.esc_html($bank['account_number']).'<br>Reference: '.esc_html($ref).'</p>';
+            } else $body .= '<p>Please reply to arrange offline payment, quoting '.esc_html($ref).'.</p>';
+        }
+        if($signoff!=='') $body.='<div style="line-height:1.6;margin-top:24px">'.wpautop(esc_html($signoff)).'</div>';
+        $body .= MBS_Email::footer();
+        $org = MBS_Email_Templates::get_org_settings();
+        $headers = array( 'Content-Type: text/html; charset=UTF-8', 'From: ' . sanitize_text_field($org['name']) . ' <' . sanitize_email(get_option('admin_email')) . '>', 'Reply-To: ' . MBS_Bookings::get_admin_email() );
+        return array('subject'=>$subject,'body'=>$body,'headers'=>$headers);
     }
 
     private static function lock( $ref, $version ) {
@@ -396,16 +437,39 @@ class MBS_Additional_Charges {
         $ref = sanitize_text_field( $data['invoice_ref'] ?? '' );
         $version = absint( $data['version'] ?? 0 );
         $key = sanitize_text_field( $data['idempotency_key'] ?? '' );
-        if ( $op === 'create' ) $result = self::create( $data, $key );
+        if ( $op === 'create' || $op === 'create_draft' ) $result = self::create( $data, $key );
         elseif ( $op === 'edit' ) $result = self::update_draft( $ref, $data, $version );
-        elseif ( $op === 'issue' ) $result = self::issue( $ref, $version );
+        elseif ( $op === 'review' ) {
+            $result = self::update_draft( $ref, $data, $version );
+            if ( !is_wp_error($result) ) { wp_safe_redirect(self::admin_url(array('invoice_ref'=>$ref,'review'=>'1'))); exit; }
+        }
+        elseif ( $op === 'issue' || $op === 'issue_send' ) {
+            // Review submits the exact saved version; unsaved editor fields cannot be bypassed.
+            if ( empty($data['review_confirm']) ) $result = new WP_Error('charge_review_required','Review the saved invoice and recipient before issuing.');
+            else {
+                $result = self::issue( $ref, $version );
+                if ( $op === 'issue_send' && !is_wp_error($result) ) {
+                    $issued_ref=$result->invoice_ref;
+                    $result = self::send($result->invoice_ref,$result->version,$key);
+                    if(is_wp_error($result)) { wp_safe_redirect(self::admin_url(array('invoice_ref'=>$issued_ref,'delivery_failed'=>'1')));exit; }
+                }
+            }
+        }
         elseif ( $op === 'send' ) $result = self::send( $ref, $version, $key );
         elseif ( $op === 'resend' ) $result = self::resend( $ref, $version, $key );
         elseif ( $op === 'send_credit' ) $result = self::send_credit( $ref, $version, sanitize_text_field( $data['document_ref'] ?? '' ), $key );
         elseif ( $op === 'set_reminders' ) $result = self::set_reminders( $ref, $version, ! empty( $data['enabled'] ) );
         elseif ( $op === 'discard' ) $result = self::discard( $ref, $version );
         elseif ( $op === 'archive' || $op === 'restore' ) $result = self::$op( $ref, $version );
-        elseif ( $op === 'cancel' ) $result = self::cancel( $ref, $version, sanitize_text_field( $data['reason'] ?? '' ), $key );
+        elseif ( $op === 'cancel' ) {
+            $result = self::cancel( $ref, $version, sanitize_text_field( $data['reason'] ?? '' ), $key );
+            if(!is_wp_error($result) && !empty($data['notify_customer'])) {
+                global $wpdb;
+                $credit_ref=$wpdb->get_var($wpdb->prepare('SELECT invoice_ref FROM '.$wpdb->prefix.MBS_INVOICE_TABLE." WHERE parent_invoice_id=%d AND document_type='credit_note' ORDER BY id DESC LIMIT 1",$result->id));
+                $sent=self::send_credit($ref,$result->version,$credit_ref,$key.'-credit-email');
+                if(is_wp_error($sent)) {wp_safe_redirect(self::admin_url(array('invoice_ref'=>$ref,'delivery_failed'=>'1')));exit;}
+            }
+        }
         elseif ( $op === 'credit' ) {
             $amount = MBS_Money::from_decimal_string( (string) ( $data['credit_amount'] ?? '' ) );
             $result = is_wp_error( $amount ) ? $amount : self::credit( $ref, $amount, sanitize_text_field( $data['reason'] ?? '' ), $version, $key );
@@ -416,7 +480,7 @@ class MBS_Additional_Charges {
         } else $result = new WP_Error( 'invalid_operation', 'Unknown charge action.' );
         if ( is_wp_error( $result ) ) wp_die( esc_html( $result->get_error_message() ), 'Additional charge', array( 'back_link' => true ) );
         $result_ref = is_object( $result ) ? ( $result->invoice_ref ?? '' ) : ( $result['invoice']->invoice_ref ?? $ref );
-        wp_safe_redirect( self::admin_url( array( 'invoice_ref' => $result_ref ) ) ); exit;
+        wp_safe_redirect( self::admin_url( array( 'invoice_ref' => $result_ref, 'saved' => $op, 'review' => $op === 'create' ? '1' : '' ) ) ); exit;
     }
 
     public static function admin_url( $args = array() ) {
@@ -599,7 +663,7 @@ class MBS_Additional_Charges {
 
     public static function status_label( $invoice ) {
         $status=MBS_Invoice_Payment::is_payable($invoice)&&$invoice->due_at<current_time('mysql')?'overdue':$invoice->status;
-        $labels=array('draft'=>'Draft','issued'=>'Awaiting payment','part_paid'=>'Part paid','paid'=>'Paid','credited'=>'Credited','void'=>'Discarded','overdue'=>'Overdue');
+        $labels=array('draft'=>'Draft','issued'=>'Awaiting payment','part_paid'=>'Part paid','paid'=>'Paid','credited'=>'Cancelled / fully credited','void'=>'Discarded','overdue'=>'Overdue');
         return $labels[$status]??ucfirst(str_replace('_',' ',$status));
     }
 
@@ -642,6 +706,8 @@ class MBS_Additional_Charges {
         $view=sanitize_key($_GET['view']??'');
         $selected_ref=sanitize_text_field(wp_unslash($_GET['invoice_ref']??''));
         echo '<div class="wrap mbs-admin mbs-charges-admin"><h1 class="wp-heading-inline">'.MBS_Admin::brand_mark().'Additional charges</h1> <a class="page-title-action" href="'.esc_url(self::admin_url(array('view'=>'create','related_ref'=>$related))).'">Add charge</a><hr class="wp-header-end"><p class="nms-muted">Separate invoices for agreed extras, linked to the original booking. Hire payments and access remain unchanged.</p><nav class="mbs-charge-breadcrumbs"><a href="'.esc_url(admin_url('admin.php?page=mathlin-booking')).'">All bookings</a> <span> / </span> <a href="'.esc_url(self::admin_url()).'">Additional charges</a></nav>';
+        if(isset($_GET['delivery_failed']))echo '<div class="notice notice-warning"><p>The invoice action completed, but its email could not be prepared. Do not create another charge. Inspect email delivery below, then send the relevant invoice or credit note from this page.</p></div>';
+        if(isset($_GET['saved']))echo '<div class="notice notice-success"><p>Action completed. Check the current invoice and email status below.</p></div>';
         if($related){$context=self::related_context($related);echo '<p class="mbs-charge-context">For '.($context['url']?'<a href="'.esc_url($context['url']).'">'.esc_html($context['label']).'</a>':esc_html($context['label'])).' — '.esc_html($context['summary']).'</p>';}
         if($view!=='create'&&!$selected_ref){
             do_action( 'mbs_additional_charge_catalogue' );
@@ -651,10 +717,22 @@ class MBS_Additional_Charges {
             include MBS_PLUGIN_DIR.'admin/views/additional-charges.php';echo '</div>';return;
         }
         if($view==='create'){
+        if(!$related) {
+            $booking_search=sanitize_text_field(wp_unslash($_GET['booking_search']??''));
+            echo '<section class="nms-card"><div class="mbs-charge-card-body"><h2>Choose the booking</h2><form method="get"><input type="hidden" name="page" value="mathlin-additional-charges"><input type="hidden" name="view" value="create"><label>Find by reference, hirer or organisation<br><input type="search" name="booking_search" value="'.esc_attr($booking_search).'" required></label> <button class="button">Find bookings</button></form>';
+            if($booking_search!=='') {
+                $matches=MBS_Bookings::get_all(array('search'=>$booking_search,'exclude_archived'=>false,'limit'=>20,'order'=>'DESC'));
+                echo '<p>Up to 20 matching bookings, including archived hires. For a whole recurring series, open the series and use Add additional charge there.</p><ul>';
+                foreach($matches as $match)echo '<li><a href="'.esc_url(self::admin_url(array('view'=>'create','related_ref'=>$match->ref))).'">'.esc_html($match->ref.' · '.$match->name.' · '.$match->booking_date.' · '.$match->space).'</a></li>';
+                if(!$matches)echo '<li>No matching bookings. Try a reference or open the booking directly.</li>';
+                echo '</ul>';
+            }
+            echo '</div></section></div>';return;
+        }
         echo '<section class="nms-card"><div class="nms-card-header"><h2>New additional charge</h2></div><div class="mbs-charge-card-body mbs-charge-editor">';
         self::form_start();
         do_action( 'mbs_additional_charge_picker' );
-        self::field( 'related_ref', 'Booking or series reference', $related );
+        echo '<input type="hidden" name="related_ref" value="'.esc_attr($related).'"><p>Linked to <strong>'.esc_html($related).'</strong>. <a href="'.esc_url(self::admin_url(array('view'=>'create'))).'">Choose another booking</a></p>';
         self::field( 'contact_name', 'Recipient name (confirm before issue)', $booking ? $booking->name : ( $series ? $series->contact_name : '' ) );
         self::field( 'contact_email', 'Recipient email', $booking ? $booking->email : ( $series ? $series->contact_email : '' ), 'email' );
         self::field( 'contact_organisation', 'Organisation (optional)', $booking ? $booking->organisation : ( $series ? $series->contact_organisation : '' ), 'text', false );
@@ -662,7 +740,7 @@ class MBS_Additional_Charges {
         self::field( 'description', 'Customer-visible description' ); self::field( 'amount', 'Amount in GBP, e.g. 25.00' );
         self::field( 'service_date', 'Service date', $booking ? $booking->booking_date : wp_date( 'Y-m-d' ), 'date' );
         self::field( 'due_date', 'Due date', wp_date( 'Y-m-d', time() + 14 * DAY_IN_SECONDS ), 'date' );
-        echo '<p><label>Category <select name="category"><option value="cleaning">Cleaning</option><option value="damage">Damage</option><option value="other">Other</option></select></label></p><p><label>Internal notes (not on invoice)<br><textarea name="notes"></textarea></label></p><p><label><input type="checkbox" name="automatic_reminders" value="1">Enable one automatic overdue reminder</label></p><p class="mbs-charge-editor-footer"><button class="button button-primary" name="operation" value="create">Save draft only</button> <a class="button" href="'.esc_url(self::admin_url(array('related_ref'=>$related))).'">Cancel</a></p></form></div></section></div>';return;
+        echo '<p><label>Category <select name="category"><option value="cleaning">Cleaning</option><option value="damage">Damage</option><option value="other">Other</option></select></label></p><p><label>Internal notes (not on invoice)<br><textarea name="notes"></textarea></label></p><p><label><input type="checkbox" name="automatic_reminders" value="1">Enable one automatic overdue reminder</label></p><p class="mbs-charge-editor-footer"><button class="button button-primary" name="operation" value="create">Save and continue to review</button> <button class="button" name="operation" value="create_draft">Save draft only</button> <a class="button" href="'.esc_url(self::admin_url(array('related_ref'=>$related))).'">Cancel</a></p></form></div></section></div>';return;
         }
         $invoice_table = $wpdb->prefix . MBS_INVOICE_TABLE;
         $rows = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$invoice_table} WHERE billing_mode=%s AND document_type='invoice' AND invoice_ref=%s LIMIT 1", self::MODE, $selected_ref ) );
@@ -672,7 +750,8 @@ class MBS_Additional_Charges {
             $balance = MBS_Billing_Ledger::balance_minor( $invoice );
             $status = MBS_Invoice_Payment::is_payable( $invoice ) && $invoice->due_at < current_time( 'mysql' ) ? 'overdue' : $invoice->status;
             $context=self::related_context($meta['related_ref']??'');
-            echo '<section class="nms-card mbs-charge-detail"><div class="nms-card-header"><h2>' . esc_html( $invoice->invoice_ref . ' · ' . self::status_label($invoice) ) . '</h2></div><div class="mbs-charge-card-body"><p><strong>' . esc_html( $item ? $item->description : 'Incomplete draft' ) . '</strong></p><p>' . esc_html( $invoice->contact_name . ' <' . $invoice->contact_email . '>' ) . '</p><p>Original booking: '.($context['url']?'<a href="'.esc_url($context['url']).'">'.esc_html($context['label']).'</a>':esc_html($context['label'])).'<br><span class="nms-muted">'.esc_html($context['summary']).'</span></p><p>Total: ' . esc_html( MBS_Money::format( $invoice->status === 'draft' && $item ? (int) $item->line_total_minor : (int) $invoice->total_minor ) ) . ' | Paid: ' . esc_html( MBS_Money::format( (int) $invoice->paid_minor ) ) . ' | Balance: ' . esc_html( MBS_Money::format( $balance ) ) . ' | Due: ' . esc_html( $invoice->due_at ) . '</p>';
+            echo '<section class="nms-card mbs-charge-detail"><div class="nms-card-header"><h2>' . esc_html( $invoice->invoice_ref . ' · ' . self::status_label($invoice) ) . '</h2></div><div class="mbs-charge-card-body"><p><strong>' . esc_html( $item ? $item->description : 'Incomplete draft' ) . '</strong></p><p>' . esc_html( $invoice->contact_name . ' <' . $invoice->contact_email . '>' ) . '</p><p>Original booking: '.($context['url']?'<a href="'.esc_url($context['url']).'">'.esc_html($context['label']).'</a>':esc_html($context['label'])).'<br><span class="nms-muted">'.esc_html($context['summary']).'</span></p><p>Total: ' . esc_html( MBS_Money::format( $invoice->status === 'draft' && $item ? (int) $item->line_total_minor : (int) $invoice->total_minor ) ) . ' | Paid: ' . esc_html( MBS_Money::format( (int) $invoice->paid_minor ) ) . ' | Balance: ' . esc_html( $invoice->status==='draft' ? 'Not issued' : MBS_Money::format( $balance ) ) . (MBS_Invoice_Payment::is_payable($invoice)||$invoice->status==='draft' ? ' | Due: ' . esc_html(substr($invoice->due_at,0,10)) : '') . '</p>';
+            if ($invoice->status==='credited') echo '<div class="notice notice-info inline"><p><strong>Additional charge cancelled. Nothing to pay.</strong> '.((int)$invoice->paid_minor===0?'No payment is recorded against this charge.':'Any recorded payment requires a separate cash-refund review.').' The original hire remains unchanged.</p></div>';
             $doc = MBS_Invoice_Document_Service::get_current_ledger_document_id( $invoice->id );
             if ( $doc ) echo '<p><a href="' . esc_url( MBS_Invoice_Delivery_Endpoint::authenticated_pdf_url( $doc ) ) . '">Download invoice PDF</a></p>';
             $credits = $wpdb->get_results( $wpdb->prepare( "SELECT id,invoice_ref,total_minor FROM {$invoice_table} WHERE parent_invoice_id=%d AND document_type='credit_note' ORDER BY id", $invoice->id ) );
@@ -681,7 +760,7 @@ class MBS_Additional_Charges {
                 echo '<p>Credit: ' . esc_html( $credit->invoice_ref . ' ' . MBS_Money::format( (int) $credit->total_minor ) );
                 if ( $credit_doc ) echo ' <a href="' . esc_url( MBS_Invoice_Delivery_Endpoint::authenticated_pdf_url( $credit_doc ) ) . '">Download credit PDF</a>';
                 echo '</p>';
-                if ( $credit_doc ) { self::form_start( $invoice ); echo '<input type="hidden" name="document_ref" value="' . esc_attr( $credit->invoice_ref ) . '"><button class="button" name="operation" value="send_credit">Confirm and queue credit-note email</button></form>'; }
+                if ( $credit_doc ) { self::form_start( $invoice ); echo '<p>Send the credit-note PDF to '.esc_html($invoice->contact_email).'. No money is refunded by this action.</p><input type="hidden" name="document_ref" value="' . esc_attr( $credit->invoice_ref ) . '"><button class="button" name="operation" value="send_credit">Send credit note to customer</button></form>'; }
             }
             if ( (int) $invoice->paid_minor + (int) $invoice->credited_minor > (int) $invoice->total_minor ) echo '<p><strong>Cash refund review required: ' . esc_html( MBS_Money::format( (int) $invoice->paid_minor + (int) $invoice->credited_minor - (int) $invoice->total_minor ) ) . '.</strong> Credit alone does not return money.</p>';
             echo '<div class="mbs-charge-action-grid">';
@@ -689,10 +768,11 @@ class MBS_Additional_Charges {
                 self::form_start($invoice);echo '<p>Archived from staff lists only. Customer invoice records are retained.</p><button class="button" name="operation" value="restore">Restore charge</button></form>';
             }elseif(self::can_archive($invoice)){
                 self::form_start($invoice);echo '<p>Hide from the active staff list without deleting invoice history or changing money.</p><button class="button" name="operation" value="archive">Archive charge</button></form>';
-            }else{echo '<p>To archive, discard a draft or cancel the outstanding charge first. Resolve any checkout or cash-refund review.</p>';}
+            }
             if ( $invoice->status === 'draft' ) {
-                self::form_start( $invoice, 'mbs-charge-edit-form' );
-                foreach ( array( 'contact_name','contact_email' ) as $field ) self::field( $field, $field, $invoice->$field, $field === 'contact_email' ? 'email' : 'text' );
+                $description=$item?$item->description:'';
+                if(empty($_GET['review'])) { self::form_start( $invoice, 'mbs-charge-edit-form' );
+                foreach ( array( 'contact_name','contact_email' ) as $field ) self::field( $field, $field === 'contact_name' ? 'Recipient name' : 'Recipient email', $invoice->$field, $field === 'contact_email' ? 'email' : 'text' );
                 self::field( 'contact_organisation', 'Organisation', $invoice->contact_organisation, 'text', false );
                 self::field( 'contact_address', 'Billing address', $invoice->contact_address, 'text', false );
                 $description = $item ? $item->description : '';
@@ -700,22 +780,37 @@ class MBS_Additional_Charges {
                 self::field( 'service_date', 'Service date', $invoice->period_start, 'date' ); self::field( 'due_date', 'Due date', substr( $invoice->due_at, 0, 10 ), 'date' );
                 echo '<p>Category <select name="category">';
                 foreach ( array( 'cleaning','damage','other' ) as $category ) echo '<option value="' . esc_attr( $category ) . '" ' . selected( $meta['category'] ?? 'other', $category, false ) . '>' . esc_html( ucfirst( $category ) ) . '</option>';
-                echo '</select></p><textarea name="notes">' . esc_textarea( $meta['notes'] ?? '' ) . '</textarea><p><label><input type="checkbox" name="automatic_reminders" value="1" ' . checked( ! empty( $meta['automatic_reminders'] ), true, false ) . '>Enable overdue reminder</label></p><button class="button" name="operation" value="edit">Save draft edits</button></form>';
-                self::form_start( $invoice ); echo '<p>Issue freezes this invoice and makes it visible to its signed-in recipient. It does not email it.</p><button class="button button-primary" name="operation" value="issue">Confirm and issue</button> <button class="button" name="operation" value="discard">Discard draft</button></form>';
+                echo '</select></p><label>Internal notes (not on invoice)<textarea name="notes">' . esc_textarea( $meta['notes'] ?? '' ) . '</textarea></label><p><label><input type="checkbox" name="automatic_reminders" value="1" ' . checked( ! empty( $meta['automatic_reminders'] ), true, false ) . '>Enable overdue reminder</label></p><div class="mbs-charge-editor-footer"><button class="button button-primary" name="operation" value="review">Save and review invoice</button> <button class="button" name="operation" value="edit">Save draft only</button></div></form>';
+                }
+                if ( !empty($_GET['review']) ) {
+                    echo '<p><a class="button" href="'.esc_url(self::admin_url(array('invoice_ref'=>$invoice->invoice_ref))).'">Back to edit draft</a></p>';
+                    echo '<section class="mbs-charge-review"><h3>Review before issuing</h3><p><strong>To:</strong> '.esc_html($invoice->contact_name.' <'.$invoice->contact_email.'>').'</p><p><strong>Charge:</strong> '.esc_html($description).' · '.esc_html(MBS_Money::format((int)$item->line_total_minor)).'</p><p><strong>Due:</strong> '.esc_html(substr($invoice->due_at,0,10)).'</p><p>Issue and send emails the customer a branded additional-charge invoice, an invoice PDF and '.(MBS_Woo_Payment::is_available()?'a link to confirm the current balance and continue to checkout.':'offline payment instructions.').' Issue without sending creates the invoice without an email. The original hire invoice and access remain unchanged.</p><p>Issuing freezes these saved details and makes the invoice visible to its verified recipient.</p>';
+                    $preview_invoice=clone $invoice; $preview_invoice->total_minor=(int)$item->line_total_minor;
+                    $preview=self::build_customer_message($preview_invoice,$item,null,MBS_Woo_Payment::is_available()?'#payment-link-created-on-issue':'');
+                    echo '<details class="mbs-charge-email-preview"><summary>Preview customer email</summary><p><strong>Subject:</strong> '.esc_html($preview['subject']).'</p><p>Payment links become active only after issue. This preview sends nothing.</p><iframe title="Customer invoice email preview" sandbox="" srcdoc="'.esc_attr($preview['body']).'"></iframe></details>';
+                    self::form_start($invoice);echo '<label><input type="checkbox" name="review_confirm" value="1" required> I have checked the saved amount, description and recipient.</label><p><button class="button button-primary" name="operation" value="issue_send">Issue and send invoice</button> <button class="button" name="operation" value="issue">Issue without sending</button></p></form></section>';
+                } else echo '<p>Save and review the invoice to check the exact amount and recipient before issuing. No customer email is sent while this is a draft.</p>';
+                self::form_start($invoice);echo '<details><summary>Discard this draft</summary><p>No invoice email will be sent.</p><button class="button" name="operation" value="discard">Discard draft</button></details></form>';
             } elseif ( MBS_Invoice_Payment::is_payable( $invoice ) && ! self::communications_held( $invoice ) ) {
-                self::form_start( $invoice ); echo '<p>Send to ' . esc_html( $invoice->contact_email ) . ' with PDF and current outstanding balance/payment link. Sending attempts delivery immediately; failures remain queued for retry.</p><button class="button" name="operation" value="send">Confirm and send invoice now</button> <button class="button" name="operation" value="resend">Confirm explicit resend</button></form>';
-                self::form_start( $invoice ); self::field( 'payment_amount', 'Offline payment received (GBP)' ); self::field( 'reason', 'Payment reference / note' ); echo '<button class="button" name="operation" value="manual_payment">Confirm money received</button></form>';
+                $invoice_delivery=$wpdb->get_row($wpdb->prepare('SELECT status FROM '.$wpdb->prefix."mathlin_email_queue WHERE reference_type='invoice' AND reference_id=%d AND message_type='invoice_issued' ORDER BY id DESC LIMIT 1",$invoice->id));
+                self::form_start( $invoice ); echo '<p>Recipient: <strong>' . esc_html( $invoice->contact_email ) . '</strong>. Includes the PDF, current balance and '.(MBS_Woo_Payment::is_available()?'online payment link':'offline payment instructions').'. Sending attempts delivery now; failures remain queued for retry.</p>';
+                if($invoice_delivery && $invoice_delivery->status==='sent') echo '<p>Invoice email accepted by the mail server. Not proof of inbox delivery.</p><details><summary>Send another copy</summary><button class="button" name="operation" value="resend">Confirm explicit resend</button></details>';
+                else echo '<button class="button button-primary" name="operation" value="send">Confirm and send invoice now</button>';
+                echo '</form>';
+                echo '<details class="mbs-charge-secondary"><summary>Record an offline payment</summary>'; self::form_start( $invoice ); self::field( 'payment_amount', 'Offline payment received (GBP)' ); self::field( 'reason', 'Payment reference / note' ); echo '<button class="button" name="operation" value="manual_payment">Confirm money received</button></form></details>';
             }
             if ( in_array( $invoice->status, array( 'issued','part_paid','paid','overdue','credited' ), true ) && (int) $invoice->total_minor > (int) $invoice->credited_minor ) {
-                self::form_start( $invoice ); self::field( 'reason', 'Cancellation reason' ); echo '<p>Cancel the full remaining charge by issuing a credit note for '.esc_html(MBS_Money::format((int)$invoice->total_minor-(int)$invoice->credited_minor)).'. This retains the original invoice and does not send an email or refund money. Any money already paid needs a separate refund review.</p><button class="button" name="operation" value="cancel">Cancel charge — issue full credit note</button></form>';
-                self::form_start( $invoice ); self::field( 'credit_amount', 'Partial credit amount (GBP)' ); self::field( 'reason', 'Credit reason' ); echo '<p>Reduce only part of the charge. A credit note is not a cash refund.</p><button class="button" name="operation" value="credit">Issue partial credit note</button></form>';
+                echo '<details class="mbs-charge-secondary"><summary>Cancel this charge</summary>'; self::form_start( $invoice ); self::field( 'reason', 'Cancellation reason' ); echo '<p>Cancel the full remaining charge by issuing a credit note for '.esc_html(MBS_Money::format((int)$invoice->total_minor-(int)$invoice->credited_minor)).'. This retains the original invoice. It does not refund money. '.((int)$invoice->paid_minor>0?'Recorded payments require a separate cash-refund review.':'No payment is recorded; the customer will have nothing to pay.').'</p><p><label><input type="checkbox" name="notify_customer" value="1">Send the customer a branded cancellation email with the credit-note PDF. Leave unticked to cancel without emailing.</label></p><button class="button" name="operation" value="cancel">Cancel charge — issue full credit note</button></form></details>';
+                echo '<details class="mbs-charge-secondary"><summary>Reduce part of this charge</summary>'; self::form_start( $invoice ); self::field( 'credit_amount', 'Partial credit amount (GBP)' ); self::field( 'reason', 'Credit reason' ); echo '<p>Reduce only part of the charge. A credit note is not a cash refund.</p><button class="button" name="operation" value="credit">Issue partial credit note</button></form></details>';
             }
             echo '</div>';
+            $deliveries=self::delivery_history($invoice); $latest=$deliveries?$deliveries[0]:null;
+            echo '<p><strong>Email:</strong> '.esc_html($latest?ucfirst($latest['status']).' (mail-server acceptance is not proof of inbox delivery)':'Not sent').'</p>';
             $state = self::payment_state( $invoice );
             echo '<p>Payment processing: ' . esc_html( $state['status'] ) . ( $state['order_id'] ? ' — WooCommerce order ' . (int) $state['order_id'] : '' ) . '</p>';
             if ( self::communications_held( $invoice ) ) echo '<p><strong>Payment/checkout held for review. Resolve the WooCommerce order and invoice reconciliation before requesting more money. Automatic reminders are suppressed.</strong></p>';
-            if ( $invoice->status !== 'draft' && $invoice->status !== 'void' ) {
-                self::form_start( $invoice ); echo '<p><label><input type="checkbox" name="enabled" value="1" ' . checked( self::reminders_enabled( $invoice ), true, false ) . '>Enable one automatic overdue reminder</label> (already sent: ' . (int) $invoice->reminder_count . '). Changing this setting does not reset the one-reminder limit.</p><button class="button" name="operation" value="set_reminders">Save reminder preference</button></form>';
+            if ( MBS_Invoice_Payment::is_payable($invoice) ) {
+                echo '<details class="mbs-charge-secondary"><summary>Overdue reminder preference</summary>';self::form_start( $invoice ); echo '<p><label><input type="checkbox" name="enabled" value="1" ' . checked( self::reminders_enabled( $invoice ), true, false ) . '>Enable one automatic overdue reminder</label> (already sent: ' . (int) $invoice->reminder_count . '). Changing this setting does not reset the one-reminder limit.</p><button class="button" name="operation" value="set_reminders">Save reminder preference</button></form></details>';
             }
             echo '<details><summary>Staff history and association</summary><p>Related: ' . esc_html( $meta['related_ref'] ?? '' ) . '</p><p>Internal notes: ' . esc_html( $meta['notes'] ?? '' ) . '</p>';
             echo '<p><button type="button" class="button button-small mbs-open-email-diagnostics" data-tab="transport" data-reference-type="invoice" data-reference-id="' . (int) $invoice->id . '" data-context-label="' . esc_attr( 'Charge ' . $invoice->invoice_ref ) . '">Inspect email delivery &amp; resend</button></p>';

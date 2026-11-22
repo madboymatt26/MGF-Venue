@@ -1,5 +1,5 @@
 <?php if ( ! defined( 'ABSPATH' ) ) exit; ?>
-<div class="wrap mbs-admin">
+<div class="wrap mbs-admin mbs-archive-admin">
     <h1 class="wp-heading-inline"><?php echo MBS_Admin::brand_mark(); ?>MGF Venue – Archived</h1>
     <hr class="wp-header-end">
 
@@ -11,13 +11,23 @@
             <input type="hidden" name="page" value="mathlin-archived">
             <label class="screen-reader-text" for="nms-archived-search">Search archived bookings</label>
             <input type="search" id="nms-archived-search" name="s" value="<?php echo esc_attr( $search ); ?>" placeholder="Search archived bookings…" class="nms-search-input">
-            <button type="submit" class="button">Search</button>
-            <?php if ( $search ) : ?>
-                <a href="?page=mathlin-archived" class="button">Clear</a>
+            <label>Booking date <select name="archive_range">
+                <?php foreach(array('all'=>'All dates','this_year'=>'This year','last_year'=>'Last year','custom'=>'Custom range') as $key=>$label): ?><option value="<?php echo esc_attr($key); ?>" <?php selected($range,$key); ?>><?php echo esc_html($label); ?></option><?php endforeach; ?>
+            </select></label>
+            <label>From <input type="date" name="date_from" value="<?php echo esc_attr($date_from); ?>"></label>
+            <label>To <input type="date" name="date_to" value="<?php echo esc_attr($date_to); ?>"></label>
+            <label>Space <select name="archive_space"><option value="">All spaces</option><?php foreach($archive_spaces as $space_name=>$space): ?><option <?php selected($archive_space,$space_name); ?> value="<?php echo esc_attr($space_name); ?>"><?php echo esc_html($space_name); ?></option><?php endforeach; ?></select></label>
+            <button type="submit" class="button button-primary">Apply filters</button>
+            <p class="description">From and To apply to Custom range. Includes stays overlapping the booking dates.</p>
+            <?php if ( $search || $range !== 'all' || $archive_space ) : ?>
+                <a href="?page=mathlin-archived" class="button">Reset filters</a>
             <?php endif; ?>
         </form>
     </div>
 
+    <?php if($archive_error): ?><div class="notice notice-error"><p><?php echo esc_html($archive_error); ?></p></div><?php endif; ?>
+    <p class="nms-muted">Booking dates: <?php echo esc_html($range==='all'?'All dates':(($date_from?:'Any start').' to '.($date_to?:'Any end'))); ?>. Newest first.</p>
+    <?php $archive_pager(); ?>
     <?php if ( empty( $bookings ) ) : ?>
         <div class="nms-empty">
             <span class="dashicons dashicons-archive" style="font-size:48px;color:#ccc;"></span>
@@ -58,14 +68,14 @@
                 <td data-label="Amount"><strong>&pound;<?php echo number_format( $b->amount, 2 ); ?></strong></td>
                 <td data-label="Actions">
                     <div class="nms-action-btns">
-                        <a href="?page=mathlin-booking&action=view&ref=<?php echo esc_attr( $b->ref ); ?>" class="button button-small">View</a>
+                        <a href="?page=mathlin-booking&action=view&ref=<?php echo esc_attr( $b->ref ); ?>&amp;archive_return=<?php echo rawurlencode($archive_return); ?>" class="button button-small">View</a>
                         <?php if ( $archive_series_billing ) : ?>
                             <a href="<?php echo esc_url( admin_url( 'admin.php?page=mathlin-series&ref=' . rawurlencode( $b->series_id ) ) ); ?>" class="button button-small">Series invoices</a>
                         <?php else : ?>
                             <a href="?page=mathlin-booking&action=invoice&ref=<?php echo esc_attr( $b->ref ); ?>" class="button button-small">Invoice</a>
                         <?php endif; ?>
-                        <button class="button button-small nms-btn-reopen" data-ref="<?php echo esc_attr( $b->ref ); ?>">Restore</button>
-                        <button class="button button-small nms-btn-delete" data-ref="<?php echo esc_attr( $b->ref ); ?>">Delete</button>
+                        <details class="mbs-archive-actions"><summary>More actions</summary><button class="button button-small nms-btn-reopen" data-ref="<?php echo esc_attr( $b->ref ); ?>">Restore</button>
+                        <button class="button button-small nms-btn-delete" data-ref="<?php echo esc_attr( $b->ref ); ?>">Delete</button></details>
                     </div>
                 </td>
             </tr>
@@ -73,4 +83,5 @@
         </tbody>
     </table>
     <?php endif; ?>
+    <?php $archive_pager(); ?>
 </div>

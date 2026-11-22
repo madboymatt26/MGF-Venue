@@ -1048,3 +1048,19 @@ button.mbs-invoice-card__ref:hover { color: #5a0fb0; }
     .mbs-single-grid details.nms-card,
     .mbs-single-grid [id^="mbs-section-"] { scroll-margin-top:160px; }
 }
+
+/* Charge workflow and bounded archive retrieval */
+.mbs-charge-secondary{border:1px solid var(--border);border-radius:8px;padding:12px;margin:12px 0}
+.mbs-charge-secondary summary,.mbs-archive-actions summary{cursor:pointer;min-height:30px;padding:6px 0;font-weight:600}
+.mbs-charge-review{grid-column:1/-1;background:#f5f0ff;padding:20px;border-radius:8px}
+.mbs-charge-review form{display:block;background:transparent;border:0;padding:0}
+.mbs-charge-review iframe{display:block}
+.mbs-archive-pager{height:auto;display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:14px 0}
+.mbs-archive-admin .nms-filters form{display:flex;gap:10px;align-items:end;flex-wrap:wrap}
+.mbs-archive-admin .nms-filters label{display:flex;flex-direction:column;gap:4px}
+.mbs-archive-admin .nms-filters .description{flex-basis:100%;margin:0}
+@media(max-width:600px){.mbs-charge-action-grid{display:block}.mbs-charge-review{padding:14px}.mbs-charge-review button{white-space:normal;margin:4px 0}.mbs-archive-admin .nms-filters input,.mbs-archive-admin .nms-filters select{max-width:100%}.mbs-archive-admin .nms-filters form{max-width:100%}}
+
+.mbs-charge-email-preview{grid-column:1/-1;width:100%}
+.mbs-charge-email-preview summary{cursor:pointer;min-height:44px;font-weight:600}
+.mbs-charge-email-preview iframe{width:100%;height:580px;background:white;border:1px solid var(--border);box-sizing:border-box}

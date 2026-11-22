@@ -27,14 +27,15 @@ try {
     await staff.getByRole('link',{name:fixture.booking_ref,exact:true}).first().waitFor();
     await staff.getByRole('link',{name:fixture.invoice_ref,exact:true}).click();
     await staff.getByRole('link',{name:fixture.booking_ref,exact:true}).waitFor();
-    await staff.getByRole('button',{name:'Confirm and send invoice now',exact:true}).waitFor();
+    await staff.getByText('Send another copy',{exact:true}).waitFor();
+    await staff.getByText('Cancel this charge',{exact:true}).click();
     await staff.getByRole('button',{name:'Cancel charge — issue full credit note',exact:true}).waitFor();
     await staff.getByRole('link',{name:fixture.booking_ref,exact:true}).click();
     await staff.getByRole('heading',{name:'Additional charges',exact:true}).waitFor();
     await staff.getByRole('link',{name:fixture.invoice_ref,exact:true}).waitFor();
     await staff.getByRole('link',{name:'Add additional charge',exact:true}).click();
     await staff.getByLabel('Organisation (optional)').waitFor();
-    assert.equal(await staff.getByLabel('Booking or series reference').inputValue(),fixture.booking_ref);
+    assert.equal(await staff.locator('input[name=related_ref]').inputValue(),fixture.booking_ref);
     await staff.screenshot({path:'browser-artifacts/charge-editor.png',fullPage:true});
     await staff.goto(base+'/wp-admin/admin.php?page=mathlin-additional-charges');
     await staff.locator('select[name="charge_status"]').selectOption('payment_review');

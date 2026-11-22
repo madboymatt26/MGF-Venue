@@ -291,8 +291,43 @@ class MBS_Admin {
     }
 
     public function render_archived() {
-        $search   = isset( $_GET['s'] ) ? sanitize_text_field( $_GET['s'] ) : '';
-        $bookings = MBS_Bookings::get_all( array( 'status' => 'archived', 'search' => $search, 'exclude_archived' => false, 'orderby' => 'booking_date', 'order' => 'DESC' ) );
+        $search = sanitize_text_field( wp_unslash( $_GET['s'] ?? '' ) );
+        $range = sanitize_key( $_GET['archive_range'] ?? 'all' );
+        if ( ! in_array( $range, array( 'all', 'this_year', 'last_year', 'custom' ), true ) ) $range = 'all';
+        $date_from = ''; $date_to = ''; $archive_error = '';
+        $year = (int) wp_date( 'Y' );
+        if ( $range === 'this_year' || $range === 'last_year' ) {
+            if ( $range === 'last_year' ) $year--;
+            $date_from = $year . '-01-01'; $date_to = $year . '-12-31';
+        } elseif ( $range === 'custom' ) {
+            foreach ( array( 'date_from', 'date_to' ) as $field ) {
+                $value = sanitize_text_field( wp_unslash( $_GET[$field] ?? '' ) );
+                $date = DateTimeImmutable::createFromFormat( '!Y-m-d', $value );
+                if ( $value !== '' && ( ! $date || $date->format( 'Y-m-d' ) !== $value ) ) $archive_error = 'Enter valid booking dates.';
+                $$field = $value;
+            }
+            if ( $date_from && $date_to && $date_from > $date_to ) $archive_error = 'The booking date From must be before To.';
+        }
+        $archive_space = sanitize_text_field( wp_unslash( $_GET['archive_space'] ?? '' ) );
+        $archive_spaces = MBS_Bookings::get_spaces();
+        $archive_page = max( 1, absint( $_GET['archive_page'] ?? 1 ) );
+        $args = array( 'status' => 'archived', 'search' => $search, 'exclude_archived' => false,
+            'orderby' => 'booking_date', 'order' => 'DESC', 'date_from' => $date_from, 'date_to' => $date_to,
+            'date_overlap' => true, 'space' => $archive_space, 'limit' => 50 );
+        $archive_total = $archive_error ? 0 : MBS_Bookings::get_all( array_merge( $args, array( 'count_only' => true ) ) );
+        $archive_pages = max( 1, (int) ceil( $archive_total / 50 ) );
+        $archive_page = min( $archive_page, $archive_pages );
+        $bookings = $archive_error ? array() : MBS_Bookings::get_all( array_merge( $args, array( 'offset' => ( $archive_page - 1 ) * 50 ) ) );
+        $archive_query = array( 'page' => 'mathlin-archived', 's' => $search, 'archive_range' => $range,
+            'date_from' => $date_from, 'date_to' => $date_to, 'archive_space' => $archive_space, 'archive_page' => $archive_page );
+        $archive_return = add_query_arg( $archive_query, admin_url( 'admin.php' ) );
+        $archive_pager = static function() use ( $archive_query, $archive_page, $archive_pages, $archive_total ) {
+            echo '<nav class="tablenav mbs-archive-pager" aria-label="Archived booking pages"><span>' . esc_html( $archive_total ? ( ( $archive_page - 1 ) * 50 + 1 ) . '-' . min( $archive_page * 50, $archive_total ) . ' of ' . $archive_total . ' bookings' : '0 bookings' ) . '</span>';
+            if ( $archive_page > 1 ) echo '<a class="button" href="' . esc_url( add_query_arg( array_merge( $archive_query, array( 'archive_page' => $archive_page - 1 ) ), admin_url( 'admin.php' ) ) ) . '">Previous</a>';
+            echo '<span>Page ' . (int) $archive_page . ' of ' . (int) $archive_pages . '</span>';
+            if ( $archive_page < $archive_pages ) echo '<a class="button" href="' . esc_url( add_query_arg( array_merge( $archive_query, array( 'archive_page' => $archive_page + 1 ) ), admin_url( 'admin.php' ) ) ) . '">Next</a>';
+            echo '</nav>';
+        };
         include MBS_PLUGIN_DIR . 'admin/views/archived.php';
     }
 

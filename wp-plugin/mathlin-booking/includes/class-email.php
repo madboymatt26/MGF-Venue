@@ -498,6 +498,7 @@ class MBS_Email {
         $subject = MBS_Email_Templates::replace_placeholders( $template['subject'], $data, $extra );
         $body = self::header();
         $body .= wp_kses_post( wpautop( MBS_Email_Templates::replace_placeholders( $template['body'], $data, $extra ) ) );
+        if (class_exists('MBS_Additional_Charges') && MBS_Additional_Charges::is_charge($invoice)) $body .= '<p>This receipt is for an additional charge, separate from your original hire invoice. Your booking and access arrangements remain unchanged.</p>';
         $body .= '<p><strong>Transaction reference:</strong> ' . esc_html( $transaction->transaction_ref ) . '</p>';
         $body .= self::footer();
         return self::send( $invoice->contact_email, $subject, $body );
@@ -837,7 +838,7 @@ class MBS_Email {
         return $html;
     }
 
-    private static function header() {
+    public static function header() {
         $org  = MBS_Email_Templates::get_org_settings();
         $logo = MBS_Email_Templates::get_logo_html();
         return '<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;color:#1a1a2e;max-width:600px;margin:0 auto;">
@@ -849,7 +850,7 @@ class MBS_Email {
         <div style="background:#fff;padding:32px;border:1px solid #e0d0f0;border-top:none;border-radius:0 0 8px 8px;">';
     }
 
-    private static function footer() {
+    public static function footer() {
         $org = MBS_Email_Templates::get_org_settings();
         return '</div><div style="text-align:center;padding:16px;color:#999;font-size:12px;">
             ' . esc_html( $org['name'] ) . ' &bull; ' . esc_html( $org['address'] ) . ' &bull; ' . esc_html( $org['phone'] ) . '<br>

@@ -74,6 +74,13 @@ $is_active_oneoff_scout = ! empty( $booking->scout_use )
     && empty( $booking->series_id )
     && in_array( $booking->status, array( 'pending', 'confirmed', 'deposit_paid', 'paid' ), true );
 ?>
+<?php
+$archive_return = esc_url_raw( wp_unslash( $_GET['archive_return'] ?? '' ) );
+if ( $archive_return && strpos( $archive_return, admin_url('admin.php') . '?' ) === 0 ) {
+    $archive_params=array();parse_str((string)wp_parse_url($archive_return,PHP_URL_QUERY),$archive_params);
+    if(($archive_params['page']??'')==='mathlin-archived') echo '<p><a class="button" href="'.esc_url($archive_return).'">Back to archived results</a></p>';
+}
+?>
 <div class="wrap mbs-admin mbs-single-page">
     <!-- 1. Booking Hero Header Bar -->
     <header class="mbs-booking-hero">

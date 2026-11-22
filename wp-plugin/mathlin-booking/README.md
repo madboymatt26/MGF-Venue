@@ -4,7 +4,15 @@ A comprehensive WordPress venue booking and management plugin built for Needham 
 
 > **Note:** This plugin was previously named "Mathlin Booking System". As of v3.14.0 the product is branded **MGF Venue**. Internal identifiers (plugin folder/slug `mathlin-booking`, database tables `wp_mathlin_*`, option keys `mbs_*`, REST namespace `mathlin/v1`, shortcodes `[mathlin_*]`) are unchanged for backward compatibility.
 
-**Current Version:** 3.40.0
+**Current Version:** 3.48.4
+
+## 3.48.4 Charge review and archive usability
+
+- Save and review the exact invoice amount, recipient and branded email before issue, with an explicit issue/send choice.
+- Share branded invoices, readable payment instructions and state-aware credit emails. Optional cancellation notification is explicit and defaults off. A credit note never records a cash refund.
+- Page every archived booking in sets of 50; filter by booking date or space and return to the same results from a booking.
+- Preserve original hire payments/access, immutable documents, version locks and checkout safeguards. Existing custom email text is kept; the fixed summary and branding still apply.
+- Repository-only change. No deployment or live-site testing was performed.
 
 ## 3.40.0 Reliability and operations
 

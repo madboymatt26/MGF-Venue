@@ -1161,7 +1161,7 @@ class MBS_Email_Queue {
                 $url = '';
                 if ( function_exists( 'add_query_arg' ) ) {
                     if ( (string) ( $inv->billing_mode ?? '' ) === 'additional_charge' ) {
-                        $url = add_query_arg( array( 'page' => 'mathlin-additional-charges', 'charge' => $inv->invoice_ref ), $admin_base );
+                        $url = add_query_arg( array( 'page' => 'mathlin-additional-charges', 'invoice_ref' => $inv->invoice_ref ), $admin_base );
                     } elseif ( ! empty( $inv->series_ref ) ) {
                         $url = add_query_arg( array( 'page' => 'mathlin-series', 'ref' => $inv->series_ref ), $admin_base );
                     }
