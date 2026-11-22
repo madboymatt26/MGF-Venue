@@ -2,11 +2,13 @@
 // Requires venue-mode-browser-seed.php: venue mode, payments on, policy fixture.
 import assert from 'node:assert/strict';
 import {pathToFileURL} from 'node:url';
-import {mkdir,readFile} from 'node:fs/promises';
+import {mkdir} from 'node:fs/promises';
 const base=process.env.MGF_VENUE_BROWSER_BASE||'http://localhost:8088';
 assert.match(base,/^http:\/\/(localhost|127\.0\.0\.1):\d+$/);
 const {chromium}=await import(pathToFileURL(process.env.MGF_BROWSER_MODULE).href);
-const expected=JSON.parse(await readFile('browser-artifacts/venue-expected.json','utf8'));
+// Deterministic: the seed enrols the policy with approved_at fixed at
+// 2026-11-20 12:00 Europe/London, so the 48h deposit deadline formats as:
+const expected={deposit_deadline:'22 November 2026 at 12:00 GMT'};
 const browser=await chromium.launch({headless:true,...(process.env.MGF_BROWSER_CHANNEL?{channel:process.env.MGF_BROWSER_CHANNEL}:{})});
 const context=await browser.newContext();const page=await context.newPage();
 page.setDefaultTimeout(20000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
