@@ -34,6 +34,7 @@ function rest_url($p=''){return 'https://example.invalid/wp-json/'.ltrim($p,'/')
 function home_url($p=''){return 'https://example.invalid/'.ltrim($p,'/');}
 function wp_editor($content,$id,$args=array()){echo '<textarea id="'.esc_attr($id).'">'.esc_html($content).'</textarea>';}
 function wp_dropdown_pages($args=array()){echo '<select name="page_id"></select>';}
+$wpdb = new class { public $prefix = 'wp_'; };
 class MBS_Bookings {
     public static function get_spaces(){return array('Main Scout Hall'=>array('rate_hourly'=>25,'rate_daily'=>150,'parent'=>null));}
     public static function get_booking_tier($b){return 'standard';}
@@ -74,7 +75,7 @@ class MBS_Audit_Log {
 class MBS_Custom_Fields { public static function render_admin_display($b){return '';} }
 class MBS_Google_Calendar {
     public static function render_booking_card($b){return '';}
-    public static function status(){return array('connected'=>false,'last_result'=>'','last_success'=>null);}
+    public static function status(){return array('connected'=>false,'last_result'=>'','last_success'=>null,'enabled'=>false,'calendar'=>'');}
 }
 class MBS_Payment_Expiry { public static function render_booking($b){return '';} }
 class MBS_Space_Selection { public static function selector($b){return '';} }
@@ -85,7 +86,7 @@ class MBS_Terms_Acceptance {
 class MBS_Admin { public static function brand_mark(){return '';} }
 class MBS_Feedback { public static function default_body(){return '';} }
 class MBS_Integration_Health {
-    public static function operational_settings(){return array('legacy_read_only'=>1);}
+    public static function operational_settings(){return array('legacy_read_only'=>1,'report_open_hour'=>8,'report_close_hour'=>22,'buffers_enabled'=>0,'resource_buffers'=>array());}
     public static function payment_policy_warnings(){return array();}
 }
 require dirname(__DIR__).'/wp-plugin/mathlin-booking/includes/class-campsite-policy.php';
@@ -101,6 +102,7 @@ function booking( $overrides = array() ) {
         'start_time'=>'10:00','end_time'=>'12:00','all_day'=>0,'attendees'=>10,'purpose'=>'View test',
         'amount'=>0,'amount_paid'=>0,'deposit_paid'=>0,'kitchen'=>0,'scout_use'=>1,'series_id'=>'',
         'custom_fields'=>'','current_invoice_document_id'=>0,'chase_count'=>0,'last_chased'=>null,'address'=>'',
+        'invoice_number'=>'','organisation'=>'','notes'=>'','created_at'=>'2026-11-01 10:00:00','ha_notified'=>0,
     ), $overrides );
 }
 function render_single( $booking ) {
