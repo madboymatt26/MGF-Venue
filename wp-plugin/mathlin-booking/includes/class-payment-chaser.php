@@ -26,12 +26,31 @@ class MBS_Payment_Chaser {
     /** Whether this individual booking is allowed through occurrence chasing. */
     public static function should_chase_occurrence( $booking ) {
         if ( class_exists( 'MBS_Payment_Features' ) && ! MBS_Payment_Features::enabled( 'reminders' ) ) return false;
+        // A policy-enrolled booking's deposit phase belongs to the
+        // payment-expiry worker: the hirer has an agreed deadline from
+        // approval, is warned 24 hours before it and the booking cancels at
+        // it. Chasing inside that window contradicts the agreed deadline and
+        // can offer a checkout the policy has already closed.
+        if ( self::policy_owns_deposit( $booking ) ) return false;
         $treatment = MBS_Series::billing_treatment_for_booking( $booking );
         if ( class_exists( 'MBS_Credit_Accounts' ) && MBS_Credit_Accounts::for_booking( $booking ) && in_array( $treatment, array( 'one_off', 'legacy_per_occurrence' ), true ) ) {
             $invoice = MBS_Credit_Accounts::invoice_info( $booking );
             return $invoice && $invoice['due_date'] < wp_date( 'Y-m-d' );
         }
         return in_array( $treatment, array( 'one_off', 'legacy_per_occurrence' ), true );
+    }
+
+    /**
+     * Whether the payment-expiry policy owns this booking's current deposit
+     * deadline (active policy, deposit not yet fully paid).
+     */
+    private static function policy_owns_deposit( $booking ) {
+        if ( ! class_exists( 'MBS_Payment_Expiry' ) || ! class_exists( 'MBS_Payment_Expiry_Policy' ) || empty( $booking->ref ) ) return false;
+        $policy = MBS_Payment_Expiry::enforced_policy( $booking->ref );
+        if ( ! $policy ) return false;
+        $paid_minor = MBS_Money::from_decimal_string( (string) ( $booking->amount_paid ?? '0.00' ) );
+        if ( is_wp_error( $paid_minor ) ) return false;
+        return MBS_Payment_Expiry_Policy::next_deadline( $policy, $paid_minor )['kind'] === 'unpaid_deposit';
     }
 
     public static function chase_suppression_message( $booking ) {
@@ -41,6 +60,9 @@ class MBS_Payment_Chaser {
         }
         if ( in_array( $treatment, array( 'manual_consolidated', 'invoice_managed' ), true ) ) {
             return 'This booking belongs to a consolidated series. Manage reminders against the series or its invoices, not the individual occurrence.';
+        }
+        if ( self::policy_owns_deposit( $booking ) ) {
+            return 'This hire\'s deposit deadline is managed by the automatic payment policy: the hirer is warned before the deadline and the booking cancels automatically at it. No deposit chase is needed.';
         }
         return '';
     }

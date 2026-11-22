@@ -81,6 +81,17 @@ try {
     $check(!is_wp_error($reissue2)&&empty($ex_doc['payment_schedule']['deposit_due_at'])&&$ex_doc['payment_schedule']['deposit_due_date']===wp_date('Y-m-d'),'Exempted hire falls back to ordinary invoice terms');
     $check(strpos(MBS_Invoice::generate_html(MBS_Bookings::get($normal)),'Deposit due immediately')!==false,'Exempted hire preview falls back to ordinary terms');
     $wpdb->update($policy_table,array('policy_json'=>wp_json_encode($p)),array('booking_ref'=>$normal));
+    // Chaser consistency: the deposit phase is owned by the policy worker;
+    // balance chasing after a paid deposit continues per the printed terms.
+    $check(MBS_Payment_Chaser::should_chase_occurrence(MBS_Bookings::get($normal))===false,'Policy-controlled deposit phase is never chased');
+    $check(strpos(MBS_Payment_Chaser::chase_suppression_message(MBS_Bookings::get($normal)),'automatic payment policy')!==false,'Suppression explains the policy owns the deposit deadline');
+    $wpdb->update($table,array('created_at'=>wp_date('Y-m-d H:i:s',time()-30*86400)),array('ref'=>$normal));
+    $check(MBS_Payment_Chaser::should_chase_occurrence(MBS_Bookings::get($normal))===false,'Stale submission cannot chase inside the agreed window');
+    $check(MBS_Payment_Chaser::send_chase(MBS_Bookings::get($normal))===false,'Deposit chase send is refused while the policy owns the deadline');
+    $check((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$queue} WHERE reference_type='booking' AND reference_id=%d AND message_type='payment_chase'",MBS_Bookings::get($normal)->id))===0,'No chase email is queued for a policy-controlled deposit');
+    $wpdb->update($table,array('amount_paid'=>'7.50','deposit_paid'=>'7.50','status'=>'deposit_paid'),array('ref'=>$normal));
+    $check(MBS_Payment_Chaser::should_chase_occurrence(MBS_Bookings::get($normal))===true,'Balance chasing continues once the deposit is paid');
+    $wpdb->update($table,array('amount_paid'=>'0.00','deposit_paid'=>'0.00','status'=>'confirmed'),array('ref'=>$normal));
     $short=$seed(2); $result=MBS_Invoice_Document_Service::confirm_and_issue($short,array(),true);
     $check(is_wp_error($result)&&!MBS_Payment_Expiry::get($short),'Short notice requires explicit acknowledgement');
     $result=MBS_Bookings::update_status($short,'confirmed',true,array('return_error'=>true));
