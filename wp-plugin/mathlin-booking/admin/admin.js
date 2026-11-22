@@ -1,6 +1,19 @@
 /* NM Scouts Booking – Admin JS */
 jQuery(function ($) {
 
+    // Reveal minimised destination cards for jump links and bookmarked hashes.
+    function revealBookingSection(hash) {
+        var target = document.getElementById((hash || '').slice(1));
+        if (!target) return;
+        if (target.tagName === 'DETAILS') target.open = true;
+        else $(target).children('details').prop('open', true);
+    }
+    $('.mbs-mobile-jump-bar a[href^="#"]').on('click', function () {
+        revealBookingSection(this.getAttribute('href'));
+    });
+    $(window).on('hashchange', function () { revealBookingSection(window.location.hash); });
+    revealBookingSection(window.location.hash);
+
     // Live read-only linkage check; a separate explicit click permits a scoped sync.
     $('.nms-booking-calendar').each(function () {
         var $card = $(this), fingerprint = '', canSync = false;
@@ -2018,6 +2031,7 @@ jQuery(function ($) {
         var originalAmount = parseFloat(config.original_amount || 0);
 
         $('#nms-toggle-edit').on('click', function() {
+            $('#mbs-section-details').prop('open', true);
             $('#nms-view-mode').hide();
             $editMode.show();
             $(this).hide();

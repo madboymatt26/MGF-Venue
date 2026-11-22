@@ -329,3 +329,48 @@ jobs:
       - name: Stop disposable services
         if: always()
         run: docker compose -f tests/integration/docker-compose.yml down -v --remove-orphans
+
+  booking-review-layout:
+    name: Booking review mobile layout and money journeys
+    runs-on: ubuntu-24.04
+    env:
+      WORDPRESS_IMAGE: wordpress:6.6.2-php8.2-apache
+      WPCLI_IMAGE: wordpress:cli-2.11.0-php8.2
+      MBS_TEST_WOO_VERSION: '9.3.3'
+      MBS_TEST_URL: http://localhost:8088
+      MBS_TEST_PASSWORD: Synthetic-expiry-browser-2026!
+      MBS_TEST_READER_PASSWORD: Synthetic-reader-2026!
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start isolated WordPress and MariaDB
+        run: docker compose -f tests/integration/docker-compose.yml up -d db wordpress
+      - name: Install disposable runtime
+        run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli sh /workspace/tests/integration/setup.sh
+      - name: Install browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/mgf-browser" playwright@1.55.1
+          node "$RUNNER_TEMP/mgf-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Test rendered layout, keyboard minimisation and complete money journeys
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PLAYWRIGHT_MODULE="$RUNNER_TEMP/mgf-browser/node_modules/playwright"
+          seed() {
+            docker compose -f tests/integration/docker-compose.yml run --rm -T -e MBS_DISPOSABLE_BROWSER=1 cli wp eval-file /workspace/tests/integration/scenarios/payment-expiry-browser-seed.php --allow-root
+          }
+          seed
+          node tests/booking-review-layout-browser.cjs
+          for width in 1280 390; do
+            seed
+            MBS_TEST_WIDTH="$width" node tests/payment-expiry-browser.cjs
+          done
+      - name: Upload visual evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: booking-review-layout
+          path: browser-artifacts/booking-*.png
+          if-no-files-found: error
+      - name: Stop disposable services
+        if: always()
+        run: docker compose -f tests/integration/docker-compose.yml down -v --remove-orphans

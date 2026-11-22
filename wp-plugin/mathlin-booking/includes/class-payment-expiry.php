@@ -320,44 +320,57 @@ class MBS_Payment_Expiry {
             } catch ( Throwable $e ) { $wpdb->query( 'ROLLBACK' ); return new WP_Error( 'refund_review_failed', $e->getMessage() ); }
         } );
     }
-    private static function form( $row, $operation ) {
-        echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '"><input type="hidden" name="action" value="mbs_payment_expiry"><input type="hidden" name="operation" value="' . esc_attr( $operation ) . '">';
+    private static function form( $row, $operation, $class = '' ) {
+        echo '<form method="post"' . ( $class !== '' ? ' class="' . esc_attr( $class ) . '"' : '' ) . ' action="' . esc_url( admin_url( 'admin-post.php' ) ) . '"><input type="hidden" name="action" value="mbs_payment_expiry"><input type="hidden" name="operation" value="' . esc_attr( $operation ) . '">';
         wp_nonce_field( 'mbs_payment_expiry' );
         if ( $row ) echo '<input type="hidden" name="ref" value="' . esc_attr( $row->booking_ref ) . '"><input type="hidden" name="version" value="' . (int) $row->version . '">';
     }
     public static function render_booking( $b ) {
         $row = self::get( $b->ref );
         if ( ! $row && ( ! self::enabled() || $b->status !== 'pending' || ! self::eligible( $b ) ) ) return;
-        echo '<section class="nms-card"><div class="nms-card-header"><h2>Payment deadlines and money review</h2></div><div class="mbs-card-body">';
+        $badge = 'Policy';
+        $badge_balance = null;
+        $open = true;
+        if ( $row ) {
+            $badge = ucfirst( str_replace( '_', ' ', (string) $row->state ) );
+            $pre_review = json_decode( $row->review_json, true ) ?: array();
+            if ( $row->state === 'money_review' && isset( $pre_review['received_minor'] ) ) {
+                $badge_balance = self::review_balance( $row );
+                if ( ! is_wp_error( $badge_balance ) ) $badge = 'Money review · Unresolved: £' . number_format( $badge_balance['unresolved_minor'] / 100, 2 );
+            }
+            if ( $row->state === 'resolved' ) { $badge = 'Resolved'; $open = false; }
+            if ( ! empty( $pre_review['operational_issue'] ) ) { $badge = 'Review required'; $open = true; }
+        }
+        echo '<details class="nms-card mbs-disclosure" id="mbs-section-payment-review"' . ( $open ? ' open' : '' ) . '><summary class="nms-card-header"><h2>Payment deadlines and money review</h2><span class="mbs-card-badge">' . esc_html( $badge ) . '</span></summary><div class="mbs-card-body">';
         if ( ! $row ) {
             $cutoff = ( new DateTimeImmutable( $b->booking_date, wp_timezone() ) )->modify( '-1 day' )->setTime( 8, 0 );
             echo '<p>Approval starts a 48-hour deposit deadline. Full payment is required by ' . esc_html( $cutoff->format( 'j F Y H:i T' ) ) . '. The approval email will warn of automatic cancellation.</p>';
-            if ( $cutoff->getTimestamp() - time() < 172800 ) echo '<p role="alert">Short notice: full payment is required by that cutoff. Approval at/after cutoff requires manual review.</p><label><input type="checkbox" id="mbs-expiry-short-ack"> I acknowledge the shortened full-payment deadline.</label>';
-            if ( $cutoff->getTimestamp() <= time() && current_user_can( 'manage_options' ) ) echo '<p><label>Manual approval after cutoff: record your review and payment arrangements <input id="mbs-expiry-manual-reason" required></label></p>';
+            if ( $cutoff->getTimestamp() - time() < 172800 ) echo '<p role="alert">Short notice: full payment is required by that cutoff. Approval at/after cutoff requires manual review.</p><label class="mbs-checkbox-label"><input type="checkbox" id="mbs-expiry-short-ack"> <span>I acknowledge the shortened full-payment deadline.</span></label>';
+            if ( $cutoff->getTimestamp() <= time() && current_user_can( 'manage_options' ) ) echo '<div class="mbs-money-form"><label class="mbs-field">Manual approval after cutoff: record your review and payment arrangements <input id="mbs-expiry-manual-reason" required></label></div>';
         } else {
             $p = json_decode( $row->policy_json, true ); $review = json_decode( $row->review_json, true ) ?: array();
             echo '<p>Status: <strong>' . esc_html( $row->state ) . '</strong></p><p>' . esc_html( self::warning( $b ) ) . '</p>';
             if ( ! empty( $review['operational_issue'] ) ) echo '<p role="alert">Review required: ' . esc_html( $review['operational_issue'] ) . '</p>';
             if ( $row->state === 'active' && current_user_can( 'manage_options' ) ) {
-                self::form( $row, 'extension' );
-                echo '<p><label>Extend all payment cancellation deadlines until (Europe/London) <input type="datetime-local" name="until" required></label></p><p><label>Reason <input name="reason" required></label></p><button class="button">Grant recorded extension</button></form>';
-                self::form( $row, 'exempt' ); echo '<p><label>Exemption reason <input name="reason" required></label> <button class="button">Exempt from automatic cancellation</button></p></form>';
+                self::form( $row, 'extension', 'mbs-money-form' );
+                echo '<div class="mbs-field-row"><label class="mbs-field">Extend all payment cancellation deadlines until (Europe/London) <input type="datetime-local" name="until" required></label><label class="mbs-field">Reason <input name="reason" required></label></div><button class="button">Grant recorded extension</button></form>';
+                self::form( $row, 'exempt', 'mbs-money-form' ); echo '<div class="mbs-field-row"><label class="mbs-field">Exemption reason <input name="reason" required></label></div><button class="button">Exempt from automatic cancellation</button></form>';
             }
             if ( isset( $review['received_minor'] ) ) {
-                $balance = self::review_balance( $row );
+                $balance = $badge_balance !== null ? $badge_balance : self::review_balance( $row );
                 if ( is_wp_error( $balance ) ) echo '<p role="alert">' . esc_html( $balance->get_error_message() ) . '</p>';
                 else echo '<p><strong>Money-held review — booking status: ' . esc_html( $b->status ) . '</strong><br>Received: £' . esc_html( number_format( $balance['received_minor'] / 100, 2 ) ) . ' · Refunded: £' . esc_html( number_format( $balance['refunded_minor'] / 100, 2 ) ) . ' · Retained: £' . esc_html( number_format( $balance['retained_minor'] / 100, 2 ) ) . ' · Unresolved: £' . esc_html( number_format( $balance['unresolved_minor'] / 100, 2 ) ) . '</p>';
                 echo '<p>Gateway refund: open the original order below and use its native refund controls. A manual refund entry alone does not transfer money. Confirm the payment-provider result. This booking must remain cancelled.</p>';
                 $orders = self::orders( $b->ref );
                 if ( ! is_wp_error( $orders ) ) foreach ( $orders as $order ) echo '<p><a href="' . esc_url( $order->get_edit_order_url() ) . '">Review/refund original order #' . (int) $order->get_id() . '</a></p>';
                 if ( current_user_can( 'manage_options' ) && $row->state !== 'resolved' ) {
-                    self::form( $row, 'bank_refund' ); echo '<h3>Record a bank refund already completed</h3><p><label>Amount GBP <input name="amount" type="number" min="0.01" step="0.01" required></label> <label>Transfer date <input name="date" type="date" required></label></p><p><label>Transfer reference <input name="reference" required></label> <label>Reason <input name="reason" required></label></p><p><label><input name="confirmed" type="checkbox" value="1" required> I confirm this transfer is already completed; this action does not send money.</label></p><button class="button">Record completed refund</button></form>';
-                    self::form( $row, 'retain' ); echo '<h3>Record or revise a retention decision</h3><p><label>Total amount to retain GBP <input name="amount" type="number" min="0" step="0.01" required></label> <label>Reason under hire terms <input name="reason" required></label></p><button class="button">Record retention decision</button></form>';
-                    self::form( $row, 'resolve' ); echo '<p><label><input type="checkbox" name="confirmed" value="1" required> I have verified refunds/retention and want to close this review.</label> <button class="button">Verify and close review</button></p></form>';
+                    self::form( $row, 'bank_refund', 'mbs-money-form' ); echo '<h3>Record a bank refund already completed</h3><div class="mbs-field-row"><label class="mbs-field">Amount GBP <input name="amount" type="number" min="0.01" step="0.01" required></label><label class="mbs-field">Transfer date <input name="date" type="date" required></label></div><div class="mbs-field-row"><label class="mbs-field">Transfer reference <input name="reference" required></label><label class="mbs-field">Reason <input name="reason" required></label></div><p><label class="mbs-checkbox-label"><input name="confirmed" type="checkbox" value="1" required> <span>I confirm this transfer is already completed; this action does not send money.</span></label></p><button class="button">Record completed refund</button></form>';
+                    self::form( $row, 'retain', 'mbs-money-form' ); echo '<h3>Record or revise a retention decision</h3><div class="mbs-field-row"><label class="mbs-field">Total amount to retain GBP <input name="amount" type="number" min="0" step="0.01" required></label><label class="mbs-field">Reason under hire terms <input name="reason" required></label></div><button class="button">Record retention decision</button></form>';
+                    self::form( $row, 'resolve', 'mbs-money-form' ); echo '<p><label class="mbs-checkbox-label"><input type="checkbox" name="confirmed" value="1" required> <span>I have verified refunds/retention and want to close this review.</span></label></p><p><button class="button">Verify and close review</button></p></form>';
                 }
             }
         }
-        echo '</div></section>';
+        echo '</div></details>';
     }
     public static function settings_page() {
         if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Administrator access required.' );

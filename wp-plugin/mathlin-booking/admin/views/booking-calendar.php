@@ -1,6 +1,6 @@
 <?php if ( ! defined( 'ABSPATH' ) ) exit; ?>
-<section class="nms-card nms-booking-calendar" data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-nonce="<?php echo esc_attr( wp_create_nonce( 'mbs_gcal_booking' ) ); ?>" aria-label="Google Calendar linkage">
-    <div class="nms-card-header"><h2>Google Calendar</h2></div>
+<details class="nms-card mbs-disclosure nms-booking-calendar" open data-ref="<?php echo esc_attr( $booking->ref ); ?>" data-nonce="<?php echo esc_attr( wp_create_nonce( 'mbs_gcal_booking' ) ); ?>" aria-label="Google Calendar linkage">
+    <summary class="nms-card-header"><h2>Google Calendar</h2></summary>
     <div class="mbs-card-body">
         <p class="nms-gcal-label" role="status" aria-live="polite">Checking calendar linkage…</p>
         <p class="nms-gcal-connection nms-muted"></p>
@@ -16,4 +16,4 @@
         <p class="nms-muted">Sync now applies only to this booking. Protected estate entries and uncertain matches require review. No booking emails are sent.</p>
         <noscript><p>Enable JavaScript to check linkage here, or open Calendar Sync.</p></noscript>
     </div>
-</section>
+</details>

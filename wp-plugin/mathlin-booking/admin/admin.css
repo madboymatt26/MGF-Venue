@@ -1021,3 +1021,30 @@ button.mbs-invoice-card__ref:hover { color: #5a0fb0; }
   .mbs-review-table { overflow: visible; }
   .mbs-review-actions .button,.mbs-list-tools .button { width: 100%; text-align: center; }
 }
+
+/* Payment review money forms: stacked labelled fields that stay inside narrow viewports */
+.mbs-admin .mbs-money-form .mbs-field-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(11rem,100%),1fr)); gap:6px 16px; margin:0 0 10px; }
+.mbs-admin .mbs-money-form label.mbs-field { display:block; margin:0; font-weight:600; }
+.mbs-admin .mbs-money-form label.mbs-field input { display:block; width:100%; max-width:100%; box-sizing:border-box; margin-top:4px; font-weight:400; min-height:36px; border:1px solid #8c8f94; border-radius:4px; padding:4px 8px; }
+.mbs-admin .mbs-money-form .mbs-checkbox-label { font-weight:400; }
+.mbs-admin .mbs-money-form .button { white-space:normal; height:auto; }
+.mbs-admin .mbs-money-form { padding-top:14px; margin-top:14px; border-top:1px solid var(--border); }
+.mbs-admin .mbs-money-form h3 { margin:0 0 12px; }
+.mbs-admin .mbs-money-form .mbs-checkbox-label { align-items:flex-start; }
+.mbs-admin .mbs-money-form .mbs-checkbox-label input { flex-shrink:0; margin-top:2px; }
+.mbs-single-page .mbs-disclosure > summary { flex-wrap:wrap; }
+.mbs-single-page .mbs-disclosure > summary::before { flex-shrink:0; }
+.mbs-single-page .mbs-disclosure > summary h2 { min-width:0; flex:1 1 9rem; }
+.mbs-single-page .mbs-disclosure > summary .mbs-card-badge { max-width:100%; box-sizing:border-box; white-space:normal; overflow-wrap:anywhere; }
+@media(max-width:600px) {
+    .mbs-admin .mbs-money-form label.mbs-field input { font-size:16px; min-height:42px; }
+    .mbs-admin .mbs-money-form .mbs-field-row { grid-template-columns:minmax(0,1fr); }
+}
+/* Keep every section target clear of WordPress and the sticky booking navigation. */
+.mbs-single-grid details.nms-card,
+.mbs-single-grid [id^="mbs-section-"] { scroll-margin-top:52px; }
+@media(max-width:1024px) {
+    .mbs-single-page .mbs-mobile-jump-bar { flex-wrap:wrap; overflow-x:visible; }
+    .mbs-single-grid details.nms-card,
+    .mbs-single-grid [id^="mbs-section-"] { scroll-margin-top:160px; }
+}
