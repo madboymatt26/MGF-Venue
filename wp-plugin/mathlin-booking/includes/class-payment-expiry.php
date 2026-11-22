@@ -87,7 +87,7 @@ class MBS_Payment_Expiry {
         $text = $p['deposit_due_at'] !== null ? 'If your deposit is not paid within 48 hours of approval, your booking will unfortunately be cancelled to make the venue available for others again. ' : '';
         $text .= self::warning( $b );
         $final = MBS_Payment_Expiry_Policy::format_deadline( $p['balance_cutoff_at'], $p['timezone'] );
-        return $text . ' Any unpaid final balance will result in cancellation at ' . $final . ', when access details would otherwise become due.';
+        return $text . ' Any unpaid final balance will result in cancellation at ' . $final . '. Full payment is required before access details can be issued.';
     }
     public static function checkout_allowed( $ref ) {
         $row = self::get( $ref );

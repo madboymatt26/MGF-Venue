@@ -53,6 +53,7 @@ try {
     $check(strpos(MBS_HTML_Renderer::render(MBS_Invoice_Document_View_Model::issued(MBS_Issued_Invoice_Snapshot::from_json($snap_json))),$expected_deadline)!==false,'Rendered invoice prints the saved deadline with its exact time');
     $conf_body=MBS_Email::build_confirmation_message(MBS_Bookings::get($normal))['body'];
     $check(strpos($conf_body,$expected_deadline)!==false&&strpos($conf_body,'Deposit due now')===false,'Confirmation email states the saved deposit deadline');
+    $check(strpos($conf_body,'when access details would otherwise become due')===false&&strpos($conf_body,'Full payment is required before access details can be issued')!==false,'Approval email access claim stays accurate for any configured release window');
     $preview=MBS_Invoice::generate_html(MBS_Bookings::get($normal));
     $check(strpos($preview,$expected_deadline)!==false&&strpos($preview,'Immediately (deposit)')===false&&strpos($preview,'Deposit due immediately')===false,'Staff invoice preview shows the same saved deadline as the issued invoice');
     $legacy_preview=MBS_Invoice::generate_email_invoice(MBS_Bookings::get($normal));

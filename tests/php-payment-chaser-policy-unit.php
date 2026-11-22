@@ -119,4 +119,15 @@ check_chaser( MBS_Payment_Chaser::should_chase_occurrence( $booking ) === true, 
 $wpdb->row = null;
 check_chaser( MBS_Payment_Chaser::should_chase_occurrence( $booking ) === true, 'Bookings without a policy chase as before.' );
 
+// Approval email policy claim must stay accurate whatever access timing is
+// configured: "access becomes due at the cutoff" is only true for the
+// default 24h release window (and a hire starting before 08:00 breaks it
+// even then). The accurate claim, matching the manual-approval path, is
+// that access is only ever sent once the hire is fully paid.
+$wpdb->row = (object) array( 'state' => 'active', 'policy_json' => wp_json_encode( $policy ) );
+$approval = MBS_Payment_Expiry::approval_text( $booking );
+check_chaser( strpos( $approval, 'when access details would otherwise become due' ) === false, 'Approval claim does not tie the balance cutoff to access timing.' );
+check_chaser( strpos( $approval, 'Full payment is required before access details can be issued' ) !== false, 'Approval claim states access requires full payment, matching the manual path.' );
+check_chaser( strpos( $approval, MBS_Payment_Expiry_Policy::format_deadline( $policy['balance_cutoff_at'], $policy['timezone'] ) ) !== false, 'Approval claim still names the enforced balance cutoff time.' );
+
 echo "OK: $checks payment-chaser/policy consistency assertions passed; no email generated.\n";
