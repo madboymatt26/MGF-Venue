@@ -46,8 +46,10 @@ Series credit requires a real invoice-managed frequency (monthly, termly, upfron
 The agreement does not replace recurring billing with a new clock: series retain their reviewed advance-invoice schedule and each issued invoice's frozen due date. Suspension prevents unpaid access but does not erase invoices, stop billing for confirmed hire or automatically cancel sessions. Upfront confirmation wording now correctly describes the full-series invoice instead of saying no lump sum is required.
 
 Acceptance added:
-- 205 real SQL journey assertions across monthly/termly/upfront times online/BACS, actual approval, future issue dates, repeated cron, exact amounts, single outbox intents, immutable invoice snapshots, invoice-level reminders, partial/full settlement, request-only rendering and feature/access isolation.
+- 213 real SQL journey assertions across monthly/termly/upfront times online/BACS, actual approval, future issue dates, repeated cron, exact amounts, single outbox intents, immutable invoice snapshots, invoice-level reminders, partial/full settlement, request-only rendering and feature/access isolation.
 - 106 browser assertions across 320/390/768/1280px email renders and the real staff credit workflow, including nonce/permission/stale-state rejection and mobile layout.
 - Existing credit SQL/policy suites, broad PHP/source suite and real Woo payment/refund state-machine suite remain required.
 
 Synthetic browser HTML is not a real email-client delivery test. Hosted CI, merge and deployment are separate gates. WordPress cron still depends on its scheduler running; neither queued intent nor successful mail transport proves inbox delivery.
+
+Delayed ordinary and B2B payment chases recheck current booking status, recipient, unpaid balance and billing treatment immediately before transport. Old queued wording is suppressed after a credit assignment or move to consolidated billing; a still-current ordinary retry remains supported. Disabling reminders pauses rather than exhausts those retries.

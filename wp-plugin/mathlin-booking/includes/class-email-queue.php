@@ -474,6 +474,24 @@ class MBS_Email_Queue {
         foreach ( $claimed as $email ) {
             if ( class_exists( 'MBS_Payment_Expiry' ) && in_array( $email->message_type, array( 'expiry_warning', 'expiry_cancel', 'expiry_admin' ), true ) && ! MBS_Payment_Expiry::email_current( $email ) ) { self::mark_failed( $email->id, $worker_id, 'Payment expiry email is no longer current for this booking.', 'stale_source', 'expiry_not_current' ); continue; }
             if ( $email->message_type === 'credit_reminder' && ! MBS_Credit_Accounts::reminder_current( $email ) ) { self::mark_failed( $email->id, $worker_id, 'Credit account reminder is no longer current.', 'stale_source', 'credit_reminder_not_current' ); continue; }
+            // A failed ordinary chase may outlive the staff decision to grant
+            // credit or move hire onto consolidated invoices. Never retry its
+            // old deposit/cancellation wording under the new billing treatment.
+            if ( in_array( $email->message_type, array( 'payment_chase', 'b2b_statement_reminder' ), true ) ) {
+                if ( ! MBS_Payment_Features::enabled( 'reminders' ) ) {
+                    self::pause_for_policy( $email->id, $worker_id, 'Payment reminders disabled; delivery paused.' );
+                    continue;
+                }
+                $booking = MBS_Bookings::get_by_id( (int) $email->reference_id );
+                if ( $wpdb->last_error ) { self::release_for_retry( $email->id, $worker_id, 'Payment reminder source temporarily unavailable.', 'source_unavailable', 'transport_error' ); continue; }
+                if ( ! $booking || ! in_array( $booking->status, array( 'confirmed', 'deposit_paid' ), true )
+                    || strcasecmp( $booking->email, $email->to_email ) !== 0
+                    || (float) $booking->amount <= (float) $booking->amount_paid
+                    || MBS_Credit_Accounts::for_booking( $booking ) || ! MBS_Payment_Chaser::should_chase_occurrence( $booking ) ) {
+                    self::mark_failed( $email->id, $worker_id, 'Booking or billing treatment changed before payment reminder dispatch. Review current invoice terms.', 'stale_source', 'payment_chase_not_current' );
+                    continue;
+                }
+            }
             if ( $email->message_type === 'request_rejected' ) {
                 $request = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . $wpdb->prefix . 'mathlin_mod_requests WHERE id=%d', (int) $email->reference_id ) );
                 if ( $wpdb->last_error ) { self::release_for_retry( $email->id, $worker_id, 'Request source temporarily unavailable.', 'source_unavailable', 'transport_error' ); continue; }
