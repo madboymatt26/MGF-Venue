@@ -425,6 +425,24 @@ class MBS_Invoice_Document_Service {
     }
 
     /**
+     * The payment-expiry policy whose deadlines currently bind this booking,
+     * or null when no cancellation deadline applies (feature disabled,
+     * booking not enrolled, manual short-notice review, authorised exemption
+     * or a legacy/invalid record). Shared by invoice issuance and the
+     * confirmation email so every customer-facing deadline comes from the
+     * same saved record the cancellation worker enforces.
+     *
+     * @param object $booking Booking row.
+     * @return array|null Decoded policy.
+     */
+    private static function enforced_expiry_policy( $booking ) {
+        if ( empty( $booking->ref ) || ! class_exists( 'MBS_Payment_Expiry' ) || ! class_exists( 'MBS_Payment_Expiry_Policy' ) ) {
+            return null;
+        }
+        return MBS_Payment_Expiry::enforced_policy( $booking->ref );
+    }
+
+    /**
      * Compute a complete payment schedule (never returns null for chargeable bookings).
      */
     private static function compute_payment_schedule( $booking, $total_minor, $deposit_settings, $bank ) {
@@ -445,12 +463,28 @@ class MBS_Invoice_Document_Service {
             $deposit_minor = (int) intdiv( $total_minor * $percentage_bps + 5000, 10000 );
             $balance_minor = $total_minor - $deposit_minor;
             $balance_days = $deposit_settings['balance_days'];
-            return array(
+            $schedule = array(
                 'deposit_minor'    => $deposit_minor,
                 'deposit_due_date' => wp_date( 'Y-m-d' ),
                 'balance_minor'    => $balance_minor,
                 'balance_due_date' => wp_date( 'Y-m-d', strtotime( $booking->booking_date . " -{$balance_days} days" ) ),
             );
+            // When the booking is enrolled in the payment-expiry policy, the
+            // invoice prints the deadline the cancellation system saved at
+            // approval (48 hours from approval, honouring any agreed
+            // extension), never the issue date. Mirrors
+            // MBS_Payment_Expiry_Policy::next_deadline so the printed date and
+            // the enforced cancellation can never disagree again.
+            $policy = self::enforced_expiry_policy( $booking );
+            if ( $policy ) {
+                $deposit_due_at = MBS_Payment_Expiry_Policy::deposit_deadline_at( $policy );
+                if ( $deposit_due_at !== null ) {
+                    $schedule['deposit_due_date'] = ( new DateTimeImmutable( '@' . $deposit_due_at ) )->setTimezone( new DateTimeZone( $policy['timezone'] ) )->format( 'Y-m-d' );
+                    $schedule['deposit_due_at'] = $deposit_due_at;
+                    $schedule['deadline_timezone'] = $policy['timezone'];
+                }
+            }
+            return $schedule;
         }
         // Standard terms
         return array(

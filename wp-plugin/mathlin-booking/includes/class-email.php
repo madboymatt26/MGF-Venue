@@ -200,9 +200,19 @@ class MBS_Email {
                     $body .= '</div>';
                 }
             } elseif ( ! $requires_full ) {
+                // When the payment-expiry policy enrolled this approval, state
+                // the exact deposit deadline the cancellation system saved,
+                // never "due now" (which previously contradicted the 48-hour
+                // deadline in this same email and on the invoice).
+                $expiry_policy = ( class_exists( 'MBS_Payment_Expiry' ) && ! empty( $booking->ref ) ) ? MBS_Payment_Expiry::enforced_policy( $booking->ref ) : null;
+                $deposit_deadline_at = $expiry_policy ? MBS_Payment_Expiry_Policy::deposit_deadline_at( $expiry_policy ) : null;
                 $body .= '<div style="background:#f5f0ff;border:1px solid #e0d0f0;border-radius:6px;padding:16px;margin:16px 0;">';
                 $body .= '<strong style="color:#7413DC;">Payment Schedule</strong><br><br>';
-                $body .= '&#9679; <strong>Deposit due now:</strong> &pound;' . number_format( $deposit_amount, 2 ) . ' (' . (int) $deposit_settings['percentage'] . '% of total)<br>';
+                if ( $deposit_deadline_at !== null ) {
+                    $body .= '&#9679; <strong>Deposit:</strong> &pound;' . number_format( $deposit_amount, 2 ) . ' (' . (int) $deposit_settings['percentage'] . '% of total) &mdash; due by <strong>' . esc_html( MBS_Payment_Expiry_Policy::format_deadline( $deposit_deadline_at, $expiry_policy['timezone'] ) ) . '</strong><br>';
+                } else {
+                    $body .= '&#9679; <strong>Deposit due now:</strong> &pound;' . number_format( $deposit_amount, 2 ) . ' (' . (int) $deposit_settings['percentage'] . '% of total)<br>';
+                }
                 $body .= '&#9679; <strong>Final balance:</strong> &pound;' . number_format( $balance_amount, 2 ) . ' — due by ' . date( 'j F Y', strtotime( $booking->booking_date . " -{$balance_days} days" ) ) . '<br><br>';
                 $body .= '<em style="font-size:13px;color:#6b7280;">Bookings made less than ' . $balance_days . ' days before the event require full payment immediately.</em>';
                 $body .= '</div>';

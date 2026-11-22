@@ -38,6 +38,43 @@ try {
     $p_before=$row->policy_json; $again=MBS_Invoice_Document_Service::confirm_and_issue($normal,array(),true);
     $check(!is_wp_error($again)&&MBS_Payment_Expiry::get($normal)->policy_json===$p_before,'Approval retry never resets 48-hour clock');
     $check(strpos(MBS_Email::build_confirmation_message(MBS_Bookings::get($normal))['body'],'48 hours of approval')!==false,'Approval email contains agreed warning');
+    // Invoice/policy deadline consistency (council invoice regression): the issued
+    // document must carry the exact deadline the cancellation worker enforces,
+    // never the issue date.
+    $doc_table=$wpdb->prefix.MBS_INVOICE_DOCUMENTS_TABLE;
+    $expected_deadline=MBS_Payment_Expiry_Policy::format_deadline($p['deposit_due_at'],$p['timezone']);
+    $snap_json=$wpdb->get_var($wpdb->prepare("SELECT snapshot_json FROM {$doc_table} WHERE id=%d",(int)MBS_Bookings::get($normal)->current_invoice_document_id));
+    $issued=json_decode($snap_json,true);
+    $check($issued['payment_schedule']['deposit_due_at']===$p['deposit_due_at'],'Invoice stores the exact policy deposit deadline');
+    $check($issued['payment_schedule']['deposit_due_date']===wp_date('Y-m-d',$p['deposit_due_at'],new DateTimeZone($p['timezone'])),'Invoice deposit date is the policy deadline day');
+    $check($issued['payment_schedule']['deposit_due_date']!==wp_date('Y-m-d'),'Invoice deposit date is never the issue date');
+    $check($issued['due_date']===$issued['payment_schedule']['deposit_due_date'],'Invoice header due date matches the policy deadline');
+    $check(MBS_Payment_Expiry_Policy::next_deadline($p,0)['at']===$issued['payment_schedule']['deposit_due_at'],'Printed deadline is the enforced cancellation deadline');
+    $check(strpos(MBS_HTML_Renderer::render(MBS_Invoice_Document_View_Model::issued(MBS_Issued_Invoice_Snapshot::from_json($snap_json))),$expected_deadline)!==false,'Rendered invoice prints the saved deadline with its exact time');
+    $conf_body=MBS_Email::build_confirmation_message(MBS_Bookings::get($normal))['body'];
+    $check(strpos($conf_body,$expected_deadline)!==false&&strpos($conf_body,'Deposit due now')===false,'Confirmation email states the saved deposit deadline');
+    // Reissue after an agreed extension: the printed deadline follows the extension.
+    $p_ext=$p;$p_ext['extension_until']=$p['deposit_due_at']+3600;
+    $wpdb->update($policy_table,array('policy_json'=>wp_json_encode($p_ext)),array('booking_ref'=>$normal));
+    $wpdb->query('START TRANSACTION');
+    $locked=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$table} WHERE ref=%s FOR UPDATE",$normal));
+    $reissue=MBS_Invoice_Document_Service::reissue_booking_document_within_transaction($locked);
+    $wpdb->query('COMMIT');
+    $check(!is_wp_error($reissue),'Reissue after extension succeeds');
+    $reissue_json=$wpdb->get_var($wpdb->prepare("SELECT snapshot_json FROM {$doc_table} WHERE id=%d",(int)$reissue));
+    $reissued=json_decode($reissue_json,true);
+    $check($reissued['payment_schedule']['deposit_due_at']===$p_ext['extension_until'],'Reissued invoice honours the agreed extension');
+    $check(strpos(MBS_HTML_Renderer::render(MBS_Invoice_Document_View_Model::issued(MBS_Issued_Invoice_Snapshot::from_json($reissue_json))),MBS_Payment_Expiry_Policy::format_deadline($p_ext['extension_until'],$p['timezone']))!==false,'Rendered reissue prints the extended deadline');
+    // Authorised exemption: deadlines no longer bind, invoice falls back safely.
+    $p_ex=$p_ext;$p_ex['exempt']=true;
+    $wpdb->update($policy_table,array('policy_json'=>wp_json_encode($p_ex)),array('booking_ref'=>$normal));
+    $wpdb->query('START TRANSACTION');
+    $locked=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$table} WHERE ref=%s FOR UPDATE",$normal));
+    $reissue2=MBS_Invoice_Document_Service::reissue_booking_document_within_transaction($locked);
+    $wpdb->query('COMMIT');
+    $ex_doc=json_decode($wpdb->get_var($wpdb->prepare("SELECT snapshot_json FROM {$doc_table} WHERE id=%d",(int)$reissue2)),true);
+    $check(!is_wp_error($reissue2)&&empty($ex_doc['payment_schedule']['deposit_due_at'])&&$ex_doc['payment_schedule']['deposit_due_date']===wp_date('Y-m-d'),'Exempted hire falls back to ordinary invoice terms');
+    $wpdb->update($policy_table,array('policy_json'=>wp_json_encode($p)),array('booking_ref'=>$normal));
     $short=$seed(2); $result=MBS_Invoice_Document_Service::confirm_and_issue($short,array(),true);
     $check(is_wp_error($result)&&!MBS_Payment_Expiry::get($short),'Short notice requires explicit acknowledgement');
     $result=MBS_Bookings::update_status($short,'confirmed',true,array('return_error'=>true));
@@ -45,6 +82,8 @@ try {
     $check(MBS_Bookings::update_status($short,'confirmed',true)===false,'Legacy boolean status contract retained');
     $result=MBS_Invoice_Document_Service::confirm_and_issue($short,array(),true,array('short_notice_ack'=>true));
     $check(!is_wp_error($result)&&json_decode(MBS_Payment_Expiry::get($short)->policy_json,true)['deposit_due_at']===null,'Acknowledged short notice uses full-payment cutoff');
+    $short_doc=json_decode($wpdb->get_var($wpdb->prepare("SELECT snapshot_json FROM {$doc_table} WHERE id=%d",(int)MBS_Bookings::get($short)->current_invoice_document_id)),true);
+    $check(!empty($short_doc['payment_schedule']['immediate'])&&empty($short_doc['payment_schedule']['deposit_due_at']),'Short-notice full-payment invoice invents no deposit deadline');
     $past=$seed(0); $result=MBS_Invoice_Document_Service::confirm_and_issue($past,array(),true,array('short_notice_ack'=>true));
     $check(is_wp_error($result),'Past cutoff cannot auto-enroll');
     $warn=$seed(); MBS_Invoice_Document_Service::confirm_and_issue($warn,array(),true); $age_deposit($warn,25);
@@ -89,6 +128,11 @@ try {
     $check((bool)array_filter(MBS_Payment_Expiry::needs_attention(100),static function($x)use($held){return$x['ref']===$held;}),'Money-held review remains in dashboard attention');
     update_option('mbs_payment_expiry_enabled',0);
     $check(!MBS_Payment_Expiry::enabled(),'Policy can be suspended without changing records');
+    $plain=$seed(); $plain_result=MBS_Invoice_Document_Service::confirm_and_issue($plain,array(),true);
+    $check(!is_wp_error($plain_result)&&MBS_Payment_Expiry::get($plain)===null,'Suspended policy enrols nothing');
+    $plain_doc=json_decode($wpdb->get_var($wpdb->prepare("SELECT snapshot_json FROM {$doc_table} WHERE id=%d",(int)MBS_Bookings::get($plain)->current_invoice_document_id)),true);
+    $check(empty($plain_doc['payment_schedule']['deposit_due_at'])&&$plain_doc['payment_schedule']['deposit_due_date']===wp_date('Y-m-d'),'Suspended policy keeps legacy invoice terms');
+    $check(strpos(MBS_Email::build_confirmation_message(MBS_Bookings::get($plain))['body'],'Deposit due now:')!==false,'Suspended policy keeps the existing email wording');
     echo "PAYMENT_EXPIRY_OK: {$checks} assertions; all transport intercepted.\n";
 } finally {
     remove_filter('query',$fail,PHP_INT_MAX); remove_filter('pre_wp_mail',$mail,PHP_INT_MAX); remove_filter('pre_http_request',$http,PHP_INT_MAX); $wpdb->query('ROLLBACK');
