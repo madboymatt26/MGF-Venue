@@ -147,8 +147,9 @@ $deposit_settings = MBS_Bookings::get_deposit_settings();
             $credit_docs = $preloaded['credit_docs'][ $inv_id ] ?? array();
         ?>
         <div style="border-top:1px solid #e5e7eb;padding:1rem 0;display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
-            <div><strong><?php echo esc_html( $invoice->invoice_ref ); ?></strong> · <?php echo esc_html( ucfirst( str_replace( '_', ' ', $invoice->status ) ) ); ?><br><span class="nms-muted"><?php echo esc_html( wp_date( 'j M Y', strtotime( $invoice->period_start ) ) . '–' . wp_date( 'j M Y', strtotime( $invoice->period_end ) ) ); ?> · Total <?php echo esc_html( MBS_Money::format( (int) $invoice->total_minor, $invoice->currency ) ); ?> · Paid <?php echo esc_html( MBS_Money::format( (int) $invoice->paid_minor, $invoice->currency ) ); ?></span>
-                <?php if ( $charge_meta ) : ?><p>Additional charge, separate from hire payment: <?php echo esc_html( $charge_meta['category'] . ' / ' . $charge_meta['related_ref'] ); ?>. Due <?php echo esc_html( substr( $invoice->due_at, 0, 10 ) ); ?>.</p><?php endif; ?>
+            <div><strong><?php echo esc_html( $invoice->invoice_ref ); ?></strong> · <?php echo esc_html( MBS_Additional_Charges::is_charge($invoice) ? MBS_Additional_Charges::status_label($invoice) : ucfirst( str_replace( '_', ' ', $invoice->status ) ) ); ?><br><span class="nms-muted"><?php echo esc_html( wp_date( 'j M Y', strtotime( $invoice->period_start ) ) . '–' . wp_date( 'j M Y', strtotime( $invoice->period_end ) ) ); ?> · Total <?php echo esc_html( MBS_Money::format( (int) $invoice->total_minor, $invoice->currency ) ); ?> · Paid <?php echo esc_html( MBS_Money::format( (int) $invoice->paid_minor, $invoice->currency ) ); ?></span>
+                <?php if ( $charge_meta && $invoice->status==='credited' ) : ?><p><strong>Charge cancelled. Nothing to pay.</strong> <?php echo $balance<0?'A separate refund review is required. This is not confirmation of a refund.':'Your original hire remains unchanged.'; ?></p><?php endif; ?>
+                <?php if ( $charge_meta ) : ?><p>Additional charge, separate from hire payment: <?php echo esc_html( $charge_meta['category'] . ' / ' . $charge_meta['related_ref'] ); ?>. <?php if(MBS_Invoice_Payment::is_payable($invoice)): ?>Due <?php echo esc_html( substr( $invoice->due_at, 0, 10 ) ); ?>.<?php endif; ?></p><?php endif; ?>
                 <?php if ( $charge_meta ) : ?><p><?php echo esc_html( $charge_items ? $charge_items[0]->description : '' ); ?></p>
                     <?php foreach ( $credit_docs as $charge_document ) :
                         $credit_pdf_url = MBS_Invoice_Delivery_Endpoint::authenticated_pdf_url( (int) $charge_document['id'] );
@@ -161,6 +162,7 @@ $deposit_settings = MBS_Bookings::get_deposit_settings();
             <div style="text-align:right;"><strong>Balance <?php echo esc_html( MBS_Money::format( $balance, $invoice->currency ) ); ?></strong><br>
                 <?php if ( $invoice_pdf_url ) : ?><a href="<?php echo esc_url( $invoice_pdf_url ); ?>" class="nms-btn nms-btn-sm" style="background:#f5f0ff;color:#7413DC;border-color:#e0d0f0;">Download PDF</a><?php endif; ?>
                 <?php if ( $pay_url ) : ?><a href="<?php echo esc_url( $pay_url ); ?>" class="nms-btn nms-btn-sm" style="background:#2ecc71;color:#fff;border-color:#2ecc71;">Pay this invoice</a>
+                <?php elseif ( $charge_meta && MBS_Invoice_Payment::is_payable($invoice) ) : ?><span class="nms-muted">Contact us to arrange offline payment, quoting <?php echo esc_html($invoice->invoice_ref); ?>.</span>
                 <?php elseif ( MBS_Payment_Features::enabled() && $balance > 0 && $invoice_series && $invoice_series->payment_method === 'offline_bacs' ) : ?><span class="nms-muted">Pay by BACS using <?php echo esc_html( $invoice->invoice_ref ); ?></span><?php endif; ?>
             </div>
         </div>

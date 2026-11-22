@@ -13,9 +13,10 @@ window.NMSAdditionalCharges = function(charges) {
     root.append($('<h3>').text('Additional charges — separate from hire'));
     charges.forEach(function(charge) {
         var card = $('<section>').addClass('nms-form-section');
-        card.append($('<h4>').text(charge.invoice_ref + ' — ' + charge.status));
+        card.append($('<h4>').text(charge.invoice_ref + ' — ' + (charge.status === 'credited' ? 'Cancelled / fully credited' : charge.status.replace('_',' '))));
         card.append($('<p>').text(charge.description));
-        card.append($('<p>').text('Total ' + charge.total + ' · Balance ' + charge.balance + ' · Due ' + charge.due_date));
+        if (charge.status === 'credited') card.append($('<p>').text('Charge cancelled. Nothing to pay. Your original hire remains unchanged.'));
+        card.append($('<p>').text('Total ' + charge.total + ' · Balance ' + charge.balance + (charge.status === 'credited' ? '' : ' · Due ' + charge.due_date)));
         if (charge.payment_under_review) card.append($('<p>').text('Your payment is being checked. Please do not pay again while we review it.'));
         (charge.documents || []).forEach(function(doc) {
             card.append($('<p>').append($('<a>').attr('href', doc.pdf_url).text('Download ' + doc.type.replace('_', ' ') + ' ' + doc.reference)));

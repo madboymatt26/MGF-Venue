@@ -1027,7 +1027,10 @@ class MBS_Woo_Payment {
             if ( $invoice_ref ) {
                 echo '<div style="background:#d1fae5;border:1px solid #2ecc71;border-radius:8px;padding:16px 20px;margin:16px 0;">';
                 echo '<h3 style="color:#065f46;margin:0 0 8px;">✅ Invoice Payment Received</h3>';
-                echo '<p style="margin:0;">Your payment for consolidated invoice <strong>' . esc_html( $invoice_ref ) . '</strong> has been received. Thank you!</p>';
+                $invoice=MBS_Billing_Ledger::get_invoice($invoice_ref);
+                $is_charge=class_exists('MBS_Additional_Charges') && MBS_Additional_Charges::is_charge($invoice);
+                echo '<p style="margin:0;">Your payment for '.($is_charge?'additional-charge':'consolidated').' invoice <strong>' . esc_html( $invoice_ref ) . '</strong> has been received. Thank you!</p>';
+                if($is_charge) echo '<p>Your original hire invoice, booking and access remain unchanged.</p>';
                 echo '</div>';
                 continue;
             }

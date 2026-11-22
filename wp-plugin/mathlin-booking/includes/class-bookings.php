@@ -795,6 +795,9 @@ class MBS_Bookings {
             'scout_only'       => false,
             'one_off_only'     => false,
             'date_scope'       => '',
+            'date_overlap'     => false,
+            'space'            => '',
+            'count_only'       => false,
         );
         $args = wp_parse_args( $args, $defaults );
 
@@ -822,19 +825,24 @@ class MBS_Bookings {
             $values[] = wp_date( 'Y-m-d' );
         }
         if ( $args['date_from'] ) {
-            $where[]  = 'booking_date >= %s';
+            $where[]  = $args['date_overlap'] ? "COALESCE(NULLIF(booking_date_end, ''), booking_date) >= %s" : 'booking_date >= %s';
             $values[] = $args['date_from'];
         }
         if ( $args['date_to'] ) {
             $where[]  = 'booking_date <= %s';
             $values[] = $args['date_to'];
         }
+        if ( $args['space'] !== '' ) { $where[] = 'space = %s'; $values[] = $args['space']; }
         if ( $args['search'] ) {
             $like     = '%' . $wpdb->esc_like( $args['search'] ) . '%';
             $where[]  = '(name LIKE %s OR organisation LIKE %s OR ref LIKE %s OR purpose LIKE %s OR notes LIKE %s)';
             array_push( $values, $like, $like, $like, $like, $like );
         }
 
+        if ( $args['count_only'] ) {
+            $count_sql = "SELECT COUNT(*) FROM {$table} WHERE " . implode( ' AND ', $where );
+            return (int) $wpdb->get_var( $values ? $wpdb->prepare( $count_sql, $values ) : $count_sql );
+        }
         $allowed_order = array( 'id', 'booking_date', 'created_at', 'name', 'status', 'amount' );
         $orderby = in_array( $args['orderby'], $allowed_order ) ? $args['orderby'] : 'booking_date';
         $order   = strtoupper( $args['order'] ) === 'DESC' ? 'DESC' : 'ASC';

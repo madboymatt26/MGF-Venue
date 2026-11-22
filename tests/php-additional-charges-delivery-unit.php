@@ -17,8 +17,14 @@ class MBS_Billing_Ledger {
 class MBS_Money { public static function format($minor){return 'GBP '.number_format($minor/100,2,'.','');} }
 class MBS_Invoice_Reservation { public static $status='released'; public static function get($ref){return (object)array('status'=>self::$status);} }
 class MBS_Invoice_Payment { public static function is_payable($i){return $i->status==='issued'&&MBS_Billing_Ledger::balance_minor($i)>0;} public static function generate_payment_url($i){return 'https://example.test/pay';} }
+class MBS_Woo_Payment {public static function is_available(){return true;}}
 class MBS_Invoice_Document_Service { public static function get_current_ledger_document_id($id){return 7;} }
 class MBS_Email_Templates { public static function get_template($type){return array('subject'=>'{invoice} {credit}','body'=>'{name} {description} {balance} {credit_amount}');} public static function get_org_settings(){return array('name'=>'Synthetic');} }
+class MBS_Email {public static function header(){return '<html><body><header>Branded</header>';}public static function footer(){return '<footer>Organisation</footer></body></html>'; }}
+function wp_date($f,$t){return date($f,$t);}
+function wpautop($v){return '<p>'.str_replace("\n\n",'</p><p>',$v).'</p>';}
+function sanitize_email($v){return $v;}
+function get_option($k){return 'staff@example.test';}
 class MBS_Bookings { public static function get_admin_email(){return 'staff@example.test';} }
 class MBS_Audit_Log { public static function log(...$args){return true;} }
 class MBS_Email_Queue {
@@ -33,7 +39,7 @@ class MBS_Email_Queue {
 }
 require __DIR__.'/../wp-plugin/mathlin-booking/includes/class-additional-charges.php';
 $GLOBALS['manager']=true;
-$GLOBALS['invoice']=(object)array('id'=>1,'invoice_ref'=>'INV-TEST','billing_mode'=>'additional_charge','document_type'=>'invoice','version'=>1,'status'=>'issued','total_minor'=>2500,'paid_minor'=>0,'contact_name'=>'Synthetic','contact_email'=>'hirer@example.test','due_at'=>'2026-10-29 23:59:59');
+$GLOBALS['invoice']=(object)array('id'=>1,'invoice_ref'=>'INV-TEST','billing_mode'=>'additional_charge','document_type'=>'invoice','version'=>1,'status'=>'issued','total_minor'=>2500,'paid_minor'=>0,'credited_minor'=>0,'contact_name'=>'Synthetic','contact_email'=>'hirer@example.test','due_at'=>'2026-10-29 23:59:59');
 $GLOBALS['credit']=(object)array('id'=>2,'invoice_ref'=>'CN-TEST','document_type'=>'credit_note','parent_invoice_id'=>1,'total_minor'=>-500);
 $GLOBALS['foreign_credit']=(object)array('id'=>3,'invoice_ref'=>'CN-OTHER','document_type'=>'credit_note','parent_invoice_id'=>99,'total_minor'=>-500);
 $checks=0;

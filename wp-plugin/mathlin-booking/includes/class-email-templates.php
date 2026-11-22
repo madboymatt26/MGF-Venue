@@ -99,7 +99,7 @@ class MBS_Email_Templates {
             'additional_charge_invoice' => array(
                 'label' => 'Additional charge invoice',
                 'subject' => 'Additional charge invoice {invoice} — {org_name}',
-                'body' => "Hi {name},\n\nPlease find your separate additional-charge invoice attached for {description}.\nThe outstanding balance is {balance}, due {due_date}.\n\nKind Regards,\n{org_name}",
+                'body' => "Hi {name},\n\nYour additional-charge invoice for {description} is attached.\n\nThe amount and payment details are below.\n\nKind Regards,\n{org_name}",
             ),
             'additional_charge_credit' => array(
                 'label' => 'Additional charge credit note',
