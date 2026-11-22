@@ -8,6 +8,13 @@ global $wpdb;
 $table = $wpdb->prefix . MBS_TABLE;
 $checks = 0; $check = static function($ok,$why)use(&$checks){$checks++;if(!$ok)throw new RuntimeException($why);};
 
+// Save every option this fixture touches; the cleanup step restores them so
+// later scenarios see the state they had before the browser acceptance ran.
+$touched = array( 'mbs_campsite_mode', 'mbs_payments_enabled', 'mbs_invoices_enabled', 'mbs_deposit_enabled', 'mbs_deposit_percentage', 'mbs_payment_expiry_enabled', 'timezone_string', 'mbs_ha_webhook_url' );
+$saved = array();
+foreach ( $touched as $opt ) $saved[ $opt ] = get_option( $opt, '__MBS_UNSET__' );
+update_option( 'mbs_venue_browser_saved', $saved, false );
+
 update_option( 'mbs_campsite_mode', 0 );
 update_option( 'mbs_payments_enabled', 1 );
 update_option( 'mbs_invoices_enabled', 1 );
