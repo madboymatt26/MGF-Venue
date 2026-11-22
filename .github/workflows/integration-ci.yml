@@ -167,6 +167,22 @@ jobs:
       - name: Follow invoice terms request emails and staff review on mobile and desktop
         if: matrix.php == '8.2'
         run: MGF_BROWSER_MODULE="$RUNNER_TEMP/mgf-browser/node_modules/playwright/index.mjs" node tests/integration/invoice-terms-browser.mjs
+      - name: Seed venue-mode browser fixture
+        if: matrix.php == '8.2'
+        run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/venue-mode-browser-seed.php --allow-root
+      - name: Verify venue mode shows billing, heating and the preview deadline on desktop and mobile
+        if: matrix.php == '8.2'
+        run: MGF_BROWSER_MODULE="$RUNNER_TEMP/mgf-browser/node_modules/playwright/index.mjs" node tests/integration/venue-mode-browser.mjs
+      - name: Remove venue-mode browser fixture
+        if: always() && matrix.php == '8.2'
+        run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/venue-mode-browser-cleanup.php --allow-root
+      - name: Upload venue mode browser screenshots
+        if: always() && matrix.php == '8.2'
+        uses: actions/upload-artifact@v4
+        with:
+          name: venue-mode-browser
+          path: browser-artifacts/venue-*.png
+          if-no-files-found: ignore
       - name: Verify Scout series administration lifecycle
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/scout-series-admin.php --allow-root
       - name: Verify staff booking preview and creation
