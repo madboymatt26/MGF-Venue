@@ -11,7 +11,7 @@ const browser=await (engine==='webkit'?webkit:chromium).launch({headless:true,..
 const mode=process.env.MBS_LAYOUT_MODE||'venue';
 const page=await browser.newPage();const errors=[];let checks=0;
 const check=(ok,msg)=>{checks++;assert.ok(ok,msg);};
-const wanted=['mathlin-booking','mathlin-calendar','mathlin-settings','mathlin-archived','mathlin-blocked','mathlin-requests','mathlin-audit-log','mathlin-analytics','mathlin-custom-fields','mathlin-add-booking','mathlin-emails'];
+const wanted=['mathlin-booking','mathlin-calendar','mathlin-settings','mathlin-archived','mathlin-blocked','mathlin-requests', 'mathlin-google-calendar','mathlin-audit-log','mathlin-analytics','mathlin-custom-fields','mathlin-add-booking','mathlin-emails'];
 const readableForms={ 'mathlin-settings':true, 'mathlin-emails':true };
 try{
  await page.goto(base+'/wp-login.php');await page.locator('#user_login').fill('admin');await page.locator('#user_pass').fill(process.env.MBS_LAYOUT_PASSWORD||'integration-only');
