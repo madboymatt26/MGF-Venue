@@ -67,3 +67,19 @@ webhooks remain gateway-specific and require separate staging verification.
 The selected WordPress/WooCommerce versions officially allow PHP 7.4. If the
 project upgrades to a WooCommerce release that drops PHP 7.4, the declared
 support policy must be changed deliberately; do not silently skip the 7.4 job.
+
+### Booking scroll/width browser regression
+
+`admin-scroll-layout-browser.mjs` uses the real disposable WordPress admin,
+not copied HTML. Seed `scenarios/admin-scroll-layout-seed.php` with
+`MBS_LAYOUT_MODE=venue` or `campsite`, run with the same mode, and finally seed
+with `MBS_LAYOUT_MODE=cleanup`. CI runs Chromium and Linux WebKit in both modes.
+It checks same-page resizing from 1,920px through 320px and back, ordinary
+scrolling in both directions (including wheel input), one-row section links,
+collapsed jump destinations, unselected and selected bulk controls, multi-select,
+clear/last-uncheck, reachable per-booking/export actions, and hidden admin chrome.
+Screenshots are uploaded as `admin-scroll-layout-browser`.
+
+Mobile viewports and Linux WebKit are not real iPhone Safari. Browser address-bar
+collapse, notches/safe areas, zoom and touch/keyboard behaviour on an actual iPhone
+remain device checks. No live site, real mail, payment or HA call is used.

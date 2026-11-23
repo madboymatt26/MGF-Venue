@@ -1,6 +1,31 @@
 /* NM Scouts Booking – Admin JS */
 jQuery(function ($) {
 
+    // WordPress's mobile toolbar scrolls away on small phones. Dock against
+    // its visible edge, not its nominal height (also handles hidden toolbars).
+    var layoutFrame = 0;
+    function measureBookingChrome() {
+        layoutFrame = 0;
+        var toolbar = document.getElementById('wpadminbar');
+        var edge = toolbar && toolbar.getClientRects().length ? Math.max(0, toolbar.getBoundingClientRect().bottom) : 0;
+        document.documentElement.style.setProperty('--mbs-admin-top', edge + 'px');
+        [['.mbs-mobile-jump-bar', '--mbs-jump-height'], ['.nms-bulk-bar', '--mbs-bulk-height']].forEach(function (item) {
+            var el = document.querySelector(item[0]);
+            if (el) document.documentElement.style.setProperty(item[1], el.getBoundingClientRect().height + 'px');
+        });
+    }
+    function queueBookingChrome() {
+        if (!layoutFrame) layoutFrame = window.requestAnimationFrame(measureBookingChrome);
+    }
+    window.addEventListener('scroll', queueBookingChrome, {passive:true});
+    window.addEventListener('resize', queueBookingChrome);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', queueBookingChrome);
+    if (window.ResizeObserver) {
+        var bookingChromeObserver = new ResizeObserver(queueBookingChrome);
+        document.querySelectorAll('#wpadminbar, .mbs-mobile-jump-bar, .nms-bulk-bar').forEach(function (el) { bookingChromeObserver.observe(el); });
+    }
+    measureBookingChrome();
+
     // Reveal minimised destination cards for jump links and bookmarked hashes.
     function revealBookingSection(hash) {
         var target = document.getElementById((hash || '').slice(1));
@@ -571,6 +596,10 @@ jQuery(function ($) {
         updateBulkCount();
     });
     $(document).on('change', '.nms-bulk-check', updateBulkCount);
+    $('#nms-bulk-clear').on('click', function () {
+        $('.nms-bulk-check').prop('checked', false);
+        updateBulkCount();
+    });
 
     // Show how many of the selected bookings each action can apply to. The server
     // still decides every transition; this only helps the person choosing.
@@ -586,7 +615,10 @@ jQuery(function ($) {
         var count = $checked.length;
         $('#nms-select-all, #nms-select-all-bar').prop('checked', count > 0 && count === total)
             .prop('indeterminate', count > 0 && count < total);
+        var clearHadFocus = document.activeElement && document.activeElement.id === 'nms-bulk-clear';
         $('.nms-bulk-bar').toggleClass('has-selection', count > 0);
+        if (!count && clearHadFocus) $('.nms-bulk-check').first().trigger('focus');
+        queueBookingChrome();
         var text = '';
         if (count > 0) {
             text = count + ' selected';
@@ -601,6 +633,8 @@ jQuery(function ($) {
         if ($('#nms-bulk-action option:selected').prop('disabled')) $('#nms-bulk-action').val('');
     }
     $('#nms-bulk-action').on('change', updateBulkCount);
+    updateBulkCount();
+    window.addEventListener('pageshow', updateBulkCount);
 
     $('#nms-bulk-apply').on('click', function() {
         var action = $('#nms-bulk-action').val();
