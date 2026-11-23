@@ -14,7 +14,7 @@ const check=(ok,msg)=>{checks++;if(!ok){failures.push(msg);if(!baseline)assert.o
 const settle=()=>page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
 const scroll=async y=>{await page.evaluate(y=>scrollTo(0,y),y);await settle();};
 const detail=()=>page.goto(base+'/wp-admin/admin.php?page=mathlin-booking&action=view&ref=LAYOUT-01');
-const screenshot=async name=>page.screenshot({path:`browser-artifacts/layout-${baseline?'before':'after'}-${engine}-${mode}-${name}.png`});
+const screenshot=async name=>{await page.mouse.move(1,500);return page.screenshot({path:`browser-artifacts/layout-${baseline?'before':'after'}-${engine}-${mode}-${name}.png`});};
 page.on('pageerror',e=>errors.push(e.message));
 await mkdir('browser-artifacts',{recursive:true});
 try{
@@ -56,7 +56,14 @@ try{
     check(r.y>=n.y+n.height-2,'Jump target clears menu '+width+' '+hash);
     check(await target.evaluate(el=>el.tagName!=='DETAILS'||el.open),'Jump opens collapsed section '+hash);
    }
-   if(width===390){await scroll(900);await screenshot('detail-mobile-scroll');}
+   if(width===390){
+    await scroll(900);await page.mouse.move(1,500);
+    check(await nav.locator('a').evaluateAll(els=>els.every(el=>!el.hasAttribute('aria-current')&&!el.classList.contains('is-active'))),'Remembered hash is not presented as an active section');
+    await page.emulateMedia({media:'screen'});
+    const focused=nav.locator('a').first();await focused.focus();
+    check(await focused.evaluate(el=>getComputedStyle(el).outlineStyle!=='none'),'Keyboard focus remains clearly outlined');
+    await screenshot('detail-mobile-scroll');
+   }
   }
  }
  for(const width of [320,390,600,782,900,1280]){
