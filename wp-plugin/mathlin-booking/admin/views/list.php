@@ -84,6 +84,7 @@
             <option value="archived" data-from="confirmed,paid,cancelled">Archive selected</option>
         </select>
         <button id="nms-bulk-apply" class="button button-primary">Apply</button>
+        <button type="button" id="nms-bulk-clear" class="button">Clear selection</button>
         <span id="nms-bulk-count" class="nms-bulk-count nms-muted" role="status" aria-live="polite"></span>
         <?php if ( $series_present ) : ?><span class="nms-muted nms-bulk-seriesnote">Recurring series have no checkbox. Use the buttons on each series row.</span><?php endif; ?>
         <span id="nms-bulk-msg" class="nms-settings-msg" role="status" aria-live="polite"></span>

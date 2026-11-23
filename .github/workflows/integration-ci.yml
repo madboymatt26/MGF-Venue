@@ -149,7 +149,7 @@ jobs:
         shell: bash
         run: |
           npm install --prefix "$RUNNER_TEMP/mgf-browser" playwright@1.55.1
-          node "$RUNNER_TEMP/mgf-browser/node_modules/playwright/cli.js" install --with-deps chromium
+          node "$RUNNER_TEMP/mgf-browser/node_modules/playwright/cli.js" install --with-deps chromium webkit
           export MGF_BROWSER_MODULE="$RUNNER_TEMP/mgf-browser/node_modules/playwright/index.mjs"
           export MGF_BROWSER_FIXTURE="$(docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp option get mbs_extra_browser_fixture --format=json --allow-root)"
           node tests/integration/charge-ux-archive-browser.mjs
@@ -173,6 +173,28 @@ jobs:
       - name: Verify venue mode shows billing, heating and the preview deadline on desktop and mobile
         if: matrix.php == '8.2'
         run: MGF_BROWSER_MODULE="$RUNNER_TEMP/mgf-browser/node_modules/playwright/index.mjs" node tests/integration/venue-mode-browser.mjs
+      - name: Verify ordinary scrolling, selection toolbar and desktop resize in both modes
+        if: matrix.php == '8.2'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup_layout() {
+            docker compose -f tests/integration/docker-compose.yml run --rm -T -e MBS_LAYOUT_MODE=cleanup cli wp eval-file /workspace/tests/integration/scenarios/admin-scroll-layout-seed.php --allow-root
+          }
+          trap cleanup_layout EXIT
+          for mode in venue campsite; do
+            docker compose -f tests/integration/docker-compose.yml run --rm -T -e MBS_LAYOUT_MODE="$mode" cli wp eval-file /workspace/tests/integration/scenarios/admin-scroll-layout-seed.php --allow-root
+            for engine in chromium webkit; do
+              MBS_LAYOUT_ENGINE="$engine" MBS_LAYOUT_MODE="$mode" MGF_BROWSER_MODULE="$RUNNER_TEMP/mgf-browser/node_modules/playwright/index.mjs" node tests/integration/admin-scroll-layout-browser.mjs
+            done
+          done
+      - name: Upload scrolling and desktop width screenshots
+        if: always() && matrix.php == '8.2'
+        uses: actions/upload-artifact@v4
+        with:
+          name: admin-scroll-layout-browser
+          path: browser-artifacts/layout-*.png
+          if-no-files-found: ignore
       - name: Remove venue-mode browser fixture
         if: always() && matrix.php == '8.2'
         run: docker compose -f tests/integration/docker-compose.yml run --rm -T cli wp eval-file /workspace/tests/integration/scenarios/venue-mode-browser-cleanup.php --allow-root

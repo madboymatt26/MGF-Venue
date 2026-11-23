@@ -132,7 +132,7 @@
 }
 
 /* Single booking layout */
-.mbs-single-page { max-width: 1380px; }
+.mbs-admin.mbs-single-page { max-width: none; }
 .mbs-booking-hero {
     background: #fff;
     border: 1px solid var(--border);
@@ -188,7 +188,7 @@
 .mbs-mobile-jump-bar {
     display: none;
     position: sticky;
-    top: 32px;
+    top: var(--mbs-admin-top, 32px);
     z-index: 50;
     background: #fff;
     border: 1px solid var(--border);
@@ -796,7 +796,7 @@ button.mbs-invoice-card__ref:hover { color: #5a0fb0; }
 /* Mobile (<= 782px — WordPress admin bar breakpoint) */
 @media (max-width: 782px) {
     .mbs-admin { padding: 0 4px; }
-    .mbs-mobile-jump-bar { top: 46px; }
+    .mbs-mobile-jump-bar { top: var(--mbs-admin-top, 46px); }
     /* Tabs render via in_admin_header, outside #wpbody, so they do not share
        #wpbody's 46px mobile padding and would sit under the fixed admin bar.
        flow-root keeps the offset margin from collapsing onto the bar itself. */
@@ -820,7 +820,7 @@ button.mbs-invoice-card__ref:hover { color: #5a0fb0; }
     .nms-bookings-table td.nms-bulk-cell::before { display: none; }
     .nms-bookings-table .nms-bulk-check { width: 24px; height: 24px; margin: 0; }
     .nms-bookings-table td[data-label="Ref"] { padding-right: 40px; }
-    .nms-bulk-bar { display: flex; flex-wrap: wrap; position: sticky; top: 46px; z-index: 5; margin: 0 -4px 12px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); }
+    .nms-bulk-bar { display: flex; flex-wrap: wrap; position: static; top: var(--mbs-admin-top, 46px); z-index: 5; margin: 0 -4px 12px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); }
     .nms-bulk-bar { background: #fff; }
     .nms-bulk-bar .nms-bulk-selectall { display: flex; flex: 1 1 auto; }
     .nms-bulk-bar .nms-bulk-select { flex: 1 1 60%; min-width: 0; min-height: 40px; }
@@ -1044,9 +1044,9 @@ button.mbs-invoice-card__ref:hover { color: #5a0fb0; }
 .mbs-single-grid details.nms-card,
 .mbs-single-grid [id^="mbs-section-"] { scroll-margin-top:52px; }
 @media(max-width:1024px) {
-    .mbs-single-page .mbs-mobile-jump-bar { flex-wrap:wrap; overflow-x:visible; }
+    .mbs-single-page .mbs-mobile-jump-bar { flex-wrap:nowrap; overflow-x:auto; }
     .mbs-single-grid details.nms-card,
-    .mbs-single-grid [id^="mbs-section-"] { scroll-margin-top:160px; }
+    .mbs-single-grid [id^="mbs-section-"] { scroll-margin-top:calc(var(--mbs-admin-top, 46px) + var(--mbs-jump-height, 52px) + 12px); }
 }
 
 /* Charge workflow and bounded archive retrieval */
@@ -1064,3 +1064,20 @@ button.mbs-invoice-card__ref:hover { color: #5a0fb0; }
 .mbs-charge-email-preview{grid-column:1/-1;width:100%}
 .mbs-charge-email-preview summary{cursor:pointer;min-height:44px;font-weight:600}
 .mbs-charge-email-preview iframe{width:100%;height:580px;background:white;border:1px solid var(--border);box-sizing:border-box}
+
+/* Browsing keeps the full bulk form in flow. Only a live selection docks. */
+#nms-bulk-clear { display:none; }
+@media(max-width:782px) {
+    .nms-bulk-bar.has-selection { position:sticky; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:6px 10px; }
+    .nms-bulk-bar.has-selection .nms-bulk-selectall,
+    .nms-bulk-bar.has-selection .nms-bulk-seriesnote { display:none; }
+    .nms-bulk-bar.has-selection .nms-bulk-count { grid-row:1; grid-column:1; margin:0; }
+    .nms-bulk-bar.has-selection #nms-bulk-clear { display:block; grid-row:1; grid-column:2; }
+    .nms-bulk-bar.has-selection .nms-bulk-select { grid-row:2; grid-column:1; width:100%; }
+    .nms-bulk-bar.has-selection #nms-bulk-apply { grid-row:2; grid-column:2; }
+    .nms-bulk-bar.has-selection #nms-bulk-msg:empty { display:none; }
+    .nms-bulk-bar.has-selection #nms-bulk-msg:not(:empty) { grid-column:1/-1; }
+    .nms-bookings-table tr,
+    .nms-bookings-table .button,
+    .nms-bookings-table .nms-bulk-check { scroll-margin-top:calc(var(--mbs-admin-top, 46px) + var(--mbs-bulk-height, 120px) + 12px); }
+}
