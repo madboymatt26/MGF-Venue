@@ -525,7 +525,7 @@ $fin_values = array( round( $invoiced_fy, 2 ), round( $net_collected_fy, 2 ), ro
         </div>
         <div class="nms-card">
             <div class="nms-card-header"><h2>Venue cash by payment route</h2></div>
-            <div style="padding:1rem 1.5rem;"><table class="wp-list-table widefat striped" style="font-size:.85rem;"><thead><tr><th>Route</th><th>Transactions</th><th>Net</th></tr></thead><tbody>
+            <div style="padding:1rem 1.5rem;overflow:auto;" tabindex="0" role="region" aria-label="Venue cash by payment route"><table class="wp-list-table widefat striped" style="font-size:.85rem;"><thead><tr><th>Route</th><th>Transactions</th><th>Net</th></tr></thead><tbody>
             <?php foreach ( $payment_routes as $route => $totals ) : ?><tr><td><?php echo esc_html( $route ); ?></td><td><?php echo (int) $totals['transactions']; ?></td><td><strong><?php echo esc_html( MBS_Money::format( (int) $totals['payments'] - (int) $totals['refunds'] ) ); ?></strong><br><span class="nms-muted"><?php echo esc_html( MBS_Money::format( (int) $totals['payments'] ) ); ?> received, <?php echo esc_html( MBS_Money::format( -(int) $totals['refunds'] ) ); ?> refunded</span></td></tr><?php endforeach; ?>
             <?php if ( ! $payment_routes ) : ?><tr><td colspan="3">No payment transactions in this period.</td></tr><?php endif; ?>
             </tbody></table></div>

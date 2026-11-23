@@ -186,6 +186,7 @@ jobs:
             docker compose -f tests/integration/docker-compose.yml run --rm -T -e MBS_LAYOUT_MODE="$mode" cli wp eval-file /workspace/tests/integration/scenarios/admin-scroll-layout-seed.php --allow-root
             for engine in chromium webkit; do
               MBS_LAYOUT_ENGINE="$engine" MBS_LAYOUT_MODE="$mode" MGF_BROWSER_MODULE="$RUNNER_TEMP/mgf-browser/node_modules/playwright/index.mjs" node tests/integration/admin-scroll-layout-browser.mjs
+              MBS_LAYOUT_ENGINE="$engine" MBS_LAYOUT_MODE="$mode" MGF_BROWSER_MODULE="$RUNNER_TEMP/mgf-browser/node_modules/playwright/index.mjs" node tests/integration/admin-page-width-browser.mjs
             done
           done
       - name: Upload scrolling and desktop width screenshots

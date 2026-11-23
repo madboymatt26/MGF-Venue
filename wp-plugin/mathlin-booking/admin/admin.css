@@ -11,7 +11,7 @@
     --text-muted: #595959;
 }
 
-.mbs-admin { max-width: 1400px; box-sizing: border-box; }
+.mbs-admin { max-width: none; box-sizing: border-box; }
 
 /* Stats */
 .mbs-charge-breadcrumbs { margin: 14px 0; }
@@ -132,7 +132,6 @@
 }
 
 /* Single booking layout */
-.mbs-admin.mbs-single-page { max-width: none; }
 .mbs-booking-hero {
     background: #fff;
     border: 1px solid var(--border);
@@ -423,7 +422,7 @@
 }
 
 /* Calendar View */
-.mbs-calendar-page { max-width: 1680px; }
+.mbs-calendar-page { max-width: none; }
 .mbs-calendar-page .nms-cal-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; color: var(--text-muted); }
 .mbs-calendar-page .nms-calendar-layout { grid-template-columns: minmax(0, 1fr) minmax(280px, 360px); align-items: start; }
 .mbs-calendar-page .nms-calendar-main { min-width: 0; }
@@ -992,7 +991,7 @@ button.mbs-invoice-card__ref:hover { color: #5a0fb0; }
 }
 
 /* Invoice-scoped review: short balance summary first, long history paged. */
-.mbs-invoice-review { max-width: 1200px; }
+.mbs-invoice-review { max-width: none; }
 .mbs-invoice-review h1 span { display: block; font-size: .65em; color: #50575e; overflow-wrap: anywhere; }
 .mbs-review-status strong { margin-left: 8px; color: #9a4100; }
 .mbs-review-balances { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; margin: 18px 0 8px; }

@@ -6,7 +6,7 @@ $camp = MBS_Campsite_Policy::enabled(); $paid = ! MBS_Payment_Features::free_hir
     <p>Create a reservation on behalf of <?php echo $camp ? 'a booker or the estate' : 'a hirer or your Scout group'; ?>. Review every date before saving. No email is sent unless explicitly selected. Google sync settings are not changed.</p>
     <a href="<?php echo esc_url( admin_url( 'admin.php?page=mathlin-booking' ) ); ?>">← All Bookings</a>
     <style>
-        .mbs-entry-page{max-width:1200px}.mbs-entry-page .mbs-entry-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;align-items:start;justify-items:stretch;width:100%;margin-top:20px}
+        .mbs-entry-page{max-width:none}.mbs-entry-page .mbs-entry-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;align-items:start;justify-items:stretch;width:100%;margin-top:20px}
         .mbs-entry-page .mbs-entry-grid>.nms-card{box-sizing:border-box;width:100%;min-width:0;max-width:none;margin:0;padding:0;justify-self:stretch}
         .mbs-entry-grid label{display:block;font-weight:600;margin:12px 0 5px}
         .mbs-entry-grid input:not([type=checkbox]):not([type=radio]),.mbs-entry-grid select,.mbs-entry-grid textarea{box-sizing:border-box;width:100%;max-width:100%;min-width:0}

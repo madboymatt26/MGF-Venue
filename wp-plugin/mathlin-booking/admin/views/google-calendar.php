@@ -88,7 +88,7 @@ $print_groups = static function( $events ) use ( $print_event ) {
 <button class="button">Save new-event colours and pause</button></form></section>
 <p>Checks run every five minutes when WordPress cron runs. Use server cron for reliable timing. No contact details, notes, purpose, attendees or invitations are exported.</p></div>
 <?php elseif ( $tab === 'history' ) : ?>
-<table class="widefat striped"><thead><tr><th>UTC time</th><th>Action</th><th>Booking</th><th>Result</th></tr></thead><tbody><?php foreach ( $display as $row ) : ?><tr><?php foreach ( array( 'at', 'action', 'ref', 'result' ) as $field ) : ?><td><?php echo esc_html( $row[$field] ); ?></td><?php endforeach; ?></tr><?php endforeach; ?><?php if ( ! $items ) : ?><tr><td colspan="4">No sync actions recorded. Read-only comparisons do not change Google.</td></tr><?php endif; ?></tbody></table>
+<div class="mbs-table-scroll" role="region" aria-label="Sync history" tabindex="0"><table class="widefat striped"><thead><tr><th>UTC time</th><th>Action</th><th>Booking</th><th>Result</th></tr></thead><tbody><?php foreach ( $display as $row ) : ?><tr><?php foreach ( array( 'at', 'action', 'ref', 'result' ) as $field ) : ?><td><?php echo esc_html( $row[$field] ); ?></td><?php endforeach; ?></tr><?php endforeach; ?><?php if ( ! $items ) : ?><tr><td colspan="4">No sync actions recorded. Read-only comparisons do not change Google.</td></tr><?php endif; ?></tbody></table></div>
 <?php elseif ( ! $preview ) : ?><p>No current comparison. Refresh above, or connect a calendar in Connection settings.</p>
 <?php elseif ( $tab === 'estate' ) : ?>
 <p>Google entries without a saved MGF link. Identical-looking records are grouped for display only. Nothing in this list will be removed or rewritten.</p>
