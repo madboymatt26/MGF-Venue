@@ -22,7 +22,8 @@ try{
    await page.goto(base+'/wp-admin/admin.php?page='+slug);
    const host=page.locator('.mbs-admin').first();
    check(await host.count()===1,slug+' renders the admin shell ('+mode+')');
-   check(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),slug+' no horizontal overflow at '+width);
+   const overflow=await page.evaluate(()=>{const doc=document.documentElement;if(doc.scrollWidth<=innerWidth+1)return null;const out=[];document.querySelectorAll('body *').forEach(el=>{const r=el.getBoundingClientRect();if(r.right>innerWidth+1&&r.width>1){const path=[];let n=el;while(n&&n!==document.body&&path.length<4){path.unshift(n.tagName.toLowerCase()+(n.id?'#'+n.id:'')+(n.className&&typeof n.className==='string'?'.'+n.className.trim().split(/\s+/).slice(0,2).join('.'):''));n=n.parentElement;}out.push(path.join('>')+' right='+Math.round(r.right)+' w='+Math.round(r.width));}});return{scrollWidth:doc.scrollWidth,innerWidth,offenders:out.slice(0,6)};});
+   check(!overflow,slug+' no horizontal overflow at '+width+(overflow?' '+JSON.stringify(overflow):''));
    const m=await host.evaluate(el=>{const r=el.getBoundingClientRect();return{right:r.right,viewport:innerWidth};});
    if(width>1000){
     check(m.viewport-m.right<=30,slug+' fills available admin width at '+width+' ('+mode+', right gap '+Math.round(m.viewport-m.right)+'px)');
