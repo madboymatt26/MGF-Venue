@@ -3,9 +3,9 @@
 if(!defined('WP_CLI')||!WP_CLI||!preg_match('/127\.0\.0\.1|localhost|wordpress/',home_url()))throw new RuntimeException('Disposable fixture required.');
 global $wpdb;$bookings=$wpdb->prefix.MBS_TABLE;$series_table=$wpdb->prefix.MBS_SERIES_TABLE;$queue=$wpdb->prefix.'mathlin_email_queue';
 $saved=array();foreach(array('mbs_spaces','mbs_campsite_mode','mbs_payments_enabled','mbs_ha_webhook_url','mbs_min_duration_hours')as$opt)$saved[$opt]=get_option($opt,null);
-$refs=array();$series_refs=array();$mail=0;$http=0;$checks=0;$fail_target='';$prior_errors=$wpdb->suppress_errors(true);
+$refs=array();$series_refs=array();$mail=0;$http=0;$checks=0;$fail_target='';$ha_inserts=0;$prior_errors=$wpdb->suppress_errors(true);
 $check=static function($ok,$why)use(&$checks){$checks++;if(!$ok)throw new RuntimeException($why);};
-$filter=static function($sql)use(&$fail_target,$queue){if($fail_target==='queue'&&strpos($sql,'INSERT INTO')!==false&&strpos($sql,$queue)!==false)return'INVALID SYNTHETIC OUTBOX INSERT';if($fail_target==='ha'&&strpos($sql,'INSERT INTO')!==false&&strpos($sql,'mbs_ha_event_')!==false)return'INVALID SYNTHETIC HA INSERT';return$sql;};
+$filter=static function($sql)use(&$fail_target,&$ha_inserts,$queue){if(strpos($sql,'INSERT INTO')!==false&&strpos($sql,'mbs_ha_event_')!==false)$ha_inserts++;if($fail_target==='queue'&&strpos($sql,'INSERT INTO')!==false&&strpos($sql,$queue)!==false)return'INVALID SYNTHETIC OUTBOX INSERT';if($fail_target==='ha'&&strpos($sql,'INSERT INTO')!==false&&strpos($sql,'mbs_ha_event_')!==false)return'INVALID SYNTHETIC HA INSERT';return$sql;};
 $mail_guard=static function($pre)use(&$mail){$mail++;return true;};$http_guard=static function()use(&$http){$http++;throw new RuntimeException('Unexpected HTTP under a series writer.');};
 $user=get_user_by('login','admin');wp_set_current_user($user->ID);
 add_filter('pre_wp_mail',$mail_guard,PHP_INT_MAX);add_filter('pre_http_request',$http_guard,PHP_INT_MAX);add_filter('query',$filter,PHP_INT_MAX);
@@ -17,7 +17,11 @@ try{
         $data=array('name'=>'Synthetic series','organisation'=>'Synthetic Scout Group','email'=>'series-fixture@example.invalid','phone'=>'','address'=>'','space'=>'Outbox Test','booking_date'=>$date,'booking_date_end'=>$date,'all_day'=>true,'scout_use'=>$profile==='venue_scout','start_time'=>'','end_time'=>'','attendees'=>10,'purpose'=>'Synthetic outbox acceptance','campsite_exception'=>true);
         $created=MBS_Bookings::create_recurring($data,$end,true);$check(!is_wp_error($created),'Create '.$profile.' recurring request');
         $ref=$created['series_id'];$refs=array_merge($refs,$created['refs']);$series_refs[]=$ref;$source=MBS_Series::get($ref);
-        $fail_target=$profile==='campsite'?'ha':'queue';$result=MBS_Series::approve($ref,'pending',(int)$source->version,true);$fail_target='';
+        // Campsite flows write no HA intents at all (the integration is venue
+        // only), so the durable intent under test is the outbox insert, the
+        // same failure target as the venue profile.
+        if($profile==='campsite')$ha_inserts=0;
+        $fail_target='queue';$result=MBS_Series::approve($ref,'pending',(int)$source->version,true);$fail_target='';
         $check(is_wp_error($result),'Failed intent aborts '.$profile.' approval');
         $after=MBS_Series::get($ref);$check($after->status==='pending'&&(int)$after->version===(int)$source->version,'Series version/state rolled back');
         foreach(MBS_Bookings::get_series($ref)as$b)$check($b->status==='pending','Every occurrence rolled back');
@@ -32,6 +36,7 @@ try{
             $wpdb->query($wpdb->prepare("UPDATE {$series_table} SET version=version+1 WHERE series_ref=%s",$ref));
             MBS_Email_Queue::dispatch_message((int)$resend_row->id);$check($mail===$before_mail+1&&$wpdb->get_var($wpdb->prepare("SELECT status FROM {$queue} WHERE id=%d",$resend_row->id))==='failed','Later series version supersedes queued approval resend');
         }else{
+            $check($ha_inserts===0,'Campsite approval and cancellation write no HA intents');
             $fail_target='queue';$cancel=MBS_Series::cancel($ref,'future','confirmed',(int)$after->version,true);$fail_target='';
             $check(is_wp_error($cancel)&&MBS_Series::get($ref)->status==='confirmed','Cancellation rolls back if customer intent fails');
             foreach(MBS_Bookings::get_series($ref)as$b)$check($b->status==='confirmed','Cancellation failure retains every occurrence');
