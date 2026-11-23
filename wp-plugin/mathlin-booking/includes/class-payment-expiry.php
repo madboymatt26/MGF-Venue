@@ -64,6 +64,14 @@ class MBS_Payment_Expiry {
         if ( $ok !== 1 || ! MBS_Audit_Log::log( $b->ref, 'payment_policy_enrolled', $state === 'manual' ? 'Explicit administrator short-notice approval after cutoff: ' . $manual_reason : 'New approval enrolled in payment expiry policy v1; deadlines frozen at approval.' ) ) return new WP_Error( 'expiry_enroll_failed', 'Could not safely record the approval payment policy.' );
         return true;
     }
+    /** Policy whose deadlines currently bind the hirer, or null when none applies. */
+    public static function enforced_policy( $ref ) {
+        $row = self::get( $ref );
+        if ( ! $row || $row->state !== 'active' ) return null;
+        $policy = json_decode( (string) $row->policy_json, true );
+        if ( ! MBS_Payment_Expiry_Policy::valid( $policy ) || ! empty( $policy['exempt'] ) ) return null;
+        return $policy;
+    }
     public static function warning( $b ) {
         $row = self::get( $b->ref );
         if ( ! $row || $row->state !== 'active' || ! self::enabled() ) return '';
@@ -78,8 +86,8 @@ class MBS_Payment_Expiry {
         if ( ! MBS_Payment_Expiry_Policy::valid( $p ) || $p['exempt'] ) return '';
         $text = $p['deposit_due_at'] !== null ? 'If your deposit is not paid within 48 hours of approval, your booking will unfortunately be cancelled to make the venue available for others again. ' : '';
         $text .= self::warning( $b );
-        $final = ( new DateTimeImmutable( '@' . $p['balance_cutoff_at'] ) )->setTimezone( new DateTimeZone( $p['timezone'] ) )->format( 'j F Y \a\t H:i T' );
-        return $text . ' Any unpaid final balance will result in cancellation at ' . $final . ', when access details would otherwise become due.';
+        $final = MBS_Payment_Expiry_Policy::format_deadline( $p['balance_cutoff_at'], $p['timezone'] );
+        return $text . ' Any unpaid final balance will result in cancellation at ' . $final . '. Full payment is required before access details can be issued.';
     }
     public static function checkout_allowed( $ref ) {
         $row = self::get( $ref );

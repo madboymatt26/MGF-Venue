@@ -4,6 +4,23 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 class MBS_Invoice {
 
     /**
+     * The deposit deadline the payment-expiry policy enforces for this
+     * booking, formatted for display, or null when no policy deadline binds
+     * the hirer (feature off, ineligible, manual review, exemption or
+     * short-notice full-payment cutoff). Keeps the staff preview and the
+     * legacy email invoice consistent with the issued document.
+     *
+     * @param object $booking Booking row.
+     * @return string|null
+     */
+    private static function policy_deposit_deadline_display( $booking ) {
+        if ( empty( $booking->ref ) || ! class_exists( 'MBS_Payment_Expiry' ) || ! class_exists( 'MBS_Payment_Expiry_Policy' ) ) return null;
+        $policy = MBS_Payment_Expiry::enforced_policy( $booking->ref );
+        if ( ! $policy ) return null;
+        $at = MBS_Payment_Expiry_Policy::deposit_deadline_at( $policy );
+        return $at === null ? null : MBS_Payment_Expiry_Policy::format_deadline( $at, $policy['timezone'] );
+    }
+    /**
      * Generate invoice HTML for display in the admin dashboard.
      */
     public static function generate_html( $booking ) {
@@ -15,10 +32,17 @@ class MBS_Invoice {
         $bank           = MBS_Bookings::get_bank_details();
         $deposit_settings = MBS_Bookings::get_deposit_settings();
 
+        $policy_deadline = null;
         if ( $deposit_settings['enabled'] && (float) $booking->amount > 0 ) {
             $due_date = 'Immediately (deposit)';
             if ( MBS_Bookings::requires_full_payment( $booking->booking_date ) ) {
                 $due_date = 'Immediately';
+            }
+            // Show the deadline the cancellation system actually enforces,
+            // matching the issued invoice and confirmation email.
+            $policy_deadline = self::policy_deposit_deadline_display( $booking );
+            if ( $policy_deadline !== null ) {
+                $due_date = $policy_deadline . ' (deposit)';
             }
         } else {
             $due_date = wp_date( 'j F Y', strtotime( $booking->created_at . ' +' . $bank['payment_days'] . ' days' ) );
@@ -126,7 +150,11 @@ class MBS_Invoice {
                 <h5>Payment Terms</h5>
                 <?php if ( $deposit_settings['enabled'] && (float) $booking->amount > 0 && ! $requires_full ) : ?>
                 <p>
-                    <strong>Deposit due immediately:</strong> &pound;<?php echo number_format( $deposit_amount, 2 ); ?> (<?php echo (int) $deposit_settings['percentage']; ?>% of total)<br>
+                    <?php if ( $policy_deadline !== null ) : ?>
+                    <strong>Deposit due by <?php echo esc_html( $policy_deadline ); ?>:</strong>
+                    <?php else : ?>
+                    <strong>Deposit due immediately:</strong>
+                    <?php endif; ?> &pound;<?php echo number_format( $deposit_amount, 2 ); ?> (<?php echo (int) $deposit_settings['percentage']; ?>% of total)<br>
                     <strong>Final balance due:</strong> &pound;<?php echo number_format( $balance_amount, 2 ); ?> — payable at least <?php echo $balance_days; ?> days before your event (by <?php echo wp_date( 'j F Y', strtotime( $booking->booking_date . " -{$balance_days} days" ) ); ?>)<br><br>
                     <em>If a booking is made less than <?php echo $balance_days; ?> days before the event, the full amount is due immediately.</em>
                 </p>
@@ -158,10 +186,17 @@ class MBS_Invoice {
         $bank           = MBS_Bookings::get_bank_details();
         $deposit_settings = MBS_Bookings::get_deposit_settings();
 
+        $policy_deadline = null;
         if ( $deposit_settings['enabled'] && (float) $booking->amount > 0 ) {
             $due_date = 'Immediately (deposit)';
             if ( MBS_Bookings::requires_full_payment( $booking->booking_date ) ) {
                 $due_date = 'Immediately';
+            }
+            // Show the deadline the cancellation system actually enforces,
+            // matching the issued invoice and confirmation email.
+            $policy_deadline = self::policy_deposit_deadline_display( $booking );
+            if ( $policy_deadline !== null ) {
+                $due_date = $policy_deadline . ' (deposit)';
             }
         } else {
             $due_date = wp_date( 'j F Y', strtotime( $booking->created_at . ' +' . $bank['payment_days'] . ' days' ) );
@@ -299,7 +334,11 @@ class MBS_Invoice {
         <h5>Payment Terms</h5>
         <?php if ( $deposit_settings['enabled'] && (float) $booking->amount > 0 && ! $requires_full ) : ?>
         <p>
-            <strong>Deposit due immediately:</strong> &pound;<?php echo number_format( $deposit_amount, 2 ); ?> (<?php echo (int) $deposit_settings['percentage']; ?>% of total)<br>
+            <?php if ( $policy_deadline !== null ) : ?>
+            <strong>Deposit due by <?php echo esc_html( $policy_deadline ); ?>:</strong>
+            <?php else : ?>
+            <strong>Deposit due immediately:</strong>
+            <?php endif; ?> &pound;<?php echo number_format( $deposit_amount, 2 ); ?> (<?php echo (int) $deposit_settings['percentage']; ?>% of total)<br>
             <strong>Final balance due:</strong> &pound;<?php echo number_format( $balance_amount, 2 ); ?> — payable at least <?php echo $balance_days; ?> days before your event (by <?php echo wp_date( 'j F Y', strtotime( $booking->booking_date . " -{$balance_days} days" ) ); ?>)<br><br>
             <em>If a booking is made less than <?php echo $balance_days; ?> days before the event, the full amount is due immediately.</em>
         </p>

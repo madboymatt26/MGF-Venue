@@ -257,7 +257,13 @@ Account number: <strong><?php echo esc_html( $s->bank_details['account_number'] 
             }
         } elseif ( ! empty( $ps['deposit_minor'] ) ) {
             $html .= 'Deposit due: <strong>' . esc_html( self::format_money( $ps['deposit_minor'], $s->currency ) ) . '</strong>';
-            if ( ! empty( $ps['deposit_due_date'] ) ) $html .= ' by ' . esc_html( self::format_date( $ps['deposit_due_date'] ) );
+            if ( ! empty( $ps['deposit_due_at'] ) && ! empty( $ps['deadline_timezone'] ) && class_exists( 'MBS_Payment_Expiry_Policy' ) ) {
+                // Exact deadline saved by the payment-expiry policy at approval;
+                // this is the moment the cancellation system enforces.
+                $html .= ' by ' . esc_html( MBS_Payment_Expiry_Policy::format_deadline( (int) $ps['deposit_due_at'], (string) $ps['deadline_timezone'] ) );
+            } elseif ( ! empty( $ps['deposit_due_date'] ) ) {
+                $html .= ' by ' . esc_html( self::format_date( $ps['deposit_due_date'] ) );
+            }
             $html .= '<br>';
             if ( ! empty( $ps['balance_minor'] ) ) {
                 $html .= 'Balance: <strong>' . esc_html( self::format_money( $ps['balance_minor'], $s->currency ) ) . '</strong>';

@@ -13,6 +13,7 @@ function is_wp_error($v){return $v instanceof WP_Error;}
 class WP_Error{private $code,$message;function __construct($c,$m){$this->code=$c;$this->message=$m;}function get_error_message(){return $this->message;}function get_error_code(){return $this->code;}}
 require ABSPATH.'includes/class-money.php';
 require ABSPATH.'includes/class-bookings.php';
+require ABSPATH.'includes/class-payment-expiry-policy.php';
 require ABSPATH.'includes/invoice/class-issued-invoice-snapshot.php';
 require ABSPATH.'includes/invoice/class-invoice-document-view-model.php';
 require ABSPATH.'includes/invoice/class-html-renderer.php';
@@ -36,6 +37,29 @@ $s->account_at_issue=null;$old=MBS_HTML_Renderer::render(MBS_Invoice_Document_Vi
 $s->account_at_issue=array('payments_received_minor'=>12500,'outstanding_minor'=>0);verify(strpos(MBS_HTML_Renderer::render(MBS_Invoice_Document_View_Model::issued($s)),'No payment was outstanding')!==false,'paid invoice requests no second payment');
 $s->account_at_issue=array('payments_received_minor'=>10500,'outstanding_minor'=>2000);
 $s->document_type='credit_note';$credit_html=MBS_HTML_Renderer::render(MBS_Invoice_Document_View_Model::issued($s));verify(strpos($credit_html,'Payment Schedule')===false,'credit note must not request another payment');$s->document_type='invoice';
+
+// Policy-aligned deposit deadline (council invoice regression): an enrolled
+// payment-expiry policy approved 19 Nov 2026 23:49 Europe/London enforces
+// cancellation at 21 Nov 2026 23:49 GMT. The invoice must print that saved
+// deadline, never the issue date.
+$approved_ts=(new DateTimeImmutable('2026-11-19 23:49:00',new DateTimeZone('Europe/London')))->getTimestamp();
+$policy=MBS_Payment_Expiry_Policy::approve($approved_ts,'2026-12-19',3000,750,true);
+verify(!is_wp_error($policy)&&MBS_Payment_Expiry_Policy::deposit_deadline_at($policy)===$approved_ts+172800,'policy deadline is 48 hours from approval');
+verify(MBS_Payment_Expiry_Policy::format_deadline($policy['deposit_due_at'],$policy['timezone'])==='21 November 2026 at 23:49 GMT','deadline formats in the policy timezone');
+$extended=$policy;$extended['extension_until']=$policy['deposit_due_at']+3600;
+verify(MBS_Payment_Expiry_Policy::deposit_deadline_at($extended)===$extended['extension_until'],'agreed extension moves the printed deposit deadline');
+verify(MBS_Payment_Expiry_Policy::deposit_deadline_at($policy)===MBS_Payment_Expiry_Policy::next_deadline($policy,0)['at'],'printed deadline is the enforced cancellation deadline');
+$short_policy=MBS_Payment_Expiry_Policy::approve($approved_ts,'2026-11-21',3000,750,true,true);
+verify(!is_wp_error($short_policy)&&MBS_Payment_Expiry_Policy::deposit_deadline_at($short_policy)===null,'acknowledged short notice has no deposit deadline to print');
+$s->payment_schedule=array('deposit_minor'=>750,'deposit_due_date'=>'2026-11-21','deposit_due_at'=>$policy['deposit_due_at'],'deadline_timezone'=>'Europe/London','balance_minor'=>2250,'balance_due_date'=>'2026-12-12');
+$policy_html=MBS_HTML_Renderer::render(MBS_Invoice_Document_View_Model::issued($s));
+verify(strpos($policy_html,'Deposit due: <strong>£7.50</strong> by 21 November 2026 at 23:49 GMT')!==false,'invoice prints the exact saved cancellation deadline');
+verify(strpos($policy_html,'by 19 November 2026')===false,'invoice never presents the issue date as the deposit deadline');
+$legacy_schedule=array('deposit_minor'=>750,'deposit_due_date'=>'2026-10-27','balance_minor'=>2250,'balance_due_date'=>'2026-10-24');
+$s->payment_schedule=$legacy_schedule;
+$legacy_html=MBS_HTML_Renderer::render(MBS_Invoice_Document_View_Model::issued($s));
+verify(strpos($legacy_html,'Deposit due: <strong>£7.50</strong> by 27 October 2026')!==false,'snapshots without a saved deadline render date-only as before');
+$s->payment_schedule=array('immediate'=>true);
 if(in_array('--render',$argv,true)){
     require ABSPATH.'vendor/autoload.php';
     $out=dirname(__DIR__).'/tmp/pdfs';if(!is_dir($out))mkdir($out,0700,true);

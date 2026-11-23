@@ -57,6 +57,22 @@ class MBS_Payment_Expiry_Policy {
         return array( 'kind' => $deposit ? 'unpaid_deposit' : 'unpaid_balance', 'at' => $at, 'required_minor' => $deposit ? $policy['deposit_minor'] : $policy['total_minor'] );
     }
 
+    /**
+     * Exact deposit deadline the cancellation system enforces, honouring any
+     * agreed extension. Null when no deposit deadline applies (short-notice
+     * hire: full payment is due at the balance cutoff). Mirrors the deposit
+     * branch of next_deadline so documents/emails print what is enforced.
+     */
+    public static function deposit_deadline_at( $policy ) {
+        if ( ! self::valid( $policy ) || $policy['deposit_due_at'] === null ) return null;
+        return $policy['extension_until'] !== null ? max( $policy['deposit_due_at'], $policy['extension_until'] ) : $policy['deposit_due_at'];
+    }
+
+    /** Format an exact saved deadline in its policy timezone (e.g. "21 November 2026 at 23:49 GMT"). */
+    public static function format_deadline( $timestamp, $timezone ) {
+        return ( new DateTimeImmutable( '@' . (int) $timestamp ) )->setTimezone( new DateTimeZone( (string) $timezone ) )->format( 'j F Y \a\t H:i T' );
+    }
+
     public static function valid( $p ) {
         if ( ! is_array( $p ) || ( $p['version'] ?? null ) !== self::VERSION ) return false;
         foreach ( array( 'approved_at', 'total_minor', 'deposit_minor', 'balance_cutoff_at' ) as $key ) if ( ! isset( $p[$key] ) || ! is_int( $p[$key] ) ) return false;
@@ -76,7 +92,7 @@ class MBS_Payment_Expiry_Policy {
     public static function warning_text( $policy, $paid ) {
         if ( ! self::valid( $policy ) || ! is_int( $paid ) || $paid < 0 || $paid >= $policy['total_minor'] || $policy['exempt'] ) return '';
         $d = self::next_deadline( $policy, $paid );
-        $date = ( new DateTimeImmutable( '@' . $d['at'] ) )->setTimezone( new DateTimeZone( $policy['timezone'] ) )->format( 'j F Y \a\t H:i T' );
+        $date = self::format_deadline( $d['at'], $policy['timezone'] );
         $amount = '£' . number_format( max( 0, $d['required_minor'] - $paid ) / 100, 2, '.', '' );
         return ( $d['kind'] === 'unpaid_deposit' ? 'Your outstanding deposit of ' : 'Your outstanding balance of ' ) . $amount . ' must be paid by ' . $date . '. If payment is not received by this deadline, your booking will unfortunately be cancelled to make the venue available for others again. No access code will be issued for a cancelled booking.';
     }

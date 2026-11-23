@@ -24,9 +24,13 @@ try{
  update_option('mbs_credit_accounts_enabled',0);$check(MBS_Email::invoice_terms_request_block($ordinary)==='','Disabled feature hides requests');update_option('mbs_credit_accounts_enabled',1);
  update_option('mbs_campsite_mode',1);$check(MBS_Email::invoice_terms_request_block($ordinary)==='','Free campsite cannot offer credit');update_option('mbs_campsite_mode',0);
  $agreement=array('op'=>'create','name'=>'Synthetic recurring invoice terms','contacts'=>'terms@example.invalid','terms_days'=>'14','valid_until'=>wp_date('Y-m-d',strtotime('+2 years')),'allow_unpaid_access'=>1,'verified'=>1);$must(MBS_Credit_Accounts::decide($agreement));$id=(int)$wpdb->get_var('SELECT MAX(id) FROM '.MBS_Credit_Accounts::table());$accounts[]=$id;
- $fail_mail=static function(){return false;};add_filter('pre_wp_mail',$fail_mail,PHP_INT_MAX,2);MBS_Payment_Chaser::send_chase($ordinary);remove_filter('pre_wp_mail',$fail_mail,PHP_INT_MAX);
- $old_chase=$wpdb->get_row($wpdb->prepare('SELECT * FROM '.$wpdb->prefix.'mathlin_email_queue WHERE reference_type=%s AND reference_id=%d AND message_type=%s ORDER BY id DESC LIMIT 1','booking',$ordinary->id,'payment_chase'));$check($old_chase&&$old_chase->status==='pending','Real ordinary chase held after synthetic transport failure');
+ $fail_mail=static function(){return false;};add_filter('pre_wp_mail',$fail_mail,PHP_INT_MAX,2);
+ $suppressed_chase=MBS_Payment_Chaser::send_chase($ordinary);
+ $stray_chase=$wpdb->get_row($wpdb->prepare('SELECT * FROM '.$wpdb->prefix.'mathlin_email_queue WHERE reference_type=%s AND reference_id=%d AND message_type=%s ORDER BY id DESC LIMIT 1','booking',$ordinary->id,'payment_chase'));$check($suppressed_chase===false&&$stray_chase===null,'Policy-owned deposit deadline suppresses the deposit chase entirely');
+ $chaseable=$seed('CHM','','confirmed');MBS_Payment_Chaser::send_chase($chaseable);remove_filter('pre_wp_mail',$fail_mail,PHP_INT_MAX);
+ $old_chase=$wpdb->get_row($wpdb->prepare('SELECT * FROM '.$wpdb->prefix.'mathlin_email_queue WHERE reference_type=%s AND reference_id=%d AND message_type=%s ORDER BY id DESC LIMIT 1','booking',$chaseable->id,'payment_chase'));$check($old_chase&&$old_chase->status==='pending','Real ordinary chase held after synthetic transport failure');
  $check($assign($ordinary,$id)===true,'Staff review alone can assign existing one-off');
+ $check($assign($chaseable,$id)===true,'Credit assignment extends to the chased booking');
  $mail_before_retry=$mail_count;$wpdb->update($wpdb->prefix.'mathlin_email_queue',array('next_retry'=>wp_date('Y-m-d H:i:s',strtotime('-1 minute'))),array('id'=>$old_chase->id));(new MBS_Email_Queue())->process_queue((int)$old_chase->id);$old_chase=$wpdb->get_row($wpdb->prepare('SELECT * FROM '.$wpdb->prefix.'mathlin_email_queue WHERE id=%d',$old_chase->id));$check($old_chase->status==='failed'&&$old_chase->failure_category==='stale_source'&&$mail_count===$mail_before_retry,'Queued ordinary payment threat must not dispatch after explicit credit assignment');
 
  foreach(array('ordinary','statement')as$retry_kind){
